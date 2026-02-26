@@ -312,10 +312,15 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *  \brief Handle to the hipBLASLt library context queue.
  *
  *  \details
- *  The ``hipblasLtHandle_t`` type is a pointer type to an opaque structure holding the hipBLASLt library context. Use the following functions to manipulate this library context:
+ *  The ``hipblasLtHandle_t`` type is a pointer type to an opaque structure holding the hipBLASLt library context.
+ *  A handle encapsulates the execution state and manages device-side resources associated with the submitted operations.
+ *
+ *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
+ *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():
- *  To initialize the hipBLASLt library context and return a handle to an opaque structure holding the hipBLASLt library context.
+ *  To initialize the hipBLASLt library context and return a handle to an opaque structure holding the hipBLASLt library context.  
  *  
  *  \ref hipblasLtDestroy():
  *  To destroy a previously created hipBLASLt library context descriptor and release the resources.

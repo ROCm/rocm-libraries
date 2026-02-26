@@ -380,12 +380,6 @@ namespace rocRoller
         std::vector<int> findIndexAssignmentCandidates(KernelGraph const& kgraph, int start);
 
         /**
-         * Removes all CommandArgruments found within an expression
-         * with the appropriate AssemblyKernel Argument.
-         */
-        Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr, AssemblyKernelPtr);
-
-        /**
          * @brief Get ForLoop and increment (Linear) dimensions
          * assciated with ForLoopOp.
          */

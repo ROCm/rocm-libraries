@@ -20,7 +20,9 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+import functools
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
 from copy import deepcopy
@@ -378,6 +380,25 @@ MAIN_LOOP = "ML"
 NO_GLOBAL_LOAD_LOOP = "NGL"
 NO_LOCAL_LOAD_LOOP = "NLL"
 
+ALL_INSTRUCTION_NAMES = [
+    "LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3",
+    "GRA", "GRB",
+    "PackA0", "PackB0", "PackA1", "PackB1", "PackA3", "PackB3",
+    "SYNC", "SNOP",
+]
+
+
+def create_unified_timeline(
+    schedule_info: 'ScheduleInfo',
+    kernel: 'Solution',
+    code_path: int
+) -> 'Timeline':
+    """Create a single Timeline with all instruction types."""
+    available_names = set(schedule_info.optSchedule.keys())
+    names_to_add = [n for n in ALL_INSTRUCTION_NAMES if n in available_names]
+    return Timeline(names_to_add, code_path, schedule_info, kernel)
+
+
 class Timeline:
     def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution'):
         """
@@ -434,6 +455,9 @@ class Timeline:
         # Only index by instruction name.
         # Index is the index of the instruction in the combined timeline. index in [0, len(self.combined_timeline)-1]
         self._instructions_for_name_combined: dict[str, list[tuple[int, ValidatorInstruction]]] = defaultdict(list)
+
+        # Track which validation passes have already been applied to this timeline to avoid applying them multiple times.
+        self._applied_passes: set[Callable[['Timeline', 'ValidatorPassContext'], None]] = set()
 
         # Populate the timeline with instructions
         self._populate_instructions(instruction_names_to_add, code_path, schedule_info, kernel)
@@ -631,6 +655,19 @@ class Timeline:
             self.combined_timeline.extend(self._timelines[loop_name])
 
 
+def applies_only_once(func):
+    """Decorator: skips the function if it has already been applied to this timeline."""
+    @functools.wraps(func)
+    def wrapper(timeline, *args, **kwargs):
+        if func in timeline._applied_passes:
+            return
+        result = func(timeline, *args, **kwargs)
+        timeline._applied_passes.add(func)
+        return result
+    return wrapper
+
+
+@applies_only_once
 def apply_barriers(timeline: Timeline) -> None:
     """
     Apply the effect of SBarriers to the GlobalReads in the timeline by updating the barriered_at field of GlobalReads.
@@ -651,6 +688,7 @@ def apply_barriers(timeline: Timeline) -> None:
             instruction.barriered_at.append(barrier.issued_at)
 
 
+@applies_only_once
 def apply_must_start_after_barriers(timeline: Timeline) -> None:
     """
     Apply the effect of SBarriers to the must_start_after_barriered_at field of GlobalReads.
@@ -683,6 +721,7 @@ def _apply_must_start_after_barriers_single(timeline: Timeline, gr: GlobalRead, 
             gr.must_start_after_barriered_at.append(instruction.issued_at)
 
 
+@applies_only_once
 def apply_swaits(timeline: Timeline) -> None:
     """
     Apply the effect of SWaitCnts to the timeline by updating the guaranteed_by field of LocalReads and GlobalReads.
@@ -714,6 +753,7 @@ def apply_swaits(timeline: Timeline) -> None:
             apply(timeline.combined_timeline[i_swait-1::-1], swait, GlobalRead, swait.vlcnt)
 
 
+@applies_only_once
 def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
     """
     Set the needed_by field of LocalReads based on the VMFMA index they are required for.
@@ -761,6 +801,7 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
                 lr.needed_by = mfmas_by_index[needed_by + loop_offset]
 
 
+@applies_only_once
 def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) -> None:
     """
     Set the needed_by field of GlobalReads based on the LR1/3 instructions.
@@ -800,6 +841,7 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
             for _, gr in grs:
                 gr.needed_by = LR_target.issued_at
 
+@applies_only_once
 def set_gr_must_start_after_from_lr0s(timeline: Timeline, swap_global_read_order: bool) -> None:
     """
     Set the must_start_after field of the first GlobalRead based on the last LR0 of the same loop.
@@ -1357,6 +1399,7 @@ def _get_lrs_for_pack(timeline: Timeline, use_plr_pack: bool, pack_name: str, lo
     local_reads = timeline.get_instructions(lr_names, loop_to_use)
     return [lr for _,lr in local_reads]
 
+@applies_only_once
 def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
     """
     Set the needed_by fields 
@@ -1499,6 +1542,7 @@ def estimate_quad_cycles_precomputed(i_start: int, i_end: int, issue_times: list
     """
     return issue_times[i_end] - issue_times[i_start] - 1
 
+@applies_only_once
 def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     """
     Perform a rough estimate on the number of quad-cycles that pass between when a instruction is issued and when its result is used.
@@ -1543,10 +1587,16 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
         
     # Estimate number of quad-cycles between being issued and result being used
     for i_instruction, instruction in enumerate(timeline.combined_timeline):
-        if not hasattr(instruction, "needed_by") or instruction.needed_by is None or instruction.needed_by.issued_at == float("inf"):
-            continue
-        
         if not hasattr(instruction, "min_quad_cycles_before_result_used") or instruction.min_quad_cycles_before_result_used == 0:
+            continue
+
+        if not hasattr(instruction, "needed_by") or instruction.needed_by is None:
+            continue
+        # needed_by can be a ValidatorInstruction or a float (e.g. GlobalRead.needed_by)
+        needed_by_obj = instruction.needed_by
+        if not isinstance(needed_by_obj, ValidatorInstruction):
+            continue
+        if needed_by_obj.issued_at == float("inf"):
             continue
 
         needed_by = instruction.needed_by
@@ -1906,26 +1956,41 @@ def verify_gr_inc_order(scheduleInfo, context: dict, code_path: int) -> tuple[bo
 
     return True, ""
 
-def verify_grs_finish_before_lrs(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LR1/3 of this iteration.
-    """
-    relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
-    kernel = context["kernel"]
-    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-    
-    # Apply standalone functions to populate timeline fields
-    set_gr_needed_by_from_lrs(timeline, kernel["SwapGlobalReadOrder"])
+@dataclass
+class ValidatorPassContext:
+    """Context object containing all values needed by validator passes."""
+    kernel: 'Solution'
+    mfma_reorder: list[int]
+    swap_global_read_order: bool
+
+
+def add_local_read_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+    """Add LR.needed_by and LR.guaranteed_by constraints to the provided timeline."""
+    set_lr_needed_by_for_VMFMA(timeline, ctx.kernel, ctx.mfma_reorder)
     apply_swaits(timeline)
     apply_barriers(timeline)
 
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
+
+def add_pack_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+    """
+    Ensure that the Packs start and end at the correct indices.
+    The pack commands take the data loaded into registers by LR commands and manipulate it in various ways to prepare it for the VMFMA instructions.
+
+    There are several restrictions placed on Pack instructions:
+    1. For all gemm types (tf32, bf16, etc.) the Pack instructions must be issued after the data is guaranteed to be loaded into the registers (guaranteed by SWaitCnt instructions). And they must finish before the first VMFMA that uses their results.
+    2. For fp32 GEMMs, there are additional restrictions on:
+        1. The ordering of the Pack instructions.
+        2. The minimum number of quad-cycles that must pass between issuing certain pack instructions and when their results get used. These restrictions are defined in section 7.6 of the CDNA 4 ISA.
+    """
+    if ctx.kernel.get("UseF32XEmulation", False) and not ctx.kernel.get("UseDirect32XEmulation", False):
+        printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
+        return
+    apply_swaits(timeline)
+    hook_up_packs(timeline, ctx.kernel, ctx.mfma_reorder)
+    estimate_quad_cycles(timeline, ctx.kernel)
 
 
-def verify_grs_not_too_early(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+def add_gr_not_too_early_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
     """
     Ensure that GlobalReads are not issued before the corresponding LR0s are guaranteed complete.
 
@@ -1937,19 +2002,25 @@ def verify_grs_not_too_early(schedule_info: 'ScheduleInfo', context: dict, code_
     Thus we must ensure that every thread in every wave in the workgroup has finished all of its LRA0 instructions
     before GRA is issued. Same logic applies for B. No cross-operand constraints (LRA0 vs GRB are independent).
     """
-    relevant_names = ["GRA", "GRB", "LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
-    kernel = context["kernel"]
-    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-
     # apply_swaits must run first so that LR0.guaranteed_by (done_idx) is set before must_start_after hookup.
     apply_swaits(timeline)
-    set_gr_must_start_after_from_lr0s(timeline, kernel.get("SwapGlobalReadOrder", False))
+    set_gr_must_start_after_from_lr0s(timeline, ctx.swap_global_read_order)
     apply_must_start_after_barriers(timeline)
 
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
+
+def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+    """Add GR.needed_by and GR.barriered_at constraints."""
+    apply_swaits(timeline)
+    set_gr_needed_by_from_lrs(timeline, ctx.swap_global_read_order)
+    apply_barriers(timeline)
+
+
+TIMELINE_PASSES: list[Callable[['Timeline', 'ValidatorPassContext'], None]] = [
+    add_local_read_constraints,
+    add_pack_constraints,
+    add_gr_not_too_early_constraints,
+    add_gr_finish_before_lr_constraints,
+]
 
 
 def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
@@ -1996,62 +2067,6 @@ def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
     local_idx = local_col * block_rows + local_row
     
     return block_idx * block_size + local_idx
-
-
-def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
-    """
-    kernel = context["kernel"]
-
-    relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
-    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-
-    set_lr_needed_by_for_VMFMA(timeline, kernel, schedule_info.mfmaReorder)
-    apply_swaits(timeline)
-    apply_barriers(timeline)
-
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
-
-
-def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the Packs start and end at the correct indices.
-    The pack commands take the data loaded into registers by LR commands and manipulate it in various ways to prepare it for the VMFMA instructions.
-
-    There are several restrictions placed on Pack instructions:
-    1. For all gemm types (tf32, bf16, etc.) the Pack instructions must be issued after the data is guaranteed to be loaded into the registers (guaranteed by SWaitCnt instructions). And they must finish before the first VMFMA that uses their results.
-    2. For fp32 GEMMs, there are additional restrictions on:
-        1. The ordering of the Pack instructions.
-        2. The minimum number of quad-cycles that must pass between issuing certain pack instructions and when their results get used. These restrictions are defined in section 7.6 of the CDNA 4 ISA.
-    """
-    relevant_names = ["SYNC", "SNOP"]
-    for num in [0, 1, 3]:
-        relevant_names.append(f"PackA{num}")
-        relevant_names.append(f"PackB{num}")
-        relevant_names.append(f"LRA{num}")
-        relevant_names.append(f"LRB{num}")
-    kernel = context["kernel"]
-    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-    
-    if kernel.get("UseF32XEmulation", False) and not kernel.get("UseDirect32XEmulation", False):
-        printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
-        return True, ""
-    
-    apply_swaits(timeline)
-    apply_barriers(timeline)
-    set_lr_needed_by_for_VMFMA(timeline, kernel, schedule_info.mfmaReorder)
-    hook_up_packs(timeline, kernel, schedule_info.mfmaReorder)
-    estimate_quad_cycles(timeline, kernel)
-
-    message = validate_timeline(timeline)
-
-    if message:
-        return False, message
-    return True, ""
 
 
 def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
@@ -2137,23 +2152,35 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         # All rules bypassed, considered valid.
         return True, message
 
-    # The set of validation rules to run (code-path aware)
-    rules = [
+    kernel = context["kernel"]
+
+    structural_checks = [
         verify_correct_number_of_instructions,
         verify_ascending_order,
-        verify_lrs_finished_before_vmfma,
-        verify_packs_start_and_end_at_correct_indices,
-        verify_grs_not_too_early,
-        verify_grs_finish_before_lrs,
         verify_scc_overlap,
-        verify_gr_inc_order
+        verify_gr_inc_order,
     ]
 
     for code_path in range(scheduleInfo.numCodePaths):
-        for rule in rules:
-            status, message = rule(scheduleInfo, context, code_path)
+        # === Structural checks (no Timeline needed) ===
+        for check in structural_checks:
+            status, message = check(scheduleInfo, context, code_path)
             if not status:
                 return False, f"Code path {code_path}: {message}"
+
+        # === Timeline-based checks ===
+        ctx = ValidatorPassContext(
+            kernel=kernel,
+            mfma_reorder=scheduleInfo.mfmaReorder or [],
+            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
+        )
+
+        timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
+
+        for add_constraints in TIMELINE_PASSES:
+            add_constraints(timeline, ctx)
+            if error := validate_timeline(timeline):
+                return False, f"Code path {code_path}: {error}"
 
     # All rules passed, considered valid.
     return True, ""
