@@ -24,7 +24,6 @@
 #include <hipcub/block/block_discontinuity.hpp>
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_store.hpp>
-#include <hipcub/thread/thread_operators.hpp> //to use hipcub::Equality
 
 #include "common_benchmark_header.hpp"
 
@@ -32,13 +31,13 @@
 const size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
-template<class T>
-struct custom_flag_op1
+struct equal
 {
-    HIPCUB_HOST_DEVICE
-    bool operator()(const T& a, const T& b) const
+    template<class A, class B>
+        HIPCUB_HOST_DEVICE
+    inline constexpr auto operator()(const A& a, const B& b) const
     {
-        return (a == b);
+        return a == b;
     }
 };
 
@@ -75,10 +74,10 @@ struct flag_heads
             bool                                     head_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.FlagHeads(head_flags, input, hipcub::Equality(), T(123));
+                bdiscontinuity.FlagHeads(head_flags, input, equal(), T(123));
             } else
             {
-                bdiscontinuity.FlagHeads(head_flags, input, hipcub::Equality());
+                bdiscontinuity.FlagHeads(head_flags, input, equal());
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -113,10 +112,10 @@ struct flag_tails
             bool                                     tail_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.FlagTails(tail_flags, input, hipcub::Equality(), T(123));
+                bdiscontinuity.FlagTails(tail_flags, input, equal(), T(123));
             } else
             {
-                bdiscontinuity.FlagTails(tail_flags, input, hipcub::Equality());
+                bdiscontinuity.FlagTails(tail_flags, input, equal());
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -152,15 +151,12 @@ struct flag_heads_and_tails
             bool                                     tail_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.FlagHeadsAndTails(head_flags,
-                                                 T(123),
-                                                 tail_flags,
-                                                 T(234),
-                                                 input,
-                                                 hipcub::Equality());
-            } else
+                bdiscontinuity
+                    .FlagHeadsAndTails(head_flags, T(123), tail_flags, T(234), input, equal());
+            }
+            else
             {
-                bdiscontinuity.FlagHeadsAndTails(head_flags, tail_flags, input, hipcub::Equality());
+                bdiscontinuity.FlagHeadsAndTails(head_flags, tail_flags, input, equal());
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)

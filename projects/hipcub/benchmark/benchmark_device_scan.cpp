@@ -32,6 +32,8 @@
 #include <hipcub/device/device_scan.hpp>
 #include <hipcub/thread/thread_operators.hpp>
 
+#include _HIPCUB_STD_INCLUDE(functional)
+
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
@@ -98,7 +100,7 @@ auto run_device_scan_by_key(void*             temporary_storage,
                                                   scan_op,
                                                   initial_value,
                                                   static_cast<int>(input_size),
-                                                  hipcub::Equality(),
+                                                  _HIPCUB_STD::equal_to<>(),
                                                   stream);
 }
 
@@ -121,7 +123,7 @@ auto run_device_scan_by_key(void*   temporary_storage,
                                                   output,
                                                   scan_op,
                                                   static_cast<int>(input_size),
-                                                  hipcub::Equality(),
+                                                  _HIPCUB_STD::equal_to<>(),
                                                   stream);
 }
 
