@@ -3,6 +3,7 @@
 
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/{{ op.class_name }}.hpp"
 #include "descriptors/GraphDescriptor.hpp"
@@ -15,6 +16,10 @@
 #include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+{% if op.test_data.constants_include %}
+#include <hipdnn_test_sdk/constants/{{ op.test_data.constants_include }}.hpp>
+{% endif %}
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
 #include <memory>
@@ -24,6 +29,10 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+{% if op.test_data.constants_include %}
+using namespace hipdnn_tests::constants;
+{% endif %}
+using hipdnn_tests::toVec;
 
 namespace
 {
@@ -35,7 +44,7 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 {% for taf in op.tensor_array_fields %}
                           std::vector<HipdnnBackendDescriptor*> {{ taf.name }}Descs = {}{% if not loop.last %},{% endif %}
 {% endfor %}{% endif %},
-                          DataType computeType = DataType::FLOAT)
+                          hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<{{ op.class_name }}>();
     auto desc = wrapper->asDescriptor<{{ op.class_name }}>();
@@ -46,9 +55,16 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
 {% endfor %}
 {% for df in op.required_data_fields %}
 {% if df.is_vector %}
+{% if op.test_data.constants_include %}
+{% set const_name = df.test_constant_name if df.test_constant_name else ("K_CONV_" ~ (df.name | upper) if "conv" in op.effective_error_label else "K_" ~ (df.name | upper)) %}
+
+    auto {{ df.camel_name }} = toVec({{ const_name }});
+    desc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, static_cast<int64_t>({{ df.camel_name }}.size()), {{ df.camel_name }}.data());
+{% else %}
 
     std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
     desc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
+{% endif %}
 {% elif df.is_enum %}
 
     auto {{ df.camel_name }} = static_cast<int64_t>({{ df.enum_short_type }}::{{ df.test_enum_value }});
@@ -107,7 +123,14 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildFromSingleOperation)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% endif %}
 {% else %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
 {% endif %}
@@ -159,12 +182,19 @@ TEST_F(TestGraphDescriptor{{ op.name }}, ComputeDataTypePreserved)
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% endif %}
 {% else %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
 {% endif %}
 {% endfor %}
-    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, DataType::HALF);
+    auto opDesc = createFinalized{{ op.name }}Op({% for tf in op.tensor_fields %}{{ tf.local_desc_name }}.get(){% if not loop.last %}, {% endif %}{% endfor %}, HIPDNN_DATA_HALF);
 
     auto desc = getDescriptor();
     setHandle();
@@ -189,7 +219,14 @@ TEST_F(TestGraphDescriptor{{ op.name }}, BuildWith{{ taf.test_label or taf.name 
 {% for tf in op.tensor_fields %}
 {% set tc = op.test_data.tensor_configs.get(tf.name) %}
 {% if tc %}
+{% if op.test_data.constants_include %}
+{% set uid_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% set dims_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_DIMS" %}
+{% set strides_const = "K_TENSOR_" ~ (tf.name | upper) ~ "_STRIDES" %}
+    auto {{ tf.local_desc_name }} = createFinalizedTensor({{ uid_const }}, toVec({{ dims_const }}), toVec({{ strides_const }}));
+{% else %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }}, {{ '{' }}{{ tc.dims | join(', ') }}{{ '}' }}, {{ '{' }}{{ tc.strides | join(', ') }}{{ '}' }});
+{% endif %}
 {% else %}
     auto {{ tf.local_desc_name }} = createFinalizedTensor({{ op.test_data.tensor_uids.get(tf.name, loop.index) }});
 {% endif %}

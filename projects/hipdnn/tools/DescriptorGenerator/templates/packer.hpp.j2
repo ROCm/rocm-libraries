@@ -10,18 +10,12 @@ namespace hipdnn_frontend::detail
 {
 
 // Builds a {{ op.effective_packer_operation_label }} operation descriptor from {{ op.frontend.attributes_class }}.
-// Tensor descriptors are created/deduplicated via createOrFindTensorDesc.
+// Tensor descriptors are created/deduplicated via ensureAndSetTensorRef.
 inline Error {{ op.frontend.packer_function }}(
     const graph::{{ op.frontend.attributes_class }}& attributes,
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
-    // Ensure tensor descriptors exist for {{ op.tensor_fields | map(attribute='attr_suffix') | join(', ') }}
-{% for tf in op.tensor_fields %}
-    auto [{{ tf.err_name }}, {{ tf.camel_name }}Uid] = createOrFindTensorDesc(tensorDescs, attributes.{{ tf.frontend_getter }});
-    HIPDNN_CHECK_ERROR({{ tf.err_name }});
-{% endfor %}
-
     // Create operation descriptor
     ScopedHipdnnBackendDescriptor opDesc({{ op.descriptor_type_enum }});
     if(!opDesc.valid())
@@ -30,10 +24,13 @@ inline Error {{ op.frontend.packer_function }}(
                 "Failed to create {{ op.effective_packer_operation_label }} operation descriptor"};
     }
 
-    // Set tensor references
+    // Create tensor descriptors (if needed) and set them on the operation
 {% for tf in op.tensor_fields %}
-    HIPDNN_CHECK_ERROR(setDescriptorAttrTensorRef(
-        opDesc.get(), {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, {{ tf.camel_name }}Uid, tensorDescs, "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }},
+                                             attributes.{{ tf.frontend_getter }},
+                                             tensorDescs,
+                                             "{{ op.effective_error_label }} {{ tf.attr_suffix }}"));
 {% endfor %}
 
     // Set {{ op.packer_params_label }} parameters
@@ -58,12 +55,10 @@ inline Error {{ op.frontend.packer_function }}(
 {% endfor %}
 {% if op.has_compute_data_type %}
 
-    auto computeDataType = hipdnn_frontend::toSdkType(attributes.compute_data_type);
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               {{ op.compute_data_type_attr }},
-                                               HIPDNN_TYPE_DATA_TYPE,
-                                               computeDataType,
-                                               "{{ op.effective_error_label }} compute data type"));
+    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
+                                                 {{ op.compute_data_type_attr }},
+                                                 attributes.compute_data_type,
+                                                 "{{ op.effective_error_label }} compute data type"));
 {% endif %}
 {% for taf in op.tensor_array_fields %}
 

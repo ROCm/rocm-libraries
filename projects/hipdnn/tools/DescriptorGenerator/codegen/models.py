@@ -75,6 +75,7 @@ class DataField:
     build_node_check: bool = True
     shared: bool = False
     test_enum_value: str = ""
+    test_constant_name: str = ""
 
     @property
     def camel_name(self) -> str:
@@ -158,6 +159,7 @@ class TestData:
     tensor_uids: dict[str, int] = field(default_factory=dict)
     tensor_configs: dict[str, TensorConfig] = field(default_factory=dict)
     field_values: dict[str, list] = field(default_factory=dict)
+    constants_include: str = ""
 
 
 @dataclass

@@ -85,6 +85,7 @@ def load_config(path: Path) -> OperationConfig:
                 build_node_check=df.get("build_node_check", True),
                 shared=df.get("shared", False),
                 test_enum_value=df.get("test_enum_value", ""),
+                test_constant_name=df.get("test_constant_name", ""),
             )
         )
 
@@ -115,6 +116,7 @@ def load_config(path: Path) -> OperationConfig:
                 strides=cfg.get("strides", []),
             )
         test_data.field_values = td_raw.get("field_values", {})
+        test_data.constants_include = td_raw.get("constants_include", "")
 
     config = OperationConfig(
         name=op["name"],
