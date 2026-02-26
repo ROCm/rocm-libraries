@@ -1430,11 +1430,7 @@ try
         hipStream_t default_stream{};
         dest->csritsv_info->copy(src->csritsv_info, default_stream);
     }
-
-    dest->boost_enable   = src->boost_enable;
-    dest->boost_tol_size = src->boost_tol_size;
-    dest->boost_tol      = src->boost_tol;
-    dest->boost_val      = src->boost_val;
+    dest->boost.copy(src->boost);
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4073,10 +4069,8 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
-
     ROCSPARSE_CHECKARG_POINTER(1, bsr_row_ptr);
     ROCSPARSE_CHECKARG(
         2, bsr_col_ind, descr->nnz > 0 && bsr_col_ind == nullptr, rocsparse_status_invalid_pointer);
@@ -4474,6 +4468,7 @@ try
                        rocsparse_status_invalid_value);
 
     descr->batch_count                 = batch_count;
+    descr->batch_stride                = columns_values_batch_stride;
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = columns_values_batch_stride;
 

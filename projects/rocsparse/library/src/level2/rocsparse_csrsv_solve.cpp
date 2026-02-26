@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -92,15 +92,13 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
     }
 
-    csrsv_info->set_pivot_batch_count(batch_count, stream);
-
     // If diag type is unit, re-initialize zero pivot to remove structural zeros
     switch(diag_type)
     {
     case rocsparse_diag_type_unit:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
-            batch_count, A->col_type, csrsv_info->get_zero_pivot(), stream));
+            batch_count, A->col_type, csrsv_info->get_position(), stream));
         break;
     }
     case rocsparse_diag_type_non_unit:
@@ -182,7 +180,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                         done_array,
                         csrsv->get_row_map(),
                         0,
-                        csrsv_info->get_zero_pivot(),
+                        csrsv_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,

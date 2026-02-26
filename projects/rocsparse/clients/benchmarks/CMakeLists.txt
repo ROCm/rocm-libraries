@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -179,6 +179,8 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_sptrsv_csr.cpp
 ../testings/testing_sptrsv_coo.cpp
 ../testings/testing_spitsv_csr.cpp
+../testings/testing_spic0.cpp
+../testings/testing_spilu0.cpp
 ../testings/testing_spsm_csr.cpp
 ../testings/testing_spsm_coo.cpp
 ../testings/testing_sptrsm_csr.cpp

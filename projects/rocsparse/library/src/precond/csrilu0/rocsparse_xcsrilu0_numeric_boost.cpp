@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ namespace rocsparse
     static rocsparse_status csrilu0_numeric_boost_template(rocsparse_handle   handle,
                                                            rocsparse_mat_info info,
                                                            int                enable_boost,
-                                                           size_t             boost_tol_size,
+                                                           rocsparse_datatype boost_tol_datatype,
                                                            const void*        boost_tol,
                                                            const T*           boost_val)
     {
@@ -42,7 +42,7 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(1, info);
 
         // Reset boost
-        info->boost_enable = 0;
+        info->boost.set_enable(0);
 
         // Numeric boost
         if(enable_boost)
@@ -51,10 +51,12 @@ namespace rocsparse
             ROCSPARSE_CHECKARG_POINTER(3, boost_tol);
             ROCSPARSE_CHECKARG_POINTER(4, boost_val);
 
-            info->boost_enable   = enable_boost;
-            info->boost_tol_size = boost_tol_size;
-            info->boost_tol      = boost_tol;
-            info->boost_val      = reinterpret_cast<const void*>(boost_val);
+            info->boost.set_enable(enable_boost);
+            info->boost.set_tol_datatype(boost_tol_datatype);
+            info->boost.set_tol(boost_tol);
+            info->boost.set_val(reinterpret_cast<const void*>(boost_val));
+            info->boost.set_tol_pointer_mode(handle->pointer_mode);
+            info->boost.set_val_pointer_mode(handle->pointer_mode);
         }
 
         return rocsparse_status_success;
@@ -77,7 +79,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, sizeof(float), boost_tol, boost_val));
+        handle, info, enable_boost, rocsparse_datatype_f32_r, boost_tol, boost_val));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -97,7 +99,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
+        handle, info, enable_boost, rocsparse_datatype_f64_r, boost_tol, boost_val));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -118,7 +120,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, sizeof(float), boost_tol, boost_val));
+        handle, info, enable_boost, rocsparse_datatype_f32_r, boost_tol, boost_val));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -139,7 +141,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
+        handle, info, enable_boost, rocsparse_datatype_f64_r, boost_tol, boost_val));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -159,7 +161,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
+        handle, info, enable_boost, rocsparse_datatype_f64_r, boost_tol, boost_val));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -180,7 +182,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
+        handle, info, enable_boost, rocsparse_datatype_f64_r, boost_tol, boost_val));
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

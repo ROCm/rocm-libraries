@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,13 +81,14 @@ void rocsparse_clients::configurable_event_listener::OnTestCaseStart(
 
 void rocsparse_clients::configurable_event_listener::OnTestStart(const testing::TestInfo& test_info)
 {
+#if 0
     if(redirectOutput)
     {
         // Clear and redirect streams before each test
         this->m_redirector.clear();
         this->m_redirector.redirect();
     }
-
+#endif
     if(showTestNames)
     {
         m_eventListener->OnTestStart(test_info);
@@ -102,6 +103,7 @@ void rocsparse_clients::configurable_event_listener::OnTestPartResult(
 
 void rocsparse_clients::configurable_event_listener::OnTestEnd(const testing::TestInfo& test_info)
 {
+#if 0
     if(redirectOutput)
     {
         // Restore streams after test
@@ -118,7 +120,7 @@ void rocsparse_clients::configurable_event_listener::OnTestEnd(const testing::Te
             }
         }
     }
-
+#endif
     if(test_info.result()->Failed() ? showInlineFailures : showSuccesses)
     {
         m_eventListener->OnTestEnd(test_info);

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -371,5 +371,26 @@ rocsparse_status rocsparse::get_rocsparse_status_for_hip_status(hipError_t statu
     case hipErrorUnknown:
     default:
         return rocsparse_status_internal_error;
+    }
+}
+
+rocsparse_pointer_mode rocsparse::get_pointer_mode(const void* data)
+{
+    hipPointerAttribute_t attributes;
+    THROW_IF_HIP_ERROR(hipPointerGetAttributes(&attributes, data));
+    switch(attributes.type)
+    {
+    case hipMemoryTypeHost:
+    case hipMemoryTypeUnregistered:
+    {
+        return rocsparse_pointer_mode_host;
+    }
+    case hipMemoryTypeManaged:
+    case hipMemoryTypeUnified:
+    case hipMemoryTypeDevice:
+    case hipMemoryTypeArray:
+    {
+        return rocsparse_pointer_mode_device;
+    }
     }
 }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,6 @@ rocsparse_status rocsparse::bsric0_kernel_launch(rocsparse_handle      handle,
     const auto max_nnzb = trm_info->get_max_nnz();
 
     rocsparse::bsric0_kernel_launch_t launch{};
-
     if((sleep) || (handle->wavefront_size == 32) || (max_nnzb > 128) || (A->block_dim > 32))
     {
         launch = find_bsric0_kernel_general_launch(handle, bsric0_info, A);

@@ -131,6 +131,11 @@ rocsparse_order
 
 .. doxygenenum:: rocsparse_order
 
+rocsparse_singularity
+---------------------
+
+.. doxygenenum:: rocsparse_singularity
+
 rocsparse_spmat_attribute
 -------------------------
 
@@ -196,6 +201,45 @@ rocsparse_sptrsm_stage
 
 .. doxygenenum:: rocsparse_sptrsm_stage
 
+rocsparse_spilu0_alg
+--------------------
+
+.. doxygenenum:: rocsparse_spilu0_alg
+
+rocsparse_spilu0_stage
+----------------------
+
+.. doxygenenum:: rocsparse_spilu0_stage
+
+rocsparse_spilu0_input
+----------------------
+
+.. doxygenenum:: rocsparse_spilu0_input
+
+rocsparse_spilu0_output
+-----------------------
+
+.. doxygenenum:: rocsparse_spilu0_output
+
+rocsparse_spic0_alg
+-------------------
+
+.. doxygenenum:: rocsparse_spic0_alg
+
+rocsparse_spic0_stage
+---------------------
+
+.. doxygenenum:: rocsparse_spic0_stage
+
+rocsparse_spic0_input
+---------------------
+
+.. doxygenenum:: rocsparse_spic0_input
+
+rocsparse_spic0_output
+----------------------
+
+.. doxygenenum:: rocsparse_spic0_output
 
 rocsparse_spmm_alg
 ------------------
