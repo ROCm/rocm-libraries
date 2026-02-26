@@ -849,9 +849,11 @@ namespace TensileLite
                 m_currentSolution = solution;
                 // Re-initialize MX FP4 scale data with preSwizzle now that the solution is known
                 // (earlier prepareGPUInputs() skipped it since m_currentSolution was null).
-                // Push corrected, pre-shuffled data to GPU buffers for the expected memory layout.
-
-                if(m_currentSolution != nullptr && m_currentGemmProblem != nullptr
+                // Only applies when the kernel has scaling enabled (useScaleAB non-empty);
+                // if scaling is disabled in Tensile, skip to avoid unnecessary re-upload.
+                if(m_currentSolution != nullptr
+                   && !m_currentSolution->problemType.useScaleAB.empty()
+                   && m_currentGemmProblem != nullptr
                    && !m_gpuPtrs.empty())
                 {
                     bool isMXFP4 = isMXFP4Problem(*m_currentGemmProblem);

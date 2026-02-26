@@ -1775,7 +1775,8 @@ namespace TensileLite
             // the scale tensor into the GPU kernel's expected memory layout
             std::vector<size_t> preSwizzleA, preTileA, preSwizzleB, preTileB;
 
-            if(m_currentSolution != nullptr)
+            if(m_currentSolution != nullptr
+               && !m_currentSolution->problemType.useScaleAB.empty())
             {
                 auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
                 size_t           MiK           = static_cast<size_t>(mi[2]);
@@ -1786,16 +1787,28 @@ namespace TensileLite
                 {
                     if(problem.mxBlockA() > 0 && MiK % problem.mxBlockA() == 0)
                     {
-                        size_t subTileK = MiK / problem.mxBlockA();
-                        preSwizzleA     = {swizzleTileMN, tileK, subTileK};
-                        preTileA        = {tileK, swizzleTileMN};
+                        // scale tensor: scaleRows = sizes[0]/mxBlock, scaleCols = sizes[1]
+                        // preSwizzle requires both to be multiples of their tile dimensions
+                        size_t scaleRowsA = problem.a().sizes()[0] / problem.mxBlockA();
+                        size_t scaleColsA = problem.a().sizes()[1];
+                        if(scaleRowsA % tileK == 0 && scaleColsA % swizzleTileMN == 0)
+                        {
+                            size_t subTileK = MiK / problem.mxBlockA();
+                            preSwizzleA     = {swizzleTileMN, tileK, subTileK};
+                            preTileA        = {tileK, swizzleTileMN};
+                        }
                     }
 
                     if(problem.mxBlockB() > 0 && MiK % problem.mxBlockB() == 0)
                     {
-                        size_t subTileK = MiK / problem.mxBlockB();
-                        preSwizzleB     = {swizzleTileMN, tileK, subTileK};
-                        preTileB        = {tileK, swizzleTileMN};
+                        size_t scaleRowsB = problem.b().sizes()[0] / problem.mxBlockB();
+                        size_t scaleColsB = problem.b().sizes()[1];
+                        if(scaleRowsB % tileK == 0 && scaleColsB % swizzleTileMN == 0)
+                        {
+                            size_t subTileK = MiK / problem.mxBlockB();
+                            preSwizzleB     = {swizzleTileMN, tileK, subTileK};
+                            preTileB        = {tileK, swizzleTileMN};
+                        }
                     }
                 }
             }
