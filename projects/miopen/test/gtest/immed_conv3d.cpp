@@ -41,22 +41,21 @@ auto GetDataset()
 {
     std::vector<miopen::test::conv::conv_test_input> cases{};
 
-    auto batch_sizes =
-        generate_data_limited(miopen::test::conv::get_batch_sizes(), 1, std::size_t{1});
-    auto input_channels =
-        generate_data_limited(miopen::test::conv::get_input_channels(), 1, std::size_t{32});
-    auto output_channels =
-        generate_data_limited(miopen::test::conv::get_output_channels(), 1, std::size_t{64});
-    auto spatial_dim_elements = generate_data_limited(
-        miopen::test::conv::get_3d_spatial_dims(), 1, std::vector<std::size_t>{14, 14, 14});
-    auto filter_dims = generate_data_limited(
-        miopen::test::conv::get_3d_filter_dims(), 2, std::vector<std::size_t>{3, 3, 3});
-    auto pads_strides_dilations =
-        generate_data_limited(miopen::test::conv::get_3d_pads_strides_dilations(),
-                              2,
-                              std::vector<int>{1, 1, 1, 1, 1, 1, 1, 1, 1});
-    auto trans_output_pads = generate_data(miopen::test::conv::get_3d_trans_output_pads());
-    auto pad_modes         = generate_data(std::vector<std::string>{"default", "same", "valid"});
+    auto batch_sizes      = generate_data(std::vector<std::size_t>{1, 8});
+    auto input_channels   = generate_data(std::vector<std::size_t>{16, 32});
+    auto output_channels  = generate_data(std::vector<std::size_t>{32, 64});
+    auto spatial_dim_elements =
+        generate_data(std::vector<std::vector<std::size_t>>{{3, 4, 4}});
+    auto filter_dims =
+        generate_data(std::vector<std::vector<std::size_t>>{{3, 5, 5}, {3, 7, 7}});
+    auto pads_strides_dilations = generate_data(std::vector<std::vector<int>>{
+        {0, 0, 0, 1, 1, 1, 1, 1, 1},
+        {0, 0, 0, 2, 2, 2, 1, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 1, 1, 2, 2, 2, 1, 1, 1},
+    });
+    auto trans_output_pads = generate_data(std::vector<std::vector<int>>{{0, 0, 0}});
+    auto pad_modes         = generate_data(std::vector<std::string>{"valid"});
     auto in_layouts        = generate_data(std::vector<std::string>{"NCDHW"});
     auto fil_layouts       = generate_data(std::vector<std::string>{"NCDHW"});
     auto out_layouts       = generate_data(std::vector<std::string>{"NCDHW"});
