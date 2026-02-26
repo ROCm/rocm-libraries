@@ -4419,6 +4419,56 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
                                                                                    20,20,20,20, 20,20, 22,22,22,22]
         lwsa   = [                                                                            20] # use delay before mfma4x4x4
         lwsb   = [                                                                            20]    
+    
+    elif isNT(kernel) and useLDSTr and TLDS==0  and kernel["VectorWidthA"] == 2 and kernel["VectorWidthB"] == 2:
+        disable_validation = True # swap instructions included in pack are not supported yet
+
+        lra0   = [0,0,0,0,
+                    1,1,1,1]
+        lrb0   = [     3,3,4,4,
+                                 6,6,6,6]
+        #              wait then read
+        syncs.add(     3, dscnt=4, comment="wait for the first 2x2 LRAs before packing")
+        syncs.add(         4, dscnt=2, comment="wait for the rest of LRAs")
+        pack_a0 = [    3,3,4,4, # swap instructions, must come after LR and before other packs
+                             4,5,5,5, 6,6, 7,7,7,7, 
+                             5,5,6,6, 6,6, 8,8,8,8]
+        # because of GR starting at 10, we need barrier at 9, will use that for sync too.
+        syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
+                                                 barrier=True, barrier_comment="make sure all LRs are done before starting GR")
+        pack_b0= [                               9,9, 9,9, # swap instructions, must come after LR and before other packs
+                                                 10,10,10,10, 10,10, 11,11,11,11,
+                                                 9,9,9,9,     10,10, 11,11,11,11]
+        grinca = [0,0,1, 1,2,2, 2,2,2]
+        grincb = [2,2,6, 7,7,7, 8,8,8]
+        lrsa   = [10]
+        lrsb   = [10]   
+        
+        num_code_paths = 2
+        gra   = [                                9,9,   11,11]
+        gra2  = [                                 10,10,11,11]
+        grb    = [                                              13,        14,14,17] # one index for two instructions
+        grb2   = [                                              13,         15,15,17] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+        syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
+
+        lra1   = [                                             12,12,12,12,
+                                                                13,13,13,13]
+        syncs.add(                                                         14, vlcnt=4+1, barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
+        lrb1   = [                                                         14,14,15,15,
+                                                                             16,16,16,16]
+        syncs.add(                                                            15, dscnt=2, comment="wait for LRAs")
+        pack_a1 =[                                                            15,15,16,16, # swap instructions, must come after LR and before other packs
+                                                                                17,17,17,17, 20,20, 21,21,21,21,
+                                                                                 18,18,18,18, 20,20, 21,21,21,21]
+        syncs.add(                                                                19, dscnt=4, comment="wait for the first 2 LRBs before the packing them")
+        syncs.add(                                                                 20, dscnt=0, comment="wait for the rest of LRBs")
+        pack_b1= [                                                                19,19,19,19, # swap instructions, must come after LR and before other packs
+                                                                                  19,19,19,19, 20,20, 22,22,22,22,
+                                                                                   20,20,20,20, 20,20, 22,22,22,22]
+        lwsa   = [                                                                            20] # use delay before mfma4x4x4
+        lwsb   = [                                                                            20]    
+
     else:
         return False, None  
     

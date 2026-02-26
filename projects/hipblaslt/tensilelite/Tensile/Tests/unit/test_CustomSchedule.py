@@ -943,14 +943,15 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
         # fmt: off
-        "transA, transB, lds_tr_inst,  tr_lds,  plr,  vwa,       mi    , ncp", [
-        (  True,  False,       False,       1,  1,   None, [16,16,32,1],   1),
-        (  True,  False,       False,       1,  1,   None, [32,32,16,1],   1),
-        (  False, False,       False,       1,  1,      2, [32,32,16,1],   2),
-        (  False, False,        True,       1,  1,      2, [32,32,16,1],   2),
+        "transA, transB, lds_tr_inst,  tr_lds,  plr,  vwa,  vwb,      mi    , ncp", [
+        (  True,  False,       False,       1,  1,   None, None, [16,16,32,1],   1),
+        (  True,  False,       False,       1,  1,   None, None, [32,32,16,1],   1),
+        (  False, False,       False,       1,  1,      2, None, [32,32,16,1],   2),
+        (  False, False,        True,       1,  1,      2, None, [32,32,16,1],   2),
+        (  False, True,         True,       0,  1,      2,    2, [32,32,16,1],   2),
         # fmt: on
         ])
-    def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, vwa, mi, ncp):
+    def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, vwa, vwb, mi, ncp):
         """Tests the 128x128x32 TF32 schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -971,6 +972,8 @@ class TestCustomScheduleTF32:
         })
         if vwa is not None:
             kernel.update({"VectorWidthA": vwa})
+        if vwb is not None:
+            kernel.update({"VectorWidthB": vwb})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
