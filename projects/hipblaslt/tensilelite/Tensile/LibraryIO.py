@@ -116,6 +116,10 @@ def writeMsgPack(filename, data):
     with open(filename, "wb") as f:
         msgpack.pack(data, f)
 
+def _solutionsCachePath(yamlFilename):
+    """Return path to the msgpack cache file for a solutions YAML."""
+    return yamlFilename + ".solcache.dat"
+
 def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
     """Writes solution YAML file."""
 
@@ -123,13 +127,18 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
     solutionStates = []
 
     if cache:
-        solYaml = read(filename)
-        if biasTypeArgs and activationArgs:
-            solutionStates = solYaml[4:]
-        elif biasTypeArgs or activationArgs:
-            solutionStates = solYaml[3:]
+        cachePath = _solutionsCachePath(filename)
+        if os.path.exists(cachePath):
+            with open(cachePath, "rb") as cf:
+                solutionStates = msgpack.unpack(cf, raw=False)
         else:
-            solutionStates = solYaml[2:]
+            solYaml = read(filename)
+            if biasTypeArgs and activationArgs:
+                solutionStates = solYaml[4:]
+            elif biasTypeArgs or activationArgs:
+                solutionStates = solYaml[3:]
+            else:
+                solutionStates = solYaml[2:]
     else:
         for solution in solutions:
             solutionState = solution.getAttributes()
@@ -138,6 +147,10 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
             isa = solutionState["ISA"]
             solutionState["ISA"] = [isa[0], isa[1], isa[2]]
             solutionStates.append(solutionState)
+        try:
+            writeMsgPack(_solutionsCachePath(filename), solutionStates)
+        except Exception:
+            pass  # Non-fatal: will fall back to full reload from YAML on next cached run
     # write dictionaries
     with open(filename, "w") as f:
         f.write("- MinimumRequiredVersion: {}\n".format(__version__))
