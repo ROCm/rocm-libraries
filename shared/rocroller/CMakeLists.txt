@@ -91,6 +91,10 @@ endif()
 find_package(spdlog QUIET)
 if(NOT spdlog_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
+
+
+
+
         FetchContent_Declare(
             spdlog
             GIT_REPOSITORY https://github.com/gabime/spdlog.git
@@ -178,6 +182,10 @@ endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
     if(ROCROLLER_ENABLE_FETCH)
+
+
+
+
         set(YAML_CPP_BUILD_TOOLS OFF)
         set(YAML_BUILD_SHARED_LIBS OFF)
         option(YAML_CPP_INSTALL "" ON)
