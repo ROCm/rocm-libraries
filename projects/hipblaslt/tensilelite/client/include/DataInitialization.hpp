@@ -47,12 +47,12 @@ namespace TensileLite
 {
     namespace Client
     {
-        static inline bool isMXFP4Tensor(const TensorDescriptor& tensor, size_t mxBlock)
+        inline bool isMXFP4Tensor(const TensorDescriptor& tensor, size_t mxBlock)
         {
             return tensor.dataType() == rocisa::DataType::Float4 && mxBlock > 0;
         }
 
-        static inline bool isMXFP4Problem(const ContractionProblemGemm& problem)
+        inline bool isMXFP4Problem(const ContractionProblemGemm& problem)
         {
             return isMXFP4Tensor(problem.a(), problem.mxBlockA())
                 || isMXFP4Tensor(problem.b(), problem.mxBlockB());
