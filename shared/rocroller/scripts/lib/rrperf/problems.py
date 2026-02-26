@@ -554,6 +554,31 @@ _base_to_run_class = {
 }
 
 
+def _is_nested_gemm_result(result: dict) -> bool:
+    return any(key in result for key in ("problem", "solution", "benchmark"))
+
+
+def _flatten_nested_gemm_result(result: dict) -> dict:
+    """
+    Flatten nested GEMM result sections into legacy top-level keys.
+
+    Merge order matches the old writer's effective behavior:
+    problem -> solution -> benchmark, where later sections override earlier values.
+    """
+    flattened = {
+        key: value
+        for key, value in result.items()
+        if key not in ("problem", "solution", "benchmark")
+    }
+
+    for key in ("problem", "solution", "benchmark"):
+        section = result.get(key)
+        if isinstance(section, dict):
+            flattened.update(section)
+
+    return flattened
+
+
 def cast_missing_parameters(result):
     """
     Cast parameters in previous GEMMResult version into existing parameters
@@ -615,7 +640,13 @@ def load_results(path: pathlib.Path):
     """
     rv = []
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
+        if r is None:
+            continue
+
+        r = dict(r)
         ResultClass = _client_to_result_class[r["resultType"]]
+        if r.get("resultType") == "GEMM" and _is_nested_gemm_result(r):
+            r = _flatten_nested_gemm_result(r)
         r.pop("path", None)
         cast_missing_parameters(r)
         rv.append(ResultClass(path=path, **r))

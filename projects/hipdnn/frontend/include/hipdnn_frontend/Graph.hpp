@@ -77,6 +77,7 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
@@ -790,6 +791,12 @@ public:
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Building operation graph " << graph_attributes.get_name());
+
+        if(!_preferredEngineId.has_value())
+        {
+            _preferredEngineId
+                = hipdnn_frontend::engine_override::getPreferredIdFromOverrideConfig(*this);
+        }
 
         auto serializedGraph = buildFlatbufferOperationGraph();
         _graphDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
