@@ -280,48 +280,53 @@ namespace rocRoller::KernelGraph::ControlGraph
         using GD = Graph::Direction;
         std::unordered_set<int> visited_nodes;
 
-        // Corresponding variant index of edge type:
-        //   Sequence(0), Initialize(1), ForLoopIncrement(2), Body(3), Else(4)
-        //
-        // And order of edge type
-        //   Initialize -> Body -> Else -> ForLoopIncrement -> Sequence.
-
         // Decide order of A and B when A is parent of B
         auto const getOrderIfParent = [&](int edge) {
-            auto const index = getEdge(edge).index();
-            AssertFatal(index <= 4, "Invalid edge");
-            return index == 0 ? NodeOrdering::LeftFirst : NodeOrdering::RightInBodyOfLeft;
+            return std::holds_alternative<Sequence>(getEdge(edge))
+                       ? NodeOrdering::LeftFirst
+                       : NodeOrdering::RightInBodyOfLeft;
         };
 
         // Decide order of A and B when A and B are descendants of a node
-        auto const getOrderOfDescendants = [&](int edgeATypeIndex, int edgeBTypeIndex) {
-            AssertFatal(edgeATypeIndex != edgeBTypeIndex, "edgeA and edgeB should not be the same");
-            AssertFatal(edgeATypeIndex <= 4 && edgeBTypeIndex <= 4, "Invalid edge");
+        // And order of edge type :
+        // Initialize -> Body -> Else -> ForLoopIncrement -> Sequence.
+        auto const getOrderOfDescendants = [&](int edgeA, int edgeB) {
+            auto edgeAElem = getEdge(edgeA);
+            auto edgeBElem = getEdge(edgeB);
+            AssertFatal(edgeAElem.index() != edgeBElem.index(),
+                        "edgeA and edgeB types should not be the same");
 
-            switch(edgeATypeIndex)
-            {
-            case 0: // edgeA is Sequence
-                return opposite(NodeOrdering::LeftFirst);
-            case 1: // edgeA is Initialize
-                return NodeOrdering::LeftFirst;
-            case 2: // edgeA is ForLoopIncrement
-                return edgeBTypeIndex == 0 ? NodeOrdering::LeftFirst
-                                           : opposite(NodeOrdering::LeftFirst);
-            case 3: // edgeA is Body
-                return edgeBTypeIndex == 1 ? opposite(NodeOrdering::LeftFirst)
-                                           : NodeOrdering::LeftFirst;
-            case 4: // edgeA is Else
-                return edgeBTypeIndex == 1 || edgeBTypeIndex == 3
-                           ? opposite(NodeOrdering::LeftFirst)
-                           : NodeOrdering::LeftFirst;
-            default:
-                return NodeOrdering::Undefined;
-            }
+            return std::visit(
+                rocRoller::overloaded{
+                    [&](auto const&) {
+                        AssertFatal(false, "Unhandled edge type in getOrderOfDescendants");
+                        return NodeOrdering::Undefined;
+                    },
+                    [&](Body const&) {
+                        return std::holds_alternative<Initialize>(edgeBElem)
+                                   ? opposite(NodeOrdering::LeftFirst)
+                                   : NodeOrdering::LeftFirst;
+                    },
+                    [&](Sequence const&) { return opposite(NodeOrdering::LeftFirst); },
+                    [&](Initialize const&) { return NodeOrdering::LeftFirst; },
+                    [&](ForLoopIncrement const&) {
+                        return std::holds_alternative<Sequence>(edgeBElem)
+                                   ? NodeOrdering::LeftFirst
+                                   : opposite(NodeOrdering::LeftFirst);
+                    },
+                    [&](Else const&) {
+                        return std::holds_alternative<Initialize>(edgeBElem)
+                                       || std::holds_alternative<Body>(edgeBElem)
+                                   ? opposite(NodeOrdering::LeftFirst)
+                                   : NodeOrdering::LeftFirst;
+                    }},
+                edgeAElem);
         };
 
-        // {key, value} = {node index, edge type (index of variant)}
+        // {key, value} = {node index, edge index}
         std::unordered_map<int, int> A_ancestors;
-        std::vector<int>             stk{nodeA};
+        // stack
+        std::vector<int> stk{nodeA};
 
         // Traverse upstream from A to collect all ancestors of A
         while(!stk.empty())
@@ -336,7 +341,7 @@ namespace rocRoller::KernelGraph::ControlGraph
                     if(parent == nodeB)
                         return opposite(getOrderIfParent(edge));
 
-                    A_ancestors.insert({parent, getEdge(edge).index()});
+                    A_ancestors.insert({parent, edge});
 
                     if(!visited_nodes.contains(parent))
                     {
@@ -368,10 +373,9 @@ namespace rocRoller::KernelGraph::ControlGraph
                     {
                         // If this is a common ancestor, compare the types of both edges to
                         // know the order
-                        auto const edgeBTypeIndex = getEdge(edge).index();
-                        if(A_ancestors.at(parent) != edgeBTypeIndex)
+                        if(getEdge(A_ancestors.at(parent)).index() != getEdge(edge).index())
                         {
-                            return getOrderOfDescendants(A_ancestors.at(parent), edgeBTypeIndex);
+                            return getOrderOfDescendants(A_ancestors.at(parent), edge);
                         }
                     }
 
