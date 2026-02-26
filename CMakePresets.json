@@ -57,6 +57,13 @@
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "rocrand"
             }
+        },
+        {
+            "name": "hipdnn",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;miopen-provider;hipblaslt-provider"
+            }
         }
     ],
     "buildPresets": [
