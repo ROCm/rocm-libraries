@@ -18,52 +18,67 @@
         },
         {
             "name": "mxdatagenerator",
-            "inherits": ["default:release"],
+            "inherits": [
+                "default:release"
+            ],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator"
             }
         },
         {
             "name": "rocroller",
-            "inherits": ["default:release"],
+            "inherits": [
+                "default:release"
+            ],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller"
             }
         },
         {
             "name": "origami",
-            "inherits": ["default:release"],
+            "inherits": [
+                "default:release"
+            ],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "origami"
             }
         },
         {
             "name": "hipblaslt",
-            "inherits": ["default:release"],
+            "inherits": [
+                "default:release"
+            ],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "mxdatagenerator;rocroller;origami;hipblas-common;hipblaslt"
             }
         },
         {
             "name": "rocprim",
-            "inherits": ["default:release"],
+            "inherits": [
+                "default:release"
+            ],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "rocprim"
             }
         },
         {
             "name": "rocrand",
-            "inherits": ["default:release"],
+            "inherits": [
+                "default:release"
+            ],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "rocrand"
             }
         },
         {
             "name": "hipdnn",
-            "inherits": ["default:release"],
+            "inherits": [
+                "default:release"
+            ],
             "cacheVariables": {
                 "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;miopen-provider;hipblaslt-provider"
-            }
+            },
+            "toolchainFile": "${sourceDir}/projects/hipdnn/cmake/ClangToolChain.cmake"
         }
     ],
     "buildPresets": [
