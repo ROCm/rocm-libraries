@@ -80,3 +80,56 @@ TEST(TestPlatformUtils, GetCurrentExecutableDirectoryContainsExecutable)
     EXPECT_TRUE(std::filesystem::exists(execDir / actualExecPath.filename()));
 }
 #endif // defined(__linux__)
+
+#if defined(__linux__)
+TEST(TestPlatformUtils, GetLibraryNameLinux)
+{
+    std::string lib = hipdnn_data_sdk::utilities::getLibraryName("hipdnn");
+    EXPECT_EQ(lib, "libhipdnn.so");
+}
+#endif
+
+#if defined(__linux__)
+TEST(TestPlatformUtils, GetExecutableNameLinux)
+{
+    std::string exe = hipdnn_data_sdk::utilities::getExecutableName("hipdnn");
+    EXPECT_EQ(exe, "hipdnn");
+}
+#endif
+
+TEST(TestPlatformUtils, GetEnvReturnsEmptyWhenNotSetAndNoDefault)
+{
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_ENV_EMPTY");
+    std::string result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ENV_EMPTY");
+    EXPECT_EQ(result, "");
+}
+
+TEST(TestPlatformUtils, GetEnvReturnsDefaultWhenNotSet)
+{
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_ENV_FOO");
+    std::string result = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ENV_FOO", "fallback");
+    EXPECT_EQ(result, "fallback");
+}
+
+TEST(TestPlatformUtils, EnvSetAndGet)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_ENV_BAR", "123");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ENV_BAR"), "123");
+}
+
+TEST(TestPlatformUtils, EnvUnsetWorks)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_ENV_X", "something");
+    hipdnn_data_sdk::utilities::unsetEnv("HIPDNN_TEST_ENV_X");
+
+    EXPECT_EQ(hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ENV_X", "default"), "default");
+}
+
+TEST(TestPlatformUtils, EnvSetOverwritesExistingValue)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_ENV_OVER", "first");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ENV_OVER"), "first");
+
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_TEST_ENV_OVER", "second");
+    EXPECT_EQ(hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ENV_OVER"), "second");
+}
