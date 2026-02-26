@@ -155,7 +155,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
     static constexpr std::integral_constant<bool, TestFixture::params::copy> copy_constant{};
     using output_type
         = std::conditional_t<copy_constant, input_type, typename TestFixture::params::output_type>;
-    static constexpr ::hipcub::Difference op;
+    static constexpr test_utils::minus op;
 
     hipStream_t stream = 0;
     if(TestFixture::params::use_graphs)
