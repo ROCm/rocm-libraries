@@ -1,0 +1,155 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+message(STATUS "Building hip kernel provider plugin standalone")
+cmake_minimum_required(VERSION 3.25.2)
+add_compile_definitions(__HIP_PLATFORM_AMD__)
+
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+    CACHE STRING "Toolchain file"
+)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+set(HIP_KERNEL_PLUGIN_VERSION "0.0.1")
+project(hip_kernel_provider VERSION ${HIP_KERNEL_PLUGIN_VERSION} LANGUAGES CXX)
+
+if(NOT WIN32)
+    # Only set if not already specified by user
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+        set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
+    endif()
+    message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
+endif()
+
+include(GNUInstallDirs)
+
+set(CMAKE_CXX_STANDARD 17)
+
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE
+    CACHE BOOL "Add paths to linker search and installed rpath"
+)
+
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip
+     ${HIP_DIR}/cmake
+)
+
+# Migrate HIP_DNN_SKIP_TESTS -> HIPDNN_SKIP_TESTS
+if(DEFINED HIP_DNN_SKIP_TESTS)
+    set(HIPDNN_SKIP_TESTS ${HIP_DNN_SKIP_TESTS} CACHE BOOL "Skip building tests" FORCE)
+    unset(HIP_DNN_SKIP_TESTS CACHE)
+    message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
+endif()
+option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
+
+option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+
+list(
+    PREPEND
+    HIPDNN_WARNING_COMPILE_OPTIONS
+    -Werror
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wshadow
+    -Wnon-virtual-dtor
+    -Wold-style-cast
+    -Wcast-align
+    -Woverloaded-virtual
+    -Wconversion
+    -Wsign-conversion
+    -Wnull-dereference
+    -Wdouble-promotion
+    -Wformat=2
+    -Winit-self
+    -Wunreachable-code
+    -Wno-error=unused-command-line-argument
+    -Wswitch-default
+)
+
+# NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
+# remove when fixed. Added to prevent issues with not finding hip cmake.
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
+
+find_package(hip REQUIRED)
+find_package(hipdnn_data_sdk CONFIG REQUIRED)
+find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+# Setup testing dependencies
+include(Dependencies)
+include(Tests)
+
+if(WIN32)
+    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")
+else()
+    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "lib")
+endif()
+
+set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
+    "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ENGINE_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
+)
+
+message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
+message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
+file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
+
+# OBJECT library with all implementation
+add_library(
+    hip_kernel_plugin_impl OBJECT
+    HipKernelHandle.cpp
+    HipKernelContainer.cpp
+    HipKernelPluginPublic.cpp
+)
+target_include_directories(hip_kernel_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(hip_kernel_plugin_impl PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk)
+
+target_compile_options(hip_kernel_plugin_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(hip_kernel_plugin_impl PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    POSITION_INDEPENDENT_CODE ON
+)
+
+# Static library for unit tests to link against (provides access to internal implementation)
+add_library(hip_kernel_plugin_private STATIC $<TARGET_OBJECTS:hip_kernel_plugin_impl>)
+target_include_directories(hip_kernel_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(hip_kernel_plugin_private PUBLIC hipdnn_data_sdk hipdnn_plugin_sdk hip_kernel_plugin_impl)
+
+# hip_kernel_plugin - SHARED library (the actual plugin)
+add_library(hip_kernel_plugin SHARED $<TARGET_OBJECTS:hip_kernel_plugin_impl>)
+target_link_libraries(hip_kernel_plugin PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk)
+
+if(NOT WIN32)
+    target_link_libraries(hip_kernel_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
+
+target_compile_options(hip_kernel_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(
+    hip_kernel_plugin
+    PROPERTIES CXX_VISIBILITY_PRESET hidden
+               LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+               INSTALL_RPATH "${ROCM_PATH}/lib"
+               INSTALL_RPATH_USE_LINK_PATH TRUE
+               BUILD_WITH_INSTALL_RPATH TRUE
+)
+
+if(NOT HIPDNN_SKIP_TESTS)
+    add_subdirectory(tests)
+    add_subdirectory(integration_tests)
+
+    # Keep this after all build folders have been added so they have a chance to register their tests
+    # using add_*_test_target()
+    finalize_test_targets()
+
+    install_hip_kernel_plugin_ctest_files()
+endif()
+
+# Install the plugin
+install(TARGETS hip_kernel_plugin EXPORT hip-kernel-plugin
+        LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
+        RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
+)
