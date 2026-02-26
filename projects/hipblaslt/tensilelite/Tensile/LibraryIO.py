@@ -28,6 +28,7 @@ from .CustomYamlLoader import load_yaml_stream
 from Tensile import __version__
 from Tensile.Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
+from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
@@ -146,22 +147,25 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
         else:
             return solYaml[2:]
 
-    if cache:
-        solutionStates = load_solution_states_from_cache(filename)
-    else:
-        solutionStates: list[dict] = []
-        for solution in solutions:
-            solutionState = solution.getAttributes()
-            solutionState["ProblemType"] = solutionState["ProblemType"].state
-            problemTypeToEnum(solutionState["ProblemType"])
-            isa = solutionState["ISA"]
-            solutionState["ISA"] = [isa[0], isa[1], isa[2]]
-            solutionStates.append(solutionState)
-        if _msgpack_available:
-            try:
-                writeMsgPack(_solutionsCacheFilename(filename), solutionStates)
-            except Exception as e:
-                printWarning("Failed to write solution cache: {}".format(e))
+    with timing_context("python_wsol_prepare"):
+        if cache:
+            with timing_context("python_wsol_prepare_cache"):
+                solutionStates = load_solution_states_from_cache(filename)
+        else:
+            with timing_context("python_wsol_prepare_nocache"):
+                solutionStates: list[dict] = []
+                for solution in solutions:
+                    solutionState = solution.getAttributes()
+                    solutionState["ProblemType"] = solutionState["ProblemType"].state
+                    problemTypeToEnum(solutionState["ProblemType"])
+                    isa = solutionState["ISA"]
+                    solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+                    solutionStates.append(solutionState)
+                if _msgpack_available:
+                    try:
+                        writeMsgPack(_solutionsCacheFilename(filename), solutionStates)
+                    except Exception as e:
+                        printWarning("Failed to write solution cache: {}".format(e))
     # write dictionaries
     with open(filename, "w") as f:
         f.write("- MinimumRequiredVersion: {}\n".format(__version__))
