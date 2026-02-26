@@ -1,0 +1,46 @@
+{
+    "name": "sample_matmul_256x512x1024",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "input_a",
+            "dims": [256, 512],
+            "strides": [512, 1],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "input_b",
+            "dims": [512, 1024],
+            "strides": [1024, 1],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "output_c",
+            "dims": [256, 1024],
+            "strides": [1024, 1],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "matmul_node",
+            "type": "MatmulAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "a_tensor_uid": 1,
+                "b_tensor_uid": 2
+            },
+            "outputs": {
+                "c_tensor_uid": 3
+            }
+        }
+    ]
+}

@@ -20,7 +20,9 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+import functools
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
 from copy import deepcopy
@@ -378,6 +380,58 @@ MAIN_LOOP = "ML"
 NO_GLOBAL_LOAD_LOOP = "NGL"
 NO_LOCAL_LOAD_LOOP = "NLL"
 
+# --- Pack Group Sizes ---
+PACK_GROUP_SIZE_TF32 = 24        # 4 CVT0 + 16 middle + 4 CVT1
+PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
+
+# --- TF32 Pack Index Ranges (within a group) ---
+# Regular TF32 (groups of 24)
+TF32_CVT0_END = 4                # Indices 0..3 are CVT0
+TF32_MIDDLE_16_START = 4         # Indices 4..19 are middle-16
+TF32_MIDDLE_16_END = 20          # (exclusive)
+# TF32_CVT1 occupies indices 20..23
+
+# 4x4 MFMA TF32 (groups of 10)
+TF32_4X4_MFMA_START = 4          # Indices 4..5 are 4x4 MFMAs
+TF32_4X4_MFMA_END = 6            # (exclusive)
+# CVT0: 0..3, CVT1: 6..9
+
+# --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
+QUAD_CYCLES_CVT_BEFORE_MFMA = 2          # CVT packs need 2 quad-cycles before MFMA can use result
+QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = 5     # 4x4 MFMA needs 5 quad-cycles before CVT1 can use result
+QUAD_CYCLES_STANDARD_MFMA_FINISH = 3      # Standard MFMA takes 3 quad-cycles to finish after issue
+QUAD_CYCLES_MFMA_4X4_FINISH = 1           # 4x4 MFMA takes 1 quad-cycle to finish after issue
+
+# --- MFMA Type-Switch Thresholds ---
+MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5  # Min gap before type switch from standard MFMA
+MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3       # Min gap before type switch from 4x4 MFMA
+
+# --- TF32 Emulation ---
+MFMAS_PER_TILE_TF32 = 3   # 3 MFMAs per tile pair in TF32 emulation
+MFMAS_PER_TILE_BF16 = 1   # 1 MFMA per tile pair in BF16
+
+# --- VGPRs ---
+VGPRS_PER_CONVERSION_GROUP = 8   # 8 VGPRs per conversion group in TF32 emulation
+
+ALL_INSTRUCTION_NAMES = [
+    "LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3",
+    "GRA", "GRB",
+    "PackA0", "PackB0", "PackA1", "PackB1", "PackA3", "PackB3",
+    "SYNC", "SNOP",
+]
+
+
+def create_unified_timeline(
+    schedule_info: 'ScheduleInfo',
+    kernel: 'Solution',
+    code_path: int
+) -> 'Timeline':
+    """Create a single Timeline with all instruction types."""
+    available_names = set(schedule_info.optSchedule.keys())
+    names_to_add = [n for n in ALL_INSTRUCTION_NAMES if n in available_names]
+    return Timeline(names_to_add, code_path, schedule_info, kernel)
+
+
 class Timeline:
     def __init__(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution'):
         """
@@ -434,6 +488,9 @@ class Timeline:
         # Only index by instruction name.
         # Index is the index of the instruction in the combined timeline. index in [0, len(self.combined_timeline)-1]
         self._instructions_for_name_combined: dict[str, list[tuple[int, ValidatorInstruction]]] = defaultdict(list)
+
+        # Track which validation passes have already been applied to this timeline to avoid applying them multiple times.
+        self._applied_passes: set[Callable[['Timeline', 'ValidatorPassContext'], None]] = set()
 
         # Populate the timeline with instructions
         self._populate_instructions(instruction_names_to_add, code_path, schedule_info, kernel)
@@ -631,6 +688,19 @@ class Timeline:
             self.combined_timeline.extend(self._timelines[loop_name])
 
 
+def applies_only_once(func):
+    """Decorator: skips the function if it has already been applied to this timeline."""
+    @functools.wraps(func)
+    def wrapper(timeline, *args, **kwargs):
+        if func in timeline._applied_passes:
+            return
+        result = func(timeline, *args, **kwargs)
+        timeline._applied_passes.add(func)
+        return result
+    return wrapper
+
+
+@applies_only_once
 def apply_barriers(timeline: Timeline) -> None:
     """
     Apply the effect of SBarriers to the GlobalReads in the timeline by updating the barriered_at field of GlobalReads.
@@ -651,6 +721,7 @@ def apply_barriers(timeline: Timeline) -> None:
             instruction.barriered_at.append(barrier.issued_at)
 
 
+@applies_only_once
 def apply_must_start_after_barriers(timeline: Timeline) -> None:
     """
     Apply the effect of SBarriers to the must_start_after_barriered_at field of GlobalReads.
@@ -683,6 +754,7 @@ def _apply_must_start_after_barriers_single(timeline: Timeline, gr: GlobalRead, 
             gr.must_start_after_barriered_at.append(instruction.issued_at)
 
 
+@applies_only_once
 def apply_swaits(timeline: Timeline) -> None:
     """
     Apply the effect of SWaitCnts to the timeline by updating the guaranteed_by field of LocalReads and GlobalReads.
@@ -714,6 +786,7 @@ def apply_swaits(timeline: Timeline) -> None:
             apply(timeline.combined_timeline[i_swait-1::-1], swait, GlobalRead, swait.vlcnt)
 
 
+@applies_only_once
 def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
     """
     Set the needed_by field of LocalReads based on the VMFMA index they are required for.
@@ -761,6 +834,7 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
                 lr.needed_by = mfmas_by_index[needed_by + loop_offset]
 
 
+@applies_only_once
 def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) -> None:
     """
     Set the needed_by field of GlobalReads based on the LR1/3 instructions.
@@ -800,6 +874,7 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
             for _, gr in grs:
                 gr.needed_by = LR_target.issued_at
 
+@applies_only_once
 def set_gr_must_start_after_from_lr0s(timeline: Timeline, swap_global_read_order: bool) -> None:
     """
     Set the must_start_after field of the first GlobalRead based on the last LR0 of the same loop.
@@ -980,7 +1055,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 n_a_tiles=n_tiles_a,
                 n_b_tiles=n_tiles_b,
                 mfma_reorder=mfma_reorder,
-                mfmas_per_tile=1,  # BF16: 1 MFMA per tile pair
+                mfmas_per_tile=MFMAS_PER_TILE_BF16,  # BF16: 1 MFMA per tile pair
             )
             
             # Add iteration offset to get final position
@@ -1000,9 +1075,9 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
 
         packs = sorted(packs, key=lambda x: x.issue_index)
         for i_pack, pack in enumerate(packs):
-            idx_in_group = pack.issue_index % 10
+            idx_in_group = pack.issue_index % PACK_GROUP_SIZE_TF32_4X4
             # Which group of 10 packs (which tile) does this pack belong to?
-            group_index = pack.issue_index // 10
+            group_index = pack.issue_index // PACK_GROUP_SIZE_TF32_4X4
 
             # The first 4 packs have both a needed_by for MFMAs, and a needed_by for the next packs
             # First 4 CVT0 packs (indices 0-3) feed into 4x4 MFMAs (indices 4-5)
@@ -1022,7 +1097,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 continue
             
             # Calculate pack_offset within the tile (which MFMA within the 3-MFMA group uses this pack)
-            if idx_in_group < 4:
+            if idx_in_group < TF32_CVT0_END:
                 # First 4 CVT0 packs: feed into the 1st MFMA of each tile (bf16*bf16)
                 pack_offset = 0
             else:
@@ -1053,17 +1128,17 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
         n_tiles_a //= 2
         n_tiles_b //= 2
         for pack in packs:
-            idx_in_group = pack.issue_index % 24
+            idx_in_group = pack.issue_index % PACK_GROUP_SIZE_TF32
             # Which group of 24 packs (which tile) does this pack belong to?
-            group_index = pack.issue_index // 24
+            group_index = pack.issue_index // PACK_GROUP_SIZE_TF32
 
             # Middle 16 packs (4-19) don't need needed_by set
             # They are depended on by the last 4 packs and are handled implicitly.
-            if 4 <= idx_in_group < 20:
+            if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END:
                 continue
 
             # Determine which MFMA within the 3-MFMA tile group uses this pack
-            if idx_in_group < 4:
+            if idx_in_group < TF32_CVT0_END:
                 # CVT0 packs (bf16 approximations) are used by MFMA 0 (bf16*bf16)
                 mfma_in_tile = 0
             else:
@@ -1101,13 +1176,13 @@ def _handle_min_pack_quad_cycles(packs: list[Pack], is_4x4mfma: bool) -> None:
         # - Middle 2 packs: are 4x4 MFMAs themselves, no constraint
         # - Last 4 packs (CVT1): need 2 quad-cycles before "real" MFMAs that use the result
         for pack in packs:
-            idx_in_group = pack.issue_index % 10
-            if 4 <= idx_in_group < 6:
-                # Middle 2 packs are 4x4 MFMAs, need 5 quad-cycles before the CVT1 instructions 
-                pack.min_quad_cycles_before_result_used = 5
+            idx_in_group = pack.issue_index % PACK_GROUP_SIZE_TF32_4X4
+            if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
+                # Middle 2 packs are 4x4 MFMAs, need 5 quad-cycles before the CVT1 instructions
+                pack.min_quad_cycles_before_result_used = QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1
             else:
                 # First 4 and last 4 packs (CVT instructions) need 2 quad-cycles before MFMAs can use their results.
-                pack.min_quad_cycles_before_result_used = 2
+                pack.min_quad_cycles_before_result_used = QUAD_CYCLES_CVT_BEFORE_MFMA
 
     else:
         # For main TF32 mode: packs come in groups of 24
@@ -1115,9 +1190,9 @@ def _handle_min_pack_quad_cycles(packs: list[Pack], is_4x4mfma: bool) -> None:
         # - Middle 16 packs (indices 4-19): v_cvt_f32_bf16 + v_sub_f32 pairs, no constraint
         # - Last 4 packs (indices 20-23): CVT1, need 2 quad-cycles before MFMA
         for pack in packs:
-            if not (4 <= pack.issue_index % 24 < 20):
+            if not (TF32_MIDDLE_16_START <= pack.issue_index % PACK_GROUP_SIZE_TF32 < TF32_MIDDLE_16_END):
                 # First 4 and last 4 packs (CVT instructions) need 2 quad-cycles before MFMAs can use their results.
-                pack.min_quad_cycles_before_result_used = 2
+                pack.min_quad_cycles_before_result_used = QUAD_CYCLES_CVT_BEFORE_MFMA
 
 def _hook_up_packs_bf16(packs: list[Pack], local_reads: list[LocalRead]) -> None:
     """
@@ -1176,14 +1251,14 @@ def _hook_up_packs_f32(packs: list[Pack], all_middle_16_packs: list[Pack], local
     # This is necessary to handle inter-pack dependencies.
     packs = sorted(packs, key=lambda x: x.issue_index)
 
-    assert len(packs) % 24 == 0, "Each Pack must be a multiple of 24 instructions in TF32 emulation mode."
-    n_pack_groups = len(packs) // 24
+    assert len(packs) % PACK_GROUP_SIZE_TF32 == 0, "Each Pack must be a multiple of 24 instructions in TF32 emulation mode."
+    n_pack_groups = len(packs) // PACK_GROUP_SIZE_TF32
 
     assert len(local_reads) % n_pack_groups == 0, "Case not supported: Different number of LRs for each Pack group."
     n_lrs_per_group = len(local_reads) // n_pack_groups
 
     # NOTE: Assuming that all LRs are of the same width.
-    vgprs_per_local_read = 8 // n_lrs_per_group
+    vgprs_per_local_read = VGPRS_PER_CONVERSION_GROUP // n_lrs_per_group
 
     # Partial Pack->Pack dependency graph within a group of 24.
     # Key: pack index (0-23), Value: list of pack indices it depends on.
@@ -1210,13 +1285,13 @@ def _hook_up_packs_f32(packs: list[Pack], all_middle_16_packs: list[Pack], local
         end = start + n_lrs_per_group
         local_reads_for_group = local_reads[start:end]
 
-        start = group_idx * 24
-        end = start + 24
+        start = group_idx * PACK_GROUP_SIZE_TF32
+        end = start + PACK_GROUP_SIZE_TF32
         pack_group = packs[start:end]
 
         # Set must_start_after
         for leader_idx, pack in enumerate(pack_group):
-            if leader_idx < 4:
+            if leader_idx < TF32_CVT0_END:
                 # First 4 packs depend only on local reads.
                 first_lr = (leader_idx * 2) // vgprs_per_local_read
                 last_lr = (leader_idx * 2 + 1) // vgprs_per_local_read
@@ -1237,14 +1312,14 @@ def _hook_up_packs_f32(packs: list[Pack], all_middle_16_packs: list[Pack], local
     # The middle 16 packs are scheduled sequentially in pairs, and no other middle-16 pack
     # (even from other groups) can be scheduled between a pair.
     for i, pack in enumerate(packs):
-        idx_in_group = pack.issue_index % 24
-        if 4 <= idx_in_group < 20 and idx_in_group % 2 == 0:
+        idx_in_group = pack.issue_index % PACK_GROUP_SIZE_TF32
+        if TF32_MIDDLE_16_START <= idx_in_group < TF32_MIDDLE_16_END and idx_in_group % 2 == 0:
             pack.pair_consumer = packs[i + 1]
     
     # Hook up the producer Pack in each pair to the middle-16 Pack scheduled immediately after it.
     # Only modify the packs that were passed in, rather than all packs in all_middle_16_packs.
     for pack in packs:
-        if not (4 <= (pack.issue_index % 24) < 20):  # Not a middle-16 pack
+        if not (TF32_MIDDLE_16_START <= (pack.issue_index % PACK_GROUP_SIZE_TF32) < TF32_MIDDLE_16_END):  # Not a middle-16 pack
             continue
         if pack.issue_index % 2 != 0:  # Not a producer
             continue
@@ -1270,14 +1345,14 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead]) -> 
     # This is necessary to handle inter-pack dependencies.
     packs = sorted(packs, key=lambda x: x.issue_index)
 
-    assert len(packs) % 10 == 0, "Packs must be issued in groups of 10."
-    n_pack_groups = len(packs) // 10
+    assert len(packs) % PACK_GROUP_SIZE_TF32_4X4 == 0, "Packs must be issued in groups of 10."
+    n_pack_groups = len(packs) // PACK_GROUP_SIZE_TF32_4X4
 
     assert len(local_reads) % n_pack_groups == 0, "Case not supported: Different number of LRs for each Pack group."
     n_lrs_per_group = len(local_reads) // n_pack_groups
 
     # NOTE: Assuming that all LRs are of the same width.
-    vgprs_per_local_read = 8 // n_lrs_per_group
+    vgprs_per_local_read = VGPRS_PER_CONVERSION_GROUP // n_lrs_per_group
 
     # Partial Pack->Pack dependency graph within a group of 10.
     # Key: pack index (0-9), Value: list of pack indices it depends on.
@@ -1301,13 +1376,13 @@ def _hook_up_packs_f32_mfma(packs: list[Pack], local_reads: list[LocalRead]) -> 
         end = start + n_lrs_per_group
         local_reads_for_group = local_reads[start:end]
 
-        start = group_idx * 10
-        end = start + 10
+        start = group_idx * PACK_GROUP_SIZE_TF32_4X4
+        end = start + PACK_GROUP_SIZE_TF32_4X4
         pack_group = packs[start:end]
 
         # Set must_start_after
         for pack_idx, pack in enumerate(pack_group):
-            if pack_idx < 4:
+            if pack_idx < TF32_CVT0_END:
                 # First 4 packs depend only on local reads.
                 first_lr = (pack_idx * 2) // vgprs_per_local_read
                 last_lr = (pack_idx * 2 + 1) // vgprs_per_local_read
@@ -1357,6 +1432,7 @@ def _get_lrs_for_pack(timeline: Timeline, use_plr_pack: bool, pack_name: str, lo
     local_reads = timeline.get_instructions(lr_names, loop_to_use)
     return [lr for _,lr in local_reads]
 
+@applies_only_once
 def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int]) -> None:
     """
     Set the needed_by fields 
@@ -1399,7 +1475,7 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
             all_middle_16_packs = []
             for packs in packs_by_name.values():
                 for pack in packs:
-                    if 4 <= (pack.issue_index % 24) < 20:
+                    if TF32_MIDDLE_16_START <= (pack.issue_index % PACK_GROUP_SIZE_TF32) < TF32_MIDDLE_16_END:
                         all_middle_16_packs.append(pack)
             all_middle_16_packs.sort(key=lambda p: p.issued_at)
 
@@ -1444,11 +1520,11 @@ def precompute_issue_times(instructions: list[ValidatorInstruction], is_4x4mfma_
             - finish_cycles: Number of quad-cycles the MFMA takes to finish, or None if not an MFMA
         """
         if isinstance(instruction, MFMA):
-            return (MFMAType.STANDARD, 3)
+            return (MFMAType.STANDARD, QUAD_CYCLES_STANDARD_MFMA_FINISH)
         if isinstance(instruction, Pack) and is_4x4mfma_tf32_packs:
-            idx_in_group = instruction.issue_index % 10
-            if idx_in_group in [4, 5]:
-                return (MFMAType.MFMA_4X4, 1)
+            idx_in_group = instruction.issue_index % PACK_GROUP_SIZE_TF32_4X4
+            if idx_in_group in range(TF32_4X4_MFMA_START, TF32_4X4_MFMA_END):
+                return (MFMAType.MFMA_4X4, QUAD_CYCLES_MFMA_4X4_FINISH)
         return (MFMAType.NONE, None)
         
     mfma_free_at = 0
@@ -1466,7 +1542,7 @@ def precompute_issue_times(instructions: list[ValidatorInstruction], is_4x4mfma_
             # MFMA type switch penalty
             if last_mfma_type != MFMAType.NONE and last_mfma_type != mfma_type:
                 gap = current_issue - last_mfma_issue
-                threshold = 5 if last_mfma_type == MFMAType.STANDARD else 3
+                threshold = MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD if last_mfma_type == MFMAType.STANDARD else MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4
                 if gap < threshold:
                     current_issue += 1
             
@@ -1499,6 +1575,7 @@ def estimate_quad_cycles_precomputed(i_start: int, i_end: int, issue_times: list
     """
     return issue_times[i_end] - issue_times[i_start] - 1
 
+@applies_only_once
 def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     """
     Perform a rough estimate on the number of quad-cycles that pass between when a instruction is issued and when its result is used.
@@ -1543,10 +1620,16 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
         
     # Estimate number of quad-cycles between being issued and result being used
     for i_instruction, instruction in enumerate(timeline.combined_timeline):
-        if not hasattr(instruction, "needed_by") or instruction.needed_by is None or instruction.needed_by.issued_at == float("inf"):
-            continue
-        
         if not hasattr(instruction, "min_quad_cycles_before_result_used") or instruction.min_quad_cycles_before_result_used == 0:
+            continue
+
+        if not hasattr(instruction, "needed_by") or instruction.needed_by is None:
+            continue
+        # needed_by can be a ValidatorInstruction or a float (e.g. GlobalRead.needed_by)
+        needed_by_obj = instruction.needed_by
+        if not isinstance(needed_by_obj, ValidatorInstruction):
+            continue
+        if needed_by_obj.issued_at == float("inf"):
             continue
 
         needed_by = instruction.needed_by
@@ -1610,7 +1693,7 @@ def _transform_index_with_force_unroll_sub_iter(
     LR data is consumed by multiple MFMAs (one for each tile in the opposite dimension).
     With MFMA reordering, we find the earliest consumer.
     """
-    mfmas_per_tile = 3 if use_f32x_emulation else 1
+    mfmas_per_tile = MFMAS_PER_TILE_TF32 if use_f32x_emulation else MFMAS_PER_TILE_BF16
     
     # Determine the tile coordinate for this LR
     # For LRA: linear_index is the A tile index
@@ -1678,7 +1761,7 @@ def _transform_index_standard(
     LR data is consumed by multiple MFMAs (one for each tile in the opposite dimension).
     With MFMA reordering, we find the earliest consumer.
     """
-    mfmas_per_tile = 3 if use_f32x_emulation else 1
+    mfmas_per_tile = MFMAS_PER_TILE_TF32 if use_f32x_emulation else MFMAS_PER_TILE_BF16
     
     # Convert linear index to MFMA base index
     needed_by = linear_index * mfmas_per_tile
@@ -1906,26 +1989,41 @@ def verify_gr_inc_order(scheduleInfo, context: dict, code_path: int) -> tuple[bo
 
     return True, ""
 
-def verify_grs_finish_before_lrs(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LR1/3 of this iteration.
-    """
-    relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
-    kernel = context["kernel"]
-    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-    
-    # Apply standalone functions to populate timeline fields
-    set_gr_needed_by_from_lrs(timeline, kernel["SwapGlobalReadOrder"])
+@dataclass
+class ValidatorPassContext:
+    """Context object containing all values needed by validator passes."""
+    kernel: 'Solution'
+    mfma_reorder: list[int]
+    swap_global_read_order: bool
+
+
+def add_local_read_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+    """Add LR.needed_by and LR.guaranteed_by constraints to the provided timeline."""
+    set_lr_needed_by_for_VMFMA(timeline, ctx.kernel, ctx.mfma_reorder)
     apply_swaits(timeline)
     apply_barriers(timeline)
 
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
+
+def add_pack_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+    """
+    Ensure that the Packs start and end at the correct indices.
+    The pack commands take the data loaded into registers by LR commands and manipulate it in various ways to prepare it for the VMFMA instructions.
+
+    There are several restrictions placed on Pack instructions:
+    1. For all gemm types (tf32, bf16, etc.) the Pack instructions must be issued after the data is guaranteed to be loaded into the registers (guaranteed by SWaitCnt instructions). And they must finish before the first VMFMA that uses their results.
+    2. For fp32 GEMMs, there are additional restrictions on:
+        1. The ordering of the Pack instructions.
+        2. The minimum number of quad-cycles that must pass between issuing certain pack instructions and when their results get used. These restrictions are defined in section 7.6 of the CDNA 4 ISA.
+    """
+    if ctx.kernel.get("UseF32XEmulation", False) and not ctx.kernel.get("UseDirect32XEmulation", False):
+        printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
+        return
+    apply_swaits(timeline)
+    hook_up_packs(timeline, ctx.kernel, ctx.mfma_reorder)
+    estimate_quad_cycles(timeline, ctx.kernel)
 
 
-def verify_grs_not_too_early(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
+def add_gr_not_too_early_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
     """
     Ensure that GlobalReads are not issued before the corresponding LR0s are guaranteed complete.
 
@@ -1937,19 +2035,25 @@ def verify_grs_not_too_early(schedule_info: 'ScheduleInfo', context: dict, code_
     Thus we must ensure that every thread in every wave in the workgroup has finished all of its LRA0 instructions
     before GRA is issued. Same logic applies for B. No cross-operand constraints (LRA0 vs GRB are independent).
     """
-    relevant_names = ["GRA", "GRB", "LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
-    kernel = context["kernel"]
-    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-
     # apply_swaits must run first so that LR0.guaranteed_by (done_idx) is set before must_start_after hookup.
     apply_swaits(timeline)
-    set_gr_must_start_after_from_lr0s(timeline, kernel.get("SwapGlobalReadOrder", False))
+    set_gr_must_start_after_from_lr0s(timeline, ctx.swap_global_read_order)
     apply_must_start_after_barriers(timeline)
 
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
+
+def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: ValidatorPassContext) -> None:
+    """Add GR.needed_by and GR.barriered_at constraints."""
+    apply_swaits(timeline)
+    set_gr_needed_by_from_lrs(timeline, ctx.swap_global_read_order)
+    apply_barriers(timeline)
+
+
+TIMELINE_PASSES: list[Callable[['Timeline', 'ValidatorPassContext'], None]] = [
+    add_local_read_constraints,
+    add_pack_constraints,
+    add_gr_not_too_early_constraints,
+    add_gr_finish_before_lr_constraints,
+]
 
 
 def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
@@ -1996,62 +2100,6 @@ def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
     local_idx = local_col * block_rows + local_row
     
     return block_idx * block_size + local_idx
-
-
-def verify_lrs_finished_before_vmfma(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the LocalReads are guaranteed to be complete before the first VMFMA that uses their data.
-    """
-    kernel = context["kernel"]
-
-    relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3", "SYNC"]
-    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-
-    set_lr_needed_by_for_VMFMA(timeline, kernel, schedule_info.mfmaReorder)
-    apply_swaits(timeline)
-    apply_barriers(timeline)
-
-    message = validate_timeline(timeline)
-    if message:
-        return False, message
-    return True, ""
-
-
-def verify_packs_start_and_end_at_correct_indices(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
-    """
-    Ensure that the Packs start and end at the correct indices.
-    The pack commands take the data loaded into registers by LR commands and manipulate it in various ways to prepare it for the VMFMA instructions.
-
-    There are several restrictions placed on Pack instructions:
-    1. For all gemm types (tf32, bf16, etc.) the Pack instructions must be issued after the data is guaranteed to be loaded into the registers (guaranteed by SWaitCnt instructions). And they must finish before the first VMFMA that uses their results.
-    2. For fp32 GEMMs, there are additional restrictions on:
-        1. The ordering of the Pack instructions.
-        2. The minimum number of quad-cycles that must pass between issuing certain pack instructions and when their results get used. These restrictions are defined in section 7.6 of the CDNA 4 ISA.
-    """
-    relevant_names = ["SYNC", "SNOP"]
-    for num in [0, 1, 3]:
-        relevant_names.append(f"PackA{num}")
-        relevant_names.append(f"PackB{num}")
-        relevant_names.append(f"LRA{num}")
-        relevant_names.append(f"LRB{num}")
-    kernel = context["kernel"]
-    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-    
-    if kernel.get("UseF32XEmulation", False) and not kernel.get("UseDirect32XEmulation", False):
-        printWarning("UseF32XEmulation is set to True but UseDirect32XEmulation is not set to True. Skipping CMS validation for packs.")
-        return True, ""
-    
-    apply_swaits(timeline)
-    apply_barriers(timeline)
-    set_lr_needed_by_for_VMFMA(timeline, kernel, schedule_info.mfmaReorder)
-    hook_up_packs(timeline, kernel, schedule_info.mfmaReorder)
-    estimate_quad_cycles(timeline, kernel)
-
-    message = validate_timeline(timeline)
-
-    if message:
-        return False, message
-    return True, ""
 
 
 def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
@@ -2137,23 +2185,35 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         # All rules bypassed, considered valid.
         return True, message
 
-    # The set of validation rules to run (code-path aware)
-    rules = [
+    kernel = context["kernel"]
+
+    structural_checks = [
         verify_correct_number_of_instructions,
         verify_ascending_order,
-        verify_lrs_finished_before_vmfma,
-        verify_packs_start_and_end_at_correct_indices,
-        verify_grs_not_too_early,
-        verify_grs_finish_before_lrs,
         verify_scc_overlap,
-        verify_gr_inc_order
+        verify_gr_inc_order,
     ]
 
     for code_path in range(scheduleInfo.numCodePaths):
-        for rule in rules:
-            status, message = rule(scheduleInfo, context, code_path)
+        # === Structural checks (no Timeline needed) ===
+        for check in structural_checks:
+            status, message = check(scheduleInfo, context, code_path)
             if not status:
                 return False, f"Code path {code_path}: {message}"
+
+        # === Timeline-based checks ===
+        ctx = ValidatorPassContext(
+            kernel=kernel,
+            mfma_reorder=scheduleInfo.mfmaReorder or [],
+            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
+        )
+
+        timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
+
+        for add_constraints in TIMELINE_PASSES:
+            add_constraints(timeline, ctx)
+            if error := validate_timeline(timeline):
+                return False, f"Code path {code_path}: {error}"
 
     # All rules passed, considered valid.
     return True, ""

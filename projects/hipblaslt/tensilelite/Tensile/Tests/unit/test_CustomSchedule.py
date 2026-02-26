@@ -717,6 +717,35 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel": kernel})
         assert valid, message
 
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        (  True,  False,       True,       1),
+        # fmt: on
+        ])
+    def test_schedule_352x192x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
+        """Tests the 352x192x64 16-bit TN schedule."""
+        kernel = create_base_kernel()
+        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
+        kernel["ProblemType"].update({
+            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+            "TransposeA": transA, "TransposeB": transB
+        })
+        kernel.update({
+            "MacroTile0": 352, "MacroTile1": 192, "DepthU": 64,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 11, "MIWaveTileB": 6,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 2
+        assert schedule_info.numMfma == TestCustomScheduleBF16.get_num_mfma(kernel)
+        valid, message = isValid(schedule_info, {"kernel" : kernel})
+        assert valid, message
 
 class TestCustomScheduleTF32:
     @staticmethod
@@ -914,14 +943,15 @@ class TestCustomScheduleTF32:
 
     @pytest.mark.parametrize(
         # fmt: off
-        "transA, transB, lds_tr_inst,  tr_lds,  plr,  vwa,       mi    , ncp", [
-        (  True,  False,       False,       1,  1,   None, [16,16,32,1],   1),
-        (  True,  False,       False,       1,  1,   None, [32,32,16,1],   1),
-        (  False, False,       False,       1,  1,      2, [32,32,16,1],   2),
-        (  False, False,        True,       1,  1,      2, [32,32,16,1],   2),
+        "transA, transB, lds_tr_inst,  tr_lds,  plr,  vwa,  vwb,      mi    , ncp", [
+        (  True,  False,       False,       1,  1,   None, None, [16,16,32,1],   1),
+        (  True,  False,       False,       1,  1,   None, None, [32,32,16,1],   1),
+        (  False, False,       False,       1,  1,      2, None, [32,32,16,1],   2),
+        (  False, False,        True,       1,  1,      2, None, [32,32,16,1],   2),
+        (  False, True,         True,       0,  1,      2,    2, [32,32,16,1],   2),
         # fmt: on
         ])
-    def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, vwa, mi, ncp):
+    def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, vwa, vwb, mi, ncp):
         """Tests the 128x128x32 TF32 schedule."""
         kernel = create_base_kernel()
         kernel["ProblemType"].update({
@@ -942,6 +972,8 @@ class TestCustomScheduleTF32:
         })
         if vwa is not None:
             kernel.update({"VectorWidthA": vwa})
+        if vwb is not None:
+            kernel.update({"VectorWidthB": vwb})
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -1091,7 +1123,7 @@ class TestCustomScheduleValidation:
 
         # A non-empty verification message means that the schedule info is considered invalid.
         status, message = isValid(
-            ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {}
+            ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {"kernel" : {"DepthU": 42}}
         )
         assert status == False
 

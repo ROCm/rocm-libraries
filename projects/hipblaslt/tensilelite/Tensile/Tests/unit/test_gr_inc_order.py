@@ -28,7 +28,9 @@ from Tensile.Components.CMSValidator import verify_gr_inc_order
 from cms_validation_base import CMSValidationTestBase
 
 class TestGRIncOrder(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
+    needs_timeline = False
+
+    def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
         return verify_gr_inc_order(sched, kernel_dict, codePathIdx)
 
     def setUp(self):
