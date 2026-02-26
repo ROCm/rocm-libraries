@@ -38,8 +38,6 @@ if(GPU_TARGETS MATCHES "gfx90a|gfx942|gfx950")
     # Collect all test targets for umbrella label
     set(CK_TILE_GEMM_STREAMK_TEST_TARGETS
         test_ck_tile_streamk_tile_partitioner
-        test_ck_tile_streamk_reduction
-        test_ck_tile_streamk_smoke
         test_ck_tile_streamk_extended
     )
 
