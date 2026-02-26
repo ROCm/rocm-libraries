@@ -7,13 +7,12 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "tests/common/ActivationCommon.hpp"
 #include "tests/common/ConvolutionCommon.hpp"
@@ -30,7 +29,7 @@ class TestMiopenConvFwdBiasActivPlanBuilder : public ::testing::Test
 {
 protected:
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;
-    HipdnnEnginePluginHandle _dummyHandle;
+    HipdnnMiopenHandle _dummyHandle;
 };
 
 enum class TypeKey
@@ -119,7 +118,6 @@ protected:
         SKIP_IF_WINDOWS();
 
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
 
         auto param = GetParam();
         auto& convTestCase = param.convTestCase;
@@ -235,16 +233,8 @@ protected:
         _isApplicable = param.isApplicable;
     }
 
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
-    }
-
     MiopenConvFwdBiasActivPlanBuilder _planBuilder;
-    HipdnnEnginePluginHandle _handle;
+    HipdnnMiopenHandle _handle;
 
     Graph _graphObj;
     bool _isApplicable;
@@ -584,15 +574,16 @@ TEST_P(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableGetWorkspaceSizeAnd
 {
     auto graphBuffer = _graphObj.buildFlatbufferOperationGraph();
     auto graph = GraphWrapper(graphBuffer.data(), graphBuffer.size());
+    MockEngineConfig mockEngineConfig;
 
     EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), _isApplicable);
 
     if(_isApplicable)
     {
-        EXPECT_NO_THROW(_planBuilder.getWorkspaceSize(_handle, graph));
+        HipdnnMiopenSettings settings;
+        EXPECT_NO_THROW(_planBuilder.getMaxWorkspaceSize(_handle, graph, settings));
 
-        HipdnnEnginePluginExecutionContext ctx;
-        MockEngineConfig mockEngineConfig;
+        HipdnnMiopenContext ctx;
         ASSERT_NO_THROW(_planBuilder.buildPlan(_handle, graph, mockEngineConfig, ctx));
         EXPECT_TRUE(ctx.hasValidPlan());
     }
@@ -668,14 +659,16 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
 
-        EXPECT_THROW(_planBuilder.getWorkspaceSize(_dummyHandle, mockGraph),
+        HipdnnMiopenSettings settings;
+        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
 
-        EXPECT_THROW(_planBuilder.getWorkspaceSize(_dummyHandle, mockGraph),
+        HipdnnMiopenSettings settings;
+        EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, settings),
                      hipdnn_plugin_sdk::HipdnnPluginException);
     }
 }
@@ -686,29 +679,30 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForUnsupport
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    EXPECT_THROW(_planBuilder.getWorkspaceSize(_dummyHandle, graph),
+    HipdnnMiopenSettings settings;
+    EXPECT_THROW(_planBuilder.getMaxWorkspaceSize(_dummyHandle, graph, settings),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGraph)
 {
+    MockEngineConfig mockConfig;
+
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
-        HipdnnEnginePluginExecutionContext ctx;
-        MockEngineConfig mockEngineConfig;
+        HipdnnMiopenContext ctx;
 
-        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockEngineConfig, ctx),
+        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockConfig, ctx),
                      hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_FALSE(ctx.hasValidPlan());
     }
     {
         MockGraph mockGraph;
         EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
-        HipdnnEnginePluginExecutionContext ctx;
-        MockEngineConfig mockEngineConfig;
+        HipdnnMiopenContext ctx;
 
-        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockEngineConfig, ctx),
+        EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, mockGraph, mockConfig, ctx),
                      hipdnn_plugin_sdk::HipdnnPluginException);
         EXPECT_FALSE(ctx.hasValidPlan());
     }
@@ -719,10 +713,10 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
-    MockEngineConfig mockEngineConfig;
+    HipdnnMiopenContext ctx;
+    MockEngineConfig mockConfig;
 
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
+    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
 }

@@ -27,7 +27,7 @@ template <typename DataType>
 class ConvForward : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
+    void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
@@ -69,8 +69,8 @@ protected:
 using IntegrationGpuConvFwdNchwFp32 = ConvForward<float>;
 using IntegrationGpuConvFwdNcdhwFp32 = ConvForward<float>;
 
-using IntegrationGpuConvFwdNchwBfp16 = ConvForward<hip_bfloat16>;
-using IntegrationGpuConvFwdNcdhwBfp16 = ConvForward<hip_bfloat16>;
+using IntegrationGpuConvFwdNchwBfp16 = ConvForward<bfloat16>;
+using IntegrationGpuConvFwdNcdhwBfp16 = ConvForward<bfloat16>;
 
 using IntegrationGpuConvFwdNchwFp16 = ConvForward<half>;
 using IntegrationGpuConvFwdNcdhwFp16 = ConvForward<half>;
@@ -78,8 +78,8 @@ using IntegrationGpuConvFwdNcdhwFp16 = ConvForward<half>;
 using IntegrationGpuConvFwdNhwcFp32 = ConvForward<float>;
 using IntegrationGpuConvFwdNdhwcFp32 = ConvForward<float>;
 
-using IntegrationGpuConvFwdNhwcBfp16 = ConvForward<hip_bfloat16>;
-using IntegrationGpuConvFwdNdhwcBfp16 = ConvForward<hip_bfloat16>;
+using IntegrationGpuConvFwdNhwcBfp16 = ConvForward<bfloat16>;
+using IntegrationGpuConvFwdNdhwcBfp16 = ConvForward<bfloat16>;
 
 using IntegrationGpuConvFwdNhwcFp16 = ConvForward<half>;
 using IntegrationGpuConvFwdNdhwcFp16 = ConvForward<half>;
@@ -98,12 +98,12 @@ TEST_P(IntegrationGpuConvFwdNcdhwFp32, Correctness)
 
 TEST_P(IntegrationGpuConvFwdNchwBfp16, Correctness)
 {
-    runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(conv::getToleranceFwd<bfloat16>(), TensorLayout::NCHW);
 }
 
 TEST_P(IntegrationGpuConvFwdNcdhwBfp16, Correctness)
 {
-    runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(conv::getToleranceFwd<bfloat16>(), TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvFwdNchwFp16, Correctness)
@@ -128,12 +128,12 @@ TEST_P(IntegrationGpuConvFwdNdhwcFp32, Correctness)
 
 TEST_P(IntegrationGpuConvFwdNhwcBfp16, Correctness)
 {
-    runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(conv::getToleranceFwd<bfloat16>(), TensorLayout::NHWC);
 }
 
 TEST_P(IntegrationGpuConvFwdNdhwcBfp16, Correctness)
 {
-    runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(conv::getToleranceFwd<bfloat16>(), TensorLayout::NDHWC);
 }
 
 TEST_P(IntegrationGpuConvFwdNhwcFp16, Correctness)

@@ -28,7 +28,9 @@ from Tensile.Components.CMSValidator import verify_scc_overlap
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateSCCOverlap(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
+    needs_timeline = False
+
+    def validation_function(self, sched, kernel_dict, codePathIdx, timeline=None):
         return verify_scc_overlap(sched, kernel_dict, codePathIdx)
 
     def setUp(self):

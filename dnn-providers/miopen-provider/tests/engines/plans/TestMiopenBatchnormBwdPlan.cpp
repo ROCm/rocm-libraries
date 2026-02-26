@@ -1,7 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "engines/plans/MiopenBatchnormBwdPlan.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -181,9 +182,10 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZeroForFusedMode)
 
     BatchnormBwdParams params(
         *batchnormBwdAttrs, *pointwiseAttrs, *batchnormInfAttrs, graph.getTensorMap());
-    BatchnormBwdPlan plan(std::move(params));
+    HipdnnMiopenSettings executionSettings;
+    BatchnormBwdPlan plan(std::move(params), executionSettings);
 
-    HipdnnEnginePluginHandle handle;
+    HipdnnMiopenHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0);
 }
 
@@ -198,9 +200,10 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
     ASSERT_NE(attrs, nullptr);
 
     BatchnormBwdParams params(*attrs, graph.getTensorMap());
-    BatchnormBwdPlan plan(std::move(params));
+    HipdnnMiopenSettings executionSettings;
+    BatchnormBwdPlan plan(std::move(params), executionSettings);
 
-    HipdnnEnginePluginHandle handle;
+    HipdnnMiopenHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0);
 }
 
