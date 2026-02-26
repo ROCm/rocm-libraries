@@ -29,6 +29,7 @@ from ctypes_utils import (
     setup_gemm_dispatcher,
     cleanup_gemm,
     reset_for_example,
+    detect_gpu_arch,
 )
 
 
@@ -56,7 +57,7 @@ Examples:
         "--atol", type=float, default=1e-2, help="Absolute tolerance (default: 1e-2)"
     )
     parser.add_argument(
-        "--arch", default="gfx942", help="Target architecture (default: gfx942)"
+        "--arch", default=detect_gpu_arch(), help="Target architecture (auto-detected from rocminfo)"
     )
     args = parser.parse_args()
 

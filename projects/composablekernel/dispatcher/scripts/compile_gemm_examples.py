@@ -94,17 +94,17 @@ def find_hipcc() -> str:
 
 
 def extract_conv_kernel_declarations(source_file: Path) -> list:
-    """Extract CONVOLUTION kernel declarations from C++ source file.
+    """Extract GROUPED CONVOLUTION kernel declarations from C++ source file.
 
-    Supports DECL_CONV_KERNEL_SET macro with ConvSig/ConvAlgo pattern.
+    Supports DECL_GROUPED_CONV_KERNEL_SET macro with ConvSig/ConvAlgo pattern.
     Extracts all parameters: dtype, layout, conv_type, dims, tile, wave, warp, pipeline, scheduler.
     """
     content = source_file.read_text()
     declarations = []
     seen = set()
 
-    # Pattern: DECL_CONV_KERNEL_SET(name, .add(...).add(...))
-    set_pattern = r"DECL_CONV_KERNEL_SET\s*\(\s*(\w+)\s*,([^;]+)\)"
+    # Pattern: DECL_GROUPED_CONV_KERNEL_SET(name, .add(...).add(...))
+    set_pattern = r"DECL_GROUPED_CONV_KERNEL_SET\s*\(\s*(\w+)\s*,([^;]+)\)"
 
     for match in re.finditer(set_pattern, content, re.DOTALL):
         set_name = match.group(1)
@@ -396,27 +396,26 @@ def expand_conv_declaration_with_arch_filter(decl: dict, arch: str = "gfx942") -
 
 
 def generate_conv_kernels(declarations: list, gpu_target: str = "gfx942") -> int:
-    """Generate convolution kernels using unified_conv_codegen."""
+    """Generate grouped convolution kernels using unified_grouped_conv_codegen."""
     kernel_dir = get_generated_kernels_dir()
     kernel_dir.mkdir(parents=True, exist_ok=True)
 
-    # Import conv codegen
     codegen_dir = get_dispatcher_root() / "codegen"
     sys.path.insert(0, str(codegen_dir))
 
     try:
-        from unified_conv_codegen import (
-            UnifiedConvCodegen,
-            ConvKernelConfig,
-            ConvVariant,
+        from unified_grouped_conv_codegen import (
+            UnifiedGroupedConvCodegen as UnifiedConvCodegen,
+            GroupedConvKernelConfig as ConvKernelConfig,
+            GroupedConvVariant as ConvVariant,
             TileConfig,
-            TraitConfig,
+            GroupedConvTraitConfig as TraitConfig,
         )
     except ImportError as e:
-        print_error(f"  Failed to import conv codegen: {e}")
+        print_error(f"  Failed to import grouped conv codegen: {e}")
         return 0
 
-    codegen = UnifiedConvCodegen(kernel_dir)
+    codegen = UnifiedGroupedConvCodegen(kernel_dir)
     total_generated = 0
 
     # Group by dtype and variant for efficient generation
@@ -1601,9 +1600,9 @@ def generate_specific_conv_kernel(decl: dict, gpu_target: str = "gfx942") -> boo
     else:
         variant = "forward"
 
-    # Use unified_conv_codegen
+    # Use unified_grouped_conv_codegen
     codegen_dir = get_dispatcher_root() / "codegen"
-    codegen_script = codegen_dir / "unified_conv_codegen.py"
+    codegen_script = codegen_dir / "unified_grouped_conv_codegen.py"
     output_dir = get_generated_kernels_dir()
 
     cmd = [
@@ -1865,7 +1864,7 @@ In your C++ code, declare kernels like:
 
     if not gemm_declarations and not conv_declarations:
         print_error("  No kernel declarations found!")
-        print("  Add DECL_KERNEL_SET for GEMM or DECL_CONV_KERNEL_SET for Conv")
+        print("  Add DECL_KERNEL_SET for GEMM or DECL_GROUPED_CONV_KERNEL_SET for Grouped Conv")
         return 1
 
     # Handle GEMM declarations

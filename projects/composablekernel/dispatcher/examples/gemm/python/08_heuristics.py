@@ -43,6 +43,7 @@ from ctypes_utils import (
     setup_gemm_dispatcher,
     cleanup_gemm,
     reset_for_example,
+    detect_gpu_arch,
 )
 
 
@@ -561,8 +562,8 @@ Examples:
     )
     parser.add_argument(
         "--arch",
-        default="gfx942",
-        help="Target architecture (default: gfx942)",
+        default=detect_gpu_arch(),
+        help="Target architecture (auto-detected from rocminfo, override with --arch gfxNNN)",
     )
     args = parser.parse_args()
 

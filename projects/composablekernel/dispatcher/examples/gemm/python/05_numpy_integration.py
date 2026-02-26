@@ -29,6 +29,7 @@ from ctypes_utils import (
     setup_gemm_dispatcher,
     cleanup_gemm,
     reset_for_example,
+    detect_gpu_arch,
 )
 
 
@@ -70,7 +71,7 @@ Examples:
         help="Data type (default: fp16)",
     )
     parser.add_argument(
-        "--arch", default="gfx942", help="Target architecture (default: gfx942)"
+        "--arch", default=detect_gpu_arch(), help="Target architecture (auto-detected from rocminfo)"
     )
     args = parser.parse_args()
 

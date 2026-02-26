@@ -45,6 +45,7 @@ from ctypes_utils import (  # noqa: E402
     cleanup_gemm,
     reset_for_example,
     validate_kernel_config,
+    detect_gpu_arch,
 )
 
 # Sample JSON configuration (embedded for demonstration)
@@ -141,8 +142,8 @@ Examples:
     )
     parser.add_argument(
         "--arch",
-        default="gfx942",
-        help="Target GPU architecture (default: gfx942)",
+        default=detect_gpu_arch(),
+        help="Target GPU architecture (auto-detected from rocminfo, override with --arch gfxNNN)",
     )
     args = parser.parse_args()
 

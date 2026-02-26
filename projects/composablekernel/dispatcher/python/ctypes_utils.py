@@ -38,6 +38,43 @@ import time
 
 
 # =============================================================================
+# GPU Architecture Auto-Detection
+# =============================================================================
+
+_detected_arch: Optional[str] = None
+
+
+def detect_gpu_arch(fallback: str = "gfx942") -> str:
+    """
+    Auto-detect the GPU architecture by querying rocminfo.
+
+    Caches the result after the first call. Falls back to `fallback` if
+    detection fails (e.g. no GPU, rocminfo not installed).
+    """
+    global _detected_arch
+    if _detected_arch is not None:
+        return _detected_arch
+
+    try:
+        result = subprocess.run(
+            ["/opt/rocm/bin/rocminfo"], capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Name:") and "gfx" in stripped:
+                # Extract e.g. "gfx950" from "Name:                    gfx950"
+                name = stripped.split(":", 1)[1].strip()
+                if name.startswith("gfx") and name[3:].isdigit():
+                    _detected_arch = name
+                    return _detected_arch
+    except Exception:
+        pass
+
+    _detected_arch = fallback
+    return _detected_arch
+
+
+# =============================================================================
 # Path Configuration
 # =============================================================================
 

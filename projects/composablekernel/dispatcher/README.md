@@ -1,6 +1,6 @@
 # CK Tile Dispatcher
 
-A unified kernel dispatch system for AMD GPUs with C++ and Python frontends.
+A unified kernel dispatch system for AMD GPUs with C++ and Python frontends, supporting GEMM and Grouped Convolution operations.
 
 **Validated Platform:** AMD Instinct MI300 series (gfx942)
 
@@ -847,15 +847,31 @@ dispatcher/
 ├── CMakeLists.txt              # Build configuration
 │
 ├── include/ck_tile/dispatcher/  # C++ headers
-│   ├── dispatcher.hpp           # GEMM dispatcher
-│   ├── registry.hpp             # Kernel registry
-│   └── kernel_key.hpp          # Kernel configuration
+│   ├── dispatcher.hpp           # Main dispatcher include
+│   ├── registry.hpp             # GEMM kernel registry
+│   ├── kernel_key.hpp           # Kernel configuration
+│   ├── grouped_conv_config.hpp  # Grouped conv configuration
+│   ├── grouped_conv_problem.hpp # Grouped conv problem (with builder)
+│   ├── grouped_conv_kernel_decl.hpp  # Grouped conv kernel declarations
+│   ├── grouped_conv_registry.hpp     # Grouped conv registry (thread-safe)
+│   └── grouped_conv_utils.hpp        # Grouped conv utilities
 │
 ├── src/                        # C++ implementation
 │
 ├── codegen/                    # Kernel generation
+│   ├── codegen_common.py       # Shared: TileConfig, TraitConfigBase, type mappings
 │   ├── unified_gemm_codegen.py # GEMM kernel generator
+│   ├── unified_grouped_conv_codegen.py  # Grouped conv kernel generator
 │   └── arch_specs.json         # GPU specifications
+│
+├── python/                     # Python utilities
+│   ├── dispatcher_common.py    # Shared: paths, validation, Colors, phased output
+│   ├── ctypes_utils.py         # GEMM ctypes utilities
+│   └── grouped_conv_utils.py   # Grouped conv utilities
+│
+├── scripts/                    # Build scripts
+│   ├── compile_gemm_examples.py           # GEMM build script
+│   └── compile_grouped_conv_examples.py   # Grouped conv build script
 │
 ├── bindings/ctypes/            # Python ctypes interface
 │   └── gemm_ctypes_lib.cpp     # GEMM Python library
@@ -865,9 +881,7 @@ dispatcher/
 │       ├── cpp/                # C++ GEMM examples (01-06)
 │       └── python/             # Python GEMM examples (01-11)
 │
-├── scripts/                    # Build scripts
-│
-└── tests/                      # Unit tests
+└── tests/                      # Unit tests (C++ and Python)
 ```
 
 ---
@@ -879,17 +893,49 @@ dispatcher/
 | GEMM C++ | [examples/gemm/cpp/README.md](examples/gemm/cpp/README.md) |
 | GEMM Python | [examples/gemm/python/README.md](examples/gemm/python/README.md) |
 | Codegen | [codegen/README.md](codegen/README.md) |
+| Python Utils | [python/README.md](python/README.md) |
+| C++ Headers | [include/ck_tile/dispatcher/README.md](include/ck_tile/dispatcher/README.md) |
 
 ---
 
-## Archived Content
+## Grouped Convolution Support
 
-Convolution examples and utilities have been archived to `ck-2/conv_archive/dispatcher/`:
-- `examples/conv/cpp/` - 11 C++ convolution examples
-- `examples/conv/python/` - 14 Python convolution examples
-- `codegen/unified_conv_codegen.py` - Conv kernel generator
-- `include/ck_tile/dispatcher/conv_*.hpp` - Conv headers
-- `python/conv_utils.py` - Conv Python utilities
+Grouped convolution is fully supported alongside GEMM, with shared infrastructure to eliminate duplication.
+
+### Python
+
+```bash
+# Generate grouped conv kernels
+python3 codegen/unified_grouped_conv_codegen.py \
+    --output-dir build/generated_kernels \
+    --datatype fp16 --variant forward --ndim-spatial 2
+
+# Build grouped conv examples
+python3 scripts/compile_grouped_conv_examples.py examples/grouped_conv/cpp/my_example.cpp
+```
+
+### Key Files
+
+| Component | File |
+|-----------|------|
+| C++ Headers | `include/ck_tile/dispatcher/grouped_conv_*.hpp` |
+| Python Codegen | `codegen/unified_grouped_conv_codegen.py` |
+| Python Utils | `python/grouped_conv_utils.py` |
+| Build Script | `scripts/compile_grouped_conv_examples.py` |
+| Shared Codegen | `codegen/codegen_common.py` |
+| Shared Utils | `python/dispatcher_common.py` |
+
+### Variants
+
+- **Forward** (`grouped_conv_fwd`) - Standard grouped convolution
+- **Backward Data** (`grouped_conv_bwdd`) - Gradient w.r.t. input
+- **Backward Weight** (`grouped_conv_bwdw`) - Gradient w.r.t. weights
+
+### Shared Infrastructure
+
+GEMM and grouped convolution share common code to avoid duplication:
+- `codegen/codegen_common.py` - TileConfig, TraitConfigBase, type mappings, parallel generation, arch-aware expansion
+- `python/dispatcher_common.py` - Path helpers, validation, auto-correction, Colors, phased output
 
 ---
 

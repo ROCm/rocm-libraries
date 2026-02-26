@@ -29,6 +29,7 @@ from ctypes_utils import (
     setup_gemm_dispatcher,
     cleanup_gemm,
     reset_for_example,
+    detect_gpu_arch,
 )
 
 
@@ -63,7 +64,7 @@ Examples:
         "--iterations", type=int, default=10, help="Benchmark iterations (default: 10)"
     )
     parser.add_argument(
-        "--arch", default="gfx942", help="Target architecture (default: gfx942)"
+        "--arch", default=detect_gpu_arch(), help="Target architecture (auto-detected from rocminfo)"
     )
     args = parser.parse_args()
 

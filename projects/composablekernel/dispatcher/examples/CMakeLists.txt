@@ -345,6 +345,7 @@ add_declarative_gpu_example(gemm_03_benchmark_validation gemm/cpp/03_benchmark_v
 add_declarative_gpu_example(gemm_04_heuristics           gemm/cpp/04_heuristics.cpp)
 add_declarative_gpu_example(gemm_05_json_export          gemm/cpp/05_json_export.cpp)
 add_declarative_gpu_example(gemm_06_multi_registry       gemm/cpp/06_multi_registry.cpp)
+add_declarative_gpu_example(gemm_07_gfx950_minimal       gemm/cpp/07_gfx950_minimal.cpp)
 
 # ML Heuristic example -- requires LightGBM shared library
 # Derive site-packages from active Python interpreter (respects virtualenvs)
@@ -443,7 +444,17 @@ if(hip_FOUND)
 endif()
 add_dependencies(dispatcher_gemm_lib generate_gemm_fallback_kernel)
 
+# =============================================================================
+# Grouped Convolution C++ Examples
+# =============================================================================
+
+add_declarative_gpu_example(grouped_conv_01_basic         grouped_conv/cpp/01_basic_grouped_conv.cpp)
+add_declarative_gpu_example(grouped_conv_02_all_dirs      grouped_conv/cpp/02_all_directions.cpp)
+add_declarative_gpu_example(grouped_conv_03_bench_val     grouped_conv/cpp/03_benchmark_validation.cpp)
+add_declarative_gpu_example(grouped_conv_04_registry_json grouped_conv/cpp/04_registry_json.cpp)
+
 message(STATUS "GEMM examples configured - kernels will be generated during 'make'")
+message(STATUS "Grouped Conv examples configured - kernels will be generated during 'make'")
 
 # Convenience target to build all Python ctypes libraries
 add_custom_target(python_libs
@@ -455,7 +466,7 @@ add_custom_target(python_libs
 # Per-Architecture Kernel Generation Targets
 # =============================================================================
 
-set(SUPPORTED_GPU_ARCHS gfx942 gfx90a gfx1100 gfx1030)
+set(SUPPORTED_GPU_ARCHS gfx942 gfx950 gfx90a gfx1100 gfx1030)
 
 foreach(ARCH ${SUPPORTED_GPU_ARCHS})
     # GEMM kernels for this arch

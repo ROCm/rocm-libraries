@@ -34,7 +34,7 @@ from compile_gemm_examples import (  # noqa: E402
     validate_kernel_config,
     expand_declaration_with_arch_filter,
 )
-from compile_conv_examples import (  # noqa: E402
+from compile_grouped_conv_examples import (  # noqa: E402
     validate_conv_kernel_config,
     expand_conv_declaration_with_arch_filter,
 )

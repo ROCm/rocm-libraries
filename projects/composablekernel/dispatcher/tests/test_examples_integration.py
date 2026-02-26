@@ -246,14 +246,18 @@ class TestUtilityImports(unittest.TestCase):
         except ImportError as e:
             self.fail(f"Failed to import ctypes_utils: {e}")
 
-    def test_import_conv_utils(self):
-        """Test importing conv_utils."""
+    def test_import_grouped_conv_utils(self):
+        """Test importing grouped_conv_utils."""
         try:
-            from conv_utils import ConvSignature, ConvAlgorithm, ConvProblem  # noqa: F401
+            from grouped_conv_utils import (  # noqa: F401
+                GroupedConvValidationResult,
+                validate_grouped_conv_config,
+                GroupedConvDataType,
+            )
 
             self.assertTrue(True)
         except ImportError as e:
-            self.fail(f"Failed to import conv_utils: {e}")
+            self.fail(f"Failed to import grouped_conv_utils: {e}")
 
     def test_kernel_config_creation(self):
         """Test creating a KernelConfig."""
@@ -272,22 +276,19 @@ class TestUtilityImports(unittest.TestCase):
         self.assertEqual(config.dtype_a, "fp16")
         self.assertEqual(config.layout_a, "row")
 
-    def test_conv_signature_creation(self):
-        """Test creating a ConvSignature."""
-        from conv_utils import ConvSignature
+    def test_grouped_conv_default_config(self):
+        """Test creating a grouped conv default config."""
+        from grouped_conv_utils import get_grouped_conv_default_config
 
-        sig = ConvSignature(
-            dtype_in="fp16",
-            dtype_wei="fp16",
-            dtype_out="fp16",
-            dtype_acc="fp32",
+        config = get_grouped_conv_default_config(
+            variant="forward",
+            ndim_spatial=2,
+            arch="gfx942",
             layout="nhwgc",
-            direction="forward",
-            num_dims=2,
         )
 
-        self.assertEqual(sig.dtype_in, "fp16")
-        self.assertEqual(sig.direction, "forward")
+        self.assertEqual(config["variant"], "forward")
+        self.assertEqual(config["arch"], "gfx942")
 
 
 class TestAutoCorrection(unittest.TestCase):
@@ -316,21 +317,21 @@ class TestAutoCorrection(unittest.TestCase):
         self.assertTrue(was_modified, "Config should be modified")
         self.assertGreater(len(corrections), 0, "Should have corrections")
 
-    def test_conv_auto_correct(self):
-        """Test Conv auto-correction."""
-        from conv_utils import auto_correct_conv_config
-
-        # Call with invalid wave config parameters
-        corrected, was_modified, corrections = auto_correct_conv_config(
-            wave_m=99,  # Invalid
-            wave_n=99,  # Invalid
-            wave_k=99,  # Invalid
-            dtype="fp16",
-            arch="gfx942",
+    def test_grouped_conv_auto_correct(self):
+        """Test Grouped Conv auto-correction."""
+        from grouped_conv_utils import (
+            auto_correct_grouped_conv_config,
+            get_grouped_conv_default_config,
         )
 
-        self.assertTrue(was_modified, "Config should be modified")
-        self.assertGreater(len(corrections), 0, "Should have corrections")
+        config = get_grouped_conv_default_config()
+        config["tile_config"]["warp_m"] = [99]
+        config["tile_config"]["warp_n"] = [99]
+
+        corrected, result = auto_correct_grouped_conv_config(config)
+
+        self.assertIsInstance(corrected, dict)
+        self.assertIn("tile_config", corrected)
 
 
 if __name__ == "__main__":

@@ -17,3 +17,10 @@
 #include "ck_tile/dispatcher/backends/tile_backend.hpp"
 #include "ck_tile/dispatcher/backends/generated_tile_backend.hpp"
 #include "ck_tile/dispatcher/utils.hpp"
+
+// Grouped Convolution support
+#include "ck_tile/dispatcher/grouped_conv_config.hpp"
+#include "ck_tile/dispatcher/grouped_conv_problem.hpp"
+#include "ck_tile/dispatcher/grouped_conv_kernel_decl.hpp"
+#include "ck_tile/dispatcher/grouped_conv_registry.hpp"
+#include "ck_tile/dispatcher/grouped_conv_utils.hpp"

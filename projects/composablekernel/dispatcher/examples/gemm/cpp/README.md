@@ -225,5 +225,5 @@ DECL_KERNEL_SET(my_kernels,
 ## Related Documentation
 
 - [Python GEMM Examples](../python/README.md)
-- [Convolution Examples](../../conv/cpp/README.md)
+- [C++ Headers (GEMM + Grouped Conv)](../../../include/ck_tile/dispatcher/README.md)
 - [Main Dispatcher README](../../../README.md)
