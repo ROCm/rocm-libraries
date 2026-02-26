@@ -296,8 +296,8 @@ struct GemmConfigMixedPrecision : public GemmConfigBase
     static constexpr ck_tile::index_t K_Warp_Tile = 64;
 };
 
-template <typename PrecType>
-struct GemmConfigEightWarps : public GemmConfigABQuantPrefill<PrecType>
+template <typename PrecType, bool TransposeC_ = true>
+struct GemmConfigEightWarps : public GemmConfigABQuantPrefill<PrecType, TransposeC_>
 {
     static constexpr ck_tile::index_t M_Warp = 4;
     static constexpr ck_tile::index_t N_Warp = 2; // NWarps == 2 for ping-pong!
