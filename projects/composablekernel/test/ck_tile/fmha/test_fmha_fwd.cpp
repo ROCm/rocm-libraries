@@ -953,12 +953,6 @@ static std::vector<PaddingParam> BuildPaddingParams()
 {
     std::vector<PaddingParam> params;
 
-    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp8Bf16, FmhaFwdMxFp8, FmhaFwdMxFp4>::
-                     value)
-    {
-        return params;
-    }
-
     // mask variants to cover
     const std::vector<std::string> mask_variants{"0", "t:50,64", "b:32,40"};
     const std::vector<std::string> mask_variants_reduced{"0", "t:50,64"}; // used for trimmed sets

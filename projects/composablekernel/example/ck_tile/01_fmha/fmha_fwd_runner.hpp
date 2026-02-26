@@ -321,13 +321,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
         hdim_q =
             ck_tile::integer_least_multiple(hdim_q, ck_tile::numeric_traits<KDataType>::PackedSize);
     }
-    if(is_mx && !seqlen_kpads.empty() && seqlen_kpads[0] > 0)
-    {
-        std::cerr
-            << "seqlen_kpads is not supported with MX types. ignoring the 'seqlen_kpads' option"
-            << std::endl;
-        seqlen_kpads = {-1};
-    }
 
     std::mt19937 random_engine(seed != 0 ? seed : std::random_device{}());
     auto next_seed = [&random_engine]() { return static_cast<unsigned int>(random_engine()); };
