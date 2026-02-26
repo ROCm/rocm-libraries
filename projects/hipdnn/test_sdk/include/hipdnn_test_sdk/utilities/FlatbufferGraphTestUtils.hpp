@@ -1486,7 +1486,7 @@ inline flatbuffers::FlatBufferBuilder
 }
 
 inline flatbuffers::FlatBufferBuilder
-    createValidRmsnormGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
+    createValidRMSNormGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
                             const std::vector<int64_t>& dims = {1, 3, 224, 224},
                             hipdnn_data_sdk::data_objects::DataType inputDataType
                             = hipdnn_data_sdk::data_objects::DataType::FLOAT,

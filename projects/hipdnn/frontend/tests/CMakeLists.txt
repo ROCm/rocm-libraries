@@ -46,8 +46,8 @@ add_executable(
     TestNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
-    TestRmsnormAttributes.cpp
-    TestRmsnormNode.cpp
+    TestRMSNormAttributes.cpp
+    TestRMSNormNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
     TestTensorAttributes.cpp
     TestTensorValueAttributes.cpp

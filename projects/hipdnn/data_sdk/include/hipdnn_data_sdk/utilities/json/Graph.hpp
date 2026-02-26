@@ -15,7 +15,7 @@
 #include <hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp>
-#include <hipdnn_data_sdk/utilities/json/RmsnormAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/RMSNormAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
 
 namespace hipdnn_data_sdk::data_objects

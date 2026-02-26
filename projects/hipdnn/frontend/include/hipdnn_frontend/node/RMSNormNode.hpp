@@ -120,7 +120,7 @@ public:
             y->set_dim(x->get_dim());
         }
 
-        if(y->get_stride().empty())
+        if(y->get_stride().empty() && !x->get_stride().empty())
         {
             y->set_stride(x->get_stride());
         }
@@ -135,9 +135,18 @@ public:
 
             if(tensorToInfer->get_stride().empty())
             {
-                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
-                tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
-                    tensorToInfer->get_dim(), strideOrder));
+                if(!x->get_stride().empty())
+                {
+                    auto strideOrder
+                        = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                    tensorToInfer->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                        tensorToInfer->get_dim(), strideOrder));
+                }
+                else
+                {
+                    tensorToInfer->set_stride(
+                        hipdnn_data_sdk::utilities::generateStrides(tensorToInfer->get_dim()));
+                }
             }
         };
 
