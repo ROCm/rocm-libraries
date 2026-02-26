@@ -236,16 +236,34 @@ class ScheduleInfo:
         self.nllZeroDscnt = nllZeroDscnt
         self.mfmaReorder = mfmaReorder
         self.snopCode = snopCode
-        self._skipValidation = False
+        self._disabledPasses: dict[cmsv.ValidatorPass, str] = {}
 
-        # Empty list - validate all keys; list of keys - skip order validation for these keys 
-        self._skipOrderValidation : None | list[str] = []
+    def disableValidationPass(self, pass_id: cmsv.ValidatorPass, reason: str) -> None:
+        """Disable a specific validator pass for this schedule.
 
-    def disableValidation(self):
-        self._skipValidation = True
+        Args:
+            pass_id: The ValidatorPass enum member to disable.
+            reason:  Mandatory explanation of why this pass is being disabled.
+        """
+        if not isinstance(pass_id, cmsv.ValidatorPass):
+            raise TypeError(f"pass_id must be a ValidatorPass enum member, got {type(pass_id).__name__}")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Reason for disabling pass must be a non-empty string")
+        self._disabledPasses[pass_id] = reason
 
-    def isValidationDisabled(self):
-        return self._skipValidation
+    def disableValidation(self, reason: str) -> None:
+        """Disable all validator passes for this schedule."""
+        for pass_id in cmsv.ValidatorPass:
+            self.disableValidationPass(pass_id, reason)
+
+    def reasonForDisablingValidationPass(self, pass_id: cmsv.ValidatorPass) -> Optional[str]:
+        """Return the reason this pass was disabled, or None if it is enabled.
+
+        Raises TypeError if pass_id is not a ValidatorPass enum member.
+        """
+        if not isinstance(pass_id, cmsv.ValidatorPass):
+            raise TypeError(f"pass_id must be a ValidatorPass enum member, got {type(pass_id).__name__}")
+        return self._disabledPasses.get(pass_id)
 
     def pretty_print(self):
         klen = max(len(k) for k in self.optSchedule.keys())
@@ -4140,7 +4158,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("4x4MFMA with wider loads is not yet supported by validator")
     return True, opt1
 
 @RegisterSchedule(
@@ -4509,7 +4527,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     kernel["UseMFMAF32XEmulation"] = True
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("swap instructions included in pack are not supported yet")
     return True, opt1
 
 @RegisterSchedule(
@@ -4651,7 +4669,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("NN transpose with wider loads is not yet supported by validator")
     return True, opt1
 
 

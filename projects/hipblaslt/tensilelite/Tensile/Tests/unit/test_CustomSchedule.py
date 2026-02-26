@@ -24,7 +24,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid
+from Tensile.Components.CMSValidator import isValid, ValidatorPass
 from Tensile.Common import IsaVersion
 
 # Helper to create a mock data type
@@ -1104,26 +1104,89 @@ class TestCustomScheduleTF32:
         assert valid, message
 
 class TestCustomScheduleValidation:
-    def test_schedule_validation_disable(self):
-        """
-        Test of the flag that custom mainloop schedule (CMS) developers can use to override the
-        validation checks.
-        """
+    def test_disable_single_pass(self):
+        """Disabling a single pass allows an otherwise-invalid schedule to pass that check."""
         kernel = create_base_kernel()
         invalid_schedule = {"P": [[3, 2, 1]]}
 
-        # No verification message means that the schedule info is considered valid.
-        scheduleInfo = ScheduleInfo(
-            1, None, invalid_schedule, None, None, None, None
-        )
-        scheduleInfo.disableValidation()
-        status, message = isValid(scheduleInfo, {"kernel" : {"DepthU": 42}})
-        assert status == True
-        assert message == "CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = ?x?x42 NN"
-
-        # A non-empty verification message means that the schedule info is considered invalid.
-        status, message = isValid(
-            ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {"kernel" : {"DepthU": 42}}
-        )
+        # Without disabling, the non-ascending schedule fails on ascending order.
+        si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
+        status, message = isValid(si, {"kernel": kernel})
         assert status == False
+        assert "Non-descending-order" in message
+
+        # Disabling VERIFY_ASCENDING_ORDER skips that check.
+        # Remaining structural and timeline passes are also disabled because this
+        # minimal schedule lacks the keys/data they require.
+        si = ScheduleInfo(1, 0, invalid_schedule, None, None, None, None)
+        for p in ValidatorPass:
+            if p != ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS:
+                si.disableValidationPass(p, reason="Not relevant to this test")
+        status, message = isValid(si, {"kernel": kernel})
+        # The ascending-order error is gone; the schedule passes the remaining enabled check.
+        assert "Non-descending-order" not in message
+        assert status == True
+
+    def test_disable_validation_pass_reason_required(self):
+        """disableValidationPass requires a non-empty reason string and a valid ValidatorPass enum member."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+
+        with pytest.raises(ValueError):
+            si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="")
+
+        with pytest.raises(ValueError):
+            si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="   ")
+
+        with pytest.raises(TypeError):
+            si.disableValidationPass("not_an_enum", reason="some reason")
+
+        with pytest.raises(TypeError):
+            si.disableValidationPass(42, reason="some reason")
+
+    def test_disable_multiple_validation_passes(self):
+        """Multiple validation passes can be disabled independently."""
+        invalid_schedule = {"P": [[3, 2, 1]]}
+        si = ScheduleInfo(1, None, invalid_schedule, None, None, None, None)
+        si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="Reason A")
+        si.disableValidationPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS, reason="Reason B")
+
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "Reason A"
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS) == "Reason B"
+        # Passes not disabled return None.
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_SCC_OVERLAP) is None
+
+    def test_reason_for_disabling_validation_pass(self):
+        """reasonForDisablingValidationPass returns the reason for disabled passes, None for enabled ones,
+        and raises TypeError for non-enum arguments."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+
+        # Nothing disabled yet.
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) is None
+
+        si.disableValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER, reason="test reason")
+        assert si.reasonForDisablingValidationPass(ValidatorPass.VERIFY_ASCENDING_ORDER) == "test reason"
+
+        # Non-enum argument raises TypeError.
+        with pytest.raises(TypeError):
+            si.reasonForDisablingValidationPass("not_an_enum")
+
+        with pytest.raises(TypeError):
+            si.reasonForDisablingValidationPass(42)
+
+    def test_disable_validation_all_passes(self):
+        """disableValidation disables all passes with the given reason."""
+        si = ScheduleInfo(1, None, {}, None, None, None, None)
+        si.disableValidation("entire schedule unsupported")
+
+        for p in ValidatorPass:
+            assert si.reasonForDisablingValidationPass(p) == "entire schedule unsupported"
+
+    def test_disable_validation_isvalid_early_return(self):
+        """isValid returns (True, '') with a single warning when all passes are disabled."""
+        kernel = create_base_kernel()
+        si = ScheduleInfo(1, 0, {}, None, None, None, None)
+        si.disableValidation("not supported yet")
+        status, message = isValid(si, {"kernel": kernel})
+        assert status == True
+        assert message == ""
 
