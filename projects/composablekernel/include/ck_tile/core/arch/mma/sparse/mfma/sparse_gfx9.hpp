@@ -10,10 +10,30 @@
 
 namespace ck_tile::core::arch::mma {
 
+/**
+ * @struct DefaultSparseMfmaCtrlFlags
+ * @brief Default MFMA sparse flags, select (VGPR[srcC][7..0]) if srcC is
+ * 16-bit or (VGPR[srcC][15..0]) if srcC is 8-bit.
+ */
 struct DefaultSparseMfmaCtrlFlags
 {
-    static constexpr SparseCompressionIndex CompressionIndex = SparseCompressionIndex::LE16;
+    static constexpr SparseCompressionIndex CompressionIndex = SparseCompressionIndex::FIRST;
 };
+
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
+#include <concepts>
+
+/**
+ * @concept SparseMfmaCtrlFlags
+ * @brief Expresses the interface of required members for each CtrlFlags type
+ */
+template <typename CtrlFlags>
+concept SparseMfmaCtrlFlags = requires(CtrlFlags ctrlFlags) {
+    // Flag members for sparse MFMA instructions
+    { CtrlFlags::CompressionIndex } -> std::convertible_to<SparseCompressionIndex>;
+};
+
+#endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 /**
  * @struct amdgcn_mma
@@ -81,12 +101,8 @@ struct amdgcn_mma<
         using namespace sparse::detail;
         static constexpr BuiltinParams PARAMS =
             get_builtin_params<CtrlFlags::CompressionIndex>::value;
-        return {__builtin_amdgcn_smfmac_f32_16x16x32_f16(a_vec_pruned,
-                                                         bVec,
-                                                         cVec,
-                                                         idx,
-                                                         PARAMS.Override16BitDefaultMask,
-                                                         PARAMS.ByteIndexToOverride)};
+        return {__builtin_amdgcn_smfmac_f32_16x16x32_f16(
+            a_vec_pruned, bVec, cVec, idx, PARAMS.UseFirstIndex, PARAMS.ByteIndexToOverride)};
     }
 };
 

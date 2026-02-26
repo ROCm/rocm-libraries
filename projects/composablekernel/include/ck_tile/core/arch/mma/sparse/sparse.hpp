@@ -7,24 +7,37 @@ namespace ck_tile::core::arch::mma {
 
 /**
  * @enum SparseCompressionIndex
- * @brief Indicates which 8 bit part should be used as compression index.
- * Note that the LE16 option can select the lowest 16 bits instead.
- * \see DefaultSparseMfmaCtrlFlags
+ * @brief Indicates which set of sparse-indices within a VGPR starting at srcC
+ * containing 8-bits (for 16-bit source data) or 16-bits (for 8-bit source data)
+ * of index information for a lane. \see DefaultSparseMfmaCtrlFlags
  */
 enum struct SparseCompressionIndex : int
 {
-    LE16   = -1, // Uses bits [15:0] (lowest 16 bits)
-    FIRST  = 0,  // Uses bits [7:0] (lowest 8 bits)
-    SECOND = 1,  // Uses bits [15:8] (second 8 bits)
-    THIRD  = 2,  // Uses bits [23:16] (third 8 bits)
-    FOURTH = 3,  // Uses bits [31:24] (highest 8 bits)
+    FIRST  = 0, // Uses bits  [7:0] or [15..0], for 16 and 8 bit data respectively
+    SECOND = 1, // Uses bits [15:8] or [31:16], for 16 and 8 bit data respectively
+    THIRD  = 2, // Uses bits [23:16]
+    FOURTH = 3, // Uses bits [31:24]
 };
 
 namespace sparse::detail {
+
+/**
+ * @struct BuiltinParams
+ * @brief Translates the SparseCompressionIndex to the correct CBSZ and ABID pairs for sparse
+ * builtins. The actual behavior of the builtin depends on the input data type: 16-bit source data:
+ * If CBSZ=0, ABID selects one of four 8-bit sets of sparse-indices within a VGPR starting at srcC
+ * containing 8-bits of index information for a lane. If CBSZ!=0 the very first is selected
+ * (VGPR[srcC][7..0]).
+ *
+ * 8-bit source data:
+ * If CBSZ=0, ABID selects one of two 16-bit sets of sparse-indices within a VGPR starting at srcC
+ * containing 16-bits of index information for a lane. If CBSZ!=0; the very first is selected
+ * (VGPR[srcC][15..0]).
+ */
 struct BuiltinParams
 {
-    int Override16BitDefaultMask;
-    int ByteIndexToOverride;
+    int UseFirstIndex;       // CBSZ
+    int ByteIndexToOverride; // ABID
 };
 
 template <SparseCompressionIndex Idx>
@@ -33,13 +46,13 @@ struct get_builtin_params
     private:
     static constexpr BuiltinParams getBuiltinParams()
     {
-        if constexpr(Idx == SparseCompressionIndex::LE16)
+        if constexpr(Idx == SparseCompressionIndex::FIRST)
         {
-            return {.Override16BitDefaultMask = 0, .ByteIndexToOverride = 0};
+            return {.UseFirstIndex = 1, .ByteIndexToOverride = 0};
         }
         else
         {
-            return {.Override16BitDefaultMask = 1, .ByteIndexToOverride = static_cast<int>(Idx)};
+            return {.UseFirstIndex = 0, .ByteIndexToOverride = static_cast<int>(Idx)};
         }
     }
 
