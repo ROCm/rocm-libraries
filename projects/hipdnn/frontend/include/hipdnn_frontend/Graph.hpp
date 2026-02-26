@@ -91,7 +91,7 @@
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
-#include <hipdnn_frontend/node/LayernormFpropNode.hpp>
+#include <hipdnn_frontend/node/LayernormNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -628,7 +628,7 @@ private:
                         attr.set_name(fbNode->name()->str());
                     }
                     _sub_nodes.emplace_back(
-                        std::make_shared<LayernormFpropNode>(std::move(attr), graph_attributes));
+                        std::make_shared<LayernormNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -1588,7 +1588,6 @@ public:
         layernorm(std::shared_ptr<TensorAttributes> x,
                   std::shared_ptr<TensorAttributes> scale,
                   std::shared_ptr<TensorAttributes> bias,
-                  std::shared_ptr<TensorAttributes> epsilon,
                   LayernormAttributes attributes)
     // NOLINTEND(readability-identifier-naming)
     {
@@ -1609,7 +1608,9 @@ public:
         {
             bias->set_name(attributes.get_name() + "::BIAS");
         }
-        if(epsilon->get_name().empty())
+
+        auto epsilon = attributes.get_epsilon();
+        if(epsilon && epsilon->get_name().empty())
         {
             epsilon->set_name(attributes.get_name() + "::EPSILON");
         }
@@ -1630,11 +1631,10 @@ public:
         attributes.set_x(std::move(x));
         attributes.set_scale(std::move(scale));
         attributes.set_bias(std::move(bias));
-        attributes.set_epsilon(std::move(epsilon));
         attributes.set_y(y);
 
         _sub_nodes.emplace_back(
-            std::make_shared<LayernormFpropNode>(std::move(attributes), graph_attributes));
+            std::make_shared<LayernormNode>(std::move(attributes), graph_attributes));
 
         return {y, mean, invVariance};
     }

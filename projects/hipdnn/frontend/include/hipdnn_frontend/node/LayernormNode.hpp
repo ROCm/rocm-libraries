@@ -12,12 +12,12 @@
 
 namespace hipdnn_frontend::graph
 {
-class LayernormFpropNode : public BaseNode<LayernormFpropNode>
+class LayernormNode : public BaseNode<LayernormNode>
 {
 public:
     LayernormAttributes attributes;
 
-    LayernormFpropNode(LayernormAttributes&& layernormAttrs, const GraphAttributes& graphAttrs)
+    LayernormNode(LayernormAttributes&& layernormAttrs, const GraphAttributes& graphAttrs)
         : BaseNode(graphAttrs)
         , attributes(std::move(layernormAttrs))
     {
@@ -52,23 +52,23 @@ public:
         // SECTION 2: Validate Required Tensor Pointers
         HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormFpropNode missing x for pre-validation");
+                               "LayernormNode missing x for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormFpropNode missing y for pre-validation");
+                               "LayernormNode missing y for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_epsilon(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormFpropNode missing epsilon for pre-validation");
+                               "LayernormNode missing epsilon for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormFpropNode missing scale for pre-validation");
+                               "LayernormNode missing scale for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_bias(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormFpropNode missing bias for pre-validation");
+                               "LayernormNode missing bias for pre-validation");
 
         // Get tensor references
         auto x = attributes.get_x();
@@ -108,14 +108,12 @@ public:
 
         if(!x)
         {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "LayernormFpropNode missing x for setting properties"};
+            return {ErrorCode::ATTRIBUTE_NOT_SET, "LayernormNode missing x for setting properties"};
         }
 
         if(!y)
         {
-            return {ErrorCode::ATTRIBUTE_NOT_SET,
-                    "LayernormFpropNode missing y for setting properties"};
+            return {ErrorCode::ATTRIBUTE_NOT_SET, "LayernormNode missing y for setting properties"};
         }
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
@@ -138,25 +136,8 @@ public:
             }
         }
 
-        // Infer epsilon dims and strides: all-ones matching X's rank
-        auto epsilon = attributes.get_epsilon();
-        if(epsilon && !x->get_dim().empty())
-        {
-            if(epsilon->get_dim().size() < x->get_dim().size())
-            {
-                std::vector<int64_t> epsilonDim(x->get_dim().size(), 1);
-                epsilon->set_dim(epsilonDim);
-            }
-            if(epsilon->get_stride().empty())
-            {
-                std::vector<int64_t> epsilonStride(epsilon->get_dim().size(), 1);
-                epsilon->set_stride(epsilonStride);
-            }
-        }
-
         // Infer scale and bias dims and strides from X's normalized dimensions
         // For input [N, C, H, W], scale/bias dim = [1, C, H, W] (batch dim set to 1)
-        // This matches cudnn-frontend convention for porting compatibility
         auto scale = attributes.get_scale();
         auto bias = attributes.get_bias();
 
@@ -221,7 +202,7 @@ public:
             {
                 // Stats dims mirror X's shape, but where scale has dim 1 (batch dims),
                 // the stats dim retains X's value; where scale has dim > 1 (normalized
-                // dims), the stats dim becomes 1. This matches cudnn-frontend convention.
+                // dims), the stats dim becomes 1.
                 const auto& xDim = x->get_dim();
                 const auto& scaleDim = scale->get_dim();
                 if(scaleDim.size() == xDim.size())

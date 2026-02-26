@@ -1469,8 +1469,9 @@ TEST_F(TestGraph, LayernormNodeCreation)
     LayernormAttributes attributes;
     attributes.set_name("LayernormNode");
     attributes.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attributes.set_epsilon(epsilon);
 
-    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, epsilon, attributes);
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
 
     EXPECT_EQ(y->get_name(), "LayernormNode::Y");
     EXPECT_TRUE(y->get_is_virtual());
@@ -1504,8 +1505,9 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
     LayernormAttributes attributes;
     attributes.set_name("LayernormNodeTraining");
     attributes.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attributes.set_epsilon(epsilon);
 
-    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, epsilon, attributes);
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
 
     EXPECT_EQ(y->get_name(), "LayernormNodeTraining::Y");
     EXPECT_TRUE(y->get_is_virtual());
@@ -1556,8 +1558,9 @@ TEST_F(TestGraph, BuildAndSerializeLayernormGraph)
     LayernormAttributes layernormAttributes;
     layernormAttributes.set_name("LayernormNode");
     layernormAttributes.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    layernormAttributes.set_epsilon(epsilon);
 
-    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, epsilon, layernormAttributes);
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, layernormAttributes);
 
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();

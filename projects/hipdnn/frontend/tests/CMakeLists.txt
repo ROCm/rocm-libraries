@@ -41,8 +41,8 @@ add_executable(
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
-    TestLayernormFpropAttributes.cpp
-    TestLayernormFpropNode.cpp
+    TestLayernormAttributes.cpp
+    TestLayernormNode.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp
