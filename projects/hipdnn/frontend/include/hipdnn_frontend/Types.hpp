@@ -333,6 +333,7 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_FP8_E4M3;
     case DataType::FP8_E5M2:
         return HIPDNN_DATA_FP8_E5M2;
+    case DataType::NOT_SET:
     default:
         return std::nullopt;
     }

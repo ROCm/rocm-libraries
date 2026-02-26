@@ -25,16 +25,12 @@ void checkSetArgs(hipdnnBackendAttributeType_t expectedType,
 
 void checkGetArgs(hipdnnBackendAttributeType_t expectedType,
                   hipdnnBackendAttributeType_t attributeType,
-                  const void* arrayOfElements,
                   const char* errorPrefix)
 {
     THROW_IF_NULL(errorPrefix, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "errorPrefix is null");
     THROW_IF_FALSE(attributeType == expectedType,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": attributeType mismatch");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  std::string(errorPrefix) + ": arrayOfElements is null");
 }
 
 void setInt64Vector(std::vector<int64_t>& target,
@@ -59,7 +55,17 @@ void getInt64Vector(const std::vector<int64_t>& source,
                     void* arrayOfElements,
                     const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, arrayOfElements, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = static_cast<int64_t>(source.size());
+        return;
+    }
+
     THROW_IF_LT(requestedElementCount,
                 static_cast<int64_t>(0),
                 HIPDNN_STATUS_BAD_PARAM,

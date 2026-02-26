@@ -113,7 +113,17 @@ void getDataType(hipdnn_data_sdk::data_objects::DataType source,
                  void* arrayOfElements,
                  const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_DATA_TYPE, attributeType, arrayOfElements, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_DATA_TYPE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": requestedElementCount < 1");

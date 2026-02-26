@@ -565,7 +565,7 @@ TEST_F(TestTensorDescriptor, GetAttributeWrongType)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestTensorDescriptor, GetAttributeWrongRequestedElementCount)
+TEST_F(TestTensorDescriptor, GetAttributeQueryFailsNullElementCount)
 {
     makeFinalized();
     auto desc = getDescriptor();
@@ -573,7 +573,7 @@ TEST_F(TestTensorDescriptor, GetAttributeWrongRequestedElementCount)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 0, nullptr, &uid),
-        HIPDNN_STATUS_BAD_PARAM);
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 // =============================================================================
@@ -589,6 +589,192 @@ TEST_F(TestTensorDescriptor, GetAttributeElementCountNullable)
     // elementCount is nullptr - should still work
     ASSERT_NO_THROW(
         desc->getAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, nullptr, &uid));
+}
+
+// =============================================================================
+// GetAttribute Tests - Two-Call Query Pattern
+// =============================================================================
+
+TEST_F(TestTensorDescriptor, GetAttributeDimensionsQueryReturnsSize)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+
+    ASSERT_EQ(elementCount, 4);
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeStridesQueryReturnsSize)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_STRIDES, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+
+    ASSERT_EQ(elementCount, 4);
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeUniqueIdQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeDataTypeQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_DATA_TYPE, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeIsVirtualQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_IS_VIRTUAL, HIPDNN_TYPE_BOOLEAN, 0, &elementCount, nullptr));
+
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeDimensionsQueryThenRetrieve)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    // First call: query the size
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 4);
+
+    // Second call: retrieve the data
+    std::vector<int64_t> dims(static_cast<size_t>(elementCount));
+    int64_t retrievedCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_TENSOR_DIMENSIONS,
+                                       HIPDNN_TYPE_INT64,
+                                       elementCount,
+                                       &retrievedCount,
+                                       dims.data()));
+
+    ASSERT_EQ(retrievedCount, 4);
+    ASSERT_EQ(dims[0], 1);
+    ASSERT_EQ(dims[1], 3);
+    ASSERT_EQ(dims[2], 32);
+    ASSERT_EQ(dims[3], 32);
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeNameQueryReturnsSize)
+{
+    auto desc = getDescriptor();
+    const char* name = "test_tensor";
+    desc->setAttribute(
+        HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, static_cast<int64_t>(strlen(name)), name);
+    setRequiredAttributes();
+    desc->finalize();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
+
+    ASSERT_EQ(elementCount, static_cast<int64_t>(strlen("test_tensor") + 1));
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeNameQueryThenRetrieve)
+{
+    auto desc = getDescriptor();
+    const char* name = "test_tensor";
+    desc->setAttribute(
+        HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, static_cast<int64_t>(strlen(name)), name);
+    setRequiredAttributes();
+    desc->finalize();
+
+    // First call: query the size
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, static_cast<int64_t>(strlen("test_tensor") + 1));
+
+    // Second call: retrieve the data
+    std::vector<char> buffer(static_cast<size_t>(elementCount));
+    int64_t retrievedCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_TENSOR_NAME_EXT,
+                                       HIPDNN_TYPE_CHAR,
+                                       elementCount,
+                                       &retrievedCount,
+                                       buffer.data()));
+
+    ASSERT_STREQ(buffer.data(), "test_tensor");
+    ASSERT_EQ(retrievedCount, elementCount);
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeValueFloat32QueryReturnsSize)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+    float setVal = 1.5f;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(float), &setVal);
+    desc->finalize();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
+
+    ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(float)));
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeValueFloat32QueryThenRetrieve)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+    float setVal = 1.5f;
+    desc->setAttribute(HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, sizeof(float), &setVal);
+    desc->finalize();
+
+    // First call: query the size
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(float)));
+
+    // Second call: retrieve the data
+    float retrieved = 0.0f;
+    int64_t retrievedCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, elementCount, &retrievedCount, &retrieved));
+
+    ASSERT_FLOAT_EQ(retrieved, 1.5f);
+    ASSERT_EQ(retrievedCount, static_cast<int64_t>(sizeof(float)));
+}
+
+TEST_F(TestTensorDescriptor, GetAttributeValueQueryFailsWhenNotSet)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(
+            HIPDNN_ATTR_TENSOR_VALUE_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
 }
 
 // =============================================================================

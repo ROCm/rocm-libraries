@@ -190,9 +190,16 @@ void TensorDescriptor::getName(hipdnnBackendAttributeType_t attributeType,
     THROW_IF_FALSE(attributeType == HIPDNN_TYPE_CHAR,
                    HIPDNN_STATUS_BAD_PARAM,
                    "TensorDescriptor::getAttribute(): attributeType is not HIPDNN_TYPE_CHAR");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "TensorDescriptor::getAttribute(): arrayOfElements is null");
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "TensorDescriptor::getAttribute(): elementCount is null");
+        *elementCount = static_cast<int64_t>(_data.name.size() + 1);
+        return;
+    }
+
     THROW_IF_LT(requestedElementCount,
                 static_cast<int64_t>(0),
                 HIPDNN_STATUS_BAD_PARAM,
@@ -303,11 +310,20 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
                    HIPDNN_STATUS_BAD_PARAM,
                    "TensorDescriptor::getAttribute(): attributeType must be HIPDNN_TYPE_CHAR "
                    "for TENSOR_VALUE");
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "TensorDescriptor::getAttribute(): arrayOfElements is null");
 
     using namespace hipdnn_data_sdk::data_objects;
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "TensorDescriptor::getAttribute(): elementCount is null");
+        THROW_IF_TRUE(_data.value.type == TensorValue::NONE,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): tensor value is not set");
+        *elementCount = getDataTypeByteSize(_data.data_type);
+        return;
+    }
 
     THROW_IF_TRUE(_data.value.type == TensorValue::NONE,
                   HIPDNN_STATUS_BAD_PARAM,
