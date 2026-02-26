@@ -795,7 +795,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
-     - # BenchmarkProblemSizeGroup - 96x256x64 NN (CMS)
+    - # BenchmarkProblemSizeGroup - 96x256x64 NN (CMS)
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
