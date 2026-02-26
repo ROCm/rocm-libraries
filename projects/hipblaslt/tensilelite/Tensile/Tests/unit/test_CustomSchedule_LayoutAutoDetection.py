@@ -196,10 +196,11 @@ class TestLayoutAutoDetection:
             "_get_schedule_256x208x64_16bit": {"NN", "TN"},
             "_get_schedule_192x128x64_16bit": {"TN"},
             "_get_schedule_224x128x64_16bit": {"NN", "NT", "TN"},
-            "_get_schedule_224x256x64_16bit": {"NN","NT", "TN"},
+            "_get_schedule_224x256x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_192x320x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_256x224x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_320x192x64_16bit": {"NN", "NT", "TN"},
+            "_get_schedule_352x192x64_16bit": {"TN"},
             "_get_schedule_240x256x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_208x256x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_128x224x64_16bit": {"NN", "NT", "TN"},
@@ -210,7 +211,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_256x256x32_TF32": {"NT", "TN"},
             "_get_schedule_192x128x32_TF32": {"TN"},
             "_get_schedule_128x128x32_TF32": {"TN"},
-            "_get_schedule_128x128x32_TF32_plr1": {"NN","TN"},
+            "_get_schedule_128x128x32_TF32_plr1": {"NN", "TN"},
             "_get_schedule_128x128x64_TF32": {"NN", "TN"},
             "_get_schedule_128x256x32_TF32": {"TN"},
             "_get_schedule_128x160x64_TF32": {"TN"},
@@ -226,11 +227,11 @@ class TestLayoutAutoDetection:
         # Confirm we have all the expected schedules in the registry
         for func_name in EXPECTED:
             assert func_name in registered_schedules, f"{func_name} not found in _SCHEDULE_REGISTRY (Please update the expected layouts in the test if needed)"
-        
+
         # Confirm we have all the registered schedules in the expected layouts
         for func_name in registered_schedules:
             assert func_name in EXPECTED, f"{func_name} not found in 'EXPECTED' (Please update the 'EXPECTED' layouts in the test if needed)"
-            
+
         for name, expected_layouts in EXPECTED.items():
             detected = _get_layouts_for(name)
             assert detected == expected_layouts, \
@@ -305,20 +306,19 @@ class TestLayoutAutoDetection:
             # TransposeA, TransposeB, LDSTrInst, TransposeLDS
             (False, True, True, 1): False, # NT  (NT and LDSTrInst and TransposeLDS == 1)
             (False, True, False, 1): False, # NT  (NT and LDSTrInst and TransposeLDS == 1)
-            (False, True, True, 0): False, # NT  (NT and LDSTrInst and TransposeLDS == 0)  
-            (False, True, False, 0): False, # NT  (NT and LDSTrInst and TransposeLDS == 0) 
+            (False, True, True, 0): False, # NT  (NT and LDSTrInst and TransposeLDS == 0)
+            (False, True, False, 0): False, # NT  (NT and LDSTrInst and TransposeLDS == 0)
 
             # TransposeA, TransposeB, LDSTrInst, TransposeLDS
             (True, True, True, 1): False, # TT  (TT and LDSTrInst and TransposeLDS == 1)
             (True, True, False, 1): False, # TT  (TT and LDSTrInst and TransposeLDS == 1)
-            (True, True, True, 0): False, # TT  (TT and LDSTrInst and TransposeLDS == 0)  
-            (True, True, False, 0): False, # TT  (TT and LDSTrInst and TransposeLDS == 0) 
-            
-        }   
+            (True, True, True, 0): False, # TT  (TT and LDSTrInst and TransposeLDS == 0)
+            (True, True, False, 0): False, # TT  (TT and LDSTrInst and TransposeLDS == 0)
+
+        }
 
         for expected_kernel_info, expected_detection in expected_kernel_infos_detection.items():
             if expected_detection:
                 assert expected_kernel_info in kernel_infos, f"Kernel support for {expected_kernel_info} (TransposeA, TransposeB, LDSTrInst, TransposeLDS) is not found in kernel_infos"
             else:
                 assert expected_kernel_info not in kernel_infos, f"Kernel support for {expected_kernel_info} (TransposeA, TransposeB, LDSTrInst, TransposeLDS) is unexpectedly found in kernel_infos"
-            
