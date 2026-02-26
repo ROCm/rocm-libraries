@@ -1620,7 +1620,7 @@ public:
         std::shared_ptr<TensorAttributes> mean = nullptr;
         std::shared_ptr<TensorAttributes> invVariance = nullptr;
 
-        if(attributes.get_forward_phase() != hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE)
+        if(attributes.get_forward_phase() != NormFwdPhase::INFERENCE)
         {
             mean = outputTensor(attributes.get_name() + "::MEAN");
             invVariance = outputTensor(attributes.get_name() + "::INV_VARIANCE");

@@ -30,7 +30,7 @@ LayernormAttributes makeMinimalAttrs(const std::shared_ptr<TensorAttributes>& x)
 {
     LayernormAttributes attrs;
     attrs.set_x(x);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
     epsilon->set_value(1e-5f);
@@ -122,7 +122,7 @@ TEST(TestLayernormNode, PreValidateFailsForwardPhaseNotSet)
 TEST(TestLayernormNode, PreValidateFailsMissingX)
 {
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
     epsilon->set_value(1e-5f);
@@ -140,7 +140,7 @@ TEST(TestLayernormNode, PreValidateFailsMissingX)
 TEST(TestLayernormNode, PreValidateFailsMissingY)
 {
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     auto x = makeTensor({32, 512});
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
@@ -159,7 +159,7 @@ TEST(TestLayernormNode, PreValidateFailsMissingY)
 TEST(TestLayernormNode, PreValidateFailsMissingEpsilon)
 {
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     auto x = makeTensor({32, 512});
     attrs.set_x(x);
     attrs.set_y(std::make_shared<TensorAttributes>());
@@ -175,7 +175,7 @@ TEST(TestLayernormNode, PreValidateFailsMissingEpsilon)
 TEST(TestLayernormNode, PreValidateFailsMissingScale)
 {
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     auto x = makeTensor({32, 512});
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
@@ -194,7 +194,7 @@ TEST(TestLayernormNode, PreValidateFailsMissingScale)
 TEST(TestLayernormNode, PreValidateFailsMissingBias)
 {
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     auto x = makeTensor({32, 512});
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
@@ -330,7 +330,7 @@ TEST(TestLayernormNode, InferPropertiesPreservesNhwcStrideOrder)
     auto x = makeTensor({2, 64, 28, 28}, {50176, 1, 1792, 64});
 
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
@@ -375,7 +375,7 @@ TEST(TestLayernormNode, InferPropertiesNhwcScaleStridesMatchX)
     auto x = makeTensor({4, 32, 16, 16}, {8192, 1, 512, 32}); // NHWC
 
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     attrs.set_x(x);
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_dim({1});
@@ -426,7 +426,7 @@ TEST(TestLayernormNode, InferPropertiesSetsMeanShape)
 {
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     attrs.set_mean(mean);
@@ -445,7 +445,7 @@ TEST(TestLayernormNode, InferPropertiesSetsInvVarianceShape)
 {
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto invVariance = std::make_shared<TensorAttributes>();
     attrs.set_inv_variance(invVariance);
@@ -517,7 +517,7 @@ TEST(TestLayernormNode, PackNode)
 TEST(TestLayernormNode, PreValidateFailsXWithNoDimensions)
 {
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     attrs.set_x(std::make_shared<TensorAttributes>()); // No dimensions set
 
     auto epsilon = std::make_shared<TensorAttributes>();
@@ -538,7 +538,7 @@ TEST(TestLayernormNode, PreValidateFailsEpsilonNotScalar)
 {
     auto x = makeTensor({32, 512});
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     attrs.set_x(x);
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(makeTensor({512}));
@@ -561,7 +561,7 @@ TEST(TestLayernormNode, PreValidateFailsEpsilonNotPassByValue)
 {
     auto x = makeTensor({32, 512});
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     attrs.set_x(x);
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(makeTensor({512}));
@@ -582,7 +582,7 @@ TEST(TestLayernormNode, PreValidateFailsEpsilonWithNoDimensions)
 {
     auto x = makeTensor({32, 512});
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     attrs.set_x(x);
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(makeTensor({512}));
@@ -601,7 +601,7 @@ TEST(TestLayernormNode, PreValidateFailsXYShapeMismatch)
 {
     auto x = makeTensor({32, 512});
     LayernormAttributes attrs;
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
     attrs.set_x(x);
     attrs.set_scale(makeTensor({512}));
     attrs.set_bias(makeTensor({512}));
@@ -707,7 +707,7 @@ TEST(TestLayernormNode, InferPropertiesMeanStrideFromXStrideOrder)
     // When x has strides, mean stride should be inferred from x's stride order
     auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     attrs.set_mean(mean);
@@ -728,7 +728,7 @@ TEST(TestLayernormNode, InferPropertiesInvVarianceStrideFromXStrideOrder)
     // When x has strides, inv_variance stride should be inferred from x's stride order
     auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto invVariance = std::make_shared<TensorAttributes>();
     attrs.set_inv_variance(invVariance);
@@ -749,7 +749,7 @@ TEST(TestLayernormNode, InferPropertiesPreservesExplicitMeanDims)
     // Mean with dims already set should not be overwritten
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({32});
@@ -771,7 +771,7 @@ TEST(TestLayernormNode, InferPropertiesPreservesExplicitStatStrides)
     // Stats tensor with strides already set should not be overwritten
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({1});
@@ -792,7 +792,7 @@ TEST(TestLayernormNode, InferPropertiesSetsBothMeanAndInvVariance)
     // Both mean and inv_variance should be inferred when set (training phase only)
     auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     auto invVariance = std::make_shared<TensorAttributes>();

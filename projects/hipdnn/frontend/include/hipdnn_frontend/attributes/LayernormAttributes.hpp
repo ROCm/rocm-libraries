@@ -178,14 +178,14 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    LayernormAttributes& set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase value)
+    LayernormAttributes& set_forward_phase(NormFwdPhase value)
     {
         _forwardPhase = value;
         return *this;
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    hipdnn_data_sdk::data_objects::NormFwdPhase get_forward_phase() const
+    NormFwdPhase get_forward_phase() const
     {
         return _forwardPhase;
     }
@@ -207,7 +207,7 @@ public:
                  : flatbuffers::Optional<int64_t>(flatbuffers::nullopt),
             invVariance ? flatbuffers::Optional<int64_t>(invVariance->get_uid())
                         : flatbuffers::Optional<int64_t>(flatbuffers::nullopt),
-            _forwardPhase);
+            toSdkType(_forwardPhase));
     }
 
     static LayernormAttributes fromFlatBuffer(
@@ -221,7 +221,7 @@ public:
         attr.set_bias(tensorMap.at(fb->bias_tensor_uid()));
         attr.set_epsilon(tensorMap.at(fb->epsilon_tensor_uid()));
         attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-        attr.set_forward_phase(fb->forward_phase());
+        attr.set_forward_phase(fromSdkType(fb->forward_phase()));
 
         if(fb->mean_tensor_uid().has_value())
         {
@@ -236,8 +236,7 @@ public:
     }
 
 private:
-    hipdnn_data_sdk::data_objects::NormFwdPhase _forwardPhase
-        = hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET;
+    NormFwdPhase _forwardPhase = NormFwdPhase::NOT_SET;
 };
 
 typedef LayernormAttributes Layernorm_attributes; // NOLINT(readability-identifier-naming)

@@ -44,8 +44,7 @@ public:
         // ====================================================================
 
         // SECTION 1: Validate Forward Phase
-        HIPDNN_RETURN_IF_FALSE(attributes.get_forward_phase()
-                                   != hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET,
+        HIPDNN_RETURN_IF_FALSE(attributes.get_forward_phase() != NormFwdPhase::NOT_SET,
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "Forward phase not set of layernorm node.");
 
@@ -241,7 +240,7 @@ public:
             }
         };
 
-        if(attributes.get_forward_phase() != hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE)
+        if(attributes.get_forward_phase() != NormFwdPhase::INFERENCE)
         {
             if(mean)
             {

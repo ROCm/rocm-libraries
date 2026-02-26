@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 
+using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
 TEST(TestLayernormAttributes, DefaultValues)
@@ -17,7 +18,7 @@ TEST(TestLayernormAttributes, DefaultValues)
     EXPECT_EQ(attrs.get_y(), nullptr);
     EXPECT_EQ(attrs.get_mean(), nullptr);
     EXPECT_EQ(attrs.get_inv_variance(), nullptr);
-    EXPECT_EQ(attrs.get_forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET);
+    EXPECT_EQ(attrs.get_forward_phase(), NormFwdPhase::NOT_SET);
 }
 
 TEST(TestLayernormAttributes, SetRequiredTensors)
@@ -78,11 +79,11 @@ TEST(TestLayernormAttributes, SetForwardPhase)
 {
     LayernormAttributes attrs;
 
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
-    EXPECT_EQ(attrs.get_forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
+    EXPECT_EQ(attrs.get_forward_phase(), NormFwdPhase::TRAINING);
 
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
-    EXPECT_EQ(attrs.get_forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attrs.set_forward_phase(NormFwdPhase::INFERENCE);
+    EXPECT_EQ(attrs.get_forward_phase(), NormFwdPhase::INFERENCE);
 }
 
 TEST(TestLayernormAttributes, PackAttributes)
@@ -111,7 +112,7 @@ TEST(TestLayernormAttributes, PackAttributes)
     attrs.set_y(y);
     attrs.set_mean(mean);
     attrs.set_inv_variance(invVariance);
-    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     flatbuffers::FlatBufferBuilder builder;
     auto packed = attrs.pack_attributes(builder);
@@ -213,7 +214,7 @@ TEST(TestLayernormAttributes, FromFlatBuffer)
     EXPECT_EQ(attrs.get_mean()->get_uid(), 60);
     ASSERT_NE(attrs.get_inv_variance(), nullptr);
     EXPECT_EQ(attrs.get_inv_variance()->get_uid(), 70);
-    EXPECT_EQ(attrs.get_forward_phase(), hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    EXPECT_EQ(attrs.get_forward_phase(), NormFwdPhase::TRAINING);
 }
 
 TEST(TestLayernormAttributes, FromFlatBufferNoOptionals)

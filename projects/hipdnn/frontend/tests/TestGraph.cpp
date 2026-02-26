@@ -1468,7 +1468,7 @@ TEST_F(TestGraph, LayernormNodeCreation)
 
     LayernormAttributes attributes;
     attributes.set_name("LayernormNode");
-    attributes.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    attributes.set_forward_phase(NormFwdPhase::INFERENCE);
     attributes.set_epsilon(epsilon);
 
     auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
@@ -1504,7 +1504,7 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
 
     LayernormAttributes attributes;
     attributes.set_name("LayernormNodeTraining");
-    attributes.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+    attributes.set_forward_phase(NormFwdPhase::TRAINING);
     attributes.set_epsilon(epsilon);
 
     auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
@@ -1557,7 +1557,7 @@ TEST_F(TestGraph, BuildAndSerializeLayernormGraph)
 
     LayernormAttributes layernormAttributes;
     layernormAttributes.set_name("LayernormNode");
-    layernormAttributes.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE);
+    layernormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
     layernormAttributes.set_epsilon(epsilon);
 
     auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, layernormAttributes);
