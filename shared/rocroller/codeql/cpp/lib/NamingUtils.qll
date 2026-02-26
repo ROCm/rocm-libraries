@@ -10,6 +10,10 @@ import cpp
  */
 predicate isInCheckedDirs(Element v) {
   not (
+    v.getFile()
+        .getAbsolutePath()
+        .toString()
+        .regexpMatch(".*(build)/.*") or
     v.getFile().getAbsolutePath().toString().regexpMatch(".*(Context\\.hpp)$")
   )
 }
