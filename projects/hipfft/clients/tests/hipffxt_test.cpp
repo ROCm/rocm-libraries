@@ -101,6 +101,8 @@ TEST_P(hipfftxtunit, plancreation)
 
     // Just batch=1 for now.
 
+    // FIXME: handle 3D as well.
+    
     const int Nx    = 32;
     const int Ny    = 32;
 
@@ -140,6 +142,7 @@ TEST_P(hipfftxtunit, plancreation)
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 }
 
+
 INSTANTIATE_TEST_SUITE_P(
     hipfftxttest,
     hipfftxtunit,
@@ -155,6 +158,117 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     }
     );
+
+
+
+class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<int, bool, bool,
+                                                                    hipfftXtSubFormat,
+                                                                    hipfftXtSubFormat>>
+{};
+
+TEST_P(hipfftxtunitdesc, desccreation)
+{
+    // Test whether we can just make plans.
+    
+    size_t    ngpus = 2;
+
+    // Just batch=1 for now.
+
+    // FIXME: handle 3D as well.
+    
+    const int Nx    = 32;
+    const int Ny    = 32;
+
+    const int direction = std::get<0>(GetParam());
+    const bool realcomplex = std::get<1>(GetParam());
+    const bool inplace = std::get<2>(GetParam());
+    
+    const hipfftXtSubFormat informat = std::get<3>(GetParam());
+    const hipfftXtSubFormat outformat = std::get<4>(GetParam());
+    
+    const hipfftType transform_type  = realcomplex ?
+        ((direction == HIPFFT_FORWARD) ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
+
+    if(verbose > 0)
+    {
+        std::cout << "hipfftxt plan creation test: " << directionname(direction)
+                  << (realcomplex ? " real/complex" : "complex/complex")
+                  << "\n";
+    }
+
+    auto hipfft_rt = HIPFFT_SUCCESS;
+        
+    hipfftHandle plan;
+    hipfft_rt =   hipfftCreate(&plan);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+    std::vector<int> gpus(ngpus);
+    std::iota(gpus.begin(), gpus.end(), 0);
+    
+    hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
+
+    std::vector<size_t> workSize(ngpus);
+    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
+                                 transform_type,
+                                 workSize.data());
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed with return code "
+                                         << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
+
+    hipLibXtDesc*       indesc = nullptr;
+    hipfft_rt                     = hipfftXtMalloc(plan, &indesc, informat);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
+    hipfft_rt = hipfftXtFree(indesc);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    
+    hipLibXtDesc*       outdesc = nullptr;
+    hipfft_rt                     = hipfftXtMalloc(plan, &outdesc, outformat);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
+                                         << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
+    hipfft_rt = hipfftXtFree(outdesc);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+       
+    
+    hipfft_rt = hipfftDestroy(plan);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+}
+
+
+INSTANTIATE_TEST_SUITE_P(
+    hipfftxttest,
+    hipfftxtunitdesc,
+    ::testing::Combine(
+        ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
+        ::testing::Values(true, false),
+        ::testing::Values(true, false),
+        ::testing::Values(HIPFFT_XT_FORMAT_INPUT,
+                          HIPFFT_XT_FORMAT_OUTPUT,
+                          HIPFFT_XT_FORMAT_INPLACE,
+                          HIPFFT_XT_FORMAT_INPLACE_SHUFFLED),
+        ::testing::Values(HIPFFT_XT_FORMAT_INPUT,
+                          HIPFFT_XT_FORMAT_OUTPUT,
+                          HIPFFT_XT_FORMAT_INPLACE,
+                          HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+        ),
+    [](const testing::TestParamInfo<hipfftxtunitdesc::ParamType>& info) {
+        const int direction = std::get<0>(info.param);
+        const bool realcomplex = std::get<1>(info.param);
+        const bool inplace = std::get<2>(info.param);
+        const hipfftXtSubFormat informat = std::get<3>(info.param);
+        const hipfftXtSubFormat outformat = std::get<4>(info.param);
+        std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
+        name += realcomplex ? "rc" : "cc";
+        name += inplace ? "i" : "o";
+        name += formatname(informat);
+        name += formatname(outformat);
+        return name;
+    }
+    );
+
+
 
 
 // Params are direction, format, and batch size.
@@ -322,7 +436,6 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
         // back-end.
         GTEST_SKIP();
     }
-        
     
     hipfftXtSubFormat outformat;
     if(batch == 1)

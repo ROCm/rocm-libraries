@@ -597,7 +597,6 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     }
 
-    // set comm handle on the plans
     if(plan->comm_type != rocfft_comm_none)
     {
         for(auto rocfft_desc : {ip_forward_desc, op_forward_desc, ip_inverse_desc, op_inverse_desc})
@@ -606,8 +605,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     }
 
-
-    // count the number of plans that got created - it's possible to
+    // Count the number of plans that got created - it's possible to
     // have parameters that are valid for out-place but not for
     // in-place, so some of these rocfft_plan_creates could
     // legitimately fail.
@@ -616,9 +614,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     {
         for(const auto inplace : {true, false})
         {
-            
             const bool forward = iotype.is_forward(t);
-
             auto& plan_ptr  = inplace
                 ? (forward ? plan->ip_forward : plan->ip_inverse)
                 : (forward ? plan->op_forward : plan->op_inverse);
@@ -646,7 +642,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     }
 
-    // if no plans got created, fail
+    // If no plans got created, fail
     if(plans_created == 0)
         return HIPFFT_PARSE_ERROR;
     plan->type = iotype;
