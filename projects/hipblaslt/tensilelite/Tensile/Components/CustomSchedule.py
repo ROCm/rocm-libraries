@@ -956,8 +956,8 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
     if isNT(kernel) and useLDSTr and TLDS == 0:
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write for iteration == 0"),
-            18, SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
-            18, SBarrier(comment=""),
+            19, SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
+            19, SBarrier(comment=""),
             40, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
             40, SBarrier(comment=""),
         ]
@@ -970,14 +970,14 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
             'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]],
             'LRB0': [[9, 10, 11, 12, 13, 14]],
 
-            'GRA': [[6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 13, 14, 15, 16]],
+            'GRA': [[3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]],
             'GRB': [[27, 27, 28, 28, 29, 29]],
 
-            'LRA1': [[19, 19, 21, 21, 23, 23, 25, 25, 31, 31, 33, 33, 35, 35, 37, 37]],
+            'LRA1': [[21, 21, 23, 23, 25, 25, 27, 27, 31, 31, 33, 33, 35, 35, 37, 37]],
             'LRB1': [[41, 41, 43, 43, 45, 45]],
 
-            'LRSA': [[17, 17, 17, 17]],
-            'LRSB': [[22]],
+            'LRSA': [[18, 18, 18, 18]],
+            'LRSB': [[24]],
             'LWSA': [[39, 39, 39]],
             'LWSB': [[]],
             'LCC': [[47, 47]],
