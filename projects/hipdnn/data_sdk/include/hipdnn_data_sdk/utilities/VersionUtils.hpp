@@ -5,10 +5,10 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
-#include <sstream>
 
 namespace hipdnn_data_sdk::utilities
 {
@@ -32,7 +32,8 @@ struct Version
 
     Version(const std::string& versionStr)
     {
-        char dot1, dot2;
+        char dot1;
+        char dot2;
         std::istringstream iss(versionStr);
         if(!(iss >> major >> dot1 >> minor >> dot2 >> patch) || dot1 != '.' || dot2 != '.')
         {
