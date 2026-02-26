@@ -260,14 +260,17 @@ public:
             }
         };
 
-        if(mean)
+        if(attributes.get_forward_phase() != hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE)
         {
-            inferStatsTensor(mean);
-        }
+            if(mean)
+            {
+                inferStatsTensor(mean);
+            }
 
-        if(invVariance)
-        {
-            inferStatsTensor(invVariance);
+            if(invVariance)
+            {
+                inferStatsTensor(invVariance);
+            }
         }
 
         return {};

@@ -327,6 +327,7 @@ TEST(TestLayernormFpropNode, InferPropertiesSetsMeanShape)
 {
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     attrs.set_mean(mean);
@@ -345,6 +346,7 @@ TEST(TestLayernormFpropNode, InferPropertiesSetsInvVarianceShape)
 {
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 
     auto invVariance = std::make_shared<TensorAttributes>();
     attrs.set_inv_variance(invVariance);
@@ -606,6 +608,7 @@ TEST(TestLayernormFpropNode, InferPropertiesMeanStrideFromXStrideOrder)
     // When x has strides, mean stride should be inferred from x's stride order
     auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     attrs.set_mean(mean);
@@ -626,6 +629,7 @@ TEST(TestLayernormFpropNode, InferPropertiesInvVarianceStrideFromXStrideOrder)
     // When x has strides, inv_variance stride should be inferred from x's stride order
     auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 
     auto invVariance = std::make_shared<TensorAttributes>();
     attrs.set_inv_variance(invVariance);
@@ -646,6 +650,7 @@ TEST(TestLayernormFpropNode, InferPropertiesPreservesExplicitMeanDims)
     // Mean with dims already set should not be overwritten
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({32});
@@ -667,6 +672,7 @@ TEST(TestLayernormFpropNode, InferPropertiesPreservesExplicitStatStrides)
     // Stats tensor with strides already set should not be overwritten
     auto x = makeTensor({32, 512});
     auto attrs = makeMinimalAttrs(x);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_dim({1});
@@ -684,9 +690,10 @@ TEST(TestLayernormFpropNode, InferPropertiesPreservesExplicitStatStrides)
 
 TEST(TestLayernormFpropNode, InferPropertiesSetsBothMeanAndInvVariance)
 {
-    // Both mean and inv_variance should be inferred when set
+    // Both mean and inv_variance should be inferred when set (training phase only)
     auto x = makeTensor({32, 512}, {512, 1});
     auto attrs = makeMinimalAttrs(x);
+    attrs.set_forward_phase(hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
 
     auto mean = std::make_shared<TensorAttributes>();
     auto invVariance = std::make_shared<TensorAttributes>();
