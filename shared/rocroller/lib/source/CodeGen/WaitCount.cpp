@@ -7,6 +7,7 @@
 #include "rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp"
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/Utilities/String.hpp>
 
 namespace rocRoller
 {
@@ -447,7 +448,7 @@ namespace rocRoller
 
             if(commentIter != m_comments.end())
             {
-                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                for(auto const& line : EscapeComment(*commentIter))
                     os << line;
                 commentIter++;
             }
@@ -463,7 +464,7 @@ namespace rocRoller
 
             if(commentIter != m_comments.end())
             {
-                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                for(auto const& line : EscapeComment(*commentIter))
                     os << line;
                 commentIter++;
             }
@@ -488,7 +489,7 @@ namespace rocRoller
                     += fmt::format(" m_queuesToSync({})", rocRoller::toString(m_queuesToSync));
             }
 
-            for(auto const& line : Instruction::EscapeComment(fieldComment))
+            for(auto const& line : EscapeComment(fieldComment))
                 os << line;
             os << "\n";
         }
@@ -497,7 +498,7 @@ namespace rocRoller
         {
             for(; commentIter != m_comments.end(); commentIter++)
             {
-                for(auto const& line : Instruction::EscapeComment(*commentIter))
+                for(auto const& line : EscapeComment(*commentIter))
                     os << line;
             }
             os << "\n";

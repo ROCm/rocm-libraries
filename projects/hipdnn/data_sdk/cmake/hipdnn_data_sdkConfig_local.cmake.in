@@ -10,6 +10,15 @@ find_dependency(hip CONFIG REQUIRED)
 # Find required dependencies
 find_package(Threads REQUIRED)
 
+# Export HIPDNN_FRONTEND_SKIP_JSON_LIB setting for consumers
+set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@ CACHE BOOL
+    "Defines whether FE should not include nlohmann/json.hpp.")
+
+# nlohmann_json is optional based on HIPDNN_FRONTEND_SKIP_JSON_LIB
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    find_dependency(nlohmann_json REQUIRED)
+endif()
+
 # Subdirectory path for hipDNN engine plugins (relative to lib)
 set(HIPDNN_PLUGIN_ENGINE_SUBDIR "@HIPDNN_PLUGIN_ENGINE_SUBDIR@")
 

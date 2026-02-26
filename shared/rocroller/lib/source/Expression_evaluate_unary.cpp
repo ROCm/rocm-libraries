@@ -339,7 +339,7 @@ namespace rocRoller::Expression::EvaluateDetail
                 mask = (static_cast<UnsignedARG>(1) << this->expr.width) - 1;
             }
 
-            UnsignedARG result = (arg >> this->expr.offset) & mask;
+            UnsignedARG result = (unsignedArg >> this->expr.offset) & mask;
 
             // Sign extend if needed
             if constexpr(std::is_signed_v<ARG>)
