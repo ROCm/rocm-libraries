@@ -6,27 +6,27 @@
 
 #include "mocks/MockPlan.hpp"
 
-#include "HipdnnEnginePluginExecutionContext.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnHipKernelContext.hpp"
+#include "HipdnnHipKernelHandle.hpp"
 
 using namespace hip_kernel_plugin;
 
-TEST(TestHipKernelHipdnnEnginePluginExecutionContext, SetAndGetPlan)
+TEST(TestHipKernelHipdnnHipKernelContext, SetAndGetPlan)
 {
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
 
     auto mockPlan = std::make_unique<hip_kernel_plugin::MockPlan>();
     auto* planPtr = mockPlan.get();
     ctx.setPlan(std::move(mockPlan));
 
-    hip_kernel_plugin::IPlan& planRef = ctx.plan();
+    hipdnn_plugin_sdk::IPlan<HipdnnHipKernelHandle>& planRef = ctx.plan();
 
     EXPECT_EQ(&planRef, planPtr);
 }
 
-TEST(TestHipKernelHipdnnEnginePluginExecutionContext, HasValidPlan)
+TEST(TestHipKernelHipdnnHipKernelContext, HasValidPlan)
 {
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
 
     EXPECT_FALSE(ctx.hasValidPlan());
 
@@ -36,21 +36,21 @@ TEST(TestHipKernelHipdnnEnginePluginExecutionContext, HasValidPlan)
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
-TEST(TestHipKernelHipdnnEnginePluginExecutionContext, GetPlanThrowsIfNotSet)
+TEST(TestHipKernelHipdnnHipKernelContext, GetPlanThrowsIfNotSet)
 {
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
 
     EXPECT_THROW(ctx.plan(), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestHipKernelHipdnnEnginePluginExecutionContext, GetWorkspaceSize)
+TEST(TestHipKernelHipdnnHipKernelContext, GetWorkspaceSize)
 {
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
 
     auto mockPlan = std::make_unique<hip_kernel_plugin::MockPlan>();
     EXPECT_CALL(*mockPlan, getWorkspaceSize(::testing::_)).WillOnce(testing::Return(42));
     ctx.setPlan(std::move(mockPlan));
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnHipKernelHandle dummyHandle;
     EXPECT_EQ(ctx.plan().getWorkspaceSize(dummyHandle), 42);
 }

@@ -5,10 +5,8 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
-#include <unordered_set>
 
 #include "BatchnormPlanBuilder.hpp"
-#include "HipKernelUtils.hpp"
 #include "engines/plans/BatchnormApplicabilityChecks.hpp"
 #include "engines/plans/BatchnormFwdInferencePlan.hpp"
 #include "engines/plans/BatchnormFwdInferenceWithVariancePlan.hpp"
@@ -154,7 +152,7 @@ bool batchnormFwdFusionCheckTensorsLogErrors(
 } // namespace
 
 bool BatchnormPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     auto anyNodeIsNotF32Compute = [&]() {
@@ -305,9 +303,10 @@ bool BatchnormPlanBuilder::isApplicable(
     }
 }
 
-size_t BatchnormPlanBuilder::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+size_t BatchnormPlanBuilder::getMaxWorkspaceSize(
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const HipdnnHipKernelSettings& executionSettings) const
 {
     //batchnorm plan builder does not require workspace size
     return 0u;
@@ -317,39 +316,39 @@ namespace
 {
 
 void buildPlanInferenceSingleNode(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnHipKernelContext& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
 
     BatchnormFwdInferenceParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params),
-                                                            executionContext.benchmarkingEnabled());
+                                                            executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
 void buildPlanInferenceWithVarianceSingleNode(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnHipKernelContext& executionContext)
 {
     const auto& attr = nodeWrapper.attributesAs<
         hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt>();
 
     BatchnormFwdInferenceWithVarianceParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(
-        std::move(params), executionContext.benchmarkingEnabled());
+        std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
 void buildPlanFusedFwdInferenceActivation(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnHipKernelContext& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
@@ -361,14 +360,14 @@ void buildPlanFusedFwdInferenceActivation(
 
     BatchnormFwdInferenceParams params(fwdInference, activation, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params),
-                                                            executionContext.benchmarkingEnabled());
+                                                            executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
 void buildPlanFusedFwdInferenceWithVarianceActivation(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnHipKernelContext& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
     const auto& node1 = opGraph.getNodeWrapper(1);
@@ -381,17 +380,25 @@ void buildPlanFusedFwdInferenceWithVarianceActivation(
     BatchnormFwdInferenceWithVarianceParams params(
         fwdInference, activation, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdInferenceWithVariancePlan>(
-        std::move(params), executionContext.benchmarkingEnabled());
+        std::move(params), executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 
 } // namespace
 
+void BatchnormPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] HipdnnHipKernelSettings& executionSettings) const
+{
+}
+
 void BatchnormPlanBuilder::buildPlan(
-    const HipdnnEnginePluginHandle& handle,
+    const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    HipdnnHipKernelContext& executionContext) const
 {
     if(opGraph.nodeCount() == 2)
     {
@@ -437,7 +444,7 @@ void BatchnormPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> BatchnormPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};

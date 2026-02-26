@@ -8,39 +8,46 @@
 #include <gmock/gmock.h>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
-#include "engines/EngineInterface.hpp"
+#include "HipdnnHipKernelContext.hpp"
+#include "HipdnnHipKernelHandle.hpp"
+#include "HipdnnHipKernelSettings.hpp"
+#include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
 namespace hip_kernel_plugin
 {
 
-class MockEngine : public IEngine
+class MockEngine : public hipdnn_plugin_sdk::IEngine<HipdnnHipKernelHandle,
+                                                     HipdnnHipKernelSettings,
+                                                     HipdnnHipKernelContext>
 {
 public:
     MOCK_METHOD(int64_t, id, (), (const, override));
     MOCK_METHOD(bool,
                 isApplicable,
-                (HipdnnEnginePluginHandle & handle,
+                (HipdnnHipKernelHandle & handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(void,
                 getDetails,
-                (HipdnnEnginePluginHandle & handle,
+                (HipdnnHipKernelHandle & handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                  hipdnnPluginConstData_t& detailsOut),
                 (const, override));
     MOCK_METHOD(size_t,
-                getWorkspaceSize,
-                (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                getMaxWorkspaceSize,
+                (const HipdnnHipKernelHandle& handle,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig),
                 (const, override));
 
     MOCK_METHOD(void,
                 initializeExecutionContext,
-                (const HipdnnEnginePluginHandle& handle,
+                (const HipdnnHipKernelHandle& handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                  const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-                 HipdnnEnginePluginExecutionContext& executionContext),
+                 HipdnnHipKernelContext& executionContext),
                 (const, override));
 };
 

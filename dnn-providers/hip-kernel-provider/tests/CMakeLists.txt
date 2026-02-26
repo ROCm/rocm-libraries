@@ -13,10 +13,8 @@ add_executable(
     engines/TestHipKernelEngine.cpp
     main.cpp
     TestHipKernelEngineManager.cpp
-    TestHipKernelEnginePluginApi.cpp
     TestHipKernelHipdnnEnginePluginHandle.cpp
     TestHipKernelHipdnnPluginExecutionContext.cpp
-    TestHipKernelPluginApi.cpp
     TestHipProgramAndKernel.cpp
 )
 

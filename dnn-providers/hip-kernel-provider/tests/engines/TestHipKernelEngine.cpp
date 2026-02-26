@@ -3,7 +3,6 @@
 
 #include <gtest/gtest.h>
 #include <memory>
-#include <set>
 
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
@@ -13,7 +12,7 @@
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
 #include "engines/HipKernelEngine.hpp"
-#include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
+#include "mocks/MockHipdnnHipKernelContext.hpp"
 #include "mocks/MockPlanBuilder.hpp"
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
@@ -32,9 +31,10 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
     HipKernelEngine engine(1);
 
     MockGraph mockGraph;
+    MockEngineConfig mockEngineConfig;
 
-    HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 0u);
+    HipdnnHipKernelHandle dummyHandle;
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig), 0u);
 }
 
 TEST(TestHipKernelEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
@@ -42,16 +42,17 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
-    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSize(::testing::_, ::testing::_))
+    EXPECT_CALL(*mockPlanBuilder, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(1337u));
 
     HipKernelEngine engine(1);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
+    MockEngineConfig mockEngineConfig;
 
-    HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 1337u);
+    HipdnnHipKernelHandle dummyHandle;
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig), 1337u);
 }
 
 TEST(TestHipKernelEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
@@ -61,11 +62,11 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
 
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
-    EXPECT_CALL(*mockPlanBuilder, getWorkspaceSize(::testing::_, ::testing::_))
+    EXPECT_CALL(*mockPlanBuilder, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(1337u));
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
-    EXPECT_CALL(*mockPlanBuilder2, getWorkspaceSize(::testing::_, ::testing::_))
+    EXPECT_CALL(*mockPlanBuilder2, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(45000u));
 
     HipKernelEngine engine(1);
@@ -73,9 +74,10 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
+    MockEngineConfig mockEngineConfig;
 
-    HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 45000u);
+    HipdnnHipKernelHandle dummyHandle;
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig), 45000u);
 }
 
 TEST(TestHipKernelEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
@@ -88,9 +90,10 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
+    MockEngineConfig mockEngineConfig;
 
-    HipdnnEnginePluginHandle dummyHandle;
-    EXPECT_EQ(engine.getWorkspaceSize(dummyHandle, mockGraph), 0u);
+    HipdnnHipKernelHandle dummyHandle;
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockEngineConfig), 0u);
 }
 
 TEST(TestHipKernelEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
@@ -106,7 +109,7 @@ TEST(TestHipKernelEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnHipKernelHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -126,7 +129,7 @@ TEST(TestHipKernelEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnHipKernelHandle dummyHandle;
     EXPECT_TRUE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -137,7 +140,7 @@ TEST(TestHipKernelEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnHipKernelHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
@@ -153,14 +156,14 @@ TEST(TestHipKernelEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     MockGraph mockGraph;
     auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnHipKernelHandle dummyHandle;
     EXPECT_FALSE(engine.isApplicable(dummyHandle, mockGraph));
 }
 
 TEST(TestHipKernelEngine, GetDetailsReturnsSerializedEngineDetails)
 {
     HipKernelEngine engine(1);
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnHipKernelHandle dummyHandle;
     MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
@@ -174,7 +177,7 @@ TEST(TestHipKernelEngine, GetDetailsReturnsSerializedEngineDetails)
 TEST(TestHipKernelEngine, GetDetailsContainsBenchmarkingKnob)
 {
     HipKernelEngine engine(1);
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnHipKernelHandle dummyHandle;
     MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
@@ -238,7 +241,7 @@ TEST(TestHipKernelEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
-    HipdnnEnginePluginHandle dummyHandle;
+    HipdnnHipKernelHandle dummyHandle;
     MockGraph mockGraph;
 
     hipdnnPluginConstData_t result;
@@ -283,8 +286,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextInvokesFirstApplicablePlanBu
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelHandle dummyHandle;
+    MockHipdnnHipKernelContext ctx;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
@@ -295,8 +298,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 {
     HipKernelEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelHandle dummyHandle;
+    MockHipdnnHipKernelContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString("global.benchmarking");
@@ -320,15 +323,15 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
-    EXPECT_TRUE(ctx.benchmarkingEnabled());
+    EXPECT_TRUE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestHipKernelEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 {
     HipKernelEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelHandle dummyHandle;
+    MockHipdnnHipKernelContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
     auto knobIdOffset = builder.CreateString("global.benchmarking");
@@ -353,30 +356,30 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled());
+    EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestHipKernelEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenConfigInvalid)
 {
     HipKernelEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelHandle dummyHandle;
+    MockHipdnnHipKernelContext ctx;
     MockEngineConfig mockConfig;
 
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled());
+    EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestHipKernelEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenNoKnobs)
 {
     HipKernelEngine engine(1);
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelHandle dummyHandle;
+    MockHipdnnHipKernelContext ctx;
 
     flatbuffers::FlatBufferBuilder builder;
     auto engineConfig = hipdnn_data_sdk::data_objects::CreateEngineConfig(builder, 1, 0);
@@ -388,7 +391,7 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDefaultsBenchmarkingDisabled
 
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
-    EXPECT_FALSE(ctx.benchmarkingEnabled());
+    EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestHipKernelEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
@@ -413,8 +416,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelHandle dummyHandle;
+    MockHipdnnHipKernelContext ctx;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 
@@ -442,8 +445,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppl
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
-    HipdnnEnginePluginHandle dummyHandle;
-    MockHipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelHandle dummyHandle;
+    MockHipdnnHipKernelContext ctx;
     MockEngineConfig mockConfig;
     EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
 

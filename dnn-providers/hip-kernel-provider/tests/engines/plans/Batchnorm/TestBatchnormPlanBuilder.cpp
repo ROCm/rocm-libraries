@@ -2,21 +2,21 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <numeric>
 #include <unordered_set>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/MockNode.hpp>
 
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
-
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnHipKernelContext.hpp"
+#include "HipdnnHipKernelHandle.hpp"
+#include "HipdnnHipKernelSettings.hpp"
 #include "engines/plans/BatchnormPlanBuilder.hpp"
 
-#include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
+#include "mocks/MockHipdnnHipKernelContext.hpp"
 
 using namespace hip_kernel_plugin;
 using namespace hipdnn_test_sdk::utilities;
@@ -63,7 +63,8 @@ class TestBatchnormPlanBuilder : public ::testing::Test
 {
 protected:
     BatchnormPlanBuilder _planBuilder;
-    HipdnnEnginePluginHandle _dummyHandle;
+    HipdnnHipKernelHandle _dummyHandle;
+    HipdnnHipKernelSettings _dummyExecutionSettings;
 };
 
 TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsupportedNodeCount)
@@ -768,7 +769,8 @@ TEST_F(TestBatchnormPlanBuilder, GetWorkspaceSizeReturnsExpectedValue)
 {
     MockGraph mockGraph;
 
-    size_t workspaceSize = _planBuilder.getWorkspaceSize(_dummyHandle, mockGraph);
+    size_t workspaceSize
+        = _planBuilder.getMaxWorkspaceSize(_dummyHandle, mockGraph, _dummyExecutionSettings);
 
     EXPECT_EQ(workspaceSize, 0u);
 }
@@ -779,7 +781,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceNode)
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
@@ -792,7 +794,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceWithVaria
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
@@ -805,7 +807,7 @@ TEST_F(TestBatchnormPlanBuilder, DISABLED_BuildPlanSetsPlanForSupportedBackwardN
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
@@ -818,7 +820,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForFusedTwoNodeGraph)
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
@@ -831,7 +833,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForFusedThreeNodeGraph)
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx));
@@ -868,7 +870,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanThrowsForUnsupportedNodeType)
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -905,7 +907,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanThrowsForMalformedInferenceAttributes)
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -942,7 +944,7 @@ TEST_F(TestBatchnormPlanBuilder, DISABLED_BuildPlanThrowsForMalformedBackwardAtt
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -998,7 +1000,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGraphFir
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -1046,7 +1048,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanThrowsForMalformedTwoNodeFusedGraphSec
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
 
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -1124,7 +1126,7 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanThrowsForMalformedFusedGraphFirstNode)
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -1193,7 +1195,7 @@ TEST_F(TestBatchnormPlanBuilder, DISABLED_BuildPlanThrowsForMalformedFusedGraphS
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),
@@ -1262,7 +1264,7 @@ TEST_F(TestBatchnormPlanBuilder, DISABLED_BuildPlanThrowsForMalformedFusedGraphT
 
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
-    HipdnnEnginePluginExecutionContext ctx;
+    HipdnnHipKernelContext ctx;
     MockEngineConfig mockEngineConfig;
 
     EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, mockEngineConfig, ctx),

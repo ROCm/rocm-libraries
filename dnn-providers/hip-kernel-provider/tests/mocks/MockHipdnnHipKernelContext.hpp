@@ -3,20 +3,18 @@
 
 #pragma once
 
-#include <memory>
+#include "tests/mocks/MockPlan.hpp"
 
-#include "mocks/MockPlan.hpp"
+#include "HipdnnHipKernelContext.hpp"
 
-#include "HipdnnEnginePluginExecutionContext.hpp"
-
-struct MockHipdnnEnginePluginExecutionContext : public HipdnnEnginePluginExecutionContext
+struct MockHipdnnHipKernelContext : public HipdnnHipKernelContext
 {
-    MockHipdnnEnginePluginExecutionContext()
+    MockHipdnnHipKernelContext()
         : mockPlan(std::make_unique<hip_kernel_plugin::MockPlan>())
     {
     }
 
-    hip_kernel_plugin::IPlan& plan() const override
+    hipdnn_plugin_sdk::IPlan<HipdnnHipKernelHandle>& plan() const override
     {
         return *mockPlan;
     }
