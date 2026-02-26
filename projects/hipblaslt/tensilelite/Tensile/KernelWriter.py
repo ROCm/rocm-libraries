@@ -34,11 +34,11 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   DSLoadB64TrB8, DSLoadB64TrB4, DSLoadB96TrB6, DSLoadInstruction, DSLoadU16, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB96, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB192, FlatLoadB32, \
-  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
+  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, GlobalLoadB128, GlobalLoadB192, GlobalLoadB32, \
+  GlobalLoadB64, GlobalStoreB128, GlobalStoreB32, GlobalStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, SLShiftRightB32, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, \
-  Instruction
+  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 
@@ -1801,7 +1801,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # in case there are localWrite and globalread in same iteration
             # we need to make sure globalRead before localWrite
             if writeItems and not countGlobalRead(globalReadCode):
-              localWriteCodeCounts.pop(0)
+              if localWriteCodeCounts:
+                localWriteCodeCounts.pop(0)
               writeItem = writeItems.pop(0)
               iterCode.add(writeItem)
               self.states.scheduledGRInstCounts += countGlobalRead(writeItem) # PGR2 case GR is in localWriteCode
@@ -1817,7 +1818,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
               iterCode.add(writeItem)
         if mfmaIndex == self.states.lwEndMfmaIndex:
           while writeItems:
-            localWriteCodeCounts.pop(0)
+            if localWriteCodeCounts:
+              localWriteCodeCounts.pop(0)
             writeItem = writeItems.pop(0)
             # generate all remaining pre code before the first Store C
             iterCode.add(writeItem)
@@ -2803,53 +2805,102 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.vgprPool.checkIn(tP["gpr"]["subIterReg"])
           tP["gpr"]["subIterReg"] = None
 
-      # addresses
-      if not forceNoTileCode:
-        # Addresses A(MXSA)
+      if kernel["BufferLoad"]:
+        # BufferLoad: addresses first (sets up SRD), then final offsets (computes 32-bit offsets)
+        if not forceNoTileCode:
+          # Addresses A(MXSA)
+          if not tdmA:
+            module.addComment1("global read addresses: addresses a")
+            module.add(self.graAddresses(kernel, tensorParametersA))
+          if not tdmA and kernel["ProblemType"]["MXBlockA"]:
+            module.addComment1("global read addresses: addresses mxsa")
+            module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
+          # Addresses Metadata
+          if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+            module.addComment1("global read addresses: addresses metadata")
+            module.add(self.graAddresses(kernel, tPM))
+          # Addresses B(MXSB)
+          if not tdmB and kernel["ProblemType"]["MXBlockB"]:
+            module.addComment1("global read addresses: addresses mxsb")
+            module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
+          if not tdmB:
+            module.addComment1("global read addresses: addresses b")
+            module.add(self.graAddresses(kernel, tensorParametersB))
+
+        # workgroup SGPRs no longer needed
+        if not tdmA or prod(kernel["MIWaveGroup"]) < 2:
+          module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
+
+        # Final offsets A(MXSA)
         if not tdmA:
-          module.addComment1("global read addresses: addresses a")
-          module.add(self.graAddresses(kernel, tensorParametersA))
+          module.addComment1("global read addresses: final offsets a")
+          module.add(self.graFinalOffsets(kernel, tensorParametersA))
+          # releaseTensorTmpGprs(tensorParametersA)
         if not tdmA and kernel["ProblemType"]["MXBlockA"]:
-          module.addComment1("global read addresses: addresses mxsa")
-          module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
-        # Addresses Metadata
-        if not tdmMetadata and kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-          module.addComment1("global read addresses: addresses metadata")
-          module.add(self.graAddresses(kernel, tPM))
-        # Addresses B(MXSB)
+          module.addComment1("global read addresses: final offsets mxsa")
+          module.add(self.graFinalOffsets(kernel, tensorParametersA["MX"]))
+        if kernel["ProblemType"]["Sparse"]:
+          module.addComment1("global read addresses: final offsets metadata")
+          if kernel["DirectToVgprSparseMetadata"]:
+            module.add(self.graMetadataFinalOffsets(kernel, tPMRef))
+          else:
+            module.add(self.graFinalOffsets(kernel, tPM))
+        # Final offsets B(MXSB)
         if not tdmB and kernel["ProblemType"]["MXBlockB"]:
-          module.addComment1("global read addresses: addresses mxsb")
-          module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
+          module.addComment1("global read addresses: final offsets mxsb")
+          module.add(self.graFinalOffsets(kernel, tensorParametersB["MX"]))
         if not tdmB:
-          module.addComment1("global read addresses: addresses b")
-          module.add(self.graAddresses(kernel, tensorParametersB))
+          module.addComment1("global read addresses: final offsets b")
+          module.add(self.graFinalOffsets(kernel, tensorParametersB))
+          # releaseTensorTmpGprs(tensorParametersB)
+      else:
+        # Flat addressing: final offsets first (GLOBAL_OFFSET writes byte offset into addr VGPRs),
+        # then addresses (adds base pointer to get full 64-bit flat address)
+        if not tdmA or prod(kernel["MIWaveGroup"]) < 2:
+          module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
 
-      # workgroup SGPRs no longer needed
-      if not tdmA or prod(kernel["MIWaveGroup"]) < 2:
-        module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
+        # Final offsets A(MXSA)
+        if not tdmA:
+          module.addComment1("global read addresses: final offsets a")
+          module.add(self.graFinalOffsets(kernel, tensorParametersA))
+          # releaseTensorTmpGprs(tensorParametersA)
+        if not tdmA and kernel["ProblemType"]["MXBlockA"]:
+          module.addComment1("global read addresses: final offsets mxsa")
+          module.add(self.graFinalOffsets(kernel, tensorParametersA["MX"]))
+        if kernel["ProblemType"]["Sparse"]:
+          module.addComment1("global read addresses: final offsets metadata")
+          if kernel["DirectToVgprSparseMetadata"]:
+            module.add(self.graMetadataFinalOffsets(kernel, tPMRef))
+          else:
+            module.add(self.graFinalOffsets(kernel, tPM))
+        # Final offsets B(MXSB)
+        if not tdmB and kernel["ProblemType"]["MXBlockB"]:
+          module.addComment1("global read addresses: final offsets mxsb")
+          module.add(self.graFinalOffsets(kernel, tensorParametersB["MX"]))
+        if not tdmB:
+          module.addComment1("global read addresses: final offsets b")
+          module.add(self.graFinalOffsets(kernel, tensorParametersB))
+          # releaseTensorTmpGprs(tensorParametersB)
 
-      # Final offsets A(MXSA)
-      if not tdmA:
-        module.addComment1("global read addresses: final offsets a")
-        module.add(self.graFinalOffsets(kernel, tensorParametersA))
-        # releaseTensorTmpGprs(tensorParametersA)
-      if not tdmA and kernel["ProblemType"]["MXBlockA"]:
-        module.addComment1("global read addresses: final offsets mxsa")
-        module.add(self.graFinalOffsets(kernel, tensorParametersA["MX"]))
-      if not tdmMetadata and kernel["ProblemType"]["Sparse"]:
-        module.addComment1("global read addresses: final offsets metadata")
-        if kernel["DirectToVgprSparseMetadata"]:
-          module.add(self.graMetadataFinalOffsets(kernel, tPMRef))
-        else:
-          module.add(self.graFinalOffsets(kernel, tPM))
-      # Final offsets B(MXSB)
-      if not tdmB and kernel["ProblemType"]["MXBlockB"]:
-        module.addComment1("global read addresses: final offsets mxsb")
-        module.add(self.graFinalOffsets(kernel, tensorParametersB["MX"]))
-      if not tdmB:
-        module.addComment1("global read addresses: final offsets b")
-        module.add(self.graFinalOffsets(kernel, tensorParametersB))
-        # releaseTensorTmpGprs(tensorParametersB)
+        if not forceNoTileCode:
+          # Addresses A(MXSA)
+          if not tdmA:
+            module.addComment1("global read addresses: addresses a")
+            module.add(self.graAddresses(kernel, tensorParametersA))
+          if not tdmA and kernel["ProblemType"]["MXBlockA"]:
+            module.addComment1("global read addresses: addresses mxsa")
+            module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
+          # Addresses Metadata
+          if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+            module.addComment1("global read addresses: addresses metadata")
+            module.add(self.graAddresses(kernel, tPM))
+          # Addresses B(MXSB)
+          if not tdmB and kernel["ProblemType"]["MXBlockB"]:
+            module.addComment1("global read addresses: addresses mxsb")
+            module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
+          if not tdmB:
+            module.addComment1("global read addresses: addresses b")
+            module.add(self.graAddresses(kernel, tensorParametersB))
 
       self.dontAppendCode = False
       self.dontAppendCode = self.dontAppendCode or forceNoTileCode
@@ -6209,12 +6260,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # remove staggerU code for the following cases
     # - tailloopInNll (cannot support staggerU)
     # - StreamK + MX (not enough sgpr. gfx950 only for now)
-    self.states.staggerUCode = True
-    if self.states.tailloopInNll or \
-       (kernel["StreamK"] and \
+    # also disable for BufferLoad=0: stagger uses SRD increment which only exists in buffer mode
+    self.states.staggerUCode = not self.states.tailloopInNll and kernel["BufferLoad"]
+    if (kernel["StreamK"] and \
         (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) and \
         isgfx950) or kernel["UseSubtileImpl"]:
       self.states.staggerUCode = False
+    # remove staggerU code for tailloopInNll (cannot support staggerU)
+    
     self.states.tailloopInNllmaxUnit = 1
     if self.states.tailloopInNll:
       tluA = kernel["ProblemType"]["TLUA"]
@@ -6790,6 +6843,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     _flat_load_b128 = MemoryInstruction(FlatLoadB128, 1, 0, 0, 4)
     _flat_load_b64 = MemoryInstruction(FlatLoadB64,   1, 0, 0, 2)
     _flat_load_b32 = MemoryInstruction(FlatLoadB32,   1, 0, 0, 1)
+    _global_load_b192 = MemoryInstruction(GlobalLoadB192, 1, 0, 0, 6)
+    _global_load_b128 = MemoryInstruction(GlobalLoadB128, 1, 0, 0, 4)
+    _global_load_b64  = MemoryInstruction(GlobalLoadB64,  1, 0, 0, 2)
+    _global_load_b32  = MemoryInstruction(GlobalLoadB32,  1, 0, 0, 1)
 
     _buffer_load_b192 = MemoryInstruction(BufferLoadB192, 1, 0, 0, 6)
     _buffer_load_b128 = MemoryInstruction(BufferLoadB128, 1, 0, 0, 4)
@@ -6805,9 +6862,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     ########################################
     # Global Write
-    _flat_store_b128 = MemoryInstruction(FlatStoreB128, 1, 0, 0, 4)
-    _flat_store_b64  = MemoryInstruction(FlatStoreB64,  1, 0, 0, 2)
-    _flat_store_b32  = MemoryInstruction(FlatStoreB32,  1, 0, 0, 1)
+    _global_store_b128 = MemoryInstruction(GlobalStoreB128, 1, 0, 0, 4)
+    _global_store_b64  = MemoryInstruction(GlobalStoreB64,  1, 0, 0, 2)
+    _global_store_b32  = MemoryInstruction(GlobalStoreB32,  1, 0, 0, 1)
 
     ########################################
     # Available Memory Instructions per Architecture
@@ -6826,17 +6883,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       chosen_load_b16  = _buffer_load_d16_b16
       chosen_load_b8   = _buffer_load_d16_u8
     else:
-      #TODO: add flatl_load_b96
-      chosen_load_b192 = _flat_load_b192
-      chosen_load_b128 = _flat_load_b128
-      chosen_load_b64  = _flat_load_b64
-      chosen_load_b32  = _flat_load_b32
-      chosen_load_b16  = _flat_load_b32 # not supported
-      chosen_load_b8   = _flat_load_b32 # not supported
+      #TODO: add global_load_b96
+      chosen_load_b192 = _global_load_b192
+      chosen_load_b128 = _global_load_b128
+      chosen_load_b64  = _global_load_b64
+      chosen_load_b32  = _global_load_b32
+      chosen_load_b16  = _global_load_b32 # not supported
+      chosen_load_b8   = _global_load_b32 # not supported
 
-    chosen_store_b128 = _flat_store_b128
-    chosen_store_b64  = _flat_store_b64
-    chosen_store_b32  = _flat_store_b32
+    chosen_store_b128 = _global_store_b128
+    chosen_store_b64  = _global_store_b64
+    chosen_store_b32  = _global_store_b32
 
     self.memoryInstructions = {
           "GlobalRead" : [ chosen_load_b192, chosen_load_b128, chosen_load_b96, chosen_load_b64,

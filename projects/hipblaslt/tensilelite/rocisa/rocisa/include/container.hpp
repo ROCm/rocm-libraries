@@ -198,15 +198,33 @@ namespace rocisa
 
     struct GLOBALModifiers : public Container
     {
-        GLOBALModifiers(int offset = 0)
+        GLOBALModifiers(int        offset  = 0,
+                        bool       glc     = false,
+                        bool       slc     = false,
+                        bool       dlc     = false,
+                        CacheScope scope   = CacheScope::SCOPE_NONE,
+                        bool       lds     = false,
+                        bool       isStore = false)
             : Container()
             , offset(offset)
+            , glc(glc)
+            , slc(slc)
+            , dlc(dlc)
+            , scope(scope)
+            , lds(lds)
+            , isStore(isStore)
         {
         }
 
         GLOBALModifiers(const GLOBALModifiers& other)
             : Container()
             , offset(other.offset)
+            , glc(other.glc)
+            , slc(other.slc)
+            , dlc(other.dlc)
+            , scope(other.scope)
+            , lds(other.lds)
+            , isStore(other.isStore)
         {
         }
 
@@ -217,15 +235,43 @@ namespace rocisa
 
         std::string toString() const override
         {
+            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
+            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
             std::string kStr;
             if(offset != 0)
             {
                 kStr += " offset:" + std::to_string(offset);
             }
+            if(glc)
+            {
+                kStr += " " + getGlcBitName();
+            }
+            if(slc)
+            {
+                kStr += " " + getSlcBitName();
+            }
+            if(hasDLCModifier && dlc)
+            {
+                kStr += " dlc";
+            }
+            if(hasSCOPEModifier && scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
+            }
+            if(lds)
+            {
+                kStr += " lds";
+            }
             return kStr;
         }
 
-        int offset;
+        int        offset;
+        bool       glc;
+        bool       slc;
+        bool       dlc;
+        CacheScope scope;
+        bool       lds;
+        bool       isStore;
     };
 
     struct MUBUFModifiers : public Container

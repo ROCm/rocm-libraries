@@ -197,17 +197,18 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid1), src0=vgpr(tmpVgpr0), src1=vgpr(tid1), shiftHex=log2(kernel["VectorWidthB"]), comment="coordination 1 = vwB *(wave_id1 + tid1)"))
 
             # coord 1 : offset part
-            packedC1 = kernel["PackedC1IndicesX"]
-            strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
-            strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
-            module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
-            module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
-                module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
-            if writer.vgprs.coutRowPtrBias != -1:
-                index = packedC1[0] - 1
-                strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
-                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(lsuTid1), src1=sgpr(strideW1), comment=" offset 1"))
+            if kernel["BufferStore"]:
+                packedC1 = kernel["PackedC1IndicesX"]
+                strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
+                strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
+                module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
+                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
+                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
+                if writer.vgprs.coutRowPtrBias != -1:
+                    index = packedC1[0] - 1
+                    strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
+                    module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(lsuTid1), src1=sgpr(strideW1), comment=" offset 1"))
 
             # coord 0 : wave part
             module.add(vectorStaticRemainder(dummy, tmpVgpr0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res, tmpSgprInfo))
@@ -323,17 +324,18 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid1), src0=vgpr(tmpVgpr0), src1=vgpr(tid1), shiftHex=log2(kernel["VectorWidthB"]), comment="coordination 1 = vwB *(wave_id1 + tid1)"))
 
             # coord 1 : offset part
-            packedC1 = kernel["PackedC1IndicesX"]
-            strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
-            strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
-            module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
-            module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
-            if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
-                module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
-            if writer.vgprs.coutRowPtrBias != -1:
-                index = packedC1[0] - 1
-                strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
-                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(lsuTid1), src1=sgpr(strideW1), comment=" offset 1"))
+            if kernel["BufferStore"]:
+                packedC1 = kernel["PackedC1IndicesX"]
+                strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
+                strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
+                module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(lsuTid1), src1=sgpr(strideC1), comment=" offset 1"))
+                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
+                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
+                if writer.vgprs.coutRowPtrBias != -1:
+                    index = packedC1[0] - 1
+                    strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
+                    module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(lsuTid1), src1=sgpr(strideW1), comment=" offset 1"))
 
             # coord 0 : wave part
             module.add(vectorStaticRemainder(dummy, tid0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res, tmpSgprInfo))

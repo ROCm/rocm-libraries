@@ -58,6 +58,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -106,6 +108,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -154,6 +158,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -202,6 +208,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -250,6 +258,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -324,6 +334,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -398,6 +410,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -472,6 +486,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - BufferLoad: [0, 1]
+        - BufferStore: [0, 1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

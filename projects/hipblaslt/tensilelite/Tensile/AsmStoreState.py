@@ -1064,6 +1064,8 @@ class StoreState:
         self.isReset = False
 
     def checkInTempVgprC(self):
+        if not hasattr(self, 'elementSumIdx'):
+            return # object was not fully initialized
         if self.kernelWriter.states.serializedStore is False:
             return # early exit; currently only serializedStore==True checks out C-tile from register pool
 

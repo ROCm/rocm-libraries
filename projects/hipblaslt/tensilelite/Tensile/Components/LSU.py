@@ -27,7 +27,7 @@ from rocisa.instruction import DSLoadB128, DSLoadB32, DSLoadB64, DSStoreB128, \
     VAddF32, VAddI32, VAddU32, VAndB32, VLShiftLeftAddU32, VMovB32, VMulLOU32, VAddF64
 from rocisa.functions import vectorStaticDivide
 from copy import deepcopy
-from ..Common import log2, ceilDivide
+from ..Common import log2, ceilDivide, DataDirection
 from ..Component import Component
 from ..KernelWriterModules import *
 from ..AsmStoreState import StoreState, VectorDataTypes
@@ -145,7 +145,6 @@ class LSUOn(LSU):
         acc2arch, arch2acc = accToArchMapper(kernel)
         accImOffset = accVgprImagNumOffset(kernel)
         complexMultiplier = 2 if kernel["ProblemType"]["DataType"].isComplex() else 1
-
         # prepare the data that is to be Reduction in this wave
         # the output LSUelementsArchIdx has all arch-indices.
         validOffset = self.splitOutputData(writer, kernel)
@@ -444,17 +443,19 @@ class LSUOn(LSU):
                 module.add(VAddU32(dst=vgpr(writer.vgprs.coord1InMT), src0=vgpr(tmpVgpr1), src1=vgpr(writer.vgprs.coord1InMT), comment="coord1InMT += LSU offset1"))
 
                 # this code is from CouputeStoreVgprs. coord 1 : offset part
-                packedC1 = kernel["PackedC1IndicesX"]
-                strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
-                strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
-                module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideC1), comment=" offset 1"))
-                module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideD1), comment=" offset 1"))
-                if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
-                        module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(writer.vgprs.coord1InMT), comment=" save offset 1 for E"))
-                if writer.vgprs.coutRowPtrBias != -1:
-                        index = packedC1[0] - 1
-                        strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
-                        module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideW1), comment=" offset 1"))
+                # cinRowPtr/coutRowPtrD are only allocated for BufferStore (SRD-based row offsets)
+                if kernel["BufferStore"]:
+                    packedC1 = kernel["PackedC1IndicesX"]
+                    strideC1 = "StrideC%s" % (writer.states.indexChars[packedC1[0]])
+                    strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
+                    module.add(VMulLOU32(dst=vgpr(writer.vgprs.cinRowPtr), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideC1), comment=" offset 1"))
+                    module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideD1), comment=" offset 1"))
+                    if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                            module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(writer.vgprs.coord1InMT), comment=" save offset 1 for E"))
+                    if writer.vgprs.coutRowPtrBias != -1:
+                            index = packedC1[0] - 1
+                            strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
+                            module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrBias), src0=vgpr(writer.vgprs.coord1InMT), src1=sgpr(strideW1), comment=" offset 1"))
             else:
                 module.addComment0("valid offset coord1 is zero.")
 
@@ -474,6 +475,11 @@ class LSUOn(LSU):
             writer.vgprs.addrScaleBVec     = -1
             writer.vgprs.addrScaleAlphaVec = -1
         else:
+            writer.vgprs.addrE             = -1
+            writer.vgprs.addrBias          = -1
+            writer.vgprs.addrScaleAVec     = -1
+            writer.vgprs.addrScaleBVec     = -1
+            writer.vgprs.addrScaleAlphaVec = -1
             writer.vgprs.addrD = writer.vgprPool.checkOut(2)
             module.add(VMovB32(
                     dst=vgpr(writer.vgprs.addrD+0), \

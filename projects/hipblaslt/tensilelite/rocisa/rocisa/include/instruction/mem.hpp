@@ -1495,6 +1495,138 @@ namespace rocisa
         }
     };
 
+    struct GlobalLoadD16HIB16 : public GLOBALLoadInstruction
+    {
+        GlobalLoadD16HIB16(const std::shared_ptr<RegisterContainer>& dst,
+                           const std::shared_ptr<RegisterContainer>& vaddr,
+                           const std::shared_ptr<RegisterContainer>& saddr,
+                           std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                           const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_D16_HI_B16, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadD16HIB16(const GlobalLoadD16HIB16& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadD16HIB16>(*this);
+        }
+    };
+
+    struct GlobalLoadD16B16 : public GLOBALLoadInstruction
+    {
+        GlobalLoadD16B16(const std::shared_ptr<RegisterContainer>& dst,
+                         const std::shared_ptr<RegisterContainer>& vaddr,
+                         const std::shared_ptr<RegisterContainer>& saddr,
+                         std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                         const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_D16_B16, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadD16B16(const GlobalLoadD16B16& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadD16B16>(*this);
+        }
+    };
+
+    struct GlobalLoadB32 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB32(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                      const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B32, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB32(const GlobalLoadB32& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB32>(*this);
+        }
+    };
+
+    struct GlobalLoadB64 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB64(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                      const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B64, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB64(const GlobalLoadB64& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB64>(*this);
+        }
+    };
+
+    struct GlobalLoadB128 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB128(const std::shared_ptr<RegisterContainer>& dst,
+                       const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B128, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB128(const GlobalLoadB128& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB128>(*this);
+        }
+    };
+
+    struct GlobalLoadB192 : public GLOBALLoadInstruction
+    {
+        GlobalLoadB192(const std::shared_ptr<RegisterContainer>& dst,
+                       const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALLoadInstruction(InstType::INST_B192, dst, vaddr, saddr, modifier, comment)
+        {
+        }
+
+        GlobalLoadB192(const GlobalLoadB192& other)
+            : GLOBALLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalLoadB192>(*this);
+        }
+    };
+
     struct BufferStoreB8 : public MUBUFStoreInstruction
     {
         BufferStoreB8(const std::shared_ptr<RegisterContainer>& src,
@@ -1971,6 +2103,166 @@ namespace rocisa
 
     private:
         std::shared_ptr<RegisterContainer> tmp;
+    };
+
+    struct GLOBALStoreInstruction : public GlobalWriteInstruction
+    {
+        std::shared_ptr<Container>     vaddr;
+        std::shared_ptr<Container>     saddr;
+        std::optional<GLOBALModifiers> modifier;
+
+        GLOBALStoreInstruction(InstType                          instType,
+                               const std::shared_ptr<Container>& vaddr,
+                               const std::shared_ptr<Container>& srcData,
+                               const std::shared_ptr<Container>& saddr,
+                               std::optional<GLOBALModifiers>    modifier = std::nullopt,
+                               const std::string&                comment  = "")
+            : GlobalWriteInstruction(instType, srcData, comment)
+            , vaddr(vaddr)
+            , saddr(saddr)
+            , modifier(modifier)
+        {
+            instStr = "global_store_";
+        }
+
+        GLOBALStoreInstruction(const GLOBALStoreInstruction& other)
+            : GlobalWriteInstruction(other)
+            , vaddr(other.vaddr ? other.vaddr->clone() : nullptr)
+            , saddr(other.saddr ? other.saddr->clone() : nullptr)
+            , modifier(other.modifier)
+        {
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {vaddr, srcData, saddr};
+        }
+
+        virtual std::string getArgStr() const
+        {
+            return vaddr->toString() + ", " + srcData->toString() + ", " + saddr->toString();
+        }
+
+        std::string toString() const override
+        {
+            auto        newInstStr = preStr();
+            std::string kStr       = newInstStr + " " + getArgStr();
+            if(modifier)
+            {
+                kStr += modifier->toString();
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
+    struct GlobalStoreD16HIB16 : public GLOBALStoreInstruction
+    {
+        GlobalStoreD16HIB16(const std::shared_ptr<RegisterContainer>& vaddr,
+                            const std::shared_ptr<RegisterContainer>& src,
+                            const std::shared_ptr<RegisterContainer>& saddr,
+                            std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                            const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_D16_HI_B16, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreD16HIB16(const GlobalStoreD16HIB16& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreD16HIB16>(*this);
+        }
+    };
+
+    struct GlobalStoreD16B16 : public GLOBALStoreInstruction
+    {
+        GlobalStoreD16B16(const std::shared_ptr<RegisterContainer>& vaddr,
+                          const std::shared_ptr<RegisterContainer>& src,
+                          const std::shared_ptr<RegisterContainer>& saddr,
+                          std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                          const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_D16_B16, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreD16B16(const GlobalStoreD16B16& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreD16B16>(*this);
+        }
+    };
+
+    struct GlobalStoreB32 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB32(const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& src,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B32, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB32(const GlobalStoreB32& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB32>(*this);
+        }
+    };
+
+    struct GlobalStoreB64 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB64(const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& src,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                       const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B64, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB64(const GlobalStoreB64& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB64>(*this);
+        }
+    };
+
+    struct GlobalStoreB128 : public GLOBALStoreInstruction
+    {
+        GlobalStoreB128(const std::shared_ptr<RegisterContainer>& vaddr,
+                        const std::shared_ptr<RegisterContainer>& src,
+                        const std::shared_ptr<RegisterContainer>& saddr,
+                        std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                        const std::string&                        comment  = "")
+            : GLOBALStoreInstruction(InstType::INST_B128, vaddr, src, saddr, modifier, comment)
+        {
+        }
+
+        GlobalStoreB128(const GlobalStoreB128& other)
+            : GLOBALStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalStoreB128>(*this);
+        }
     };
 
     struct DSLoadU8 : public DSLoadInstruction
