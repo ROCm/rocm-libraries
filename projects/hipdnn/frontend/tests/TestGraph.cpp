@@ -1788,12 +1788,17 @@ TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenGraphCreateFails)
     ConvFpropAttributes convAttrs;
     convAttrs.set_x(x);
     convAttrs.set_w(w);
+    convAttrs.set_compute_data_type(DataType::FLOAT);
     convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
     convAttrs.set_post_padding(toVec(K_CONV_PADDING));
     convAttrs.set_stride(toVec(K_CONV_STRIDE));
     convAttrs.set_dilation(toVec(K_CONV_DILATION));
 
     graph.conv_fprop(x, w, convAttrs);
+
+    // Validate graph to propagate graph-level attributes (e.g. io_data_type)
+    // to node/tensor attributes, matching the real build() flow
+    ASSERT_TRUE(graph.validate().is_good());
 
     // Tensor/operation descriptors succeed, but graph descriptor creation fails
     EXPECT_CALL(*_mockBackend,

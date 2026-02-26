@@ -4,6 +4,7 @@
 #include "GraphDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
 #include "DataTypeConversion.hpp"
+#include "DescriptorAttributeUtils.hpp"
 #include "FlatbufferUtilities.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"

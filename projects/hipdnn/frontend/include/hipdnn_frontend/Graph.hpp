@@ -856,6 +856,12 @@ protected:
 
         assignUnsetTensorUids();
 
+        if(!_preferredEngineId.has_value())
+        {
+            _preferredEngineId
+                = hipdnn_frontend::engine_override::getPreferredIdFromOverrideConfig(*this);
+        }
+
         // Collect all tensor descriptors (keyed by UID for deduplication)
         std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
 
