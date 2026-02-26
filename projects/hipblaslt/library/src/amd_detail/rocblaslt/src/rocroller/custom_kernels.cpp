@@ -1,3 +1,6 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "custom_kernels.hpp"
 
 #include <hip/hip_ext.h>

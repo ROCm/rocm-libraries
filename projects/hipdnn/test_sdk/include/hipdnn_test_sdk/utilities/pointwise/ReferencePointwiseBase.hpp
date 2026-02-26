@@ -56,12 +56,13 @@ public:
                                  const hipdnn_data_sdk::utilities::TensorBase<InputType>& input,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
-                                 const ParamType lowerSlope)
+                                 const ParamType lowerSlope,
+                                 const ParamType swishBeta = ParamType{1})
     {
         static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
         executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(
-            operation, output, input, lowerClip, upperClip, lowerSlope);
+            operation, output, input, lowerClip, upperClip, lowerSlope, swishBeta);
     }
 
     // Binary operations
@@ -123,6 +124,15 @@ private:
         case hipdnn_data_sdk::data_objects::PointwiseMode::IDENTITY:
             policy.executeUnary(input, output, pointwise::Identity{});
             break;
+        case hipdnn_data_sdk::data_objects::PointwiseMode::GELU_FWD:
+            policy.executeUnary(input, output, pointwise::GeluForward<ComputeType>{});
+            break;
+        case hipdnn_data_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD:
+            policy.executeUnary(input, output, pointwise::GeluApproxTanhForward<ComputeType>{});
+            break;
+        case hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD:
+            policy.executeUnary(input, output, pointwise::SwishForward<ComputeType>{});
+            break;
         default:
             throw std::runtime_error("Unsupported unary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
@@ -138,7 +148,8 @@ private:
         const hipdnn_data_sdk::utilities::TensorBase<InputType>& input,
         const ParamType lowerClip,
         const ParamType upperClip,
-        const ParamType lowerSlope)
+        const ParamType lowerSlope,
+        const ParamType swishBeta)
     {
         DeviceExecutor policy;
 
@@ -151,6 +162,12 @@ private:
                 pointwise::ReluForward<ComputeType>{static_cast<ComputeType>(lowerClip),
                                                     static_cast<ComputeType>(upperClip),
                                                     static_cast<ComputeType>(lowerSlope)});
+            break;
+        case hipdnn_data_sdk::data_objects::PointwiseMode::SWISH_FWD:
+            policy.executeUnary(
+                input,
+                output,
+                pointwise::SwishForward<ComputeType>{static_cast<ComputeType>(swishBeta)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized pointwise operation: "

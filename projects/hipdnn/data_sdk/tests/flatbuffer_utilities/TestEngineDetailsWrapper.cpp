@@ -31,9 +31,15 @@ flatbuffers::FlatBufferBuilder
         auto knobIdStrOffset = builder.CreateString(knobIdStr);
         auto descOffset = builder.CreateString("Description for " + knobIdStr);
 
+        // Create a default int value (required field)
+        auto defaultValueOffset
+            = hipdnn_data_sdk::data_objects::CreateIntValue(builder, int64_t{0});
+
         hipdnn_data_sdk::data_objects::KnobBuilder knobBuilder(builder);
         knobBuilder.add_knob_id(knobIdStrOffset);
         knobBuilder.add_description(descOffset);
+        knobBuilder.add_default_value_type(hipdnn_data_sdk::data_objects::KnobValue::IntValue);
+        knobBuilder.add_default_value(defaultValueOffset.Union());
         knobs.push_back(knobBuilder.Finish());
     }
 
