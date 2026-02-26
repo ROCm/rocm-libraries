@@ -614,10 +614,8 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     std::string kernelName = genKernelName(gemm);
     auto        context    = Context::ForDefaultHipDevice(
         kernelName,
-        {{.assertWaitCntState = false,
-          .scaleSkipPermlane = gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3
-                                         && gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3
-          }});
+        {{.scaleSkipPermlane = gemm->kernelType.scaleTypeA.preSwizzleTile.size() == 3
+                                         && gemm->kernelType.scaleTypeB.preSwizzleTile.size() == 3}});
     auto commandKernel = std::make_shared<CommandKernel>(command, kernelName);
     commandKernel->setContext(context);
     commandKernel->setCommandParameters(params);

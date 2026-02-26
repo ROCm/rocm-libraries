@@ -84,6 +84,7 @@ bool isSwizzleSupported(hipDataType datatype)
     case HIP_R_16BF:
     case HIP_R_16F:
     case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_4F_E2M1_EXT:
         return true;
     default:
         return false;
@@ -98,6 +99,8 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
     case HIP_R_16BF:
         return HIPBLASLT_ORDER_COL16_4R8;
     case HIP_R_8F_E4M3_FNUZ:
+        return HIPBLASLT_ORDER_COL16_4R16;
+    case HIP_R_4F_E2M1_EXT:
         return HIPBLASLT_ORDER_COL16_4R16;
     default:
         throw std::runtime_error("unsupported datatype in orderForDatatype");
@@ -136,6 +139,12 @@ void calculateKforSwizzling(
     case HIP_R_8F_E4M3:
     case HIP_R_8F_E5M2:
         MiK  = 32;
+        MiKv = 8;
+        break;
+    case HIP_R_4F_E2M1_EXT:
+        // For fp4 viewed as uint8: matches shuffle_weight with layout=(16,16)
+        // BK=32 bytes, K=16 bytes, BK/K=2
+        MiK  = 16;  // K inner block = 16 bytes
         MiKv = 8;
         break;
     default:
@@ -250,6 +259,11 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
     case HIP_R_8F_E5M2:
         swizzle_tensor<hipblaslt_bf8>(
             dst.as<hipblaslt_bf8>(), src.as<hipblaslt_bf8>(), datatype, arg, b, m_n, k, ld, colMaj);
+        return;
+    case HIP_R_4F_E2M1_EXT:
+        // fp4: 2 elements per byte, so k_bytes = k/2, ld_bytes = ld/2
+        swizzle_tensor<uint8_t>(
+            dst.as<uint8_t>(), src.as<uint8_t>(), datatype, arg, b, m_n, k/2, ld/2, colMaj);
         return;
     default:
         hipblaslt_cerr << "Error type in swizzle_tensor_type()" << std::endl;
