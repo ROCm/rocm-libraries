@@ -580,7 +580,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                                                    keys.begin(),
                                                    expected.begin(),
                                                    scan_op,
-                                                   hipcub::Equality());
+                                                   test_utils::equal());
 
             // Scan operator: CastOp.
             hipcub::CastOp<acc_type> op{};
@@ -600,7 +600,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                                                                 input_iterator,
                                                                 d_output,
                                                                 static_cast<int>(input.size()),
-                                                                hipcub::Equality(),
+                                                                test_utils::equal(),
                                                                 stream));
             }
             else
@@ -612,7 +612,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                                                                  d_output,
                                                                  scan_op,
                                                                  static_cast<int>(input.size()),
-                                                                 hipcub::Equality(),
+                                                                 test_utils::equal(),
                                                                  stream));
             }
 
@@ -636,7 +636,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                                                                 input_iterator,
                                                                 d_output,
                                                                 static_cast<int>(input.size()),
-                                                                hipcub::Equality(),
+                                                                test_utils::equal(),
                                                                 stream));
             }
             else
@@ -648,7 +648,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                                                                  d_output,
                                                                  scan_op,
                                                                  static_cast<int>(input.size()),
-                                                                 hipcub::Equality(),
+                                                                 test_utils::equal(),
                                                                  stream));
             }
 
@@ -982,7 +982,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                    initial_value,
                                                    expected.begin(),
                                                    scan_op,
-                                                   hipcub::Equality());
+                                                   test_utils::equal());
 
             // Scan operator: CastOp.
             hipcub::CastOp<acc_type> op{};
@@ -1002,7 +1002,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                                 input_iterator,
                                                                 d_output,
                                                                 static_cast<int>(input.size()),
-                                                                hipcub::Equality(),
+                                                                test_utils::equal(),
                                                                 stream));
             }
             else
@@ -1015,7 +1015,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                                  scan_op,
                                                                  initial_value,
                                                                  static_cast<int>(input.size()),
-                                                                 hipcub::Equality(),
+                                                                 test_utils::equal(),
                                                                  stream));
             }
 
@@ -1039,7 +1039,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                                 input_iterator,
                                                                 d_output,
                                                                 static_cast<int>(input.size()),
-                                                                hipcub::Equality(),
+                                                                test_utils::equal(),
                                                                 stream));
             }
             else
@@ -1052,7 +1052,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                                  scan_op,
                                                                  initial_value,
                                                                  static_cast<int>(input.size()),
-                                                                 hipcub::Equality(),
+                                                                 test_utils::equal(),
                                                                  stream));
             }
 

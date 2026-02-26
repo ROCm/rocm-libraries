@@ -65,7 +65,7 @@ struct Inequality
 };
 
 // TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-template <class EqualityOp>
+template<class EqualityOp>
 struct InequalityWrapper
 {
     EqualityOp op;
