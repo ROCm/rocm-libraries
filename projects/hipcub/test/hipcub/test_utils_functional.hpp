@@ -132,6 +132,30 @@ struct divides
     }
 };
 
+struct maximum
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE
+    auto operator()(const T& a, const U& b) const
+    {
+        using result_type = ::std::common_type_t<T, U>;
+        result_type ra = a, rb = b;
+        return ra < rb ? rb : ra;
+    }
+};
+
+struct minimum
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE
+    auto operator()(const T& a, const U& b) const
+    {
+        using result_type = ::std::common_type_t<T, U>;
+        result_type ra = a, rb = b;
+        return ra < rb ? ra : rb;
+    }
+};
+
 // HALF
 template<>
 HIPCUB_HOST_DEVICE inline bool

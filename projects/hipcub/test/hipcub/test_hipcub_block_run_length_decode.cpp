@@ -113,11 +113,11 @@ void block_run_length_decode_kernel(const ItemT*   d_run_items,
         ItemT decoded_items[DecodedItemsPerThread];
 
         block_run_length_decode.RunLengthDecode(decoded_items, decoded_window_offset);
-        hipcub::StoreDirectBlocked(
-            global_thread_idx,
-            d_decoded_items + decoded_window_offset,
-            decoded_items,
-            hipcub::Min{}(total_decoded_size - decoded_window_offset, decoded_items_per_block));
+        hipcub::StoreDirectBlocked(global_thread_idx,
+                                   d_decoded_items + decoded_window_offset,
+                                   decoded_items,
+                                   test_utils::minimum{}(total_decoded_size - decoded_window_offset,
+                                                         decoded_items_per_block));
 
         decoded_window_offset += decoded_items_per_block;
     }

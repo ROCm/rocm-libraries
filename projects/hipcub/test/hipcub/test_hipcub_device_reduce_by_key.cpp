@@ -56,19 +56,19 @@ using Params = ::testing::Types<
     params<int, int, hipcub::Sum, 1, 1>,
     params<double, int, hipcub::Sum, 3, 5>,
     params<float, int, hipcub::Sum, 1, 10>,
-    params<unsigned long long, float, hipcub::Min, 1, 30>,
-    params<int, unsigned int, hipcub::Max, 20, 100, short>,
-    params<float, unsigned long long, hipcub::Max, 100, 400>,
+    params<unsigned long long, float, test_utils::minimum, 1, 30>,
+    params<int, unsigned int, test_utils::maximum, 20, 100, short>,
+    params<float, unsigned long long, test_utils::maximum, 100, 400>,
     params<unsigned int, unsigned int, hipcub::Sum, 200, 600>,
     params<double, int, hipcub::Sum, 100, 2000>,
     params<int, unsigned int, hipcub::Sum, 1000, 5000>,
     params<unsigned int, int, hipcub::Sum, 2048, 2048>,
-    params<unsigned int, double, hipcub::Min, 1000, 50000>,
+    params<unsigned int, double, test_utils::minimum, 1000, 50000>,
     params<long long, short, hipcub::Sum, 1000, 10000, long long>,
     params<unsigned long long, unsigned long long, hipcub::Sum, 100000, 100000>,
     // Sum for half and bfloat will result in values too big due to limited range.
-    params<test_utils::half, test_utils::half, hipcub::Max, 3, 100>,
-    params<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 20, 100>,
+    params<test_utils::half, test_utils::half, test_utils::maximum, 3, 100>,
+    params<test_utils::bfloat16, test_utils::bfloat16, test_utils::maximum, 20, 100>,
     params<int, int, hipcub::Sum, 1, 1, int, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceReduceByKey, Params);
