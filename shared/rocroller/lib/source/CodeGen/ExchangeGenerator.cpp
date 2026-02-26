@@ -132,7 +132,8 @@ namespace rocRoller
                     co_yield generateOp<Expression::BitFieldExtract>(
                         temp->element({index}),
                         vgpr,
-                        Expression::BitFieldExtract{{}, exchange.varType.dataType, index * 8, 8});
+                        Expression::BitFieldExtract{
+                            {}, exchange.varType.dataType, static_cast<uint32_t>(index * 8), 8});
                 vgpr = temp;
             }
 

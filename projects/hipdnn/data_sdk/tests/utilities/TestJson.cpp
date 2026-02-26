@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 #include <flatbuffers/flatbuffer_builder.h>
 #include <gtest/gtest.h>
 
@@ -158,3 +160,5 @@ TEST(TestJson, Enum)
                   "BatchnormInferenceAttributes",
                   "(for hipdnn_data_sdk::data_objects::NodeAttributes)");
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
