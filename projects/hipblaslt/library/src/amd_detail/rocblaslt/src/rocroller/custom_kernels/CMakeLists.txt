@@ -12,27 +12,14 @@ endif()
 
 file(MAKE_DIRECTORY "${CUSTOM_KERNEL_DST_DIR}")
 
-# Find ROCm tools
-find_program(ROCM_CLANG clang
-    PATHS
-        /opt/rocm/llvm/bin
-        /opt/rocm/bin
-    NO_DEFAULT_PATH
-)
-
-find_program(ROCM_LLD ld.lld
-    PATHS
-        /opt/rocm/llvm/bin
-        /opt/rocm/bin
-    NO_DEFAULT_PATH
+find_program(ROCM_LLD
+    NAMES ld.lld
+    PATH_SUFFIXES lib/llvm/bin llvm/bin bin
 )
 
 # Create output directory for built files
 set(BUILT_OBJ_DIR "${CMAKE_CURRENT_BINARY_DIR}/obj")
 file(MAKE_DIRECTORY "${BUILT_OBJ_DIR}")
-
-# GPU target architecture for custom kernels
-set(CUSTOM_KERNEL_GPU_ARCH "gfx950" CACHE STRING "GPU architecture for custom kernels" FORCE)
 
 # Assembly source files for custom kernels (explicit list)
 set(CUSTOM_KERNEL_ASM_SOURCES
@@ -74,7 +61,7 @@ set(CUSTOM_KERNEL_ASM_SOURCES
 )
 
 # Build combined .co from all assembly sources
-if(ROCM_CLANG AND ROCM_LLD)
+if(ROCM_LLD)
     message(STATUS "Building custom kernels from assembly sources")
     message(STATUS "  ROCm clang: ${ROCM_CLANG}")
     message(STATUS "  ROCm ld.lld: ${ROCM_LLD}")
@@ -88,10 +75,10 @@ if(ROCM_CLANG AND ROCM_LLD)
         
         add_custom_command(
             OUTPUT "${OBJ_OUTPUT}"
-            COMMAND ${ROCM_CLANG}
+            COMMAND ${CMAKE_CXX_COMPILER}
                 -x assembler
                 -target amdgcn-amd-amdhsa
-                "-mcpu=${CUSTOM_KERNEL_GPU_ARCH}"
+                "-mcpu=gfx950"
                 -c
                 "${ASM_FILE}"
                 -o "${OBJ_OUTPUT}"
@@ -131,11 +118,8 @@ if(ROCM_CLANG AND ROCM_LLD)
     
     message(STATUS "  Combined output: ${COMBINED_CO_DST}")
 else()
-    if(NOT ROCM_CLANG)
-        message(WARNING "ROCm clang not found, cannot build custom kernels from assembly")
-    endif()
     if(NOT ROCM_LLD)
-        message(WARNING "ROCm ld.lld not found, cannot build custom kernels from assembly")
+        message(FATAL_ERROR "ROCm ld.lld not found, cannot build custom kernels from assembly")
     endif()
 endif()
 
