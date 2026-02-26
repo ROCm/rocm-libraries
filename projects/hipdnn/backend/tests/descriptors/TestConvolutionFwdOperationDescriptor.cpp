@@ -609,6 +609,132 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeUnsupported)
 }
 
 // =============================================================================
+// GetAttribute Query Mode Tests
+// =============================================================================
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeTensorXQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeTensorWQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeConvModeQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributePrePaddingQueryReturnsSize)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 2);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributePrePaddingQueryThenRetrieve)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    // Query: get the element count
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, 2);
+
+    // Retrieve: use the queried count to allocate and fetch
+    std::vector<int64_t> prePadding(static_cast<size_t>(elementCount));
+    int64_t retrievedCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
+                                       HIPDNN_TYPE_INT64,
+                                       elementCount,
+                                       &retrievedCount,
+                                       prePadding.data()));
+    ASSERT_EQ(retrievedCount, 2);
+    EXPECT_EQ(prePadding, toVec(K_CONV_PADDING));
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  0,
+                                                  nullptr,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeConvModeQueryFailsNullElementCount)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(
+            HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 0, nullptr, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+// =============================================================================
 // Accessor Tests
 // =============================================================================
 

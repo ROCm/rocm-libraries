@@ -16,14 +16,6 @@ inline Error createConvFpropOperation(
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
-    // Ensure tensor descriptors exist for X, W, Y
-    auto [errX, xUid] = createOrFindTensorDesc(tensorDescs, attributes.get_x());
-    HIPDNN_CHECK_ERROR(errX);
-    auto [errW, wUid] = createOrFindTensorDesc(tensorDescs, attributes.get_w());
-    HIPDNN_CHECK_ERROR(errW);
-    auto [errY, yUid] = createOrFindTensorDesc(tensorDescs, attributes.get_y());
-    HIPDNN_CHECK_ERROR(errY);
-
     // Create operation descriptor
     ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
     if(!opDesc.valid())
@@ -32,13 +24,22 @@ inline Error createConvFpropOperation(
                 "Failed to create convolution forward operation descriptor"};
     }
 
-    // Set tensor references
-    HIPDNN_CHECK_ERROR(setDescriptorAttrTensorRef(
-        opDesc.get(), HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, xUid, tensorDescs, "conv X"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrTensorRef(
-        opDesc.get(), HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, wUid, tensorDescs, "conv W"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrTensorRef(
-        opDesc.get(), HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, yUid, tensorDescs, "conv Y"));
+    // Create tensor descriptors (if needed) and set them on the operation
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                             attributes.get_x(),
+                                             tensorDescs,
+                                             "conv X"));
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                                             attributes.get_w(),
+                                             tensorDescs,
+                                             "conv W"));
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
+                                             attributes.get_y(),
+                                             tensorDescs,
+                                             "conv Y"));
 
     // Set convolution parameters
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),

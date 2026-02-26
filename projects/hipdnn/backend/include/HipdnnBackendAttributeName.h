@@ -317,13 +317,13 @@ typedef enum
      */
 
     /** @brief Weight tensor for forward convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W = 1403,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W = 1400,
 
     /** @brief Input tensor for forward convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X = 1404,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X = 1401,
 
     /** @brief Output tensor for forward convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y = 1405,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y = 1402,
 
     /** @} */
 

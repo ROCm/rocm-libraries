@@ -138,104 +138,86 @@ inline Error finalizeDescriptor(hipdnnBackendDescriptor_t desc, const std::strin
 }
 
 // Creates a backend tensor descriptor for the given TensorAttributes if one
-// does not already exist in the map (keyed by UID). Returns the tensor UID.
-inline std::pair<Error, int64_t>
+// does not already exist in the map (keyed by UID).
+inline Error
     createOrFindTensorDesc(std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
                            const std::shared_ptr<graph::TensorAttributes>& tensor)
 {
     auto uid = tensor->get_uid();
     if(tensorDescs.find(uid) != tensorDescs.end())
     {
-        return {{}, uid};
+        return {};
     }
 
     ScopedHipdnnBackendDescriptor desc(HIPDNN_BACKEND_TENSOR_DESCRIPTOR);
     if(!desc.valid())
     {
-        return {Error(ErrorCode::HIPDNN_BACKEND_ERROR,
-                      "Failed to create tensor descriptor for uid " + std::to_string(uid)),
-                uid};
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to create tensor descriptor for uid " + std::to_string(uid)};
     }
 
-    auto err = setDescriptorAttrScalar(desc.get(),
-                                       HIPDNN_ATTR_TENSOR_UNIQUE_ID,
-                                       HIPDNN_TYPE_INT64,
-                                       uid,
-                                       "tensor UID " + std::to_string(uid));
-    if(err.is_bad())
-    {
-        return {std::move(err), uid};
-    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                               HIPDNN_ATTR_TENSOR_UNIQUE_ID,
+                                               HIPDNN_TYPE_INT64,
+                                               uid,
+                                               "tensor UID " + std::to_string(uid)));
 
     auto& name = tensor->get_name();
     if(!name.empty())
     {
-        err = setDescriptorAttrString(desc.get(), HIPDNN_ATTR_TENSOR_NAME_EXT, name, "tensor name");
-        if(err.is_bad())
-        {
-            return {std::move(err), uid};
-        }
+        HIPDNN_CHECK_ERROR(
+            setDescriptorAttrString(desc.get(), HIPDNN_ATTR_TENSOR_NAME_EXT, name, "tensor name"));
     }
 
-    err = setDescriptorAttrDataType(
-        desc.get(), HIPDNN_ATTR_TENSOR_DATA_TYPE, tensor->get_data_type(), "tensor data type");
-    if(err.is_bad())
-    {
-        return {std::move(err), uid};
-    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(
+        desc.get(), HIPDNN_ATTR_TENSOR_DATA_TYPE, tensor->get_data_type(), "tensor data type"));
 
-    err = setDescriptorAttrVec(desc.get(),
-                               HIPDNN_ATTR_TENSOR_DIMENSIONS,
-                               HIPDNN_TYPE_INT64,
-                               tensor->get_dim(),
-                               "tensor dimensions");
-    if(err.is_bad())
-    {
-        return {std::move(err), uid};
-    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(desc.get(),
+                                            HIPDNN_ATTR_TENSOR_DIMENSIONS,
+                                            HIPDNN_TYPE_INT64,
+                                            tensor->get_dim(),
+                                            "tensor dimensions"));
 
-    err = setDescriptorAttrVec(desc.get(),
-                               HIPDNN_ATTR_TENSOR_STRIDES,
-                               HIPDNN_TYPE_INT64,
-                               tensor->get_stride(),
-                               "tensor strides");
-    if(err.is_bad())
-    {
-        return {std::move(err), uid};
-    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(desc.get(),
+                                            HIPDNN_ATTR_TENSOR_STRIDES,
+                                            HIPDNN_TYPE_INT64,
+                                            tensor->get_stride(),
+                                            "tensor strides"));
 
     bool isVirtual = tensor->get_is_virtual();
-    err = setDescriptorAttrScalar(desc.get(),
-                                  HIPDNN_ATTR_TENSOR_IS_VIRTUAL,
-                                  HIPDNN_TYPE_BOOLEAN,
-                                  isVirtual,
-                                  "tensor is_virtual");
-    if(err.is_bad())
-    {
-        return {std::move(err), uid};
-    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                               HIPDNN_ATTR_TENSOR_IS_VIRTUAL,
+                                               HIPDNN_TYPE_BOOLEAN,
+                                               isVirtual,
+                                               "tensor is_virtual"));
 
     if(tensor->get_pass_by_value())
     {
-        err = std::visit(
+        HIPDNN_CHECK_ERROR(std::visit(
             [&](auto&& arg) -> Error {
                 return setDescriptorAttrTensorValue(desc.get(), arg, "tensor value");
             },
-            tensor->get_value_variant());
-        if(err.is_bad())
-        {
-            return {std::move(err), uid};
-        }
+            tensor->get_value_variant()));
     }
 
-    err = finalizeDescriptor(desc.get(), "tensor descriptor");
-    if(err.is_bad())
-    {
-        return {std::move(err), uid};
-    }
+    HIPDNN_CHECK_ERROR(finalizeDescriptor(desc.get(), "tensor descriptor"));
 
     tensorDescs.emplace(uid, std::move(desc));
-    return {{}, uid};
+    return {};
+}
+
+// Creates a tensor descriptor (if needed) and sets it as a tensor reference
+// attribute on the given operation descriptor. Combines createOrFindTensorDesc
+// + setDescriptorAttrTensorRef in a single call.
+inline Error
+    ensureAndSetTensorRef(hipdnnBackendDescriptor_t desc,
+                          hipdnnBackendAttributeName_t attrName,
+                          const std::shared_ptr<graph::TensorAttributes>& tensor,
+                          std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
+                          const std::string& errorContext)
+{
+    HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, tensor));
+    return setDescriptorAttrTensorRef(desc, attrName, tensor->get_uid(), tensorDescs, errorContext);
 }
 
 } // namespace hipdnn_frontend::detail

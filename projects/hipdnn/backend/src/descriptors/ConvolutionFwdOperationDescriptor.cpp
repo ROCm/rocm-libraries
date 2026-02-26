@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "ConvolutionFwdOperationDescriptor.hpp"
-#include "DataTypeConversion.hpp"
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
@@ -115,13 +114,10 @@ void ConvolutionFwdOperationDescriptor::setTensorDesc(hipdnnBackendAttributeName
                                                       int64_t elementCount,
                                                       const void* arrayOfElements)
 {
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "ConvolutionFwdOperationDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "ConvolutionFwdOperationDescriptor::setAttribute(): attributeType is not "
-                   "BACKEND_DESCRIPTOR");
+    checkSetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                 attributeType,
+                 arrayOfElements,
+                 "ConvolutionFwdOperationDescriptor::setAttribute()");
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    "ConvolutionFwdOperationDescriptor::setAttribute(): elementCount is not 1");
@@ -163,12 +159,10 @@ void ConvolutionFwdOperationDescriptor::setConvMode(hipdnnBackendAttributeType_t
                                                     int64_t elementCount,
                                                     const void* arrayOfElements)
 {
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "ConvolutionFwdOperationDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "ConvolutionFwdOperationDescriptor::setAttribute(): attributeType mismatch");
+    checkSetArgs(HIPDNN_TYPE_INT64,
+                 attributeType,
+                 arrayOfElements,
+                 "ConvolutionFwdOperationDescriptor::setAttribute()");
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    "ConvolutionFwdOperationDescriptor::setAttribute(): elementCount is not 1");
@@ -259,13 +253,19 @@ void ConvolutionFwdOperationDescriptor::getTensorDesc(hipdnnBackendAttributeName
                                                       int64_t* elementCount,
                                                       void* arrayOfElements) const
 {
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "ConvolutionFwdOperationDescriptor::getAttribute(): arrayOfElements is null");
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "ConvolutionFwdOperationDescriptor::getAttribute(): attributeType is not "
-                   "BACKEND_DESCRIPTOR");
+    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                 attributeType,
+                 "ConvolutionFwdOperationDescriptor::getAttribute()");
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "ConvolutionFwdOperationDescriptor::getAttribute(): elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    "ConvolutionFwdOperationDescriptor::getAttribute(): requestedElementCount < 1");
@@ -302,12 +302,18 @@ void ConvolutionFwdOperationDescriptor::getConvMode(hipdnnBackendAttributeType_t
                                                     int64_t* elementCount,
                                                     void* arrayOfElements) const
 {
-    THROW_IF_NULL(arrayOfElements,
-                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                  "ConvolutionFwdOperationDescriptor::getAttribute(): arrayOfElements is null");
-    THROW_IF_FALSE(attributeType == HIPDNN_TYPE_INT64,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "ConvolutionFwdOperationDescriptor::getAttribute(): attributeType mismatch");
+    checkGetArgs(
+        HIPDNN_TYPE_INT64, attributeType, "ConvolutionFwdOperationDescriptor::getAttribute()");
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      "ConvolutionFwdOperationDescriptor::getAttribute(): elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    "ConvolutionFwdOperationDescriptor::getAttribute(): requestedElementCount < 1");

@@ -58,6 +58,7 @@ public:
 
     // Creates backend operation descriptor(s) for this node using the C-API.
     // Tensor descriptors are deduplicated by UID in tensorDescs.
+    // TODO: Make pure virtual once pack_node / flatbuffers serialization path is removed.
     // NOLINTNEXTLINE(readability-identifier-naming)
     virtual Error create_operation(
         [[maybe_unused]] std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>&

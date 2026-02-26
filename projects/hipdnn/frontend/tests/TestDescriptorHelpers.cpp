@@ -137,9 +137,8 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescCreatesNewDescriptor)
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good());
-    EXPECT_EQ(uid, K_DEFAULT_TENSOR_UID);
     EXPECT_EQ(tensorDescs.size(), 1u);
     EXPECT_TRUE(tensorDescs.find(K_DEFAULT_TENSOR_UID) != tensorDescs.end());
 }
@@ -157,14 +156,13 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescDeduplicatesByUid)
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
     // First call creates the descriptor
-    auto [err1, uid1] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err1 = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err1.is_good());
     EXPECT_EQ(tensorDescs.size(), 1u);
 
     // Second call with same UID reuses existing -- no additional mock calls expected
-    auto [err2, uid2] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err2 = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err2.is_good());
-    EXPECT_EQ(uid2, K_DEFAULT_TENSOR_UID);
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
 
@@ -177,7 +175,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnCreateError)
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -241,7 +239,7 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefSucceeds)
     // Create a tensor desc map with an entry
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    auto [ensureErr, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto ensureErr = createOrFindTensorDesc(tensorDescs, tensor);
     ASSERT_TRUE(ensureErr.is_good());
 
     // Expect the tensor ref to be set with BACKEND_DESCRIPTOR type
@@ -252,8 +250,11 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefSucceeds)
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrTensorRef(
-        desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, uid, tensorDescs, "test tensor ref");
+    auto err = setDescriptorAttrTensorRef(desc,
+                                          HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                          K_DEFAULT_TENSOR_UID,
+                                          tensorDescs,
+                                          "test tensor ref");
     EXPECT_TRUE(err.is_good());
 }
 
@@ -295,7 +296,7 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefReturnsErrorOnFailure)
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    auto [ensureErr, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto ensureErr = createOrFindTensorDesc(tensorDescs, tensor);
     ASSERT_TRUE(ensureErr.is_good());
 
     // Override the mock to fail on the next setAttribute call
@@ -303,8 +304,11 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefReturnsErrorOnFailure)
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrTensorRef(
-        desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, uid, tensorDescs, "test tensor ref");
+    auto err = setDescriptorAttrTensorRef(desc,
+                                          HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                          K_DEFAULT_TENSOR_UID,
+                                          tensorDescs,
+                                          "test tensor ref");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
@@ -326,6 +330,108 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrTensorRefReturnsErrorOnMissingUid
     EXPECT_TRUE(err.err_msg.find("not found") != std::string::npos);
 }
 
+TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefCreatesAndSetsDescriptor)
+{
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    // Expect the tensor ref to be set on the operation descriptor
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            _, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    hipdnnBackendDescriptor_t desc = nullptr;
+
+    auto err = ensureAndSetTensorRef(
+        desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensor, tensorDescs, "conv X");
+    EXPECT_TRUE(err.is_good());
+    EXPECT_EQ(tensorDescs.size(), 1u);
+}
+
+TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefReusesExistingDescriptor)
+{
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+
+    // First call creates the descriptor
+    auto createErr = createOrFindTensorDesc(tensorDescs, tensor);
+    ASSERT_TRUE(createErr.is_good());
+    EXPECT_EQ(tensorDescs.size(), 1u);
+
+    // ensureAndSetTensorRef should reuse the existing descriptor (no additional create calls)
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            _, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto err = ensureAndSetTensorRef(
+        desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, tensor, tensorDescs, "conv W");
+    EXPECT_TRUE(err.is_good());
+    EXPECT_EQ(tensorDescs.size(), 1u);
+}
+
+TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefPropagatesCreateError)
+{
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    hipdnnBackendDescriptor_t desc = nullptr;
+
+    auto err = ensureAndSetTensorRef(
+        desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensor, tensorDescs, "conv X");
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_TRUE(tensorDescs.empty());
+}
+
+TEST_F(TestDescriptorHelpers, EnsureAndSetTensorRefPropagatesSetAttributeError)
+{
+    expectCreateAndDestroyDescriptor();
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID,
+                              "tensor_42",
+                              toVec(K_DEFAULT_TENSOR_DIMS),
+                              toVec(K_DEFAULT_TENSOR_STRIDES));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    // The setAttribute for the tensor ref itself will fail
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            _, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _))
+        .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
+
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    hipdnnBackendDescriptor_t desc = nullptr;
+
+    auto err = ensureAndSetTensorRef(
+        desc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensor, tensorDescs, "conv X");
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    // Tensor descriptor was created successfully before the ref-set failed
+    EXPECT_EQ(tensorDescs.size(), 1u);
+}
+
 TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnSetAttribute)
 {
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
@@ -340,7 +446,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnSetAttribute)
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(tensorDescs.empty());
@@ -359,7 +465,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnFinalize)
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(tensorDescs.empty());
@@ -388,9 +494,8 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValue)
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_value(K_TENSOR_VALUE);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(uid, K_DEFAULT_TENSOR_UID);
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
 
@@ -415,9 +520,8 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueDouble)
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_value(K_TENSOR_VALUE);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(uid, K_DEFAULT_TENSOR_UID);
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
 
@@ -443,9 +547,8 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueHalf)
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_value(tensorValue);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(uid, K_DEFAULT_TENSOR_UID);
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
 
@@ -471,9 +574,8 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueBfloat16)
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_value(tensorValue);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(uid, K_DEFAULT_TENSOR_UID);
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
 
@@ -498,9 +600,8 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueUint8)
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_value(K_TENSOR_VALUE);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(uid, K_DEFAULT_TENSOR_UID);
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
 
@@ -525,8 +626,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueInt32)
     auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_value(K_TENSOR_VALUE);
 
-    auto [err, uid] = createOrFindTensorDesc(tensorDescs, tensor);
+    auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(uid, K_DEFAULT_TENSOR_UID);
     EXPECT_EQ(tensorDescs.size(), 1u);
 }
