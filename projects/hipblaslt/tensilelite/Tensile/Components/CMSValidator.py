@@ -196,7 +196,7 @@ class Pack(ValidatorInstruction):
     def done_idx(self) -> SchedulePosition:
         return self.issued_at
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         issued_at = self.issued_at.vmfma_index
 
         if (
