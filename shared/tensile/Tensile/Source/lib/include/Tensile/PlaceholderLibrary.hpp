@@ -241,7 +241,6 @@ namespace Tensile
 
             for(auto& solution : solutions)
             {
-                // TODO(rocm): possibly redudant given codeObjectFilename assignment in loadPlaceholderLibrary
                 solution->codeObjectFilename = getCodeObjectFileName(hardware, *solution);
             }
 
