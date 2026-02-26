@@ -336,38 +336,6 @@ namespace rocRoller
                 }
             }
 
-            auto queuesToEmpty = inst.getWaitCount().queuesToEmpty();
-
-            if(queuesToEmpty.any())
-            {
-                for(int i = 0; i < static_cast<int>(GPUWaitQueueType::Count); i++)
-                {
-                    GPUWaitQueueType queueType = static_cast<GPUWaitQueueType>(i);
-                    GPUWaitQueue     queue     = fromWaitQueueType(queueType);
-
-                    if(queuesToEmpty[queueType])
-                    {
-                        if(!m_instructionQueues.at(queue).empty()
-                           && (m_typeInQueue.at(queue) == queueType || m_needsWaitZero.at(queue)))
-                        {
-                            rv.combine(WaitCount(architecture, queue, 0));
-                            rv.addComment(
-                                fmt::format("DEBUG: Wait for {} queue", toString(queueType)));
-                        }
-
-                        if(queueType == GPUWaitQueueType::SMemQueue)
-                        {
-                            rv.addComment(fmt::format(
-                                "SMemQueue {}: empty: {}, needsWaitZero: {}, typeInQueue: {}",
-                                queuesToEmpty[queueType],
-                                m_instructionQueues.at(queue).empty(),
-                                m_needsWaitZero.at(queue),
-                                toString(m_typeInQueue.at(queue))));
-                        }
-                    }
-                }
-            }
-
             return rv;
         }
 

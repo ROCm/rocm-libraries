@@ -43,10 +43,6 @@ namespace rocRoller
                   EnumBitset<GPUWaitQueueType> queuesToSync,
                   std::string const&           message = "");
 
-        WaitCount(GPUArchitecture const&       arch,
-                  EnumBitset<GPUWaitQueueType> queuesToEmpty,
-                  std::string const&           message = "");
-
         ~WaitCount() = default;
 
         bool operator==(WaitCount const& a) const
@@ -141,7 +137,11 @@ namespace rocRoller
          *
          * On machines without separate vscnt, the vscnt field should not be used.
          *
+         */
+        int m_loadcnt  = -1;
+        int m_storecnt = -1;
         int m_vscnt    = -1;
+        int m_dscnt    = -1;
         int m_kmcnt    = -1;
         int m_expcnt   = -1;
 
