@@ -367,7 +367,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
                 // and has memory access strides of CHW size once all the elements in a single
                 // sample have been processed, which may be large.
                 //
-                // `__syncthreads()` helps to coaclesce memory accesses as each work-item accesses
+                // `__syncthreads()` helps to coalesce memory accesses as each work-item accesses
                 // adjacent elements to its neighbours on the same loop iteration, leading to
                 // contiguous memory access across all the waves in a workgroup. By keeping all the
                 // waves on the same loop iteration it prevents waves on different loop iterations

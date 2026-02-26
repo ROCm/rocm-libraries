@@ -421,7 +421,7 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                     // and has memory access strides of CHW size once all the elements in a single
                     // sample have been processed, which may be large.
                     //
-                    // `__syncthreads()` helps to coaclesce memory accesses as each work-item
+                    // `__syncthreads()` helps to coalesce memory accesses as each work-item
                     // accesses adjacent elements to its neighbours on the same loop iteration,
                     // leading to contiguous memory access across all the waves in a workgroup. By
                     // keeping all the waves on the same loop iteration it prevents waves on
@@ -430,6 +430,10 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                     // This can be seen by profiling the kernel with rocprofv3 and comparing the
                     // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
                     // compute viewer and seeing the impact on occupancy.
+                    //
+                    // TODO: This call is within the scope of an `if` condition, but it is not clear
+                    // that this control flow is guanteed to be uniform across all threads in a
+                    // workgroup, risking deadlock. Further investigation is needed.
                     __syncthreads();
 
                     for(unsigned int j = 0; j < max_read; ++j)
