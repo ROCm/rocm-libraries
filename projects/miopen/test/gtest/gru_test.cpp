@@ -3116,9 +3116,9 @@ auto GenCases(bool gen_dropout)
     single.nodhx         = false;
     single.flatBatchFill = false;
     single.batchSeq      = defaultBS;
-    single.inputMode = 0;
-    single.biasMode  = 0;
-    single.dirMode   = 0;
+    single.inputMode     = 0;
+    single.biasMode      = 0;
+    single.dirMode       = 0;
     cases.push_back(single);
     return cases;
 }
