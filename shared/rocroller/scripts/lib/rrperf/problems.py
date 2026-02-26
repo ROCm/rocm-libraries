@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import pathlib
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import dataclass, field, fields
 from typing import Any, List, Optional
 
 import yaml
