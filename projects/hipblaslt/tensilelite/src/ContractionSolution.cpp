@@ -580,7 +580,7 @@ namespace TensileLite
         // This will avoid CI failures and execute this project in phased approach.       
         //if(problem.batchMode() == 1)
         //{
-            std::cout<<"autoGSUVal: "<<autoGsuVal<<", autoWGM: "<<autoWGM<<", autoWGMXCC: "<<autoWGMXCC<<"autoWGMXCCCHUNK: "<<autoWGMXCCCHUNK<<"\n";
+            //std::cout<<"autoGSUVal: "<<autoGsuVal<<", autoWGM: "<<autoWGM<<", autoWGMXCC: "<<autoWGMXCC<<"autoWGMXCCCHUNK: "<<autoWGMXCCCHUNK<<"\n";
         /*    std::cout<<"Resetting the autoGsuVal, autoWGM, autoWGMXCC\n";
             gsu = autoGsuVal = 1;
             autoWGM = 1;
@@ -612,9 +612,9 @@ namespace TensileLite
         }
         else if(problemType.stridedBatched)
         {
-            if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel && problem.batchMode() != 1)
+            if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel)// && problem.batchMode() != 1)
             {
-                //std::cout << "Appending ws_d and ws_c as kernel argument "<<std::hex<<inputs.ws<<","<<std::hex<<inputs.ws<<"\n";
+                //std::cout << "StreamK Reduction is parallel: Appending ws_d and ws_c as kernel argument "<<std::hex<<inputs.ws<<","<<std::hex<<inputs.ws<<"\n";
                 args.template append<void const*>("ws_d",
                                                   (uint8_t*)inputs.ws + workspaceOffsetInByte);
                 args.template append<void const*>("ws_c",
@@ -654,7 +654,7 @@ namespace TensileLite
 
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
-        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0 && problem.batchMode() != 1)
+        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0) // && problem.batchMode() != 1)
         {
             // Assert hardware is not null
             // For now grouped gemm is not supported and passes nullptr
@@ -677,7 +677,7 @@ namespace TensileLite
         bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
-        if((gsuWSStride))// || skWSStride))// && problem.batchMode() != 1)
+        if(gsuWSStride || skWSStride)// && problem.batchMode() != 1)
         {
             //std::cout << "Inside gsuStride block\n";
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
@@ -746,7 +746,7 @@ namespace TensileLite
         }
         // Additional check for General Batched GEMM until GSU and StreamK are supported
         // in General Batched GEMM
-        if(sizeMapping.streamK != 0 && problem.batchMode() != 1)
+        if(sizeMapping.streamK != 0) // && problem.batchMode() != 1)
         {
             // SK doesn't care gsu
             if(gsu > 1)
@@ -1211,7 +1211,7 @@ namespace TensileLite
         // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
         {
-            std::cout<<"Returning the sizeMapping.globalsplitU value as autoGSU: "<<sizeMapping.globalSplitU<<"\n";
+            // std::cout<<"Returning the sizeMapping.globalsplitU value as autoGSU: "<<sizeMapping.globalSplitU<<"\n";
             return sizeMapping.globalSplitU;
         }
 
