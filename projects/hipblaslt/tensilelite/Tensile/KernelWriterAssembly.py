@@ -5282,7 +5282,7 @@ class KernelWriterAssembly(KernelWriter):
                          comment="Calculate the remaining dimension along I/J direction."))
         imod.add(SSubU32(dst=sgpr(sTmp0), src0=sgpr(strSize), src1=sgpr(sTmp0), \
                          comment="Calculate the remaining dimension along I/J direction."))
-        imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(sTmp0), src1=tP["bpeGR"], \
+        imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(sTmp0), src1=int(tP["bpeGR"]), \
                          comment="In bytes"))
         imod.add(SAndB32(dst=sgpr(sTmp1), src0=sgpr("SizeL"), src1=(kernel["DepthU"] - 1), \
                          comment="Calculate the remaining dimension along L direction."))
