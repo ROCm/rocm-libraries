@@ -26,13 +26,11 @@ setup_rocm_compilers_hash_file() {
     # if the ROCM_PATH changes, ie; for every mainline build.
     # This is because ROCM_PATH gets encoded into the clang/clang-offload-bundler binaries as part
     # of RPATH.
-    # The versions themselves contain the commit hash of the compiler repo at the time of building.
-    # Hence, this should be a viable alternative to using the binary checksum itself.
+    # Note: Since compiler version strings include the commit hash, they vary with each build of TheRock.
+    # Exclude the commit hash to prevent unnecessary cache invalidation.
+    # Omit hipcc and bitcode hashing for now; hipcc is unused, and bitcode hashing can be restored if needed
     CLANG_VERSION="$("${ROCM_PATH}/llvm/bin/clang" --version | head -n 1)"
     CLANG_OFFLOAD_BUNDLER_VERSION="$("${ROCM_PATH}/llvm/bin/clang-offload-bundler" --version | head -n 1)"
-    # Note: Removing the commit hash from the version string which will change on each build of TheRock.
-    # commenting out hipcc as it is not used as the default compiler
-    # and the hash value of the bitcode files too (TODO: Need to confirm if the bitcode hash is even requried)
     printf '%s: %s\n' 'clang version' "${CLANG_VERSION}" | sed 's/ (.*)//' | tee -a "$SCCACHE_EXTRAFILES"
     printf '%s: %s\n' 'clang-offload-bundler version' "${CLANG_OFFLOAD_BUNDLER_VERSION}" | sed 's/ (.*)//' | tee -a "$SCCACHE_EXTRAFILES"
     echo "sccache-wrapper: compilers hash file set up at ${SCCACHE_EXTRAFILES}"
