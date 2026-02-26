@@ -790,460 +790,473 @@ class KernelWriterAssembly(KernelWriter):
     # VGPR Macros
     ########################################
     module.addComment2("VGPR Assignments")
-    module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
-                           "serializedStore enabled" if self.states.serializedStore else ""))
-    module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
 
-    module.addComment0("ValuA/B   Xn=PLR buffer idx,  In=InnerUnroll idx")
-    # PLR index: from X0 to X<LoopIters-1> (at most) -> VGPRs will be duplicated LoopIters times (at most)
-    # eg, if LoopIters = 4, there would be at most 4*VGPRs
-    moduleVgprMacro = Module("VALU/G2L Vgpr Macro")
-    moduleVgprMacroValuA = Module("VALUA Vgpr Macro")
-    moduleVgprMacroValuB = Module("VALUB Vgpr Macro")
-    moduleVgprMacroValuAPack = Module("VALUA Pack Vgpr Macro")
-    moduleVgprMacroValuBPack = Module("VALUB Pack Vgpr Macro")
-    moduleVgprMacroValuM = Module("VALUMetadata Vgpr Macro")
-    moduleVgprMacroValuMPack = Module("VALUMetadata Pack Vgpr Macro")
-    moduleVgprMacroG2LA = Module("G2LA Vgpr Macro")
-    moduleVgprMacroG2LB = Module("G2LB Vgpr Macro")
-    module.add(RegSet("v", "vgprBase", self.states.startVgpr))
+    def macroAndSetImplClassic():
+      module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
+                             "serializedStore enabled" if self.states.serializedStore else ""))
+      module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
 
-    PLR = self.states.numVgprBuffer
-    numBi = PLR
+      module.addComment0("ValuA/B   Xn=PLR buffer idx,  In=InnerUnroll idx")
+      # PLR index: from X0 to X<LoopIters-1> (at most) -> VGPRs will be duplicated LoopIters times (at most)
+      # eg, if LoopIters = 4, there would be at most 4*VGPRs
+      moduleVgprMacro = Module("VALU/G2L Vgpr Macro")
+      moduleVgprMacroValuA = Module("VALUA Vgpr Macro")
+      moduleVgprMacroValuB = Module("VALUB Vgpr Macro")
+      moduleVgprMacroValuAPack = Module("VALUA Pack Vgpr Macro")
+      moduleVgprMacroValuBPack = Module("VALUB Pack Vgpr Macro")
+      moduleVgprMacroValuM = Module("VALUMetadata Vgpr Macro")
+      moduleVgprMacroValuMPack = Module("VALUMetadata Pack Vgpr Macro")
+      moduleVgprMacroG2LA = Module("G2LA Vgpr Macro")
+      moduleVgprMacroG2LB = Module("G2LB Vgpr Macro")
+      module.add(RegSet("v", "vgprBase", self.states.startVgpr))
 
-    ri = 0
-    if self.states.a.numVgprValu > 0: # Do not generate vgprValuA if numVgprValuA is 0
-      numBiFactor = numBi
-      if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
-        # DirectToVgpr case, we need LoopIters * 2 buffers
-        numBiFactor = kernel["LoopIters"] * 2
-      if self.states.lrvwTileA > 1:
-        moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
-        for bi in range(0,numBiFactor): # buffer indices
-          for iui in range(0, kernel["InnerUnroll"]):
-            moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
-            ri += self.states.a.numVgprValuPerBlock
-          if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not (kernel["UsePLRPack"] and self.states.numItersPLR):
-            ri = 0
-        ri = 0
-        if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
-          moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
-          for bi in range(0,numBiFactor): # buffer indices
-            for iui in range(0, kernel["InnerUnroll"]):
-              for data in range(0,kernel["MIInputPerThreadA"]):
-                moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuA_X0_I0_D0_PACK", ri))
-                ri += ceil(kernel["VectorWidthA"] * tPA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"]
-            if (kernel["UsePLRPack"] and self.states.numItersPLR):
-              ri = 0
-      else:
-        moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
-        for bi in range(0,numBiFactor): # buffer indices
-          for iui in range(0, kernel["InnerUnroll"]):
-            moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
-            ri += self.states.a.numVgprValuPerBlock
-        ri = 0
-        if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
-          moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
-          for data in range(1,int(self.states.bpr/tPA["bpeDS"])):
-            for bi in range(0,numBiFactor): # buffer indices
-              if bi % self.states.numVgprBufferPackA == 0:
-                ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * self.states.a.numVgprValuPerBlock
-              for iui in range(0, kernel["InnerUnroll"]):
-                moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuA_X0_I0_D0_PACK", ri))
-                ri += self.states.a.numVgprValuPerBlock
+      PLR = self.states.numVgprBuffer
+      numBi = PLR
 
-    if kernel["ProblemType"]["MXBlockA"]:
       ri = 0
-      if self.states.mxsa.numVgprValu > 0: # Do not generate vgprValuMXSA if numVgprValuA is 0
+      if self.states.a.numVgprValu > 0: # Do not generate vgprValuA if numVgprValuA is 0
         numBiFactor = numBi
         if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
           # DirectToVgpr case, we need LoopIters * 2 buffers
           numBiFactor = kernel["LoopIters"] * 2
-        if self.states.lrvwTileMXSA > 1:
-          moduleVgprMacro.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprBase", self.states.mxsa.startVgprValu - self.states.startVgpr))
+        if self.states.lrvwTileA > 1:
+          moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
             for iui in range(0, kernel["InnerUnroll"]):
-              moduleVgprMacroValuA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
-              ri += self.states.mxsa.numVgprValuPerBlock
-            if not kernel["UnrollMajorLDSA"]:
+              moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
+              ri += self.states.a.numVgprValuPerBlock
+            if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not (kernel["UsePLRPack"] and self.states.numItersPLR):
               ri = 0
           ri = 0
-          if not kernel["UnrollMajorLDSA"]:
-            moduleVgprMacro.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", "vgprBase", self.states.mxsa.startVgprValuPack - self.states.startVgpr))
+          if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+            moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
             for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
-                for data in range(0,kernel["MIInputPerThreadMXSA"]):
-                  moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuMXSA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuMXSA_X0_I0_D0_PACK", ri))
-                  ri += ceil(kernel["VectorWidthMXSA"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthMXSA"]
+                for data in range(0,kernel["MIInputPerThreadA"]):
+                  moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuA_X0_I0_D0_PACK", ri))
+                  ri += ceil(kernel["VectorWidthA"] * tPA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"]
+              if (kernel["UsePLRPack"] and self.states.numItersPLR):
+                ri = 0
         else:
-          moduleVgprMacro.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprBase", self.states.mxsa.startVgprValu - self.states.startVgpr))
+          moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
             for iui in range(0, kernel["InnerUnroll"]):
-              moduleVgprMacroValuA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
-              ri += self.states.mxsa.numVgprValuPerBlock
+              moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
+              ri += self.states.a.numVgprValuPerBlock
           ri = 0
-          if not kernel["UnrollMajorLDSA"]:
-            moduleVgprMacro.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", "vgprBase", self.states.mxsa.startVgprValuPack - self.states.startVgpr))
-            for data in range(1,int(self.states.bpr)):
+          if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+            moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
+            for data in range(1,int(self.states.bpr/tPA["bpeDS"])):
               for bi in range(0,numBiFactor): # buffer indices
                 if bi % self.states.numVgprBufferPackA == 0:
-                  ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * self.states.mxsa.numVgprValuPerBlock
+                  ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * self.states.a.numVgprValuPerBlock
                 for iui in range(0, kernel["InnerUnroll"]):
-                  moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuMXSA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuMXSA_X0_I0_D0_PACK", ri))
-                  ri += self.states.mxsa.numVgprValuPerBlock
+                  moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuA_X0_I0_D0_PACK", ri))
+                  ri += self.states.a.numVgprValuPerBlock
 
-    ri = 0
-    if self.states.b.numVgprValu > 0: # Do not generate vgprValuB if numVgprValuB is 0
-      numBiFactor = numBi
-      if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
-        # DirectToVgpr case, we need LoopIters * 2 buffers
-        numBiFactor = kernel["LoopIters"] * 2
-      if self.states.lrvwTileB > 1:
-        moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_BASE", "vgprBase", self.states.b.startVgprValu - self.states.startVgpr))
-        for bi in range(0,numBiFactor): # buffer indices
-          for iui in range(0, kernel["InnerUnroll"]):
-            moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
-            ri += self.states.b.numVgprValuPerBlock
-          if (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) and not (kernel["UsePLRPack"] and self.states.numItersPLR):
-            ri = 0
+      if kernel["ProblemType"]["MXBlockA"]:
         ri = 0
-        if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
-          moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
-          for bi in range(0,numBiFactor): # buffer indices
-            for iui in range(0, kernel["InnerUnroll"]):
-              for data in range(0,kernel["MIInputPerThreadB"]):
-                moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuB_X0_I0_D0_PACK", ri))
-                ri += ceil(kernel["VectorWidthB"] * tPB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"]
-            if (kernel["UsePLRPack"] and self.states.numItersPLR):
-              ri = 0
-      else:
-        moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_BASE", "vgprBase", self.states.b.startVgprValu - self.states.startVgpr))
-        for bi in range(0,numBiFactor): # buffer indices
-          for iui in range(0, kernel["InnerUnroll"]):
-            moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
-            ri += self.states.b.numVgprValuPerBlock
-        ri = 0
-        if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
-          moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
-          for data in range(1,int(self.states.bpr/tPB["bpeDS"])):
+        if self.states.mxsa.numVgprValu > 0: # Do not generate vgprValuMXSA if numVgprValuA is 0
+          numBiFactor = numBi
+          if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
+            # DirectToVgpr case, we need LoopIters * 2 buffers
+            numBiFactor = kernel["LoopIters"] * 2
+          if self.states.lrvwTileMXSA > 1:
+            moduleVgprMacro.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprBase", self.states.mxsa.startVgprValu - self.states.startVgpr))
             for bi in range(0,numBiFactor): # buffer indices
-              if bi % self.states.numVgprBufferPackB == 0:
-                ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * self.states.b.numVgprValuPerBlock
               for iui in range(0, kernel["InnerUnroll"]):
-                moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuB_X0_I0_D0_PACK", ri))
-                ri += self.states.b.numVgprValuPerBlock
+                moduleVgprMacroValuA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
+                ri += self.states.mxsa.numVgprValuPerBlock
+              if not kernel["UnrollMajorLDSA"]:
+                ri = 0
+            ri = 0
+            if not kernel["UnrollMajorLDSA"]:
+              moduleVgprMacro.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", "vgprBase", self.states.mxsa.startVgprValuPack - self.states.startVgpr))
+              for bi in range(0,numBiFactor): # buffer indices
+                for iui in range(0, kernel["InnerUnroll"]):
+                  for data in range(0,kernel["MIInputPerThreadMXSA"]):
+                    moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuMXSA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuMXSA_X0_I0_D0_PACK", ri))
+                    ri += ceil(kernel["VectorWidthMXSA"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthMXSA"]
+          else:
+            moduleVgprMacro.add(RegSet("v", "vgprValuMXSA_X0_I0_BASE", "vgprBase", self.states.mxsa.startVgprValu - self.states.startVgpr))
+            for bi in range(0,numBiFactor): # buffer indices
+              for iui in range(0, kernel["InnerUnroll"]):
+                moduleVgprMacroValuA.add(RegSet("v", "vgprValuMXSA_X%u_I%u"%(bi,iui), "vgprValuMXSA_X0_I0_BASE", ri))
+                ri += self.states.mxsa.numVgprValuPerBlock
+            ri = 0
+            if not kernel["UnrollMajorLDSA"]:
+              moduleVgprMacro.add(RegSet("v", "vgprValuMXSA_X0_I0_D0_PACK", "vgprBase", self.states.mxsa.startVgprValuPack - self.states.startVgpr))
+              for data in range(1,int(self.states.bpr)):
+                for bi in range(0,numBiFactor): # buffer indices
+                  if bi % self.states.numVgprBufferPackA == 0:
+                    ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * self.states.mxsa.numVgprValuPerBlock
+                  for iui in range(0, kernel["InnerUnroll"]):
+                    moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuMXSA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuMXSA_X0_I0_D0_PACK", ri))
+                    ri += self.states.mxsa.numVgprValuPerBlock
 
-    if kernel["ProblemType"]["MXBlockB"]:
       ri = 0
-      if self.states.mxsb.numVgprValu > 0: # Do not generate vgprValuMXSB if numVgprValuB is 0
+      if self.states.b.numVgprValu > 0: # Do not generate vgprValuB if numVgprValuB is 0
         numBiFactor = numBi
         if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
           # DirectToVgpr case, we need LoopIters * 2 buffers
           numBiFactor = kernel["LoopIters"] * 2
-        if self.states.lrvwTileMXSB > 1:
-          moduleVgprMacro.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprBase", self.states.mxsb.startVgprValu - self.states.startVgpr))
+        if self.states.lrvwTileB > 1:
+          moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_BASE", "vgprBase", self.states.b.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
             for iui in range(0, kernel["InnerUnroll"]):
-              moduleVgprMacroValuB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
-              ri += self.states.mxsb.numVgprValuPerBlock
-            if not kernel["UnrollMajorLDSB"]:
+              moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
+              ri += self.states.b.numVgprValuPerBlock
+            if (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) and not (kernel["UsePLRPack"] and self.states.numItersPLR):
               ri = 0
           ri = 0
-          if not kernel["UnrollMajorLDSB"]:
-            moduleVgprMacro.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", "vgprBase", self.states.mxsb.startVgprValuPack - self.states.startVgpr))
+          if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+            moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
             for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
-                for data in range(0,kernel["MIInputPerThreadMXSB"]):
-                  moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuMXSB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuMXSB_X0_I0_D0_PACK", ri))
-                  ri += ceil(kernel["VectorWidthMXSB"] / self.states.mxsbpr) * kernel["MIWaveTileB"] // kernel["VectorWidthMXSB"]
+                for data in range(0,kernel["MIInputPerThreadB"]):
+                  moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuB_X0_I0_D0_PACK", ri))
+                  ri += ceil(kernel["VectorWidthB"] * tPB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"]
+              if (kernel["UsePLRPack"] and self.states.numItersPLR):
+                ri = 0
         else:
-          moduleVgprMacro.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprBase", self.states.mxsb.startVgprValu - self.states.startVgpr))
+          moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_BASE", "vgprBase", self.states.b.startVgprValu - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
             for iui in range(0, kernel["InnerUnroll"]):
-              moduleVgprMacroValuB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
-              ri += self.states.mxsb.numVgprValuPerBlock
+              moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
+              ri += self.states.b.numVgprValuPerBlock
           ri = 0
-          if not kernel["UnrollMajorLDSB"]:
-            moduleVgprMacro.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", "vgprBase", self.states.mxsb.startVgprValuPack - self.states.startVgpr))
-            for data in range(1,int(self.states.mxsbpr)):
+          if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+            moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
+            for data in range(1,int(self.states.bpr/tPB["bpeDS"])):
               for bi in range(0,numBiFactor): # buffer indices
                 if bi % self.states.numVgprBufferPackB == 0:
-                  ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * self.states.mxsb.numVgprValuPerBlock
+                  ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * self.states.b.numVgprValuPerBlock
                 for iui in range(0, kernel["InnerUnroll"]):
-                  moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuMXSB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuMXSB_X0_I0_D0_PACK", ri))
-                  ri += self.states.mxsb.numVgprValuPerBlock
+                  moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuB_X0_I0_D0_PACK", ri))
+                  ri += self.states.b.numVgprValuPerBlock
 
-    # T reg definition for F32XEmu
-    self.macroAndSetF32XEmuTreg(kernel, tPA, tPB)
-
-    if kernel["ConvertAfterDS"]:
-      cvtTemp = max(self.states.a.startVgprValuCvtTemp, self.states.b.startVgprValuCvtTemp)
-      if (cvtTemp != -1):
-         moduleVgprMacro.add(RegSet("v", "vgprCvtTemp", "vgprBase", cvtTemp - self.states.startVgpr))
-
-    if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
-      moduleVgprMacro.add(RegSet("v", "vgprValuSum", "vgprBase", self.states.bias.startVgprValu - self.states.startVgpr))
-
-    if kernel["ProblemType"]["Sparse"]:
-      if kernel["DirectToVgprSparseMetadata"]:
-        moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
-        moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata", "vgprValuMetadata_X0_I0_BASE", 0))
-      else:
+      if kernel["ProblemType"]["MXBlockB"]:
         ri = 0
-        if self.states.m.numVgprValu > 0: # Do not generate vgprValu if numVgprValu is 0
-          if self.states.lrvwTileMetadata > 1:
-            moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
-            for bi in range(0,PLR): # buffer indices
+        if self.states.mxsb.numVgprValu > 0: # Do not generate vgprValuMXSB if numVgprValuB is 0
+          numBiFactor = numBi
+          if kernel["DirectToVgprB"] and (self.states.packDTVB or self.states.convDTVB):
+            # DirectToVgpr case, we need LoopIters * 2 buffers
+            numBiFactor = kernel["LoopIters"] * 2
+          if self.states.lrvwTileMXSB > 1:
+            moduleVgprMacro.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprBase", self.states.mxsb.startVgprValu - self.states.startVgpr))
+            for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
-                moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), "vgprValuMetadata_X0_I0_BASE", ri))
-                ri += self.states.m.numVgprValuPerBlock
-              if not kernel["UnrollMajorLDSMetadata"]:
+                moduleVgprMacroValuB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
+                ri += self.states.mxsb.numVgprValuPerBlock
+              if not kernel["UnrollMajorLDSB"]:
                 ri = 0
             ri = 0
-            if not kernel["UnrollMajorLDSMetadata"]:
-              miWaveTile = kernel["MIWaveTileB"] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTileA"]
-              moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_D_PACK", "vgprBase", self.states.m.startVgprValuPack - self.states.startVgpr))
-              for data in range(0,kernel["MIInputPerThreadMetadata"]):
-                for bi in range(0,PLR): # buffer indices
-                  for iui in range(0, kernel["InnerUnroll"]):
-                    moduleVgprMacroValuMPack.add(RegSet("v", "vgprValuMetadata_X%u_I%u_D%u"%(bi,iui,data), "vgprValuMetadata_X0_I0_D_PACK", ri))
-                    ri += ceil(kernel["VectorWidthMetadata"] * tPM["bpe"] / self.states.bpr) * miWaveTile // kernel["VectorWidthMetadata"]
+            if not kernel["UnrollMajorLDSB"]:
+              moduleVgprMacro.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", "vgprBase", self.states.mxsb.startVgprValuPack - self.states.startVgpr))
+              for bi in range(0,numBiFactor): # buffer indices
+                for iui in range(0, kernel["InnerUnroll"]):
+                  for data in range(0,kernel["MIInputPerThreadMXSB"]):
+                    moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuMXSB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuMXSB_X0_I0_D0_PACK", ri))
+                    ri += ceil(kernel["VectorWidthMXSB"] / self.states.mxsbpr) * kernel["MIWaveTileB"] // kernel["VectorWidthMXSB"]
           else:
-            moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
-            for bi in range(0,PLR): # buffer indices
+            moduleVgprMacro.add(RegSet("v", "vgprValuMXSB_X0_I0_BASE", "vgprBase", self.states.mxsb.startVgprValu - self.states.startVgpr))
+            for bi in range(0,numBiFactor): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
-                moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), "vgprValuMetadata_X0_I0_BASE", ri))
-                ri += self.states.m.numVgprValuPerBlock
+                moduleVgprMacroValuB.add(RegSet("v", "vgprValuMXSB_X%u_I%u"%(bi,iui), "vgprValuMXSB_X0_I0_BASE", ri))
+                ri += self.states.mxsb.numVgprValuPerBlock
+            ri = 0
+            if not kernel["UnrollMajorLDSB"]:
+              moduleVgprMacro.add(RegSet("v", "vgprValuMXSB_X0_I0_D0_PACK", "vgprBase", self.states.mxsb.startVgprValuPack - self.states.startVgpr))
+              for data in range(1,int(self.states.mxsbpr)):
+                for bi in range(0,numBiFactor): # buffer indices
+                  if bi % self.states.numVgprBufferPackB == 0:
+                    ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * self.states.mxsb.numVgprValuPerBlock
+                  for iui in range(0, kernel["InnerUnroll"]):
+                    moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuMXSB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuMXSB_X0_I0_D0_PACK", ri))
+                    ri += self.states.mxsb.numVgprValuPerBlock
 
-    if not kernel["LocalWriteUseSgprA"] and self.states.a.numVgprLocalWriteAddr > 0:
-      module.add(RegSet("v", "vgprLocalWriteAddrA", \
-          self.states.a.startVgprLocalWriteAddr))
-      if self.states.a.numVgprLocalWriteAddr > 1:
-        module.add(RegSet("v", "vgprLocalWriteAddrOverhangA", \
-            self.states.a.startVgprLocalWriteAddr+1))
-    if kernel["ProblemType"]["MXBlockA"]:
-      if not kernel["LocalWriteUseSgprMXSA"] and self.states.mxsa.numVgprLocalWriteAddr > 0:
-        module.add(RegSet("v", "vgprLocalWriteAddrMXSA", \
-            self.states.mxsa.startVgprLocalWriteAddr))
-        if self.states.mxsa.numVgprLocalWriteAddr > 1:
-          module.add(RegSet("v", "vgprLocalWriteAddrOverhangMXSA", \
-              self.states.mxsa.startVgprLocalWriteAddr+1))
-    if not kernel["LocalWriteUseSgprB"] and self.states.b.numVgprLocalWriteAddr > 0:
-      module.add(RegSet("v", "vgprLocalWriteAddrB", \
-          self.states.b.startVgprLocalWriteAddr))
-      if self.states.b.numVgprLocalWriteAddr > 1:
-        module.add(RegSet("v", "vgprLocalWriteAddrOverhangB", \
-            self.states.b.startVgprLocalWriteAddr+1))
-    if kernel["ProblemType"]["MXBlockB"]:
-      if not kernel["LocalWriteUseSgprMXSB"] and self.states.mxsb.numVgprLocalWriteAddr > 0:
-        module.add(RegSet("v", "vgprLocalWriteAddrMXSB", \
-            self.states.mxsb.startVgprLocalWriteAddr))
-        if self.states.mxsb.numVgprLocalWriteAddr > 1:
-          module.add(RegSet("v", "vgprLocalWriteAddrOverhangMXSB", \
-            self.states.mxsb.startVgprLocalWriteAddr+1))
-    if self.states.m.numVgprLocalWriteAddr > 0:
-      module.add(RegSet("v", "vgprLocalWriteAddrMetadata", \
-          self.states.m.startVgprLocalWriteAddr))
-      if self.states.m.numVgprLocalWriteAddr > 1:
-        module.add(RegSet("v", "vgprLocalWriteAddrOverhangMetadata", \
-            self.states.m.startVgprLocalWriteAddr+1))
-    if kernel["BufferLoad"]:
-      module.add(RegSet("v", "vgprGlobalReadOffsetA", \
-          self.startVgprGlobalReadOffsetA))
-      if kernel["ProblemType"]["MXBlockA"]:
-        module.add(RegSet("v", "vgprGlobalReadOffsetMXSA", \
-            self.startVgprGlobalReadOffsetMXSA))
-      module.add(RegSet("v", "vgprGlobalReadOffsetB", \
-          self.startVgprGlobalReadOffsetB))
-      if kernel["ProblemType"]["MXBlockB"]:
-        module.add(RegSet("v", "vgprGlobalReadOffsetMXSB", \
-            self.startVgprGlobalReadOffsetMXSB))
+      # T reg definition for F32XEmu
+      self.macroAndSetF32XEmuTreg(kernel, tPA, tPB)
+
+      if kernel["ConvertAfterDS"]:
+        cvtTemp = max(self.states.a.startVgprValuCvtTemp, self.states.b.startVgprValuCvtTemp)
+        if (cvtTemp != -1):
+           moduleVgprMacro.add(RegSet("v", "vgprCvtTemp", "vgprBase", cvtTemp - self.states.startVgpr))
+
+      if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
+        moduleVgprMacro.add(RegSet("v", "vgprValuSum", "vgprBase", self.states.bias.startVgprValu - self.states.startVgpr))
+
       if kernel["ProblemType"]["Sparse"]:
-        module.add(RegSet("v", "vgprGlobalReadOffsetMetadata", \
-            self.startVgprGlobalReadOffsetMetadata))
-    else:
-      module.add(RegSet("v", "vgprGlobalReadAddrA", \
-          self.startVgprGlobalReadAddressesA))
+        if kernel["DirectToVgprSparseMetadata"]:
+          moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
+          moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata", "vgprValuMetadata_X0_I0_BASE", 0))
+        else:
+          ri = 0
+          if self.states.m.numVgprValu > 0: # Do not generate vgprValu if numVgprValu is 0
+            if self.states.lrvwTileMetadata > 1:
+              moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
+              for bi in range(0,PLR): # buffer indices
+                for iui in range(0, kernel["InnerUnroll"]):
+                  moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), "vgprValuMetadata_X0_I0_BASE", ri))
+                  ri += self.states.m.numVgprValuPerBlock
+                if not kernel["UnrollMajorLDSMetadata"]:
+                  ri = 0
+              ri = 0
+              if not kernel["UnrollMajorLDSMetadata"]:
+                miWaveTile = kernel["MIWaveTileB"] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTileA"]
+                moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_D_PACK", "vgprBase", self.states.m.startVgprValuPack - self.states.startVgpr))
+                for data in range(0,kernel["MIInputPerThreadMetadata"]):
+                  for bi in range(0,PLR): # buffer indices
+                    for iui in range(0, kernel["InnerUnroll"]):
+                      moduleVgprMacroValuMPack.add(RegSet("v", "vgprValuMetadata_X%u_I%u_D%u"%(bi,iui,data), "vgprValuMetadata_X0_I0_D_PACK", ri))
+                      ri += ceil(kernel["VectorWidthMetadata"] * tPM["bpe"] / self.states.bpr) * miWaveTile // kernel["VectorWidthMetadata"]
+            else:
+              moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
+              for bi in range(0,PLR): # buffer indices
+                for iui in range(0, kernel["InnerUnroll"]):
+                  moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), "vgprValuMetadata_X0_I0_BASE", ri))
+                  ri += self.states.m.numVgprValuPerBlock
+
+      if not kernel["LocalWriteUseSgprA"] and self.states.a.numVgprLocalWriteAddr > 0:
+        module.add(RegSet("v", "vgprLocalWriteAddrA", \
+            self.states.a.startVgprLocalWriteAddr))
+        if self.states.a.numVgprLocalWriteAddr > 1:
+          module.add(RegSet("v", "vgprLocalWriteAddrOverhangA", \
+              self.states.a.startVgprLocalWriteAddr+1))
       if kernel["ProblemType"]["MXBlockA"]:
-        module.add(RegSet("v", "vgprGlobalReadAddrMXSA", \
-            self.startVgprGlobalReadAddressesMXSA))
-      module.add(RegSet("v", "vgprGlobalReadAddrB", \
-          self.startVgprGlobalReadAddressesB))
+        if not kernel["LocalWriteUseSgprMXSA"] and self.states.mxsa.numVgprLocalWriteAddr > 0:
+          module.add(RegSet("v", "vgprLocalWriteAddrMXSA", \
+              self.states.mxsa.startVgprLocalWriteAddr))
+          if self.states.mxsa.numVgprLocalWriteAddr > 1:
+            module.add(RegSet("v", "vgprLocalWriteAddrOverhangMXSA", \
+                self.states.mxsa.startVgprLocalWriteAddr+1))
+      if not kernel["LocalWriteUseSgprB"] and self.states.b.numVgprLocalWriteAddr > 0:
+        module.add(RegSet("v", "vgprLocalWriteAddrB", \
+            self.states.b.startVgprLocalWriteAddr))
+        if self.states.b.numVgprLocalWriteAddr > 1:
+          module.add(RegSet("v", "vgprLocalWriteAddrOverhangB", \
+              self.states.b.startVgprLocalWriteAddr+1))
       if kernel["ProblemType"]["MXBlockB"]:
-        module.add(RegSet("v", "vgprGlobalReadAddrMXSB", \
-            self.startVgprGlobalReadAddressesMXSB))
+        if not kernel["LocalWriteUseSgprMXSB"] and self.states.mxsb.numVgprLocalWriteAddr > 0:
+          module.add(RegSet("v", "vgprLocalWriteAddrMXSB", \
+              self.states.mxsb.startVgprLocalWriteAddr))
+          if self.states.mxsb.numVgprLocalWriteAddr > 1:
+            module.add(RegSet("v", "vgprLocalWriteAddrOverhangMXSB", \
+              self.states.mxsb.startVgprLocalWriteAddr+1))
+      if self.states.m.numVgprLocalWriteAddr > 0:
+        module.add(RegSet("v", "vgprLocalWriteAddrMetadata", \
+            self.states.m.startVgprLocalWriteAddr))
+        if self.states.m.numVgprLocalWriteAddr > 1:
+          module.add(RegSet("v", "vgprLocalWriteAddrOverhangMetadata", \
+              self.states.m.startVgprLocalWriteAddr+1))
+      if kernel["BufferLoad"]:
+        module.add(RegSet("v", "vgprGlobalReadOffsetA", \
+            self.startVgprGlobalReadOffsetA))
+        if kernel["ProblemType"]["MXBlockA"]:
+          module.add(RegSet("v", "vgprGlobalReadOffsetMXSA", \
+              self.startVgprGlobalReadOffsetMXSA))
+        module.add(RegSet("v", "vgprGlobalReadOffsetB", \
+            self.startVgprGlobalReadOffsetB))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.add(RegSet("v", "vgprGlobalReadOffsetMXSB", \
+              self.startVgprGlobalReadOffsetMXSB))
+        if kernel["ProblemType"]["Sparse"]:
+          module.add(RegSet("v", "vgprGlobalReadOffsetMetadata", \
+              self.startVgprGlobalReadOffsetMetadata))
+      else:
+        module.add(RegSet("v", "vgprGlobalReadAddrA", \
+            self.startVgprGlobalReadAddressesA))
+        if kernel["ProblemType"]["MXBlockA"]:
+          module.add(RegSet("v", "vgprGlobalReadAddrMXSA", \
+              self.startVgprGlobalReadAddressesMXSA))
+        module.add(RegSet("v", "vgprGlobalReadAddrB", \
+            self.startVgprGlobalReadAddressesB))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.add(RegSet("v", "vgprGlobalReadAddrMXSB", \
+              self.startVgprGlobalReadAddressesMXSB))
 
-    if self.states.a.startVgprG2L is not None:
-      moduleVgprMacro.add(RegSet("v", "vgprG2LA_BASE", "vgprBase", self.states.a.startVgprG2L - self.states.startVgpr))
-    if kernel["ProblemType"]["MXBlockA"] and (self.states.mxsa.startVgprG2L is not None):
-      moduleVgprMacro.add(RegSet("v", "vgprG2LMXSA_BASE", "vgprBase", self.states.mxsa.startVgprG2L - self.states.startVgpr))
-    if self.states.b.startVgprG2L is not None:
-      moduleVgprMacro.add(RegSet("v", "vgprG2LB_BASE", "vgprBase", self.states.b.startVgprG2L - self.states.startVgpr))
-    if kernel["ProblemType"]["MXBlockB"] and (self.states.mxsb.startVgprG2L is not None):
-      moduleVgprMacro.add(RegSet("v", "vgprG2LMXSB_BASE", "vgprBase", self.states.mxsb.startVgprG2L - self.states.startVgpr))
+      if self.states.a.startVgprG2L is not None:
+        moduleVgprMacro.add(RegSet("v", "vgprG2LA_BASE", "vgprBase", self.states.a.startVgprG2L - self.states.startVgpr))
+      if kernel["ProblemType"]["MXBlockA"] and (self.states.mxsa.startVgprG2L is not None):
+        moduleVgprMacro.add(RegSet("v", "vgprG2LMXSA_BASE", "vgprBase", self.states.mxsa.startVgprG2L - self.states.startVgpr))
+      if self.states.b.startVgprG2L is not None:
+        moduleVgprMacro.add(RegSet("v", "vgprG2LB_BASE", "vgprBase", self.states.b.startVgprG2L - self.states.startVgpr))
+      if kernel["ProblemType"]["MXBlockB"] and (self.states.mxsb.startVgprG2L is not None):
+        moduleVgprMacro.add(RegSet("v", "vgprG2LMXSB_BASE", "vgprBase", self.states.mxsb.startVgprG2L - self.states.startVgpr))
 
-    if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
-      moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0))
-      if kernel["DirectToVgprA"]:
-        # additional definition G2LA2 for swapping register sets
-        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated//2))
-    if kernel["ProblemType"]["MXBlockA"]:
-      if not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]:
-        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LMXSA", "vgprG2LMXSA_BASE", 0))
+      if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
+        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0))
         if kernel["DirectToVgprA"]:
           # additional definition G2LA2 for swapping register sets
-          moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LMXSA2", "vgprG2LMXSA_BASE", self.states.a.numVgprG2LAllocated//2))
+          moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated//2))
+      if kernel["ProblemType"]["MXBlockA"]:
+        if not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]:
+          moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LMXSA", "vgprG2LMXSA_BASE", 0))
+          if kernel["DirectToVgprA"]:
+            # additional definition G2LA2 for swapping register sets
+            moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LMXSA2", "vgprG2LMXSA_BASE", self.states.a.numVgprG2LAllocated//2))
 
-    if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]:
-      moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB", "vgprG2LB_BASE", 0))
-      if kernel["DirectToVgprB"]:
-        # additional definition G2LB2 for swapping register sets
-        moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated//2))
-    if kernel["ProblemType"]["MXBlockB"]:
-      if not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]:
-        moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LMXSB", "vgprG2LMXSB_BASE", 0))
+      if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]:
+        moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB", "vgprG2LB_BASE", 0))
         if kernel["DirectToVgprB"]:
           # additional definition G2LB2 for swapping register sets
-          moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LMXSB2", "vgprG2LMXSB_BASE", self.states.b.numVgprG2LAllocated//2))
-
-    if kernel["UnrollLoopSwapGlobalReadOrder"] and not kernel["DirectToLdsA"] and not kernel["DirectToLdsB"]:
-      if kernel["ULSGRODoubleG2L"] == 0:
-        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LB2", "vgprG2LA_BASE", 0))
-        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.b.numVgprG2LAllocated))
-      else:
-        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated))
-        moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated))
-
-    if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-      moduleVgprMacro.add(RegSet("v", "vgprG2LMetadata", "vgprBase", self.states.m.startVgprG2L - self.states.startVgpr))
-
-    if ((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                              \
-        (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) or                                              \
-        (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] == 4)) \
-        and (kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].is8bitFloat()):
-      moduleVgprMacro.add(RegSet("v", "vgprPackTemp", "vgprBase", self.states.a.startVgprValuPackTemp - self.states.startVgpr))
-
-    if self.states.globalReadIncsUseVgpr:
-      module.add(RegSet("v", "vgprGlobalReadIncsA", \
-          self.startVgprGlobalReadIncsA))
-      if kernel["ProblemType"]["MXBlockA"]:
-        module.add(RegSet("v", "vgprGlobalReadIncsMXSA", \
-            self.startVgprGlobalReadIncsMXSA))
-      module.add(RegSet("v", "vgprGlobalReadIncsB", \
-          self.startVgprGlobalReadIncsB))
+          moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated//2))
       if kernel["ProblemType"]["MXBlockB"]:
-        module.add(RegSet("v", "vgprGlobalReadIncsMXSB", \
-            self.startVgprGlobalReadIncsMXSB))
+        if not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]:
+          moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LMXSB", "vgprG2LMXSB_BASE", 0))
+          if kernel["DirectToVgprB"]:
+            # additional definition G2LB2 for swapping register sets
+            moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LMXSB2", "vgprG2LMXSB_BASE", self.states.b.numVgprG2LAllocated//2))
+
+      if kernel["UnrollLoopSwapGlobalReadOrder"] and not kernel["DirectToLdsA"] and not kernel["DirectToLdsB"]:
+        if kernel["ULSGRODoubleG2L"] == 0:
+          moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LB2", "vgprG2LA_BASE", 0))
+          moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.b.numVgprG2LAllocated))
+        else:
+          moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated))
+          moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated))
+
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-        module.add(RegSet("v", "vgprGlobalReadIncsMetadata", \
-            self.startVgprGlobalReadIncsMetadata))
-    if self.states.a.numVgprLocalReadAddr > 0:
-      module.add(RegSet("v", "vgprLocalReadAddrA", \
-          self.states.a.startVgprLocalReadAddr))
-    if kernel["ProblemType"]["MXBlockA"]:
-      if self.states.mxsa.numVgprLocalReadAddr > 0:
-        module.add(RegSet("v", "vgprLocalReadAddrMXSA", \
-            self.states.mxsa.startVgprLocalReadAddr))
-    if self.states.b.numVgprLocalReadAddr > 0:
-      module.add(RegSet("v", "vgprLocalReadAddrB", \
-          self.states.b.startVgprLocalReadAddr))
-    if kernel["ProblemType"]["MXBlockB"]:
-      if self.states.mxsb.numVgprLocalReadAddr > 0:
-        module.add(RegSet("v", "vgprLocalReadAddrMXSB", \
-            self.states.mxsb.startVgprLocalReadAddr))
-    if self.states.IncLdsBufSwitch:
-      # 3 or more LDS buffer case. Need to keep original vgprLocalReadAdd
+        moduleVgprMacro.add(RegSet("v", "vgprG2LMetadata", "vgprBase", self.states.m.startVgprG2L - self.states.startVgpr))
+
+      if ((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                              \
+          (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) or                                              \
+          (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] == 4)) \
+          and (kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].is8bitFloat()):
+        moduleVgprMacro.add(RegSet("v", "vgprPackTemp", "vgprBase", self.states.a.startVgprValuPackTemp - self.states.startVgpr))
+
+      if self.states.globalReadIncsUseVgpr:
+        module.add(RegSet("v", "vgprGlobalReadIncsA", \
+            self.startVgprGlobalReadIncsA))
+        if kernel["ProblemType"]["MXBlockA"]:
+          module.add(RegSet("v", "vgprGlobalReadIncsMXSA", \
+              self.startVgprGlobalReadIncsMXSA))
+        module.add(RegSet("v", "vgprGlobalReadIncsB", \
+            self.startVgprGlobalReadIncsB))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.add(RegSet("v", "vgprGlobalReadIncsMXSB", \
+              self.startVgprGlobalReadIncsMXSB))
+        if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+          module.add(RegSet("v", "vgprGlobalReadIncsMetadata", \
+              self.startVgprGlobalReadIncsMetadata))
       if self.states.a.numVgprLocalReadAddr > 0:
-        module.add(RegSet("v", "vgprLocalReadAddrOrigA", \
-            self.states.a.startVgprLocalReadAddrOrig))
+        module.add(RegSet("v", "vgprLocalReadAddrA", \
+            self.states.a.startVgprLocalReadAddr))
       if kernel["ProblemType"]["MXBlockA"]:
         if self.states.mxsa.numVgprLocalReadAddr > 0:
-          module.add(RegSet("v", "vgprLocalReadAddrOrigMXSA", \
-              self.states.mxsa.startVgprLocalReadAddrOrig))
+          module.add(RegSet("v", "vgprLocalReadAddrMXSA", \
+              self.states.mxsa.startVgprLocalReadAddr))
       if self.states.b.numVgprLocalReadAddr > 0:
-        module.add(RegSet("v", "vgprLocalReadAddrOrigB", \
-            self.states.b.startVgprLocalReadAddrOrig))
+        module.add(RegSet("v", "vgprLocalReadAddrB", \
+            self.states.b.startVgprLocalReadAddr))
       if kernel["ProblemType"]["MXBlockB"]:
         if self.states.mxsb.numVgprLocalReadAddr > 0:
-          module.add(RegSet("v", "vgprLocalReadAddrOrigMXSB", \
-              self.states.mxsb.startVgprLocalReadAddrOrig))
-    if self.states.m.numVgprLocalReadAddr > 0:
-      module.add(RegSet("v", "vgprLocalReadAddrMetadata", \
-          self.states.m.startVgprLocalReadAddr))
-    if self.states.a.numVgprLocalReadSwapAddr > 0:
-      module.add(RegSet("v", "vgprLocalReadSwapAddrA", \
-          self.states.a.startVgprLocalReadSwapAddr))
-    if self.states.b.numVgprLocalReadSwapAddr > 0:
-      module.add(RegSet("v", "vgprLocalReadSwapAddrB", \
-          self.states.b.startVgprLocalReadSwapAddr))
-    if self.states.m.numVgprLocalReadSwapAddr > 0:
-      module.add(RegSet("v", "vgprLocalReadSwapAddrMetadata", \
-          self.states.m.startVgprLocalReadSwapAddr))
-    if kernel["ProblemType"]["MXBlockA"]:
-      if self.states.mxsa.numVgprLocalReadSwapAddr > 0:
-        module.add(RegSet("v", "vgprLocalReadSwapAddrMXSA", \
-            self.states.mxsa.startVgprLocalReadSwapAddr))
-    if kernel["ProblemType"]["MXBlockB"]:
-      if self.states.mxsb.numVgprLocalReadSwapAddr > 0:
-        module.add(RegSet("v", "vgprLocalReadSwapAddrMXSB", \
-            self.states.mxsb.startVgprLocalReadSwapAddr))
-    if self.states.a.numVgprLocalWriteSwapAddr > 0:
-      module.add(RegSet("v", "vgprLocalWriteSwapAddrA", \
-          self.states.a.startVgprLocalWriteSwapAddr))
-    if self.states.b.numVgprLocalWriteSwapAddr > 0:
-      module.add(RegSet("v", "vgprLocalWriteSwapAddrB", \
-          self.states.b.startVgprLocalWriteSwapAddr))
-    if self.states.m.numVgprLocalWriteSwapAddr > 0:
-      module.add(RegSet("v", "vgprLocalWriteSwapAddrMetadata", \
-          self.states.m.startVgprLocalWriteSwapAddr))
-    if kernel["ProblemType"]["MXBlockA"]:
-      if self.states.mxsa.numVgprLocalWriteSwapAddr > 0:
-        module.add(RegSet("v", "vgprLocalWriteSwapAddrMXSA", \
-            self.states.mxsa.startVgprLocalWriteSwapAddr))
-    if kernel["ProblemType"]["MXBlockB"]:
-      if self.states.mxsb.numVgprLocalWriteSwapAddr > 0:
-        module.add(RegSet("v", "vgprLocalWriteSwapAddrMXSB", \
-            self.states.mxsb.startVgprLocalWriteSwapAddr))
+          module.add(RegSet("v", "vgprLocalReadAddrMXSB", \
+              self.states.mxsb.startVgprLocalReadAddr))
+      if self.states.IncLdsBufSwitch:
+        # 3 or more LDS buffer case. Need to keep original vgprLocalReadAdd
+        if self.states.a.numVgprLocalReadAddr > 0:
+          module.add(RegSet("v", "vgprLocalReadAddrOrigA", \
+              self.states.a.startVgprLocalReadAddrOrig))
+        if kernel["ProblemType"]["MXBlockA"]:
+          if self.states.mxsa.numVgprLocalReadAddr > 0:
+            module.add(RegSet("v", "vgprLocalReadAddrOrigMXSA", \
+                self.states.mxsa.startVgprLocalReadAddrOrig))
+        if self.states.b.numVgprLocalReadAddr > 0:
+          module.add(RegSet("v", "vgprLocalReadAddrOrigB", \
+              self.states.b.startVgprLocalReadAddrOrig))
+        if kernel["ProblemType"]["MXBlockB"]:
+          if self.states.mxsb.numVgprLocalReadAddr > 0:
+            module.add(RegSet("v", "vgprLocalReadAddrOrigMXSB", \
+                self.states.mxsb.startVgprLocalReadAddrOrig))
+      if self.states.m.numVgprLocalReadAddr > 0:
+        module.add(RegSet("v", "vgprLocalReadAddrMetadata", \
+            self.states.m.startVgprLocalReadAddr))
+      if self.states.a.numVgprLocalReadSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalReadSwapAddrA", \
+            self.states.a.startVgprLocalReadSwapAddr))
+      if self.states.b.numVgprLocalReadSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalReadSwapAddrB", \
+            self.states.b.startVgprLocalReadSwapAddr))
+      if self.states.m.numVgprLocalReadSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalReadSwapAddrMetadata", \
+            self.states.m.startVgprLocalReadSwapAddr))
+      if kernel["ProblemType"]["MXBlockA"]:
+        if self.states.mxsa.numVgprLocalReadSwapAddr > 0:
+          module.add(RegSet("v", "vgprLocalReadSwapAddrMXSA", \
+              self.states.mxsa.startVgprLocalReadSwapAddr))
+      if kernel["ProblemType"]["MXBlockB"]:
+        if self.states.mxsb.numVgprLocalReadSwapAddr > 0:
+          module.add(RegSet("v", "vgprLocalReadSwapAddrMXSB", \
+              self.states.mxsb.startVgprLocalReadSwapAddr))
+      if self.states.a.numVgprLocalWriteSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalWriteSwapAddrA", \
+            self.states.a.startVgprLocalWriteSwapAddr))
+      if self.states.b.numVgprLocalWriteSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalWriteSwapAddrB", \
+            self.states.b.startVgprLocalWriteSwapAddr))
+      if self.states.m.numVgprLocalWriteSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalWriteSwapAddrMetadata", \
+            self.states.m.startVgprLocalWriteSwapAddr))
+      if kernel["ProblemType"]["MXBlockA"]:
+        if self.states.mxsa.numVgprLocalWriteSwapAddr > 0:
+          module.add(RegSet("v", "vgprLocalWriteSwapAddrMXSA", \
+              self.states.mxsa.startVgprLocalWriteSwapAddr))
+      if kernel["ProblemType"]["MXBlockB"]:
+        if self.states.mxsb.numVgprLocalWriteSwapAddr > 0:
+          module.add(RegSet("v", "vgprLocalWriteSwapAddrMXSB", \
+              self.states.mxsb.startVgprLocalWriteSwapAddr))
 
-    if kernel["ProblemType"]["OutputAmaxD"]:
-      module.add(RegSet("v", "vgprAmaxOut", self.startVgprAmaxOut))
-      module.add(RegSet("v", "vgprAmaxOutB", self.startVgprAmaxOutB))
+      if kernel["ProblemType"]["OutputAmaxD"]:
+        module.add(RegSet("v", "vgprAmaxOut", self.startVgprAmaxOut))
+        module.add(RegSet("v", "vgprAmaxOutB", self.startVgprAmaxOutB))
 
-    if kernel["ProblemType"]["MacDataTypeA"].isDoubleComplex() and kernel["MIArchVgpr"]:
-      module.add(RegSet("v", "vgprAlphaTmp", \
-          self.states.startVgprAlphaTmp))
+      if kernel["ProblemType"]["MacDataTypeA"].isDoubleComplex() and kernel["MIArchVgpr"]:
+        module.add(RegSet("v", "vgprAlphaTmp", \
+            self.states.startVgprAlphaTmp))
 
-    module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
+      module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
 
-    if self.debugConfig.debugKernel:
-      module.add(RegSet("v", "vgprAddressDbg", \
-          self.states.startVgprAddressDbg))
-    #module.addComment0("Occu: %u waves/simd" % self.numWavesPerSimd )
-    # module.addComment0("Num VGPR=%u"%self.vgprPool.size())
-    # module.addComment0("Num AccVGPR=%u"%self.agprPool.size())
-    self.moduleVgprMacro = moduleVgprMacro
-    self.moduleVgprMacroValuA = moduleVgprMacroValuA
-    self.moduleVgprMacroValuB = moduleVgprMacroValuB
-    self.moduleVgprMacroValuAPack = moduleVgprMacroValuAPack
-    self.moduleVgprMacroValuBPack = moduleVgprMacroValuBPack
-    self.moduleVgprMacroValuM = moduleVgprMacroValuM
-    self.moduleVgprMacroValuMPack = moduleVgprMacroValuMPack
-    self.moduleVgprMacroValuA = moduleVgprMacroValuA
-    self.moduleVgprMacroG2LA = moduleVgprMacroG2LA
-    self.moduleVgprMacroG2LB = moduleVgprMacroG2LB
-    module.addComment2("VGPR Macro Assignments")
-    module.add(self.moduleVgprMacro)
-    module.add(self.moduleVgprMacroValuA)
-    module.add(self.moduleVgprMacroValuA_T)
-    module.add(self.moduleVgprMacroValuB)
-    module.add(self.moduleVgprMacroValuB_T)
-    module.add(self.moduleVgprMacroValuAPack)
-    module.add(self.moduleVgprMacroValuBPack)
-    module.add(self.moduleVgprMacroValuM)
-    module.add(self.moduleVgprMacroValuMPack)
-    module.add(self.moduleVgprMacroG2LA)
-    module.add(self.moduleVgprMacroG2LB)
+      if self.debugConfig.debugKernel:
+        module.add(RegSet("v", "vgprAddressDbg", \
+            self.states.startVgprAddressDbg))
+      #module.addComment0("Occu: %u waves/simd" % self.numWavesPerSimd )
+      # module.addComment0("Num VGPR=%u"%self.vgprPool.size())
+      # module.addComment0("Num AccVGPR=%u"%self.agprPool.size())
+      self.moduleVgprMacro = moduleVgprMacro
+      self.moduleVgprMacroValuA = moduleVgprMacroValuA
+      self.moduleVgprMacroValuB = moduleVgprMacroValuB
+      self.moduleVgprMacroValuAPack = moduleVgprMacroValuAPack
+      self.moduleVgprMacroValuBPack = moduleVgprMacroValuBPack
+      self.moduleVgprMacroValuM = moduleVgprMacroValuM
+      self.moduleVgprMacroValuMPack = moduleVgprMacroValuMPack
+      self.moduleVgprMacroValuA = moduleVgprMacroValuA
+      self.moduleVgprMacroG2LA = moduleVgprMacroG2LA
+      self.moduleVgprMacroG2LB = moduleVgprMacroG2LB
+      module.addComment2("VGPR Macro Assignments")
+      module.add(self.moduleVgprMacro)
+      module.add(self.moduleVgprMacroValuA)
+      module.add(self.moduleVgprMacroValuA_T)
+      module.add(self.moduleVgprMacroValuB)
+      module.add(self.moduleVgprMacroValuB_T)
+      module.add(self.moduleVgprMacroValuAPack)
+      module.add(self.moduleVgprMacroValuBPack)
+      module.add(self.moduleVgprMacroValuM)
+      module.add(self.moduleVgprMacroValuMPack)
+      module.add(self.moduleVgprMacroG2LA)
+      module.add(self.moduleVgprMacroG2LB)
 
+
+    def macroAndSetVgprImplSubtile():
+      module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
+      print(self.vgprPool.size())
+      #self.vgprPool.remove(self.states.startVgprSerial, 1)
+      #module.addComment0("Need %u vgprs for GR A"%(self.states.a.tileInfo.numGRPerSubtile))
+      return
+
+    macroAndSetVgprImplSubtile()
+    
+      
     ########################################
     # SGPR Macros
     ########################################
@@ -2127,17 +2140,18 @@ class KernelWriterAssembly(KernelWriter):
 
       moduleWg = Module("Calculate Workgroup")
 
+      # TODOBS: Uncomment
       # C regs are not used during initialization so mark them as available -
       # we will claim then just before the start of the unroll loop:
-      self.vgprPool.add(self.states.a.startVgprValu , \
-          self.states.lastValuAB - self.states.a.startVgprValu , "ValuAB") # Add as available
-      moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
-                          (self.states.a.startVgprValu, self.states.lastValuAB+self.states.a.startVgprValu))
+      #self.vgprPool.add(self.states.a.startVgprValu , \
+      #    self.states.lastValuAB - self.states.a.startVgprValu , "ValuAB") # Add as available
+      #moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
+      #                    (self.states.a.startVgprValu, self.states.lastValuAB+self.states.a.startVgprValu))
 
-      self.vgprPool.add(self.states.c.startVgprValu, \
-        self.states.c.numVgprValu, "ValuC-Block") # Add as available
-      moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
-                          (self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu))
+      #self.vgprPool.add(self.states.c.startVgprValu, \
+      #  self.states.c.numVgprValu, "ValuC-Block") # Add as available
+      #moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
+      #                    (self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu))
 
       numAccvgprs = self.states.totalAgprs
       self.agprPool.add(0, numAccvgprs, "ValuC-Block")

@@ -464,7 +464,8 @@ class Solution(collections.abc.Mapping):
       state["UseMFMAF32XEmulation"] = True # enable MFMA version by default
 
     state["MfmaInitCVgprs"] = False
-
+    state["UseSubtileImpl"] = True
+    
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
@@ -1642,7 +1643,8 @@ class Solution(collections.abc.Mapping):
     for key, value in state.items():
       if isinstance(value, int) and value < 0:
         backupValues.append([key, value])
-    while True:
+    # Skip this check for subtile impl..
+    while True:# and not state["UseSubtileImpl"]:
       for backup in backupValues:
         state[backup[0]] = backup[1]
       state["ValidDepthU"] = True

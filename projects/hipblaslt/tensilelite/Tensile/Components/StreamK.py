@@ -33,6 +33,7 @@ from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
+from .SubtileBasedKernel import localReadResetOffsetsSubtile
 
 from ..Common import print2, ceilDivide, log2
 from ..Component import Component
@@ -123,12 +124,15 @@ class StreamK(Component):
 
         # Always reset pointers to handle odd-exit case which moves LRO to the upper bank
         if kernel["PrefetchGlobalRead"]: # not self.prefetchAcrossPersistent
-            module.add(writer.localReadResetOffsets(kernel, tPA))
-            if kernel["ProblemType"]["MXBlockA"]:
-              module.add(writer.localReadResetOffsets(kernel, tPA["MX"]))
-            module.add(writer.localReadResetOffsets(kernel, tPB))
-            if kernel["ProblemType"]["MXBlockB"]:
-              module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
+            if not kernel["UseSubtileImpl"]:
+                module.add(writer.localReadResetOffsets(kernel, tPA))
+                if kernel["ProblemType"]["MXBlockA"]:
+                    module.add(writer.localReadResetOffsets(kernel, tPA["MX"]))
+                module.add(writer.localReadResetOffsets(kernel, tPB))
+                if kernel["ProblemType"]["MXBlockB"]:
+                    module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
+            else:
+                module.add(localReadResetOffsetsSubtile(writer, kernel))
 
         module.addComment0("StreamK calculate tile idx and map to WG")
 
