@@ -246,13 +246,13 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             if kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() > 16:
               inputPerThread = kernel["MIInputPerThread"]
               isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
-              strideK      = (inputPerThread if umlds else (mt + LdsPad) * inputPerThread) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  inputPerThread else 1)
-        ##special case for new F8 MFMA -TODO:
-        #elif  kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32:
-        #    if umlds:
-        #        strideK = 16
-        #    else:
-        #        strideK = (mt + LdsPad) * 16
+              strideK      = (offsetK if umlds else (mt + LdsPad) * offsetK) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  offsetK else 1)
+        #special case for new F8 MFMA -TODO:
+        elif  kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and not kernel["ProblemType"]["MXBlockA"] and not kernel["ProblemType"]["MXBlockB"]:
+            if umlds:
+                strideK = 16
+            else:
+                strideK = (mt + LdsPad) * 16
         elif kernel["UseF32XEmulation"] and not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
             if umlds:
                 strideK = 4
