@@ -302,15 +302,31 @@ def shouldRunCICheck() {
         
         echo "Changed files: ${changedFiles.join(', ')}"
         
-        // Check if any changed files are not in the skip patterns
-        def hasFilesRequiringCI = changedFiles.any { file ->
-            !skipFilePatterns.any { pattern ->
+        // Separate files into those requiring CI and those that can be skipped
+        def filesRequiringCI = []
+        def skippedFiles = []
+
+        changedFiles.each { file ->
+            def shouldSkip = skipFilePatterns.any { pattern ->
                 file ==~ pattern
             }
+
+            if (shouldSkip) {
+                skippedFiles.add(file)
+            } else {
+                filesRequiringCI.add(file)
+            }
         }
-        
-        if (hasFilesRequiringCI) {
-            echo "Found files that require CI"
+
+        // Debug output
+        if (skippedFiles.size() > 0) {
+            echo "Files that don't require CI (${skippedFiles.size()}):"
+            skippedFiles.each { echo "  - ${it}" }
+        }
+
+        if (filesRequiringCI.size() > 0) {
+            echo "Files that require CI (${filesRequiringCI.size()}):"
+            filesRequiringCI.each { echo "  - ${it}" }
             return true
         } else {
             echo "Only non-relevant files changed, skipping CI"
