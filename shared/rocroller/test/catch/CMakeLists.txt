@@ -110,6 +110,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/UtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAHazardObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAObserverUnitTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WaitcntObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WorkgroupRemapXCCTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"

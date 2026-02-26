@@ -9,7 +9,9 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Visitor.hpp>
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
+#endif
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
@@ -140,6 +142,8 @@ struct GraphAndTensorMap
     }
 };
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 inline std::vector<int64_t> getOutputTensorUidsFromGraph(nlohmann::json graph)
 {
     std::vector<int64_t> outputTensorUids;
@@ -199,4 +203,7 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
 
     return {graphBuilder.Release(), std::move(tensorMap), outputTensorUids};
 }
+
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 }
