@@ -282,6 +282,35 @@ typedef enum
     /** @} */
 
     /**
+     * @name Tensor Attributes (1300-1399)
+     * Attributes for HIPDNN_BACKEND_TENSOR_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Unique ID for this tensor */
+    HIPDNN_ATTR_TENSOR_UNIQUE_ID = 1300,
+
+    /** @brief Tensor name (extension) */
+    HIPDNN_ATTR_TENSOR_NAME_EXT = 1301,
+
+    /** @brief Data type of tensor elements (hipdnnDataType_t) */
+    HIPDNN_ATTR_TENSOR_DATA_TYPE = 1302,
+
+    /** @brief Tensor dimensions */
+    HIPDNN_ATTR_TENSOR_DIMENSIONS = 1303,
+
+    /** @brief Tensor strides */
+    HIPDNN_ATTR_TENSOR_STRIDES = 1304,
+
+    /** @brief Whether this tensor is virtual */
+    HIPDNN_ATTR_TENSOR_IS_VIRTUAL = 1305,
+
+    /** @brief Pass-by-value tensor data (extension) */
+    HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
