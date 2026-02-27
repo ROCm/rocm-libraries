@@ -8,18 +8,28 @@
 #include "ck_tile/core/tensor/static_distributed_tensor.hpp"
 namespace ck_tile {
 
-//----------------------------------------------------------------------------------------------
-/// @brief      Compress A vector for 2:4 structured sparsity instruction by moving all non-zero
-///             elements into lower part of a_vec to half its effective size.
-///
-/// @param      a_vec  Vector to be compressed.
-///
-/// @return     Four 2-bit indexes of non-zero elements locations
-///
+/**
+ * @brief Compress A vector for 2:4 structured sparsity instruction by moving all non-zero
+ * elements into lower part of a_vec to half its effective size.
+ * @param a_vec Vector to be compressed.
+ * @tparam ADataType The data type of a_vec
+ * @tparam CompressedSize The target compression size
+ * @tparam AVec The vector type of a_vec (deduced)
+ * @return Packed 32‑bit word containing **CompressedSize** 2‑bit fields.
+ *         Each field encodes the original position (0–3) of the corresponding
+ *         non‑zero element in the input. If fewer than CompressedSize
+ *         non‑zeros are found, remaining fields default to 2 (see below).
+ */
 template <typename ADataType, index_t CompressedSize, typename AVec>
 static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
 {
-    int32_t idx = 0b11101110;
+    // idx holds one 2‑bit index per output element (total CompressedSize entries).
+    // It is initialized to the pattern 0b10 for every field. This matches
+    // what the hardware expects when there are fewer than two non‑zero values
+    // in a 4‑element group – the unused output is treated as coming from slot 2.
+    // The loop below will clear and set each field as real non‑zeros are seen.
+    int32_t idx = 0;
+    static_for<0, CompressedSize, 1>{}([&](auto k) { idx |= (2 << (2 * k)); });
 
     static_for<0, CompressedSize / 2, 1>{}([&](auto i) {
         ADataType nonzero_elems[2] = {a_vec[i * 4 + 2], a_vec[i * 4 + 3]};
@@ -29,6 +39,7 @@ static CK_TILE_DEVICE int32_t compress_a_impl(AVec& a_vec)
             if(a_vec[i * 4 + j] != 0.0f)
             {
                 nonzero_elems[non_zero_pos] = a_vec[i * 4 + j];
+                // clear the two‑bit field for this output and insert j
                 idx &= ~(0b11 << 2 * (i * 2 + non_zero_pos));
                 idx |= j << 2 * (i * 2 + non_zero_pos);
                 ++non_zero_pos;
