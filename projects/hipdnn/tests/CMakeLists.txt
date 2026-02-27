@@ -19,6 +19,7 @@ endif()
 
 if(HIPDNN_BUILD_BACKEND)
     add_subdirectory(backend)
+    add_subdirectory(backend_logging)
 endif()
 
 if(HIPDNN_BUILD_FRONTEND)

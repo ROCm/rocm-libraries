@@ -436,8 +436,8 @@ private:
  * test as all instances of the IsolatedLogRecorder will share the same log
  * recording buffer internally.
  *
- * This class provides a static IsolatedLogRecorder::getIsoaltedRecordingCallback() method to
- * obtain the callback function for registration with the UUT's APIs.
+ * This class provides a static IsolatedLogRecorder::getIsolatedRecordingCallback()
+ * method to obtain the callback function for registration with the UUT's APIs.
  *
  * Two modes available:
  * 1. **withCurrentLevel()** - Preserves UUT's current log level
@@ -476,9 +476,23 @@ public:
      *
      * @return Callback function pointer suitable for logging API registration
      */
-    static hipdnnCallback_t getIsoaltedRecordingCallback()
+    static hipdnnCallback_t getIsolatedRecordingCallback()
     {
         return &isolatedRecordingCallback;
+    }
+
+    /**
+     * @brief Get the user callback function for registration with user callback APIs
+     *
+     * Register this callback with hipdnnSetUserLogCallback_ext() or the frontend
+     * setUserLogCallback() to capture logs in the ISOLATED recording instance.
+     * The userHandle parameter is ignored — any non-null handle can be used.
+     *
+     * @return User callback function pointer suitable for hipdnnSetUserLogCallback_ext()
+     */
+    static hipdnnUserLogCallback_t getIsolatedUserRecordingCallback()
+    {
+        return &isolatedUserRecordingCallback;
     }
 
 private:
@@ -488,6 +502,17 @@ private:
     }
 
     static void isolatedRecordingCallback(hipdnnSeverity_t severity, const char* message)
+    {
+        if(message != nullptr)
+        {
+            LogRecording::instance(LogRecording::Id::ISOLATED)
+                .recordLog(severity, std::string(message));
+        }
+    }
+
+    static void isolatedUserRecordingCallback(hipdnnUserLogCallbackHandle_t /*userHandle*/,
+                                              hipdnnSeverity_t severity,
+                                              const char* message)
     {
         if(message != nullptr)
         {

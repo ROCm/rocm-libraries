@@ -58,12 +58,14 @@ void initialize();
 
 void loggerShutdown();
 
-void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg);
+void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg);
 
 void logHipDeviceInfo(hipStream_t stream);
 
-hipdnnStatus_t initializeGlobalOutputCallbackLogger(hipdnnBackendLogOutputCallback_t callback,
-                                                    bool async);
+hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
+                                  hipdnnSeverity_t minLevel,
+                                  hipdnnLogCallbackMode_t mode,
+                                  hipdnnUserLogCallbackHandle_t userHandle);
 
 hipdnnStatus_t setGlobalLogLevel(hipdnnSeverity_t level);
 

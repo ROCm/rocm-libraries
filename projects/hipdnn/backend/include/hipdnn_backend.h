@@ -384,32 +384,54 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           size_t* maxStringLen);
 
 /**
- * @brief Backend log output callback function type for receiving logs from hipDNN.
- *
- * @param[in] severity   The severity level of the log message
- * @param[in] message    The log message (null-terminated string, includes component name)
- * @note Callback should return promptly. For blocking operations (network, disk I/O),
- *       queue work to a separate thread to avoid impacting hipDNN performance.
- *
- * @warning If callback blocks indefinitely, shutdown operations may hang.
+ * @brief Callback mode (sync vs async).
  */
-
-typedef void (*hipdnnBackendLogOutputCallback_t)(hipdnnSeverity_t severity, const char* message);
+typedef enum
+{
+    HIPDNN_LOG_CALLBACK_SYNC = 0, ///< Callback invoked on logging thread (synchronous)
+    HIPDNN_LOG_CALLBACK_ASYNC = 1 ///< Callback invoked on worker thread (asynchronous)
+} hipdnnLogCallbackMode_t;
 
 /**
- * @brief Set global backend log output callback to redirect all logs from console/file.
+ * @brief Set or update a user log callback.
  *
- * When a global backend log output callback is set, logs are sent ONLY to the callback
- * (console/file output is disabled). Setting callback to NULL restores default console/file behavior.
+ * This API allows registering multiple user callbacks with individual log levels and sync/async modes.
+ * Each callback is uniquely identified by the composite key (callback, userHandle).
  *
- * @param[in] callback   Backend log output callback function, or NULL to restore default behavior
- * @param[in] async      If true, callback is invoked asynchronously; if false, synchronously
+ * @note When a synchronous callback is registered, the synchronous callbacks will delay hipDNN
+ *       until the callback returns, regardless of any async log callbacks also being registered.
+ *       Synchronous callbacks are recommended only for debugging or testing purposes due to
+ *       their blocking nature. Use async callbacks for production workloads.
  *
- * @retval HIPDNN_STATUS_SUCCESS           The callback was set successfully
- * @retval HIPDNN_STATUS_INTERNAL_ERROR    An internal error occurred
+ * Behavior:
+ * - If (callback, userHandle) already registered: UPDATES settings (level and/or sync/async mode)
+ * - If (callback, userHandle) new: ADDS new registration
+ * - If minLevel == SEV_OFF: REMOVES registration
+ * - userHandle must be non-null
+ *
+ * Callback Removal (minLevel == SEV_OFF):
+ * - No further logs will be received on the callback.
+ * - Any pending async logs for this callback will be abandoned
+ * - After this function returns, user can safely destroy data referenced by userHandle
+ *
+ * @param[in] callback   The callback function to invoke
+ * @param[in] minLevel   Minimum severity level (SEV_OFF removes the callback). Note that
+ *                        the logs produced on this callback will be limited by the global log
+ *                        level set either by the HIPDNN_LOG_LEVEL environment variable or
+ *                        the setGlobalLogLevel() API function.
+ * @param[in] mode       Sync or async invocation mode
+ * @param[in] userHandle Non-null user data (also serves as unique callback ID)
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           The callback was set/updated/removed successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM         callback is NULL, userHandle is NULL, invalid mode,
+ *                                         or attempting to remove non-existent callback
+ * @retval HIPDNN_STATUS_NOT_INITIALIZED   Logging system not initialized
  */
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLoggingCallback_ext(
-    hipdnnBackendLogOutputCallback_t callback, bool async);
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle);
 
 /**
  * @brief Set the global log level for the backend.

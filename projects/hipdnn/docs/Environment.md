@@ -9,7 +9,7 @@ This document describes the environment variables and runtime configuration opti
   - [MIOpen Plugin Logging](#miopen-plugin-logging)
   - [Test Configuration](#test-configuration)
 - [Logging Configuration APIs](#logging-configuration-apis)
-  - [Global Log Callback](#global-log-callback)
+  - [User Log Callbacks](#user-log-callbacks)
   - [Log Level APIs](#log-level-apis)
 - [Error Handling](#error-handling)
 
@@ -90,17 +90,104 @@ export HIPDNN_GLOBAL_TEST_SEED=RANDOM
 
 ## Logging Configuration APIs
 
-### Global Log Callback
+### User Log Callbacks
 
-A callback function can be registered to receive log messages from the hipDNN library. Once a callback function is registered, all logs will be redirected to the registered logging callback instead of the console or file specified by the `HIPDNN_LOG_FILE` environment variable. Setting the logging callback to `nullptr` will re-enable logging to the console or log file.
+One or more user callback functions can be registered to receive log messages from the hipDNN library. User callbacks do not replace console/file logging, rather they provide an additional parallel method to receive log messages.
 
-The logging callback is registered using the following frontend API function:
+Each callback is uniquely identified by the composite key `(callback, userHandle)`, which allows registering the same callback function multiple times with different user handles (e.g., for different logging destinations).
+
+#### Callback Signature
+
+User callbacks must conform to the following C signature:
+
+```c
+typedef void (*hipdnnUserLogCallback_t)(hipdnnUserLogCallbackHandle_t userHandle,
+                                        hipdnnSeverity_t severity,
+                                        const char* message);
 ```
-Error setGlobalLoggingCallback(hipdnnBackendLogOutputCallback_t callback, bool async = true);
-```
-This function registers the logging callback with hipDNN. If `async` is true then logs will be output using a separate thread so that the hipDNN library is not blocked while the callback function is running. Setting `callback` to `nullptr` will disable the logging callback.
 
-Logs output using the callback function are filtered by the level set by the `HIPDNN_LOG_LEVEL` environment variable described above, or programatically using the `getGlobalLogLevel()` API function described below.
+- `userHandle` — The opaque user-provided pointer passed back on each invocation
+- `severity` — The severity level of the log message
+- `message` — The formatted log message (null-terminated string)
+
+#### Registering a Callback
+
+The frontend API function `setUserLogCallback()` registers, updates, or removes a callback:
+
+```cpp
+Error setUserLogCallback(hipdnnUserLogCallback_t callback,
+                         hipdnnSeverity_t minLevel,
+                         LogCallbackMode mode,
+                         hipdnnUserLogCallbackHandle_t userHandle);
+```
+
+**Parameters:**
+- `callback` — The callback function to invoke (must be non-null)
+- `minLevel` — Minimum severity level for messages delivered to this callback. Use `HIPDNN_SEV_OFF` to remove the callback.
+- `mode` — `LogCallbackMode::ASYNC` (default, non-blocking) or `LogCallbackMode::SYNC` (blocking)
+- `userHandle` — Non-null opaque pointer passed to the callback and used as part of the unique ID
+
+**Behavior:**
+- If `(callback, userHandle)` is not yet registered: **adds** a new registration
+- If `(callback, userHandle)` is already registered: **updates** the level and/or mode
+- If `minLevel` is `HIPDNN_SEV_OFF`: **removes** the registration
+
+> [!NOTE]
+> * The messages delivered to the callback are also subject to the global log level set by the `HIPDNN_LOG_LEVEL` environment variable or the `setGlobalLogLevel()` API. A callback registered at `HIPDNN_SEV_INFO` will not receive info-level messages if the global level is set to `HIPDNN_SEV_WARN` or higher.
+> * The hipDNN logger has an internal log message queue of 8192 messages. Once the message queue is full, the
+> hipDNN library will block on subsequent logging calls until space is made available in the queue. The
+> callbacks must ensure that they are consuming messages and returning promptly to avoid stalling hipDNN.
+
+#### Callback Modes
+
+| Mode | Description |
+|------|-------------|
+| `LogCallbackMode::ASYNC` | Callback is invoked on a background worker thread. hipDNN is not blocked while the callback runs. Recommended for production use. |
+| `LogCallbackMode::SYNC` | Callback is invoked on the calling thread. hipDNN blocks until the callback returns. Recommended only for debugging or testing. |
+
+#### Removing a Callback
+
+To remove a callback, call `setUserLogCallback()` with `minLevel` set to `HIPDNN_SEV_OFF`:
+
+```cpp
+auto error = setUserLogCallback(myCallback, HIPDNN_SEV_OFF, LogCallbackMode::ASYNC, myHandle);
+```
+
+After this call returns:
+- The callback will not be invoked again
+- Any pending async log messages for this callback are abandoned
+- The caller can safely destroy data referenced by `userHandle`
+
+#### Example
+
+```cpp
+#include <hipdnn_frontend.hpp>
+
+using namespace hipdnn_frontend;
+
+struct MyLogContext {
+    std::ofstream logFile;
+};
+
+void myLogCallback(hipdnnUserLogCallbackHandle_t userHandle,
+                   hipdnnSeverity_t severity,
+                   const char* message) {
+    auto* ctx = static_cast<MyLogContext*>(userHandle);
+    ctx->logFile << message << std::endl;
+}
+
+// Register an async callback at INFO level
+MyLogContext ctx{std::ofstream("my_log.txt")};
+auto error = setUserLogCallback(&myLogCallback, HIPDNN_SEV_INFO,
+                                LogCallbackMode::ASYNC, &ctx);
+
+// ... use hipDNN APIs ...
+
+// Remove the callback when done
+error = setUserLogCallback(&myLogCallback, HIPDNN_SEV_OFF,
+                           LogCallbackMode::ASYNC, &ctx);
+// ctx can now be safely destroyed
+```
 
 ### Log Level APIs
 

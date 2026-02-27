@@ -146,21 +146,52 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
 // === Logging Callback and Log Level APIs ===
 
 /**
- * @brief Set global backend log output callback to redirect all logs from console/file.
+ * @brief User log callback modes (sync vs async).
+ */
+enum class LogCallbackMode
+{
+    SYNC = HIPDNN_LOG_CALLBACK_SYNC, ///< Callback invoked on logging thread (synchronous)
+    ASYNC = HIPDNN_LOG_CALLBACK_ASYNC ///< Callback invoked on worker thread (asynchronous)
+};
+
+/**
+ * @brief Set or update a user log callback.
  *
- * When a global backend log output callback is set, logs are sent ONLY to the callback
- * (console/file output is disabled). Setting callback to nullptr restores default console/file behavior.
+ * This API allows registering multiple user callbacks with individual log levels and sync/async modes.
+ * Each callback is uniquely identified by the composite key (callback, userHandle).
  *
- * @param callback   Backend log output callback function, or nullptr to restore default behavior
- * @param async      If true, callback is invoked asynchronously; if false, synchronously
+ * @note When a synchronous callback is registered, the synchronous callbacks will delay hipDNN
+ *       until the callback returns, regardless of any async log callbacks also being registered.
+ *
+ * Behavior:
+ * - If (callback, userHandle) already registered: UPDATES settings (level and/or mode)
+ * - If (callback, userHandle) new: ADDS new registration
+ * - If minLevel == SEV_OFF: REMOVES callback
+ * - userHandle must be non-null
+ *
+ * Callback Removal (minLevel == SEV_OFF):
+ * - Callback will be atomically disabled and no further logs will be received
+ * - Any pending async logs for this callback will be abandoned
+ * - After this function returns, user can safely destroy data referenced by userHandle
+ *
+ * @param callback   The callback function to invoke
+ * @param minLevel   Minimum severity level (SEV_OFF removes the callback). Note that
+ * the logs produced on this callback will be limited by the global log level set either by
+ * the HIPDNN_LOG_LEVEL environment variable or the setGlobalLogLevel() API function.
+ * @param mode       Sync or async invocation mode
+ * @param userHandle Non-null user data (also serves as unique callback ID)
  * @return Error object indicating success or failure
  */
-inline Error setGlobalLoggingCallback(hipdnnBackendLogOutputCallback_t callback, bool async = true)
+inline Error setUserLogCallback(hipdnnUserLogCallback_t callback,
+                                hipdnnSeverity_t minLevel,
+                                LogCallbackMode mode,
+                                hipdnnUserLogCallbackHandle_t userHandle)
 {
-    auto status = hipdnnBackendSetGlobalLoggingCallback_ext(callback, async);
+    auto status = hipdnnSetUserLogCallback_ext(
+        callback, minLevel, static_cast<hipdnnLogCallbackMode_t>(mode), userHandle);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set global logging callback"};
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set user log callback"};
     }
     return {};
 }

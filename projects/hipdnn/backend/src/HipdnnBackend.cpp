@@ -296,7 +296,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
 
 HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, const char* msg)
 {
-    hipdnn_backend::logging::hipdnnLoggingCallback(severity, msg);
+    hipdnn_backend::logging::backendLoggingCallback(severity, msg);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
@@ -367,10 +367,15 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
     });
 }
 
+// NOLINTBEGIN(readability-identifier-naming) - C API function
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
-    hipdnnBackendSetGlobalLoggingCallback_ext(hipdnnBackendLogOutputCallback_t callback, bool async)
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle)
+// NOLINTEND(readability-identifier-naming)
 {
-    return hipdnn_backend::logging::initializeGlobalOutputCallbackLogger(callback, async);
+    return hipdnn_backend::logging::setUserLogCallback(callback, minLevel, mode, userHandle);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level)

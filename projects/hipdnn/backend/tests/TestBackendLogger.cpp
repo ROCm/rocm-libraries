@@ -63,24 +63,6 @@ public:
 
         return testing::internal::GetCapturedStderr();
     }
-
-    static void verifyStderrContains(const std::string& expectedContent)
-    {
-        std::string logContent = getStderrContent();
-        EXPECT_NE(logContent.find(expectedContent), std::string::npos)
-            << std::string("Expected to find: \"") << expectedContent << "\" in stderr."
-            << "\nActual stderr content:\n"
-            << logContent;
-    }
-
-    static void verifyStderrNotContains(const std::string& unexpectedContent)
-    {
-        std::string logContent = getStderrContent();
-        EXPECT_EQ(logContent.find(unexpectedContent), std::string::npos)
-            << std::string("Expected NOT to find: \"") << unexpectedContent << "\" in stderr."
-            << "\nActual stderr content:\n"
-            << logContent;
-    }
 };
 
 TEST_F(TestBackendLogger, MacrosDontLogWhenOff)
@@ -93,6 +75,33 @@ TEST_F(TestBackendLogger, MacrosDontLogWhenOff)
     std::string logContent = getStderrContent();
     EXPECT_TRUE(logContent.empty())
         << std::string("Expected stderr to be empty, but it contained:\n") << logContent;
+}
+
+TEST_F(TestBackendLogger, SetLogLevelOverridesEnvironmentVariable)
+{
+    // Environment variable says "off", but we'll programmatically set to "info"
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
+
+    // Programmatically set log level to WARN (before any logging)
+    hipdnn_data_sdk::logging::setLogLevel(HIPDNN_SEV_WARN);
+
+    // Log messages at various levels
+    HIPDNN_BACKEND_LOG_INFO("Info message should not appear");
+    HIPDNN_BACKEND_LOG_WARN("Warn message should appear");
+    HIPDNN_BACKEND_LOG_ERROR("Error message should appear");
+
+    std::string logContent = getStderrContent();
+
+    // All messages should appear because we set log level to INFO programmatically
+    EXPECT_EQ(logContent.find("Info message should not appear"), std::string::npos)
+        << "Expected info message in stderr, actual content:\n"
+        << logContent;
+    EXPECT_NE(logContent.find("Warn message should appear"), std::string::npos)
+        << "Expected warn message in stderr, actual content:\n"
+        << logContent;
+    EXPECT_NE(logContent.find("Error message should appear"), std::string::npos)
+        << "Expected error message in stderr, actual content:\n"
+        << logContent;
 }
 
 TEST_F(TestBackendLogger, MacrosRespectLogLevelInfo)
@@ -145,15 +154,34 @@ TEST_F(TestBackendLogger, MacrosRespectLogLevelError)
 
 TEST_F(TestBackendLogger, LoggingCanBeReinitialized)
 {
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
+    HIPDNN_BACKEND_LOG_INFO("This first info log should appear");
+
+    hipdnn_backend::logging::loggerShutdown();
+
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "off");
     HIPDNN_BACKEND_LOG_INFO("This should not appear");
 
     hipdnn_backend::logging::loggerShutdown();
 
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "info");
-    HIPDNN_BACKEND_LOG_INFO("This should appear after reinitialization");
+    HIPDNN_BACKEND_LOG_INFO("This second info log should appear after reinitialization");
 
-    verifyStderrContains("This should appear after reinitialization");
+    std::string logContent = getStderrContent();
+    EXPECT_NE(logContent.find("This first info log should appear"), std::string::npos)
+        << "Expected to find: \"This first info log should appear\" in stderr."
+        << "\nActual stderr content:\n"
+        << logContent;
+    EXPECT_EQ(logContent.find("This should not appear"), std::string::npos)
+        << "Expected NOT to find: \"This should not appear\" in stderr."
+        << "\nActual stderr content:\n"
+        << logContent;
+    EXPECT_NE(logContent.find("This second info log should appear after reinitialization"),
+              std::string::npos)
+        << "Expected to find: \"This second info log should appear after reinitialization\" in "
+           "stderr."
+        << "\nActual stderr content:\n"
+        << logContent;
 }
 
 TEST_F(TestBackendLogger, LogPatternFormatIsCorrectOnStderr)
@@ -205,20 +233,25 @@ TEST_F(TestBackendLogger, LogFileCanBeSpecifiedByEnvVar)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     hipdnn_backend::logging::loggerShutdown();
 
-    std::string logContent;
+    auto stdErrContent = getStderrContent();
+
+    std::string logFileContent;
     std::ifstream logFileStream(_logFile);
     ASSERT_TRUE(logFileStream.is_open()) << std::string("Log file was not created: ") << _logFile;
 
-    logContent.assign((std::istreambuf_iterator<char>(logFileStream)),
-                      std::istreambuf_iterator<char>());
+    logFileContent.assign((std::istreambuf_iterator<char>(logFileStream)),
+                          std::istreambuf_iterator<char>());
     logFileStream.close();
 
-    EXPECT_NE(logContent.find("Logging to custom file"), std::string::npos)
+    EXPECT_NE(logFileContent.find("Logging to custom file"), std::string::npos)
         << std::string("Expected to find message in log file ") << _logFile
         << "\nActual log content:\n"
-        << logContent;
+        << logFileContent;
 
-    verifyStderrNotContains("Logging to custom file");
+    EXPECT_EQ(stdErrContent.find("Logging to custom file"), std::string::npos)
+        << "Expected NOT to find: \"Logging to custom file\" in stderr."
+        << "\nActual stderr content:\n"
+        << stdErrContent;
 }
 
 TEST_F(TestBackendLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
