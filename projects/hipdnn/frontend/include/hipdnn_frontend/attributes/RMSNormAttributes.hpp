@@ -1,5 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file RMSNormAttributes.hpp
+ * @brief Attributes for RMS normalization forward operation
+ *
+ * This file defines the RMSNormAttributes class used to configure
+ * RMS normalization operations, supporting both training and inference phases.
+ */
+
 #pragma once
 
 #include "Attributes.hpp"
@@ -10,6 +19,47 @@
 
 namespace hipdnn_frontend::graph
 {
+
+/**
+ * @class RMSNormAttributes
+ * @brief Configuration attributes for RMS normalization forward operation
+ *
+ * RMSNormAttributes configures an RMS normalization operation. Unlike batch
+ * normalization, RMSNorm normalizes using only the root mean square of the
+ * input without subtracting the mean, and operates per-channel rather than
+ * across the batch dimension.
+ *
+ * **Required inputs:**
+ * - X: Input tensor to normalize
+ * - Scale: Per-channel scale (gamma) tensor with shape [1, C, 1, 1, ...]
+ * - Epsilon: Scalar numerical stability constant
+ *
+ * **Optional inputs:**
+ * - Bias: Per-channel bias (beta) tensor with shape [1, C, 1, 1, ...]
+ *
+ * **Required outputs:**
+ * - Y: Normalized output tensor (same shape as X)
+ *
+ * **Optional outputs (training only):**
+ * - Inv_rms: Inverse RMS values saved for the backward pass
+ *
+ * **Required parameters:**
+ * - forward_phase: Must be set to TRAINING or INFERENCE. In TRAINING mode,
+ *   the inv_rms output is computed and saved. In INFERENCE mode, only Y
+ *   is produced.
+ *
+ * @code{.cpp}
+ * RMSNormAttributes attr;
+ * attr.set_x(inputTensor)
+ *     .set_scale(scaleTensor)
+ *     .set_epsilon(epsilonTensor)
+ *     .set_forward_phase(NormFwdPhase::TRAINING);
+ *
+ * auto [y, invRms] = graph.rmsnorm(attr);
+ * @endcode
+ *
+ * @see BatchnormAttributes for batch normalization
+ */
 class RMSNormAttributes : public Attributes<RMSNormAttributes>
 {
 public:
