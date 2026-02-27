@@ -715,5 +715,5 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
             "GRB @ idx=3 is issued too early. "
-            "Must be issued after idx=7, which is when LRB0 is guaranteed done."
+            "Must be issued after idx=-1 (of next iteration), which is when LRB0 is guaranteed done."
         )

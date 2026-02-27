@@ -36,6 +36,8 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(
         hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR),
         "HIPDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR");
+    EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_TENSOR_DESCRIPTOR),
+                 "HIPDNN_BACKEND_TENSOR_DESCRIPTOR");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -160,6 +162,21 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT),
                  "HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT");
+
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_UNIQUE_ID),
+                 "HIPDNN_ATTR_TENSOR_UNIQUE_ID");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_NAME_EXT),
+                 "HIPDNN_ATTR_TENSOR_NAME_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_DATA_TYPE),
+                 "HIPDNN_ATTR_TENSOR_DATA_TYPE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_DIMENSIONS),
+                 "HIPDNN_ATTR_TENSOR_DIMENSIONS");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_STRIDES),
+                 "HIPDNN_ATTR_TENSOR_STRIDES");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_IS_VIRTUAL),
+                 "HIPDNN_ATTR_TENSOR_IS_VIRTUAL");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_VALUE_EXT),
+                 "HIPDNN_ATTR_TENSOR_VALUE_EXT");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)
@@ -244,6 +261,21 @@ TEST(TestBackendEnumStringUtils, GetPluginLoadingModeString)
 
     EXPECT_STREQ(hipdnnGetPluginLoadingModeString(static_cast<hipdnnPluginLoadingMode_ext_t>(-1)),
                  "HIPDNN_PLUGIN_LOADING_UNKNOWN");
+}
+
+TEST(TestBackendEnumStringUtils, GetDataTypeString)
+{
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FLOAT), "HIPDNN_DATA_FLOAT");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_DOUBLE), "HIPDNN_DATA_DOUBLE");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_HALF), "HIPDNN_DATA_HALF");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_INT8), "HIPDNN_DATA_INT8");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_INT32), "HIPDNN_DATA_INT32");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_UINT8), "HIPDNN_DATA_UINT8");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_BFLOAT16), "HIPDNN_DATA_BFLOAT16");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FP8_E4M3), "HIPDNN_DATA_FP8_E4M3");
+    EXPECT_STREQ(hipdnnGetDataTypeString(HIPDNN_DATA_FP8_E5M2), "HIPDNN_DATA_FP8_E5M2");
+
+    EXPECT_STREQ(hipdnnGetDataTypeString(static_cast<hipdnnDataType_t>(-1)), "HIPDNN_DATA_UNKNOWN");
 }
 
 TEST(TestBackendEnumStringUtils, GetPluginUnloadingModeString)

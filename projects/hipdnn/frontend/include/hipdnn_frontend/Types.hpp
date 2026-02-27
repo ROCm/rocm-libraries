@@ -13,6 +13,7 @@
 #pragma once
 
 #include <HipdnnBackendHeuristicType.h>
+#include <HipdnnDataType.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -21,6 +22,7 @@
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 
 #include <bitset>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -306,6 +308,34 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP8_E5M2;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
+    }
+}
+
+inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
+{
+    switch(type)
+    {
+    case DataType::FLOAT:
+        return HIPDNN_DATA_FLOAT;
+    case DataType::DOUBLE:
+        return HIPDNN_DATA_DOUBLE;
+    case DataType::HALF:
+        return HIPDNN_DATA_HALF;
+    case DataType::INT8:
+        return HIPDNN_DATA_INT8;
+    case DataType::INT32:
+        return HIPDNN_DATA_INT32;
+    case DataType::UINT8:
+        return HIPDNN_DATA_UINT8;
+    case DataType::BFLOAT16:
+        return HIPDNN_DATA_BFLOAT16;
+    case DataType::FP8_E4M3:
+        return HIPDNN_DATA_FP8_E4M3;
+    case DataType::FP8_E5M2:
+        return HIPDNN_DATA_FP8_E5M2;
+    case DataType::NOT_SET:
+    default:
+        return std::nullopt;
     }
 }
 
