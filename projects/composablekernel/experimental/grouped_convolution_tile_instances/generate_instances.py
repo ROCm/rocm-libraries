@@ -306,8 +306,7 @@ def parse_bwd_weight_instances(instances, problem_name):
 
             # TODO: Double buffer pipeline does not currently compile for explicit GEMM.
             if blk_gemm_pipeline_version == "v4" or blk_gemm_pipeline_version == "v5":
-                print(f"Changing Block GEMM pipeline version from {blk_gemm_pipeline_version} to v3 for instance {instance_id} with device op {device_op_name}.")
-                blk_gemm_pipeline_version = "v3"
+                raise f"Block GEMM pipeline version {blk_gemm_pipeline_version} is not supported for instance {instance_id} with device op {device_op_name}."
         else:
             spec = args[11]
             block_size = int(args[12])
