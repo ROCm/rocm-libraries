@@ -45,7 +45,7 @@ struct TestCase
         return os << "dir-mode:" << tc.dir_mode << " no-hx:" << tc.no_hx << " no-dhy:" << tc.no_dhy
                   << " no-cx:" << tc.no_cx << " no-dcy:" << tc.no_dcy << " no-hy:" << tc.no_hy
                   << " no-dhx:" << tc.no_dhx << " no-cy:" << tc.no_cy << " no-dcx:" << tc.no_dcx
-                  << " no_dcx:" << tc.no_dcx;
+                  << " no-dcx:" << tc.no_dcx;
     }
 };
 
@@ -90,6 +90,37 @@ std::vector<TestCase> GetTestCases()
 
 } // namespace
 
+struct GPU_LSTM_extra_FP16 : LSTM_test<half_float::half>, testing::TestWithParam<TestCase>
+{
+};
+
+TEST_P(GPU_LSTM_extra_FP16, HalfTest)
+{
+    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
+
+    this->batchSize  = 32;
+    this->seqLength  = 3;
+    this->batchSeq   = {32, 32, 32};
+    this->inVecLen   = 128;
+    this->hiddenSize = 128;
+    this->numLayers  = 1;
+    this->inputMode  = 0;
+    this->biasMode   = 0;
+    this->dirMode    = dirMode;
+    this->nohx       = bool(nohx);
+    this->nodhy      = bool(nodhy);
+    this->nocx       = bool(nocx);
+    this->nodcy      = bool(nodcy);
+    this->nohy       = bool(nohy);
+    this->nodhx      = bool(nodhx);
+    this->nocy       = bool(nocy);
+    this->nodcx      = bool(nodcx);
+
+    RunTest();
+};
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP16, testing::ValuesIn(GetTestCases()));
+
 struct GPU_LSTM_extra_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 {
 };
@@ -120,3 +151,34 @@ TEST_P(GPU_LSTM_extra_FP32, FloatTest)
 };
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP32, testing::ValuesIn(GetTestCases()));
+
+struct GPU_LSTM_extra_FP64 : LSTM_test<double>, testing::TestWithParam<TestCase>
+{
+};
+
+TEST_P(GPU_LSTM_extra_FP64, DoubleTest)
+{
+    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
+
+    this->batchSize  = 32;
+    this->seqLength  = 3;
+    this->batchSeq   = {32, 32, 32};
+    this->inVecLen   = 128;
+    this->hiddenSize = 128;
+    this->numLayers  = 1;
+    this->inputMode  = 0;
+    this->biasMode   = 0;
+    this->dirMode    = dirMode;
+    this->nohx       = bool(nohx);
+    this->nodhy      = bool(nodhy);
+    this->nocx       = bool(nocx);
+    this->nodcy      = bool(nodcy);
+    this->nohy       = bool(nohy);
+    this->nodhx      = bool(nodhx);
+    this->nocy       = bool(nocy);
+    this->nodcx      = bool(nodcx);
+
+    RunTest();
+};
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP64, testing::ValuesIn(GetTestCases()));

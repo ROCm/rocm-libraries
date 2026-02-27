@@ -1669,8 +1669,19 @@ struct LSTM_test : Verifier
     bool nocy{false};
     bool nodcx{false};
     std::vector<int> batchSeq;
-    const double Data_scale = 0.001;
+    const double dataScale{0.001};
     miopenDataType_t dataType{miopenFloat};
+
+    LSTM_test()
+    {
+        if constexpr (std::is_same_v<T, half_float::half>) {
+            dataType = miopenHalf;
+        } else if constexpr (std::is_same_v<T, double>) {
+            dataType = miopenDouble;
+        } else {
+            dataType = miopenFloat;
+        }
+    }
 
     void RunTest()
     {
@@ -1776,7 +1787,7 @@ struct LSTM_test : Verifier
         std::vector<T> input(in_sz);
         for(std::size_t i = 0; i < in_sz; i++)
         {
-            input[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+            input[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
         }
 
         std::size_t hx_sz = ((dirMode != 0) ? 2ULL : 1ULL) * hiddenSize * batchSize * numLayers;
@@ -1795,7 +1806,7 @@ struct LSTM_test : Verifier
         std::vector<T> weights(wei_sz);
         for(std::size_t i = 0; i < wei_sz; i++)
         {
-            weights[i] = prng::gen_descreet_uniform_sign<T>(Data_scale, 100);
+            weights[i] = prng::gen_descreet_uniform_sign<T>(dataScale, 100);
         }
 
         int batch_n = std::accumulate(batchSeq.begin(), batchSeq.end(), 0);
@@ -1821,7 +1832,7 @@ struct LSTM_test : Verifier
         {
             for(std::size_t i = 0; i < hx_sz; i++)
             {
-                hx[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+                hx[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
             }
         }
 
@@ -1829,7 +1840,7 @@ struct LSTM_test : Verifier
         {
             for(std::size_t i = 0; i < hx_sz; i++)
             {
-                dhyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+                dhyin[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
             }
         }
 
@@ -1837,7 +1848,7 @@ struct LSTM_test : Verifier
         {
             for(std::size_t i = 0; i < hx_sz; i++)
             {
-                cx[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+                cx[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
             }
         }
 
@@ -1845,7 +1856,7 @@ struct LSTM_test : Verifier
         {
             for(std::size_t i = 0; i < hx_sz; i++)
             {
-                dcyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+                dcyin[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
             }
         }
 
@@ -1928,7 +1939,7 @@ struct LSTM_test : Verifier
         std::vector<T> dyin(out_sz);
         for(std::size_t i = 0; i < out_sz; i++)
         {
-            dyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+            dyin[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
         }
 
 #if(MIO_LSTM_TEST_DEBUG == 2)

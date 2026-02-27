@@ -75,6 +75,29 @@ std::vector<TestCase> GetTestCases()
 
 } // namespace
 
+struct GPU_DeepBench_LSTM_FP16 : LSTM_test<half_float::half>, testing::TestWithParam<TestCase>
+{
+};
+
+TEST_P(GPU_DeepBench_LSTM_FP16, HalfTest)
+{
+    auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
+
+    this->numLayers     = 1;
+    this->inputMode     = 1;
+    this->biasMode      = 0;
+    this->dirMode       = 0;
+    this->flatBatchFill = 1;
+    this->batchSize     = batchSize;
+    this->seqLength     = seqLength;
+    this->inVecLen      = inVecLen;
+    this->hiddenSize    = hiddenSize;
+
+    RunTest();
+};
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP16, testing::ValuesIn(GetTestCases()));
+
 struct GPU_DeepBench_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 {
 };
@@ -97,3 +120,26 @@ TEST_P(GPU_DeepBench_LSTM_FP32, FloatTest)
 };
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP32, testing::ValuesIn(GetTestCases()));
+
+struct GPU_DeepBench_LSTM_FP64 : LSTM_test<double>, testing::TestWithParam<TestCase>
+{
+};
+
+TEST_P(GPU_DeepBench_LSTM_FP64, DoubleTest)
+{
+    auto [batchSize, seqLength, inVecLen, hiddenSize] = GetParam();
+
+    this->numLayers     = 1;
+    this->inputMode     = 1;
+    this->biasMode      = 0;
+    this->dirMode       = 0;
+    this->flatBatchFill = 1;
+    this->batchSize     = batchSize;
+    this->seqLength     = seqLength;
+    this->inVecLen      = inVecLen;
+    this->hiddenSize    = hiddenSize;
+
+    RunTest();
+};
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_DeepBench_LSTM_FP64, testing::ValuesIn(GetTestCases()));

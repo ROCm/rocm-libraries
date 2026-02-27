@@ -25,7 +25,94 @@
 
 #include "lstm.hpp"
 
-struct GPU_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<std::tuple<int, int, int, int, int>>
+namespace {
+
+struct TestCase
+{
+    int usePadding;
+    int inputMode;
+    int biasMode;
+    int dirMode;
+    int algoMode;
+
+    friend std::ostream& operator<<(std::ostream& os, const TestCase& tc)
+    {
+        return os << "use-padding:" << tc.usePadding << " input-mode:" << tc.inputMode
+                  << " bias-mode:" << tc.biasMode << " dir-mode:" << tc.dirMode
+                  << " algo-mode:" << tc.algoMode;
+    }
+};
+
+std::vector<TestCase> GetTestCases()
+{
+    return std::vector{
+        // clang-format off
+        //  use-padding input-mode, bias-mode, dir-mode, algo-mode
+        TestCase(0,        0,         0,         0,        0),
+        TestCase(0,        0,         0,         0,        1),
+        TestCase(0,        0,         0,         1,        0),
+        TestCase(0,        0,         0,         1,        1),
+        TestCase(0,        0,         1,         0,        0),
+        TestCase(0,        0,         1,         0,        1),
+        TestCase(0,        0,         1,         1,        0),
+        TestCase(0,        0,         1,         1,        1),
+        TestCase(0,        1,         0,         0,        0),
+        TestCase(0,        1,         0,         0,        1),
+        TestCase(0,        1,         0,         1,        0),
+        TestCase(0,        1,         0,         1,        1),
+        TestCase(0,        1,         1,         0,        0),
+        TestCase(0,        1,         1,         0,        1),
+        TestCase(0,        1,         1,         1,        0),
+        TestCase(0,        1,         1,         1,        1),
+        TestCase(1,        0,         0,         0,        0),
+        TestCase(1,        0,         0,         0,        1),
+        TestCase(1,        0,         0,         1,        0),
+        TestCase(1,        0,         0,         1,        1),
+        TestCase(1,        0,         1,         0,        0),
+        TestCase(1,        0,         1,         0,        1),
+        TestCase(1,        0,         1,         1,        0),
+        TestCase(1,        0,         1,         1,        1),
+        TestCase(1,        1,         0,         0,        0),
+        TestCase(1,        1,         0,         0,        1),
+        TestCase(1,        1,         0,         1,        0),
+        TestCase(1,        1,         0,         1,        1),
+        TestCase(1,        1,         1,         0,        0),
+        TestCase(1,        1,         1,         0,        1),
+        TestCase(1,        1,         1,         1,        0),
+        TestCase(1,        1,         1,         1,        1)
+        // clang-format on
+    };
+}
+
+} // namespace
+
+struct GPU_LSTM_FP16 : LSTM_test<half_float::half>, testing::TestWithParam<TestCase>
+{
+};
+
+TEST_P(GPU_LSTM_FP16, HalfTest)
+{
+    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
+
+    int batchSize{17};
+    int seqLength{2};
+    this->batchSize  = batchSize;
+    this->seqLength  = seqLength;
+    this->inVecLen   = batchSize;
+    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
+    this->hiddenSize = 67;
+    this->usePadding = usePadding;
+    this->inputMode  = inputMode;
+    this->biasMode   = biasMode;
+    this->dirMode    = dirMode;
+    this->algoMode   = algoMode;
+
+    RunTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_FP16, testing::ValuesIn(GetTestCases()));
+
+struct GPU_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
 {
 };
 
@@ -49,10 +136,30 @@ TEST_P(GPU_LSTM_FP32, FloatTest)
     RunTest();
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_LSTM_FP32,
-                         testing::Combine(testing::Values(0, 1),
-                                          testing::Values(0, 1),
-                                          testing::Values(0, 1),
-                                          testing::Values(0, 1),
-                                          testing::Values(0, 1)));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_FP32, testing::ValuesIn(GetTestCases()));
+
+struct GPU_LSTM_FP64 : LSTM_test<double>, testing::TestWithParam<TestCase>
+{
+};
+
+TEST_P(GPU_LSTM_FP64, DoubleTest)
+{
+    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
+
+    int batchSize{17};
+    int seqLength{2};
+    this->batchSize  = batchSize;
+    this->seqLength  = seqLength;
+    this->inVecLen   = batchSize;
+    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
+    this->hiddenSize = 67;
+    this->usePadding = usePadding;
+    this->inputMode  = inputMode;
+    this->biasMode   = biasMode;
+    this->dirMode    = dirMode;
+    this->algoMode   = algoMode;
+
+    RunTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_FP64, testing::ValuesIn(GetTestCases()));
