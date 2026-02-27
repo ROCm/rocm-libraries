@@ -1482,7 +1482,7 @@ inline void {func_name}(ck_tile::dispatcher::Registry& registry, const std::stri
 """
     header_path.write_text(header_content)
 
-    print(f"[{target_name}] ✓ {len(obj_files)} kernels compiled")
+    print(f"[{target_name}] OK {len(obj_files)} kernels compiled")
     return 0
 
 

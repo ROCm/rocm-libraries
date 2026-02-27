@@ -8,7 +8,6 @@ Example 05: NumPy Integration
 
 Shows how to create a GPU-accelerated matmul wrapper.
 
-Complexity: ★★☆☆☆
 
 Usage:
     python3 05_numpy_integration.py

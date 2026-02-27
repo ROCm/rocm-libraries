@@ -19,7 +19,6 @@ Heuristic strategies:
 - Memory-bound: Optimize memory access for bandwidth-limited cases
 - Latency-focused: Minimize kernel launch overhead for small problems
 
-Complexity: ★★★★☆
 
 Usage:
     python3 08_heuristics.py

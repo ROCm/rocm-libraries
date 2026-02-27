@@ -20,6 +20,8 @@
 #include <iomanip>
 #include <map>
 
+#include "ck_tile/dispatcher/base_registry.hpp"
+#include "ck_tile/dispatcher/dispatcher_error.hpp"
 #include "ck_tile/dispatcher/grouped_conv_problem.hpp"
 #include "ck_tile/dispatcher/grouped_conv_kernel_decl.hpp"
 
@@ -135,16 +137,11 @@ class GroupedConvKernelInstance
 // GroupedConvRegistry - Stores and manages grouped convolution kernels
 // =============================================================================
 
-class GroupedConvRegistry
+class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConvKernelKey, GroupedConvKernelInstance, GroupedConvKernelKeyHash>
 {
-    public:
-    enum class Priority
-    {
-        Low    = 0,
-        Normal = 1,
-        High   = 2
-    };
+    using Base = BaseRegistry<GroupedConvRegistry, GroupedConvKernelKey, GroupedConvKernelInstance, GroupedConvKernelKeyHash>;
 
+    public:
     GroupedConvRegistry() = default;
 
     /// Singleton instance for global kernel registration
@@ -154,27 +151,16 @@ class GroupedConvRegistry
         return registry;
     }
 
-    void set_name(const std::string& name) { name_ = name; }
-    const std::string& name() const { return name_; }
-
-    /// Register a kernel instance
-    bool register_kernel(std::shared_ptr<GroupedConvKernelInstance> kernel,
-                        Priority priority = Priority::Normal)
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        const auto& key  = kernel->key();
-        kernels_[key]    = kernel;
-        priorities_[key] = priority;
-        return true;
-    }
-
-    /// Register kernels from a GroupedConvKernelSet
+    /// Register kernels from a GroupedConvKernelSet (atomic batch registration)
     bool register_set(const GroupedConvKernelSet& kernel_set, Priority priority = Priority::Normal)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        // Build all instances first, then register under a single lock hold
+        // so readers never see a half-registered set.
+        std::vector<std::pair<GroupedConvKernelKey, std::shared_ptr<GroupedConvKernelInstance>>> batch;
+        batch.reserve(kernel_set.declarations().size());
+
         for(const auto& decl : kernel_set.declarations())
         {
-            // Create kernel instance from declaration
             GroupedConvKernelKey key;
             key.dtype_in     = decl.signature.dtype_in_;
             key.dtype_wei    = decl.signature.dtype_wei_;
@@ -193,34 +179,41 @@ class GroupedConvRegistry
             key.scheduler    = decl.algorithm.scheduler_;
             key.arch         = decl.arch;
 
-            auto instance = std::make_shared<GroupedConvKernelInstance>(
-                key,
-                decl.name(),
-                [](const GroupedConvProblem&, void*) -> float { return 0.0f; } // Placeholder
-            );
-            kernels_[key]    = instance;
-            priorities_[key] = priority;
+            batch.emplace_back(key, std::make_shared<GroupedConvKernelInstance>(
+                key, decl.name(),
+                [](const GroupedConvProblem&, void*) -> float { return 0.0f; }
+            ));
         }
-        return true;
+
+        std::lock_guard<std::mutex> lock(mutex());
+        bool any_registered = false;
+        for(auto& [key, instance] : batch)
+        {
+            auto it = entries().find(key);
+            if(it == entries().end() || it->second.priority <= priority)
+            {
+                entries_mut()[key] = typename Base::Entry{std::move(instance), priority};
+                any_registered = true;
+            }
+        }
+        return any_registered;
     }
 
     /// Find the best kernel for a problem
     const GroupedConvKernelInstance* find(const GroupedConvProblem& problem) const
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(mutex());
         const GroupedConvKernelInstance* best = nullptr;
         Priority best_priority               = Priority::Low;
 
-        for(const auto& [key, kernel] : kernels_)
+        for(const auto& [key, entry] : entries())
         {
-            if(kernel->matches(problem))
+            if(entry.instance->matches(problem))
             {
-                auto it           = priorities_.find(key);
-                Priority priority = (it != priorities_.end()) ? it->second : Priority::Normal;
-                if(!best || priority > best_priority)
+                if(!best || entry.priority > best_priority)
                 {
-                    best          = kernel.get();
-                    best_priority = priority;
+                    best          = entry.instance.get();
+                    best_priority = entry.priority;
                 }
             }
         }
@@ -231,53 +224,34 @@ class GroupedConvRegistry
     /// Get all registered kernels
     std::vector<const GroupedConvKernelInstance*> all_kernels() const
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(mutex());
         std::vector<const GroupedConvKernelInstance*> result;
-        for(const auto& [key, kernel] : kernels_)
+        for(const auto& [key, entry] : entries())
         {
-            result.push_back(kernel.get());
+            result.push_back(entry.instance.get());
         }
         return result;
-    }
-
-    size_t size() const
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return kernels_.size();
-    }
-
-    bool empty() const
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return kernels_.empty();
-    }
-
-    void clear()
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        kernels_.clear();
-        priorities_.clear();
     }
 
     /// Export registry to JSON string
     std::string export_json(bool include_statistics = false) const
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(mutex());
         std::ostringstream json;
 
         json << "{\n";
         json << "  \"metadata\": {\n";
-        json << "    \"registry_name\": \"" << json_escape(name_) << "\",\n";
-        json << "    \"total_kernels\": " << kernels_.size() << "\n";
+        json << "    \"registry_name\": \"" << json_escape(get_name()) << "\",\n";
+        json << "    \"total_kernels\": " << entries().size() << "\n";
         json << "  }";
 
-        if(include_statistics && !kernels_.empty())
+        if(include_statistics && !entries().empty())
         {
             std::map<std::string, int> by_datatype;
             std::map<std::string, int> by_pipeline;
             std::map<std::string, int> by_arch;
 
-            for(const auto& [key, kernel] : kernels_)
+            for(const auto& [key, entry] : entries())
             {
                 std::string dtype_key = key.dtype_in + "_" + key.dtype_wei + "_" + key.dtype_out;
                 by_datatype[dtype_key]++;
@@ -320,11 +294,11 @@ class GroupedConvRegistry
 
         json << ",\n  \"kernels\": [\n";
         bool first = true;
-        for(const auto& [key, kernel] : kernels_)
+        for(const auto& [key, entry] : entries())
         {
             if(!first)
                 json << ",\n";
-            json << "    " << export_kernel_json(*kernel);
+            json << "    " << export_kernel_json(*entry.instance);
             first = false;
         }
         json << "\n  ]\n";
@@ -349,13 +323,13 @@ class GroupedConvRegistry
     std::vector<const GroupedConvKernelInstance*>
     filter(std::function<bool(const GroupedConvKernelInstance&)> predicate) const
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(mutex());
         std::vector<const GroupedConvKernelInstance*> result;
-        for(const auto& [key, kernel] : kernels_)
+        for(const auto& [key, entry] : entries())
         {
-            if(predicate(*kernel))
+            if(predicate(*entry.instance))
             {
-                result.push_back(kernel.get());
+                result.push_back(entry.instance.get());
             }
         }
         return result;
@@ -364,9 +338,9 @@ class GroupedConvRegistry
     /// Remove kernels not matching the arch
     std::size_t filter_by_arch(const std::string& gpu_arch)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(mutex());
         std::vector<GroupedConvKernelKey> to_remove;
-        for(const auto& [key, kernel] : kernels_)
+        for(const auto& [key, entry] : entries())
         {
             if(key.arch != gpu_arch)
             {
@@ -375,8 +349,7 @@ class GroupedConvRegistry
         }
         for(const auto& key : to_remove)
         {
-            kernels_.erase(key);
-            priorities_.erase(key);
+            entries_mut().erase(key);
         }
         return to_remove.size();
     }
@@ -445,14 +418,6 @@ class GroupedConvRegistry
 
         return json.str();
     }
-
-    std::string name_ = "default";
-    mutable std::mutex mutex_;
-    std::unordered_map<GroupedConvKernelKey,
-                       std::shared_ptr<GroupedConvKernelInstance>,
-                       GroupedConvKernelKeyHash>
-        kernels_;
-    std::unordered_map<GroupedConvKernelKey, Priority, GroupedConvKernelKeyHash> priorities_;
 };
 
 // =============================================================================
@@ -470,7 +435,7 @@ class GroupedConvDispatcher
         const auto* kernel = registry_->find(problem);
         if(!kernel)
         {
-            throw std::runtime_error("No suitable grouped convolution kernel found for problem: " +
+            throw NoKernelFound("No suitable grouped convolution kernel found for problem: " +
                                      problem.to_string());
         }
         return kernel->run(problem, stream);

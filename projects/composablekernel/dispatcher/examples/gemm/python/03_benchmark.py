@@ -8,7 +8,6 @@ Example 03: Benchmark
 
 Performance benchmarking with compute-optimized kernel configuration.
 
-Complexity: ★★★☆☆
 
 Usage:
     python3 03_benchmark.py

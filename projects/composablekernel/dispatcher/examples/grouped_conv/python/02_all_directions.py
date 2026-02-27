@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Example 02: All Convolution Directions (Forward, BwdData, BwdWeight) × 2D/3D
+Example 02: All Convolution Directions (Forward, BwdData, BwdWeight) x 2D/3D
 
 GPU execution for all 6 kernel variants with CPU reference verification.
 
@@ -13,6 +13,8 @@ Usage:
 """
 
 import sys
+import argparse
+import time
 import numpy as np
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from grouped_conv_utils import (
     GroupedConvKernelConfig,
     GroupedConvProblem,
     GpuGroupedConvRunner,
+    setup_multiple_grouped_conv_dispatchers,
     validate_grouped_conv_config,
     detect_gpu_arch,
 )
@@ -103,11 +106,16 @@ def ref_conv2d_bwd_weight(x, dy, prob):
 
 
 def main():
-    arch = detect_gpu_arch()
+    parser = argparse.ArgumentParser(description="All grouped-conv directions (2D/3D) with verification")
+    parser.add_argument("--arch", default=detect_gpu_arch())
+    parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
+    args = parser.parse_args()
+
+    arch = args.arch
     print("=" * 70)
-    print("Example 02: All Convolution Directions × 2D/3D")
+    print("Example 02: All Convolution Directions x 2D/3D")
     print("=" * 70)
-    print(f"\n  Arch: {arch}")
+    print(f"\n  Arch: {arch}, Dtype: {args.dtype}")
 
     # Config validation for all directions
     print("\n--- Config Validation ---")
@@ -117,13 +125,47 @@ def main():
             r = validate_grouped_conv_config(cfg.to_dict())
             print(f"  {variant:12s} {ndim}D: valid={r.is_valid}")
 
-    runner = GpuGroupedConvRunner()
-    if not runner.is_available():
-        print("\n  GPU library not available. Build dispatcher_conv_lib first.")
-        return 1
+    key_order = [
+        ("forward", 2),
+        ("forward", 3),
+        ("bwd_data", 2),
+        ("bwd_data", 3),
+        ("bwd_weight", 2),
+        ("bwd_weight", 3),
+    ]
 
-    print(f"\n  Library: {runner.library_path}")
-    print(f"  Compiled kernels: {runner.lib.kernel_names()}")
+    runner_by_key = {}
+    jit_build_s = 0.0
+    print("\n--- Python JIT Build ---")
+    configs = [
+        GroupedConvKernelConfig(
+            variant=variant,
+            ndim_spatial=ndim,
+            arch=arch,
+            dtype=args.dtype,
+        )
+        for variant, ndim in key_order
+    ]
+    t0 = time.perf_counter()
+    jit_libs = setup_multiple_grouped_conv_dispatchers(configs, verbose=False)
+    jit_build_s = time.perf_counter() - t0
+    for i, key in enumerate(key_order):
+        lib = jit_libs[i]
+        if lib is None:
+            print(f"  JIT {key[0]} {key[1]}D: FAILED")
+            continue
+        custom_runner = GpuGroupedConvRunner(lib_path=str(lib.path))
+        if custom_runner.is_available():
+            runner_by_key[key] = custom_runner
+            print(f"  JIT {key[0]} {key[1]}D: {lib.path}")
+        else:
+            print(f"  JIT {key[0]} {key[1]}D: load failed")
+    print(f"  JIT build time: {jit_build_s:.3f} s")
+
+    missing = [key for key in key_order if key not in runner_by_key]
+    if missing:
+        print(f"\n  JIT unavailable for {len(missing)} configs: {missing}")
+        return 1
 
     # GPU execution for all 6 variants
     print("\n--- GPU Execution (all 6 variants) ---")
@@ -136,20 +178,21 @@ def main():
         "bwdw_3d": GroupedConvProblem(N=1, C=64, K=64, Di=8, Hi=8, Wi=8, Z=3, Y=3, X=3, pad_d=1, pad_h=1, pad_w=1, direction="bwd_weight"),
     }
 
+    np_dtype = np.float16 if args.dtype in ["fp16", "bf16"] else np.float32
     results = {}
     for name, prob in problems.items():
         d = prob.direction
         if d == "forward":
-            a = np.random.uniform(-0.3, 0.3, prob.input_shape()).astype(np.float16)
-            b = np.random.uniform(-0.3, 0.3, prob.weight_shape()).astype(np.float16)
+            a = np.random.uniform(-0.3, 0.3, prob.input_shape()).astype(np_dtype)
+            b = np.random.uniform(-0.3, 0.3, prob.weight_shape()).astype(np_dtype)
         elif d == "bwd_data":
-            a = np.random.uniform(-0.3, 0.3, prob.output_shape()).astype(np.float16)  # dY
-            b = np.random.uniform(-0.3, 0.3, prob.weight_shape()).astype(np.float16)  # W
+            a = np.random.uniform(-0.3, 0.3, prob.output_shape()).astype(np_dtype)  # dY
+            b = np.random.uniform(-0.3, 0.3, prob.weight_shape()).astype(np_dtype)  # W
         elif d == "bwd_weight":
-            a = np.random.uniform(-0.3, 0.3, prob.input_shape()).astype(np.float16)   # X
-            b = np.random.uniform(-0.3, 0.3, prob.output_shape()).astype(np.float16)  # dY
+            a = np.random.uniform(-0.3, 0.3, prob.input_shape()).astype(np_dtype)   # X
+            b = np.random.uniform(-0.3, 0.3, prob.output_shape()).astype(np_dtype)  # dY
 
-        res = runner.run(a, b, prob)
+        res = runner_by_key[(d, prob.ndim_spatial)].run(a, b, prob)
         nz = np.count_nonzero(res.output) if res.success else 0
         sz = res.output.size if res.success else 0
         results[name] = (res, a, b, prob)
@@ -169,7 +212,7 @@ def main():
         print(f"  fwd_2d:  max_abs={d.max():.6f}  match={ok}")
         all_pass &= ok
 
-    # BwdData 2D: a=dY, b=W → c=dX
+    # BwdData 2D: a=dY, b=W -> c=dX
     res, dy, w, prob = results["bwdd_2d"]
     if res.success:
         ref = ref_conv2d_bwd_data(dy, w, prob)
@@ -178,7 +221,7 @@ def main():
         print(f"  bwdd_2d: max_abs={d.max():.6f}  match={ok}")
         all_pass &= ok
 
-    # BwdWeight 2D: a=X, b=dY → c=dW
+    # BwdWeight 2D: a=X, b=dY -> c=dW
     res, x, dy, prob = results["bwdw_2d"]
     if res.success:
         ref = ref_conv2d_bwd_weight(x, dy, prob)
@@ -187,7 +230,8 @@ def main():
         print(f"  bwdw_2d: max_abs={d.max():.6f}  match={ok}")
         all_pass &= ok
 
-    runner.cleanup()
+    for r in runner_by_key.values():
+        r.cleanup()
 
     # Summary
     gpu_ok = all(r[0].success for r in results.values())
@@ -195,6 +239,8 @@ def main():
     print("\n" + "=" * 70)
     print(f"  GPU execution:  {sum(1 for r in results.values() if r[0].success)}/6 OK")
     print(f"  CPU ref match:  {'all pass' if all_pass else 'FAIL'}")
+    if jit_build_s > 0.0:
+        print(f"  JIT build time: {jit_build_s:.3f} s")
     print(f"  Status: {status}")
     print("=" * 70)
     return 0 if status == "PASS" else 1

@@ -8,7 +8,6 @@ Example 09: Multiple Registries
 
 Demonstrates multiple registries for different optimization targets.
 
-Complexity: ★★★★★
 
 Usage:
     python3 09_multi_registry.py

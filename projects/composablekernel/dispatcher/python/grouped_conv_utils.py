@@ -585,7 +585,7 @@ class GpuGroupedConvRunner:
             self._hip.hipMalloc(ctypes.byref(d_b), weight_np.nbytes)
             self._hip.hipMalloc(ctypes.byref(d_c), output_size)
 
-            # Host → Device
+            # Host to device
             self._hip.hipMemcpy(d_a, input_np.ctypes.data, input_np.nbytes, self.HIP_MEMCPY_H2D)
             self._hip.hipMemcpy(d_b, weight_np.ctypes.data, weight_np.nbytes, self.HIP_MEMCPY_H2D)
             self._hip.hipDeviceSynchronize()
@@ -597,7 +597,7 @@ class GpuGroupedConvRunner:
             result = GroupedConvResult()
 
             if time_ms > 0:
-                # Device → Host
+                # Device to host
                 self._hip.hipMemcpy(output_np.ctypes.data, d_c, output_size, self.HIP_MEMCPY_D2H)
                 self._hip.hipDeviceSynchronize()
                 result.success = True
@@ -904,6 +904,458 @@ def auto_correct_grouped_conv_config(config: dict) -> Tuple[dict, GroupedConvVal
     return corrected, result
 
 
+def _run_hipcc_subprocess(args: dict) -> Tuple[bool, Optional[Path], str]:
+    """Run one hipcc compile+link job in a subprocess worker."""
+    import subprocess
+    from pathlib import Path
+
+    compile_cmd = args["compile_cmd"]
+    link_cmd = args["link_cmd"]
+    lib_path = Path(args["lib_path"])
+
+    try:
+        res_c = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=300)
+        if res_c.returncode != 0:
+            return False, None, f"Compile failed: {res_c.stderr[:400]}"
+
+        res_l = subprocess.run(link_cmd, capture_output=True, text=True, timeout=300)
+        if res_l.returncode != 0:
+            return False, None, f"Link failed: {res_l.stderr[:400]}"
+
+        return True, lib_path, ""
+    except subprocess.TimeoutExpired:
+        return False, None, "Timeout"
+    except Exception as e:
+        return False, None, f"Error: {e}"
+
+
+def _run_conv_codegen_subprocess(args: dict) -> Tuple[bool, Optional[str], str]:
+    """Run grouped-conv codegen once and return generated kernel header path."""
+    import subprocess
+    from pathlib import Path
+
+    out_dir = Path(args["output_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Remove stale kernels so header discovery is exact for this invocation.
+    for stale in out_dir.glob("grouped_conv_*.hpp"):
+        stale.unlink(missing_ok=True)
+    for stale in out_dir.glob("include_all_grouped_conv_*.hpp"):
+        stale.unlink(missing_ok=True)
+
+    try:
+        res = subprocess.run(args["cmd"], capture_output=True, text=True, timeout=300)
+        if res.returncode != 0:
+            err = (res.stderr or res.stdout or "").strip()[:500]
+            return False, None, f"Codegen failed: {err}"
+
+        generated = sorted(
+            out_dir.glob("grouped_conv_*.hpp"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not generated:
+            return False, None, "Codegen produced no grouped_conv_*.hpp header"
+
+        return True, str(generated[0]), ""
+    except subprocess.TimeoutExpired:
+        return False, None, "Codegen timed out"
+    except Exception as e:
+        return False, None, f"Codegen error: {e}"
+
+
+def _config_key(c: GroupedConvKernelConfig) -> Tuple[Any, ...]:
+    return (
+        c.variant,
+        c.ndim_spatial,
+        c.dtype,
+        c.layout,
+        c.arch,
+        c.tile_m,
+        c.tile_n,
+        c.tile_k,
+        c.wave_m,
+        c.wave_n,
+        c.wave_k,
+        c.warp_tile_m,
+        c.warp_tile_n,
+        c.warp_tile_k,
+        c.pipeline,
+        c.epilogue,
+        c.scheduler,
+    )
+
+
+def _parse_triplet(value: str) -> Tuple[int, int, int]:
+    parts = value.split("x")
+    if len(parts) != 3:
+        raise ValueError(f"Invalid triplet: {value}")
+    return int(parts[0]), int(parts[1]), int(parts[2])
+
+
+def _list_arch_valid_grouped_conv_configs(
+    codegen_script: Path,
+    arch: str,
+    dtype: str,
+    variant: str,
+    ndim_spatial: int,
+) -> List[GroupedConvKernelConfig]:
+    """Query codegen defaults for this (arch, dtype, variant, ndim) tuple."""
+    import re
+    import sys
+
+    cmd = [
+        sys.executable,
+        str(codegen_script),
+        "--list-configs",
+        "--arch",
+        arch,
+        "--datatype",
+        dtype,
+        "--variant",
+        variant,
+        "--ndim",
+        str(ndim_spatial),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if res.returncode != 0:
+        return []
+
+    # Example:
+    # grouped_conv_fwd_fp16_nhwgc_2d_compv3_cshuffle_intrawave_128x128x32_2x2x1_32x32x16
+    name_re = re.compile(
+        r"^grouped_conv_(fwd|bwdd|bwdw)_([a-z0-9]+)_([a-z0-9]+)_([123])d_"
+        r"([a-z0-9]+)_([a-z0-9]+)_([a-z0-9]+)_"
+        r"([0-9]+x[0-9]+x[0-9]+)_([0-9]+x[0-9]+x[0-9]+)_([0-9]+x[0-9]+x[0-9]+)"
+        r"(?:_.*)?$"
+    )
+    short_to_variant = {
+        "fwd": "forward",
+        "bwdd": "bwd_data",
+        "bwdw": "bwd_weight",
+    }
+
+    out: List[GroupedConvKernelConfig] = []
+    seen = set()
+    for raw in res.stdout.splitlines():
+        line = raw.strip()
+        if not line.startswith("- grouped_conv_"):
+            continue
+        name = line[2:].strip()
+        m = name_re.match(name)
+        if not m:
+            continue
+
+        v_short, dt, layout, ndim, pipe, epi, sched, tile_s, wave_s, warp_s = m.groups()
+        tm, tn, tk = _parse_triplet(tile_s)
+        wm, wn, wk = _parse_triplet(wave_s)
+        wtm, wtn, wtk = _parse_triplet(warp_s)
+
+        cfg = GroupedConvKernelConfig(
+            variant=short_to_variant[v_short],
+            ndim_spatial=int(ndim),
+            dtype=dt,
+            layout=layout,
+            arch=arch,
+            tile_m=tm,
+            tile_n=tn,
+            tile_k=tk,
+            wave_m=wm,
+            wave_n=wn,
+            wave_k=wk,
+            warp_tile_m=wtm,
+            warp_tile_n=wtn,
+            warp_tile_k=wtk,
+            pipeline=pipe,
+            epilogue=epi,
+            scheduler=sched,
+        )
+        key = _config_key(cfg)
+        if key not in seen:
+            out.append(cfg)
+            seen.add(key)
+
+    return out
+
+
+def _select_best_arch_valid_conv_config(
+    requested: GroupedConvKernelConfig,
+    candidates: List[GroupedConvKernelConfig],
+) -> GroupedConvKernelConfig:
+    """Pick nearest arch-valid config while preferring trait exact matches."""
+
+    def score(c: GroupedConvKernelConfig) -> Tuple[int, int, int, int, int, int]:
+        tile_delta = abs(c.tile_m - requested.tile_m) + abs(c.tile_n - requested.tile_n) + abs(
+            c.tile_k - requested.tile_k
+        )
+        wave_delta = abs(c.wave_m - requested.wave_m) + abs(c.wave_n - requested.wave_n) + abs(
+            c.wave_k - requested.wave_k
+        )
+        warp_tile_delta = abs(c.warp_tile_m - requested.warp_tile_m) + abs(
+            c.warp_tile_n - requested.warp_tile_n
+        ) + abs(c.warp_tile_k - requested.warp_tile_k)
+        return (
+            0 if c.pipeline == requested.pipeline else 1,
+            0 if c.scheduler == requested.scheduler else 1,
+            0 if c.epilogue == requested.epilogue else 1,
+            tile_delta,
+            wave_delta,
+            warp_tile_delta,
+        )
+
+    best = min(candidates, key=score)
+    selected = copy.deepcopy(best)
+    selected.arch = requested.arch
+    return selected
+
+
+def _write_single_conv_dispatch_header(
+    config: GroupedConvKernelConfig,
+    kernel_header: Path,
+    dispatch_header: Path,
+) -> None:
+    """Create a tiny dispatch header consumed by conv_ctypes_lib.cpp."""
+    macros: List[str] = []
+    aliases: List[str] = []
+
+    if config.variant == "forward":
+        kernel_name_symbol = "CONV_FWD_KERNEL_NAME"
+        if config.ndim_spatial == 3:
+            macros.append("#define CONV_FWD_3D_AVAILABLE 1")
+            aliases.append("using ConvFwd3dLauncher = SelectedConvKernelLauncher;")
+        else:
+            macros.append("#define CONV_FWD_2D_AVAILABLE 1")
+    elif config.variant == "bwd_data":
+        kernel_name_symbol = "CONV_BWD_DATA_KERNEL_NAME"
+        if config.ndim_spatial == 3:
+            macros.append("#define CONV_BWDD_3D_AVAILABLE 1")
+            aliases.append("using ConvBwdData3dLauncher = SelectedConvBwdDataLauncher;")
+        else:
+            macros.append("#define CONV_BWDD_2D_AVAILABLE 1")
+    else:
+        kernel_name_symbol = "CONV_BWD_WEIGHT_KERNEL_NAME"
+        if config.ndim_spatial == 3:
+            macros.append("#define CONV_BWDW_3D_AVAILABLE 1")
+            aliases.append("using ConvBwdWeight3dLauncher = SelectedConvBwdWeightLauncher;")
+        else:
+            macros.append("#define CONV_BWDW_2D_AVAILABLE 1")
+
+    content = (
+        "// Auto-generated single-kernel dispatch header for Python JIT\n"
+        "#pragma once\n\n"
+        f"#include \"{kernel_header.name}\"\n\n"
+        + "\n".join(macros)
+        + "\n\n"
+        + "\n".join(aliases)
+        + "\n\n"
+        + f"static const char* CONV_KERNEL_NAMES[] = {{{kernel_name_symbol}}};\n"
+        + "static constexpr int CONV_KERNEL_COUNT = 1;\n"
+    )
+    dispatch_header.write_text(content)
+
+
+class GroupedConvCodegenRunner:
+    """Generate and compile grouped-conv JIT libraries in parallel."""
+
+    def __init__(self, max_workers: Optional[int] = None):
+        import multiprocessing
+
+        self.max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
+        self.root = Path(__file__).parent.parent
+        self.build_dir = self.root / "build"
+        self.codegen_script = self.root / "codegen" / "unified_grouped_conv_codegen.py"
+
+    def generate_and_compile_parallel(
+        self,
+        configs: List[GroupedConvKernelConfig],
+        verbose: bool = True,
+    ) -> List[Optional[Path]]:
+        import sys
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        if not configs:
+            return []
+
+        if not self.build_dir.exists():
+            self.build_dir.mkdir(parents=True, exist_ok=True)
+
+        ctypes_source = self.root / "bindings" / "ctypes" / "conv_ctypes_lib.cpp"
+        static_lib = self.build_dir / "libck_tile_dispatcher.a"
+        jit_root = self.build_dir / "generated_kernels" / "python_jit"
+        jit_root.mkdir(parents=True, exist_ok=True)
+        (self.build_dir / "examples").mkdir(parents=True, exist_ok=True)
+
+        if not self.codegen_script.exists():
+            if verbose:
+                print(f"Codegen script missing: {self.codegen_script}")
+            return [None] * len(configs)
+        if not ctypes_source.exists() or not static_lib.exists():
+            if verbose:
+                print("Missing conv ctypes source or static dispatcher library")
+            return [None] * len(configs)
+
+        if verbose:
+            print(
+                f"Generating {len(configs)} grouped-conv kernels in parallel "
+                f"(workers={self.max_workers})..."
+            )
+
+        gen_jobs: List[Dict[str, Any]] = []
+        job_dirs: List[Path] = []
+        for i, c in enumerate(configs):
+            cfg_dir = jit_root / f"cfg_{i}"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            job_dirs.append(cfg_dir)
+
+            cmd = [
+                sys.executable,
+                str(self.codegen_script),
+                "--output",
+                str(cfg_dir),
+                "--datatype",
+                c.dtype,
+                "--variant",
+                c.variant,
+                "--ndim",
+                str(c.ndim_spatial),
+                "--arch",
+                c.arch,
+                "--tile-m",
+                str(c.tile_m),
+                "--tile-n",
+                str(c.tile_n),
+                "--tile-k",
+                str(c.tile_k),
+                "--warp-m",
+                str(c.wave_m),
+                "--warp-n",
+                str(c.wave_n),
+                "--warp-k",
+                str(c.wave_k),
+                "--warp-tile-m",
+                str(c.warp_tile_m),
+                "--warp-tile-n",
+                str(c.warp_tile_n),
+                "--warp-tile-k",
+                str(c.warp_tile_k),
+                "--pipeline",
+                c.pipeline,
+                "--scheduler",
+                c.scheduler,
+                "--epilogue",
+                c.epilogue,
+            ]
+            gen_jobs.append({"cmd": cmd, "output_dir": str(cfg_dir)})
+
+        generated_headers: List[Optional[Path]] = [None] * len(configs)
+        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {
+                executor.submit(_run_conv_codegen_subprocess, job): idx
+                for idx, job in enumerate(gen_jobs)
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                ok, header_path, err = future.result()
+                if ok and header_path:
+                    generated_headers[idx] = Path(header_path)
+                    if verbose:
+                        print(f"  OK [{idx}] codegen: {Path(header_path).name}")
+                else:
+                    if verbose:
+                        print(f"  FAIL [{idx}] codegen: {err}")
+
+        if verbose:
+            compile_count = sum(1 for h in generated_headers if h is not None)
+            print(
+                f"Compiling {compile_count} grouped-conv libraries in parallel "
+                f"(workers={self.max_workers})..."
+            )
+
+        compile_jobs: List[Dict[str, Any]] = []
+        compile_to_input_index: Dict[int, int] = {}
+        for i, c in enumerate(configs):
+            hdr_path = generated_headers[i]
+            if hdr_path is None:
+                continue
+
+            cfg_dir = job_dirs[i]
+            dispatch_header = cfg_dir / "conv_python_dispatch.hpp"
+            _write_single_conv_dispatch_header(c, hdr_path, dispatch_header)
+
+            lib_name = (
+                f"libdispatcher_conv_{c.variant}_{c.ndim_spatial}d_{c.dtype}_"
+                f"{c.tile_str}_{c.wave_str}_{c.warp_str}_{c.pipeline}_{c.scheduler}.so"
+            )
+            lib_path = self.build_dir / "examples" / lib_name
+            obj_file = lib_path.with_suffix(".o")
+
+            compile_cmd = [
+                "/opt/rocm/bin/hipcc",
+                "-c",
+                "-fPIC",
+                "-O3",
+                f"-I{self.root / 'include'}",
+                f"-I{self.root.parent / 'include'}",
+                f"-I{self.root.parent}",
+                f"-I{cfg_dir}",
+                "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
+                f"-include{dispatch_header}",
+                "-D__HIP_PLATFORM_AMD__",
+                f"--offload-arch={c.arch}",
+                f'-DGFX_ARCH="{c.arch}"',
+                "-mllvm",
+                "-enable-noalias-to-md-conversion=0",
+                "-Wno-undefined-func-template",
+                "-Wno-float-equal",
+                str(ctypes_source),
+                "-o",
+                str(obj_file),
+            ]
+            link_cmd = [
+                "/opt/rocm/bin/hipcc",
+                "-shared",
+                "-fPIC",
+                f"--offload-arch={c.arch}",
+                "--hip-link",
+                str(obj_file),
+                str(static_lib),
+                "-o",
+                str(lib_path),
+            ]
+
+            compile_to_input_index[len(compile_jobs)] = i
+            compile_jobs.append(
+                {
+                    "compile_cmd": compile_cmd,
+                    "link_cmd": link_cmd,
+                    "lib_path": str(lib_path),
+                    "config_name": c.name,
+                }
+            )
+
+        results_map: Dict[int, Optional[Path]] = {i: None for i in range(len(configs))}
+        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {
+                executor.submit(_run_hipcc_subprocess, job): j
+                for j, job in enumerate(compile_jobs)
+            }
+            for future in as_completed(futures):
+                job_idx = futures[future]
+                idx = compile_to_input_index[job_idx]
+                success, lib_path, err = future.result()
+                if success and lib_path:
+                    results_map[idx] = Path(lib_path)
+                if verbose:
+                    status = "OK" if success else f"FAIL ({err})"
+                    name = (
+                        Path(lib_path).name
+                        if success and lib_path
+                        else compile_jobs[job_idx]["config_name"]
+                    )
+                    print(f"  {status} {name}")
+
+        return [results_map.get(i) for i in range(len(configs))]
+
 # =============================================================================
 # Convenience functions
 # =============================================================================
@@ -962,6 +1414,130 @@ def format_grouped_conv_summary(config) -> str:
         lines.append(f"  Traits:  pipeline={pipeline} epilogue={epilogue} scheduler={scheduler}")
 
     return "\n".join(lines) if lines else "(empty config)"
+
+
+def setup_multiple_grouped_conv_dispatchers(
+    configs: List[GroupedConvKernelConfig],
+    verbose: bool = True,
+) -> List[Optional[GroupedConvDispatcherLib]]:
+    """
+    Setup multiple grouped-conv dispatchers in parallel.
+
+    This keeps architecture filtering strict:
+      1. Validate + auto-correct each requested config
+      2. Query codegen's arch-valid config set for each (arch, dtype, variant, ndim)
+      3. Map each request to nearest valid config
+      4. Parallel codegen + parallel compile
+    """
+    if not configs:
+        return []
+
+    codegen_script = Path(__file__).parent.parent / "codegen" / "unified_grouped_conv_codegen.py"
+    arch_valid_cache: Dict[Tuple[str, str, str, int], List[GroupedConvKernelConfig]] = {}
+
+    selected_configs: List[Optional[GroupedConvKernelConfig]] = []
+    for i, original in enumerate(configs):
+        c = copy.deepcopy(original)
+
+        val = validate_grouped_conv_config(c.to_dict())
+        if not val.is_valid:
+            corrected, corrected_result = auto_correct_grouped_conv_config(c.to_dict())
+            if not corrected_result.is_valid:
+                if verbose:
+                    print(f"  FAIL [{i}] config remains invalid after auto-correct")
+                selected_configs.append(None)
+                continue
+
+            tile_cfg = corrected.get("tile_config", {})
+            trait_cfg = corrected.get("trait_config", {})
+            c.variant = _resolve_variant(str(_first(corrected.get("variant", c.variant))))
+            c.ndim_spatial = int(_first(corrected.get("ndim_spatial", c.ndim_spatial)))
+            c.arch = str(corrected.get("arch", c.arch))
+            c.layout = str(corrected.get("layout", c.layout))
+            c.dtype = str(corrected.get("dtype", c.dtype))
+            c.tile_m = int(_first(tile_cfg.get("tile_m", c.tile_m)))
+            c.tile_n = int(_first(tile_cfg.get("tile_n", c.tile_n)))
+            c.tile_k = int(_first(tile_cfg.get("tile_k", c.tile_k)))
+            c.wave_m = int(_first(tile_cfg.get("wave_m", c.wave_m)))
+            c.wave_n = int(_first(tile_cfg.get("wave_n", c.wave_n)))
+            c.wave_k = int(_first(tile_cfg.get("wave_k", c.wave_k)))
+            c.warp_tile_m = int(_first(tile_cfg.get("warp_tile_m", c.warp_tile_m)))
+            c.warp_tile_n = int(_first(tile_cfg.get("warp_tile_n", c.warp_tile_n)))
+            c.warp_tile_k = int(_first(tile_cfg.get("warp_tile_k", c.warp_tile_k)))
+            c.pipeline = str(_first(trait_cfg.get("pipeline", c.pipeline)))
+            c.scheduler = str(_first(trait_cfg.get("scheduler", c.scheduler)))
+            c.epilogue = str(_first(trait_cfg.get("epilogue", c.epilogue)))
+
+        cache_key = (c.arch, c.dtype, c.variant, c.ndim_spatial)
+        if cache_key not in arch_valid_cache:
+            arch_valid_cache[cache_key] = _list_arch_valid_grouped_conv_configs(
+                codegen_script=codegen_script,
+                arch=c.arch,
+                dtype=c.dtype,
+                variant=c.variant,
+                ndim_spatial=c.ndim_spatial,
+            )
+            if verbose and not arch_valid_cache[cache_key]:
+                print(
+                    f"  FAIL [{i}] no arch-valid configs listed for "
+                    f"{c.arch}/{c.dtype}/{c.variant}/{c.ndim_spatial}d"
+                )
+
+        candidates = arch_valid_cache[cache_key]
+        if not candidates:
+            selected_configs.append(None)
+            continue
+
+        selected = _select_best_arch_valid_conv_config(c, candidates)
+        if verbose and _config_key(selected) != _config_key(c):
+            print(
+                f"  INFO [{i}] mapped to arch-valid config: "
+                f"{selected.tile_str} {selected.wave_str} {selected.warp_str} "
+                f"{selected.pipeline}/{selected.scheduler}/{selected.epilogue}"
+            )
+        selected_configs.append(selected)
+
+    unique_configs: List[GroupedConvKernelConfig] = []
+    unique_index_by_key: Dict[Tuple[Any, ...], int] = {}
+    input_to_unique: List[Optional[int]] = []
+    for cfg in selected_configs:
+        if cfg is None:
+            input_to_unique.append(None)
+            continue
+        key = _config_key(cfg)
+        if key not in unique_index_by_key:
+            unique_index_by_key[key] = len(unique_configs)
+            unique_configs.append(cfg)
+        input_to_unique.append(unique_index_by_key[key])
+
+    runner = GroupedConvCodegenRunner()
+    unique_lib_paths = runner.generate_and_compile_parallel(unique_configs, verbose=verbose)
+
+    libs: List[Optional[GroupedConvDispatcherLib]] = []
+    loaded_cache: Dict[int, Optional[GroupedConvDispatcherLib]] = {}
+    for input_idx, unique_idx in enumerate(input_to_unique):
+        if unique_idx is None:
+            libs.append(None)
+            continue
+
+        if unique_idx in loaded_cache:
+            libs.append(loaded_cache[unique_idx])
+            continue
+
+        path = unique_lib_paths[unique_idx] if unique_idx < len(unique_lib_paths) else None
+        disp: Optional[GroupedConvDispatcherLib] = None
+        if path and path.exists():
+            try:
+                lib = ctypes.CDLL(str(path))
+                disp = GroupedConvDispatcherLib(lib, path)
+                disp.initialize()
+            except Exception as e:
+                if verbose:
+                    print(f"  FAIL [{input_idx}] failed to load {path}: {e}")
+        loaded_cache[unique_idx] = disp
+        libs.append(disp)
+
+    return libs
 
 
 def detect_gpu_arch() -> str:

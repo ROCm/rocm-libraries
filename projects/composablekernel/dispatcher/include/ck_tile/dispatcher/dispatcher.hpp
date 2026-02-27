@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include "ck_tile/dispatcher/dispatcher_error.hpp"
 #include "ck_tile/dispatcher/kernel_instance.hpp"
 #include "ck_tile/dispatcher/problem.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
@@ -74,7 +75,7 @@ class Dispatcher
     /// @param problem Problem configuration
     /// @param stream HIP stream for kernel launch (nullptr = default stream)
     /// @return Kernel execution time in milliseconds
-    /// @throws std::runtime_error if no suitable kernel found
+    /// @throws NoKernelFound if no suitable kernel found
     [[nodiscard]] float run(const void* a_ptr,
                             const void* b_ptr,
                             void* c_ptr,
@@ -89,7 +90,7 @@ class Dispatcher
     /// @param problem Problem configuration
     /// @param stream HIP stream for kernel launch (nullptr = default stream)
     /// @return Kernel execution time in milliseconds
-    /// @throws std::runtime_error if no suitable kernel found
+    /// @throws NoKernelFound if no suitable kernel found
     [[nodiscard]] float run_fused(const void* a_ptr,
                                   const void* b_ptr,
                                   void* c_ptr,
@@ -106,7 +107,8 @@ class Dispatcher
     /// @param problem Problem configuration
     /// @param stream HIP stream for kernel launch (nullptr = default stream)
     /// @return Kernel execution time in milliseconds
-    /// @throws std::runtime_error if kernel not found or doesn't support problem
+    /// @throws NoKernelFound if the kernel identifier is not registered
+    /// @throws UnsupportedProblem if the selected kernel does not support the problem
     [[nodiscard]] float run_explicit(const std::string& kernel_id,
                                      const void* a_ptr,
                                      const void* b_ptr,

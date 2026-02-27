@@ -2,7 +2,7 @@
 """Generate the conv_python_dispatch.hpp header for the Python conv library.
 
 Reads the include_all headers to find available kernels and creates dispatch
-aliases for 2D/3D × fwd/bwdd/bwdw.
+aliases for 2D/3D x fwd/bwdd/bwdw.
 """
 import argparse
 import re

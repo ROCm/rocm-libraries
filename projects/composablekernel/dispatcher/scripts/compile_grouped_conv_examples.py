@@ -481,7 +481,7 @@ def validate_and_expand_grouped_conv_declarations(
 
         is_valid, error_msg = validate_grouped_conv_kernel_config(decl, decl_arch)
         if not is_valid:
-            print(f"\n    ⚠ Invalid grouped conv configuration: {decl_name}")
+            print(f"\n    WARNING Invalid grouped conv configuration: {decl_name}")
 
             # Parse the error and show specific auto-corrections
             corrections = []
@@ -494,7 +494,7 @@ def validate_and_expand_grouped_conv_declarations(
                 decl["wave_m"] = -1
                 decl["wave_n"] = -1
                 corrections.append(
-                    f"wave: {original_values['wave']} → [wildcard expansion]"
+                    f"wave: {original_values['wave']} -> [wildcard expansion]"
                 )
 
             if "warp tile" in error_msg.lower():
@@ -504,7 +504,7 @@ def validate_and_expand_grouped_conv_declarations(
                 decl["warp_m"] = -1
                 decl["warp_n"] = -1
                 corrections.append(
-                    f"warp_tile: {original_values['warp']} → [wildcard expansion]"
+                    f"warp_tile: {original_values['warp']} -> [wildcard expansion]"
                 )
 
             if "trait combination" in error_msg.lower():
@@ -513,16 +513,16 @@ def validate_and_expand_grouped_conv_declarations(
                 decl["pipeline"] = "*"
                 decl["scheduler"] = "*"
                 corrections.append(
-                    f"pipeline: {original_values['pipeline']} → [wildcard expansion]"
+                    f"pipeline: {original_values['pipeline']} -> [wildcard expansion]"
                 )
                 corrections.append(
-                    f"scheduler: {original_values['scheduler']} → [wildcard expansion]"
+                    f"scheduler: {original_values['scheduler']} -> [wildcard expansion]"
                 )
 
             # Print the auto-corrections
             print("      AUTO-CORRECTION:")
             for corr in corrections:
-                print(f"        • {corr}")
+                print(f"        - {corr}")
             auto_corrections.append((decl_name, corrections))
 
             invalid_count += 1
@@ -530,15 +530,15 @@ def validate_and_expand_grouped_conv_declarations(
 
     if invalid_count > 0:
         print(
-            f"\n    ⚠ {invalid_count} invalid config(s) auto-corrected via wildcard expansion"
+            f"\n    WARNING {invalid_count} invalid config(s) auto-corrected via wildcard expansion"
         )
 
     if wildcard_count > 0:
         print(
-            f"    ✓ {len(declarations) - wildcard_count} explicit + {wildcard_count} wildcard (will expand)"
+            f"    OK {len(declarations) - wildcard_count} explicit + {wildcard_count} wildcard (will expand)"
         )
     else:
-        print(f"    ✓ All {len(declarations)} configurations valid")
+        print(f"    OK All {len(declarations)} configurations valid")
 
     # Expand wildcards
     print("\n    Expanding wildcards to valid configurations...")
@@ -560,7 +560,7 @@ def validate_and_expand_grouped_conv_declarations(
                 wave_str = f"[{exp['wave_m']}, {exp['wave_n']}, {exp['wave_k']}]"
                 warp_str = f"[{exp['warp_m']}, {exp['warp_n']}, {exp['warp_k']}]"
                 print(
-                    f"        → wave={wave_str}, warp={warp_str}, pipeline={exp['pipeline']}"
+                    f"        -> wave={wave_str}, warp={warp_str}, pipeline={exp['pipeline']}"
                 )
             if len(expanded) > 3:
                 print(f"        ... and {len(expanded) - 3} more")
@@ -568,11 +568,11 @@ def validate_and_expand_grouped_conv_declarations(
             exp = expanded[0]
             wave_str = f"[{exp['wave_m']}, {exp['wave_n']}, {exp['wave_k']}]"
             warp_str = f"[{exp['warp_m']}, {exp['warp_n']}, {exp['warp_k']}]"
-            print(f"      {decl_name}: → wave={wave_str}, warp={warp_str}")
+            print(f"      {decl_name}: -> wave={wave_str}, warp={warp_str}")
 
     if len(expanded_declarations) != len(declarations):
         print(
-            f"\n    Total: {len(declarations)} declarations → {len(expanded_declarations)} configurations"
+            f"\n    Total: {len(declarations)} declarations -> {len(expanded_declarations)} configurations"
         )
 
     return expanded_declarations

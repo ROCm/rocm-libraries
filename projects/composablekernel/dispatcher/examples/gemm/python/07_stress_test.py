@@ -18,7 +18,6 @@ This tests:
 - Multiple data types (fp16, bf16)
 - Different schedulers (intrawave, interwave)
 
-Complexity: ★★★★☆
 
 Usage:
     python3 07_stress_test.py

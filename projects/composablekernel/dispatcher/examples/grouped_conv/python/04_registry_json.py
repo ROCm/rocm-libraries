@@ -14,6 +14,8 @@ Usage:
 
 import sys
 import json
+import argparse
+import time
 import numpy as np
 from pathlib import Path
 
@@ -24,17 +26,23 @@ from grouped_conv_utils import (
     GroupedConvProblem,
     GroupedConvRegistry,
     GpuGroupedConvRunner,
+    setup_multiple_grouped_conv_dispatchers,
     validate_grouped_conv_config,
     detect_gpu_arch,
 )
 
 
 def main():
-    arch = detect_gpu_arch()
+    parser = argparse.ArgumentParser(description="Registry JSON round-trip with required Python JIT")
+    parser.add_argument("--arch", default=detect_gpu_arch())
+    parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
+    args = parser.parse_args()
+
+    arch = args.arch
     print("=" * 70)
     print("Example 04: Registry & JSON Export/Import")
     print("=" * 70)
-    print(f"\n  Arch: {arch}")
+    print(f"\n  Arch: {arch}, Dtype: {args.dtype}")
 
     # Step 1: Build throughput registry (large tiles)
     print("\n--- Step 1: Throughput Registry (large tiles) ---")
@@ -78,22 +86,38 @@ def main():
     fwd_only = imported.filter_by_variant("forward")
     print(f"  Forward only: {len(fwd_only)} kernels")
 
-    # Step 5: GPU execution with a problem
-    print("\n--- Step 5: GPU Execution ---")
-    runner = GpuGroupedConvRunner()
-    if not runner.is_available():
-        print("  GPU library not available")
+    # Step 5: Python JIT build (required)
+    print("\n--- Step 5: Python JIT Build ---")
+    jit_cfgs = [
+        GroupedConvKernelConfig(variant="forward", ndim_spatial=2, arch=arch, dtype=args.dtype),
+        GroupedConvKernelConfig(variant="bwd_data", ndim_spatial=2, arch=arch, dtype=args.dtype),
+        GroupedConvKernelConfig(variant="bwd_weight", ndim_spatial=2, arch=arch, dtype=args.dtype),
+    ]
+    t0 = time.perf_counter()
+    jit_libs = setup_multiple_grouped_conv_dispatchers(jit_cfgs, verbose=False)
+    jit_build_s = time.perf_counter() - t0
+    if not jit_libs or any(lib is None for lib in jit_libs):
+        print("  JIT build failed for one or more required kernels")
         return 1
 
+    runner = GpuGroupedConvRunner(lib_path=str(jit_libs[0].path))
+    if not runner.is_available():
+        print("  JIT-built forward library failed to load")
+        return 1
+    print(f"  JIT build time: {jit_build_s:.3f} s")
+    print(f"  Forward JIT library: {runner.library_path}")
     print(f"  Compiled kernels: {runner.lib.kernel_names()}")
 
+    # Step 6: GPU execution with a problem
+    print("\n--- Step 6: GPU Execution ---")
     prob = GroupedConvProblem(
         N=1, C=128, K=128, Hi=16, Wi=16, Y=3, X=3,
         stride_h=1, stride_w=1, pad_h=1, pad_w=1,
         direction="forward",
     )
-    inp = np.random.uniform(-0.3, 0.3, prob.input_shape()).astype(np.float16)
-    wei = np.random.uniform(-0.3, 0.3, prob.weight_shape()).astype(np.float16)
+    np_dtype = np.float16 if args.dtype in ["fp16", "bf16"] else np.float32
+    inp = np.random.uniform(-0.3, 0.3, prob.input_shape()).astype(np_dtype)
+    wei = np.random.uniform(-0.3, 0.3, prob.weight_shape()).astype(np_dtype)
 
     res = runner.run(inp, wei, prob)
     if res.success:
@@ -110,7 +134,8 @@ def main():
     print(f"  Registries:  throughput={len(tp_reg)}, latency={len(lat_reg)}")
     print(f"  Combined:    {len(combined)} kernels")
     print(f"  JSON:        round-trip OK ({len(imported)} imported)")
-    gpu_ok = res.success if runner.is_available() else False
+    print(f"  JIT build:   {jit_build_s:.3f} s")
+    gpu_ok = res.success
     print(f"  GPU:         {'OK' if gpu_ok else 'FAIL'}")
     print(f"  Status:      {'PASS' if gpu_ok else 'FAIL'}")
     print("=" * 70)

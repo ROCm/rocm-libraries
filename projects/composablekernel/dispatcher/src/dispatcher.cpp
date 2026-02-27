@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ck_tile/dispatcher/dispatcher.hpp"
-#include <stdexcept>
+#include "ck_tile/dispatcher/dispatcher_error.hpp"
 #include <sstream>
 #include <iostream>
 
@@ -61,7 +61,7 @@ float Dispatcher::run_fused(const void* a_ptr,
         std::ostringstream oss;
         oss << "No suitable kernel found for problem: M=" << problem.M << " N=" << problem.N
             << " K=" << problem.K;
-        throw std::runtime_error(oss.str());
+        throw NoKernelFound(oss.str());
     }
 
     return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, problem, stream);
@@ -78,7 +78,7 @@ float Dispatcher::run_explicit(const std::string& kernel_id,
     auto kernel = registry_->lookup(kernel_id);
     if(!kernel)
     {
-        throw std::runtime_error("Kernel not found: " + kernel_id);
+        throw NoKernelFound("Kernel not found: " + kernel_id);
     }
 
     if(!kernel->supports(problem))
@@ -86,7 +86,7 @@ float Dispatcher::run_explicit(const std::string& kernel_id,
         std::ostringstream oss;
         oss << "Kernel " << kernel_id << " does not support problem: M=" << problem.M
             << " N=" << problem.N << " K=" << problem.K;
-        throw std::runtime_error(oss.str());
+        throw UnsupportedProblem(oss.str());
     }
 
     return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, problem, stream);

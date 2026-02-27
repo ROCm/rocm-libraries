@@ -16,6 +16,7 @@ Usage:
 
 import sys
 import argparse
+import time
 import numpy as np
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from grouped_conv_utils import (
     GroupedConvKernelConfig,
     GroupedConvProblem,
     GpuGroupedConvRunner,
+    setup_multiple_grouped_conv_dispatchers,
     validate_grouped_conv_config,
     auto_correct_grouped_conv_config,
     detect_gpu_arch,
@@ -94,12 +96,24 @@ def main():
     )
     prob.print_problem()
 
-    # Step 4: GPU execution
-    print("\n--- Step 4: GPU Execution ---")
-    runner = GpuGroupedConvRunner()
+    # Step 4: Python JIT build (required)
+    jit_build_s = 0.0
+    print("\n--- Step 4: Python JIT Build ---")
+    t0 = time.perf_counter()
+    jit_libs = setup_multiple_grouped_conv_dispatchers([config], verbose=False)
+    jit_build_s = time.perf_counter() - t0
+    if not jit_libs or jit_libs[0] is None:
+        print("  JIT build failed")
+        return 1
+    jit_path = str(jit_libs[0].path)
+    print(f"  JIT build: {jit_build_s:.3f} s")
+    print(f"  JIT library: {jit_path}")
+    runner = GpuGroupedConvRunner(lib_path=jit_path)
+
+    # Step 5: GPU execution
+    print("\n--- Step 5: GPU Execution ---")
     if not runner.is_available():
-        print("  GPU library not available")
-        print("  Build: cd dispatcher/build && cmake .. && make dispatcher_conv_lib")
+        print("  JIT-built GPU library not available")
         return 1
 
     print(f"  Library: {runner.library_path}")
@@ -118,10 +132,10 @@ def main():
     print(f"  TFLOPS: {res.tflops:.2f}")
     print(f"  Output: shape={res.output.shape}, range=[{res.output.min():.3f}, {res.output.max():.3f}]")
 
-    # Step 5: CPU reference (forward only)
+    # Step 6: CPU reference (forward only)
     verified = False
     if args.variant == "forward" and args.ndim == 2:
-        print("\n--- Step 5: CPU Reference Verification ---")
+        print("\n--- Step 6: CPU Reference Verification ---")
         ref = cpu_conv2d_fwd(inp, wei, prob)
         gpu_f32 = res.output.astype(np.float32)
         diff = np.abs(gpu_f32 - ref)
@@ -140,6 +154,8 @@ def main():
     status = "PASS" if res.success and (verified or args.variant != "forward") else "FAIL"
     print(f"  Status: {status}")
     print(f"  {config.name} | {prob.gflops:.2f} GFLOPs | {res.tflops:.2f} TFLOPS")
+    if jit_build_s > 0.0:
+        print(f"  JIT build time: {jit_build_s:.3f} s")
     print("=" * 70)
     return 0 if status == "PASS" else 1
 

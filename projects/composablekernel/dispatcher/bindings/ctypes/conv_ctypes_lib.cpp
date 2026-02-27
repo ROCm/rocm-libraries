@@ -3,7 +3,7 @@
 //
 // Multi-kernel grouped convolution dispatcher for Python ctypes.
 //
-// Supports: forward / backward-data / backward-weight × 2D / 3D
+// Supports: forward / backward-data / backward-weight x 2D / 3D
 //
 // The dispatch header (conv_python_dispatch.hpp) is force-included via
 // -include and brings in ALL compiled kernels with these aliases:
@@ -59,7 +59,7 @@ const char* conv_dispatcher_version() { return "2.0.0"; }
 
 int conv_dispatcher_has_kernels()
 {
-#ifdef CONV_FWD_2D_AVAILABLE
+#if defined(CONV_FWD_2D_AVAILABLE) || defined(CONV_FWD_3D_AVAILABLE)
     return 1;
 #else
     return 0;
@@ -68,7 +68,7 @@ int conv_dispatcher_has_kernels()
 
 int conv_dispatcher_has_bwd_data()
 {
-#ifdef CONV_BWDD_2D_AVAILABLE
+#if defined(CONV_BWDD_2D_AVAILABLE) || defined(CONV_BWDD_3D_AVAILABLE)
     return 1;
 #else
     return 0;
@@ -77,7 +77,7 @@ int conv_dispatcher_has_bwd_data()
 
 int conv_dispatcher_has_bwd_weight()
 {
-#ifdef CONV_BWDW_2D_AVAILABLE
+#if defined(CONV_BWDW_2D_AVAILABLE) || defined(CONV_BWDW_3D_AVAILABLE)
     return 1;
 #else
     return 0;

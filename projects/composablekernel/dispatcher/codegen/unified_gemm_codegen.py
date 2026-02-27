@@ -7,7 +7,7 @@
 Unified GEMM Code Generator - Single Source of Truth
 
 This is THE unified code generator for all GEMM kernel variants:
-- Standard GEMM (C = A × B)
+- Standard GEMM (C = A x B)
 - Preshuffle GEMM (optimized weight access)
 - Multi-D GEMM (element-wise fusion)
 
@@ -1533,7 +1533,7 @@ def main():
 
     results = codegen.generate_all(parallel=not args.no_parallel)
 
-    logging.info("\n✅ Generation complete!")
+    logging.info("\nGeneration complete.")
     logging.info(f"  Kernels: {len(results['kernels'])}")
     logging.info(f"  Wrappers: {len(results['wrappers'])}")
     logging.info(f"  Failed: {len(results['failed'])}")
@@ -1545,7 +1545,7 @@ def main():
 
     # Generate dispatcher registration if requested
     if args.register:
-        logging.info("\n📝 Generating dispatcher registration code...")
+        logging.info("\nGenerating dispatcher registration code...")
         try:
             from generate_dispatcher_registration import (
                 scan_generated_headers,
@@ -1562,7 +1562,7 @@ def main():
             )
             generate_registration_cpp(kernels, reg_dir / "dispatcher_registration.cpp")
 
-            logging.info(f"✓ Generated registration code for {len(kernels)} kernels")
+            logging.info(f"Generated registration code for {len(kernels)} kernels")
         except Exception as e:
             logging.error(f"Failed to generate registration code: {e}")
             return 1

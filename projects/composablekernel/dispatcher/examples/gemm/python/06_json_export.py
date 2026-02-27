@@ -8,7 +8,6 @@ Example 06: JSON Export
 
 Exports registry configuration to JSON.
 
-Complexity: ★★☆☆☆
 
 Usage:
     python3 06_json_export.py

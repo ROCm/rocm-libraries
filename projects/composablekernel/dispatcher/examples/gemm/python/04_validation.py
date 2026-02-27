@@ -8,7 +8,6 @@ Example 04: Validation
 
 Validates GPU GEMM against NumPy reference.
 
-Complexity: ★★★☆☆
 
 Usage:
     python3 04_validation.py

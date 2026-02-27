@@ -8,7 +8,6 @@ Example 02: Batch GEMM
 
 Runs multiple GEMM operations with different sizes.
 
-Complexity: ★★☆☆☆
 
 Usage:
     python3 02_batch_gemm.py

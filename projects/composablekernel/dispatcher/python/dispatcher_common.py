@@ -129,9 +129,9 @@ class ValidationResultBase:
 
     def print_result(self, indent: str = "  "):
         if self.is_valid:
-            print(f"{indent}✓ Configuration valid")
+            print(f"{indent}OK Configuration valid")
         else:
-            print(f"{indent}⚠ Configuration has issues:")
+            print(f"{indent}WARNING Configuration has issues:")
             for err in self.errors:
                 print(f"{indent}  - {err}")
         if self.warnings:
@@ -309,12 +309,12 @@ def print_phase(number: int, description: str) -> None:
 
 def print_success(message: str) -> None:
     """Print a success message."""
-    print(f"  ✓ {Colors.green(message)}")
+    print(f"  OK {Colors.green(message)}")
 
 
 def print_error(message: str) -> None:
     """Print an error message."""
-    print(f"  ✗ {Colors.red(message)}")
+    print(f"  FAIL {Colors.red(message)}")
 
 
 def print_info(message: str) -> None:
