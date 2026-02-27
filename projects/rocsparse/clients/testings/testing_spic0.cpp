@@ -635,27 +635,7 @@ void testing_spic0_bad_arg(const Arguments& arg)
     //
     rocsparse_clients::csr_tridiag_matrix_t<T, I, J> A(4);
     rocsparse_spmat_descr                            P = A;
-#if 0
-  auto                                             uplo = rocsparse_fill_mode_lower;
-  auto                                             diag = rocsparse_diag_type_unit;
-  auto matrix_type                                      = rocsparse_matrix_type_general;
-  CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(A,
-						      rocsparse_spmat_fill_mode,
-						      &uplo,
-						      sizeof(uplo)));
-
-  CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(A,
-						      rocsparse_spmat_diag_type,
-						      &diag,
-						      sizeof(diag)));
-
-  CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(A,
-						      rocsparse_spmat_matrix_type,
-						      &matrix_type,
-						      sizeof(matrix_type)));
-
-#endif
-    host_scalar<double> hsingularity_tolerance(1);
+    host_scalar<double>                              hsingularity_tolerance(1);
     hsingularity_tolerance[0] = 1.0e-5;
     device_scalar<double> dsingularity_tolerance(hsingularity_tolerance);
 
