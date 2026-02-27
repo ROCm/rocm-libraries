@@ -500,27 +500,27 @@ struct UniversalGemmKernel
                     }
                     BsTensorIsValid = false;
                 }
-                else
+            }
+            else
+            {
+                if(kargs.K % (TilePartitioner::KPerBlock * kargs.k_batch) != 0 &&
+                   GemmPipeline::kPadK == false)
                 {
-                    if(kargs.K % (TilePartitioner::KPerBlock * kargs.k_batch) != 0 &&
-                       GemmPipeline::kPadK == false)
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR(
-                                "Can't support K that is not a multiple of k_batch * KPerBlock "
-                                "without padding!");
-                        }
-                        BsTensorIsValid = false;
+                        CK_TILE_ERROR(
+                            "Can't support K that is not a multiple of k_batch * KPerBlock "
+                            "without padding!");
                     }
-                    if(kargs.K % vectorSizeB != 0)
+                    BsTensorIsValid = false;
+                }
+                if(kargs.K % vectorSizeB != 0)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-                        if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                        {
-                            CK_TILE_ERROR("K is not a multiple of vector load size for B tensor!");
-                        }
-                        BsTensorIsValid = false;
+                        CK_TILE_ERROR("K is not a multiple of vector load size for B tensor!");
                     }
+                    BsTensorIsValid = false;
                 }
             }
         });
