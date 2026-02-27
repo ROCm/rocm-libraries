@@ -992,11 +992,42 @@ namespace rocRoller
                 int firstPrefetchFromLDS = -1;
                 if(m_prefetchFromLDSChains[forLoop].contains(ldsPrefetchU))
                 {
-                    firstPrefetchFromLDS
-                        = addLDSPrefetchChains(ldsPrefetchU,
-                                               globalStores[globalStores.size() - 1].ldsChain,
-                                               segmentBoundaries[u + 1],
-                                               false);
+                    auto predecessorOfLoadLDSTileChain
+                        = globalStores[globalStores.size() - 1].ldsChain;
+
+                    // When prefetching Direct2LDS ops and mixing of memory operations is enabled,
+                    // Direct2LDS and LoadLDSTile ops can be made parallel by connecting LoadLDSTile
+                    // chains to the current segment boundary. Otherwise, LoadLDSTile operations
+                    // are sequenced after Direct2LDS/StoreLDSTile.
+                    if(prefetchDirect2LDS && m_params->prefetchMixMemOps)
+                    {
+                        auto maybeSegmentBoundaryNop
+                            = only(graph.control.getInputNodeIndices<Sequence>(
+                                globalLoads[0].globalChain));
+                        auto maybeForLoop = only(
+                            graph.control.getInputNodeIndices<Body>(globalLoads[0].globalChain));
+                        AssertFatal(
+                            maybeForLoop || maybeSegmentBoundaryNop,
+                            "Expected prefetch global load to be connected to either the for "
+                            "loop body or the segment boundary.");
+
+                        auto connectingEdge
+                            = maybeForLoop ? ControlEdge{Body()} : ControlEdge{Sequence()};
+
+                        predecessorOfLoadLDSTileChain = graph.control.addElement(NOP());
+                        graph.control.addElement(connectingEdge,
+                                                 {segmentBoundaries[u]},
+                                                 {predecessorOfLoadLDSTileChain});
+
+                        graph.control.addElement(Sequence(),
+                                                 {globalStores[globalStores.size() - 1].ldsChain},
+                                                 {segmentBoundaries[u + 1]});
+                    }
+
+                    firstPrefetchFromLDS = addLDSPrefetchChains(ldsPrefetchU,
+                                                                predecessorOfLoadLDSTileChain,
+                                                                segmentBoundaries[u + 1],
+                                                                false);
                 }
                 else
                 {
