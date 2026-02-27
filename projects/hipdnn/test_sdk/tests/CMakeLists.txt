@@ -18,6 +18,7 @@ add_executable(
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
+    utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
