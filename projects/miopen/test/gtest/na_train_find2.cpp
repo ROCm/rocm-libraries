@@ -802,6 +802,30 @@ auto GenCases(int batchNormMode, bool full = false)
                               ::testing::ValuesIn({std::string{"MIOPENACTIVATIONRELU"}}));
 }
 
+auto GetSmokePeractCases()
+{
+    static auto cases =  GenCases(0);
+    return cases;
+}
+
+auto GetSmokeSpatialCases()
+{
+    static auto cases =  GenCases(1);
+    return cases;
+}
+
+auto GetFullPeractCases()
+{
+    static auto cases = GenCases(0, true);
+    return cases;
+}
+
+auto GetFullSpatialCases()
+{
+    static auto cases = GenCases(1, true);
+    return cases;
+}
+
 template <class T>
 struct na_train_find2 : public ::testing::TestWithParam<TestCase>
 {
@@ -1121,26 +1145,26 @@ TEST_P(GPU_na_train_find2_peract_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_na_train_find2_spatial_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_na_train_find2_spatial_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_peract_FP16, GenCases(0), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_peract_FP32, GenCases(0), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_peract_FP16, GetSmokePeractCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_peract_FP32, GetSmokePeractCases(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_spatial_FP16, GenCases(1), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_spatial_FP32, GenCases(1), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_spatial_FP16, GetSmokeSpatialCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_spatial_FP32, GetSmokeSpatialCases(), TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_train_find2_peract_FP16,
-                         GenCases(0, true),
+                         GetFullPeractCases(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_train_find2_peract_FP32,
-                         GenCases(0, true),
+                         GetFullPeractCases(),
                          TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_train_find2_spatial_FP16,
-                         GenCases(1, true),
+                         GetFullSpatialCases(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_train_find2_spatial_FP32,
-                         GenCases(1, true),
+                         GetFullSpatialCases(),
                          TestNameGenerator{});

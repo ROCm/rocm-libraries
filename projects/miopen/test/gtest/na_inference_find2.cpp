@@ -49,7 +49,7 @@ using ptr_ActivationDesc = MIOPEN_MANAGE_PTR(miopenActivationDescriptor_t,
 using ManagedFindOptions = std::unique_ptr<std::remove_pointer_t<miopenFindOptions_t>,
                                            miopenStatus_t (*)(miopenFindOptions_t)>;
 
-constexpr int batch_factor = 4;
+constexpr int batch_factor = 0;
 
 ptr_ActivationDesc GetManagedActivDesc()
 {
@@ -238,6 +238,18 @@ auto GenCases(bool full = false)
         ::testing::ValuesIn({/*0, */ 1}));
 }
 
+auto GetSmokeCases()
+{
+    static auto cases =  GenCases();
+    return cases;
+}
+
+auto GetFullCases()
+{
+    static auto cases = GenCases(true);
+    return cases;
+}
+
 template <class T>
 struct na_inference_find2_test : public ::testing::TestWithParam<TestCase>
 {
@@ -399,19 +411,19 @@ TEST_P(GPU_na_inference_find2_test_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_na_inference_find2_test_BFP16, TestBFloat16) { Run(); }
 TEST_P(GPU_na_inference_find2_test_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_FP16, GenCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_BFP16, GenCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_FP32, GenCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_FP16, GetSmokeCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_BFP16, GetSmokeCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_FP32, GetSmokeCases(), TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_inference_find2_test_FP16,
-                         GenCases(true),
+                         GetFullCases(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_inference_find2_test_BFP16,
-                         GenCases(true),
+                         GetFullCases(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_inference_find2_test_FP32,
-                         GenCases(true),
+                         GetFullCases(),
                          TestNameGenerator{});

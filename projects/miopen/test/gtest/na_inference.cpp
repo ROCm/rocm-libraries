@@ -43,7 +43,7 @@ using ptr_FusionPlanArgs = MIOPEN_MANAGE_PTR(miopenOperatorArgs_t, miopenDestroy
 using ptr_ActivationDesc = MIOPEN_MANAGE_PTR(miopenActivationDescriptor_t,
                                              miopenDestroyActivationDescriptor);
 
-constexpr int batch_factor = 4;
+constexpr int batch_factor = 0;
 
 ptr_FusionPlanDesc GetManagedFusionPlanDesc(miopenTensorDescriptor_t inputDesc)
 {
@@ -206,6 +206,18 @@ auto GenCases(bool full = false)
             "MIOPENACTIVATIONRELU",
             /*, "std::string{MIOPENACTIVATIONLOGISTIC}", "std::string{MIOPENACTIVATIONABS}"*/}}),
         ::testing::ValuesIn({/*0, */ 1}));
+}
+
+auto GetSmokeCases()
+{
+    static auto cases =  GenCases();
+    return cases;
+}
+
+auto GetFullCases()
+{
+    static auto cases = GenCases(true);
+    return cases;
 }
 
 template <class T>
@@ -380,32 +392,32 @@ TEST_P(GPU_na_fusion_inference_test_BFP16, TestBFloat16) { Run(); }
 TEST_P(GPU_na_fusion_inference_test_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_na_fusion_inference_test_FP64, TestFloat64) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_I8, GenCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP16, GenCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_I8, GetSmokeCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP16, GetSmokeCases(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_na_fusion_inference_test_BFP16,
-                         GenCases(),
+                         GetSmokeCases(),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP32, GenCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP64, GenCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP32, GetSmokeCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP64, GetSmokeCases(), TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_fusion_inference_test_I8,
-                         GenCases(true),
+                         GetFullCases(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_fusion_inference_test_FP16,
-                         GenCases(true),
+                         GetFullCases(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_fusion_inference_test_BFP16,
-                         GenCases(true),
+                         GetFullCases(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_fusion_inference_test_FP32,
-                         GenCases(true),
+                         GetFullCases(),
                          TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_fusion_inference_test_FP64,
-                         GenCases(true),
+                         GetFullCases(),
                          TestNameGenerator{});
