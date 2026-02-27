@@ -129,9 +129,12 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
     if cache:
         cachePath = _solutionsCachePath(filename)
         if os.path.exists(cachePath):
-            with open(cachePath, "rb") as cf:
-                solutionStates = msgpack.unpack(cf, raw=False)
-        else:
+            try:
+                with open(cachePath, "rb") as cf:
+                    solutionStates = msgpack.unpack(cf, raw=False)
+            except Exception:
+                solutionStates = []
+        if not solutionStates:
             solYaml = read(filename)
             if biasTypeArgs and activationArgs:
                 solutionStates = solYaml[4:]
