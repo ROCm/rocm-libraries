@@ -54,14 +54,15 @@ __forceinline__ __device__ void lds_reduce2_welford(FloatAccum& mean,
             FloatAccum n_a   = lcl_data_count[lid];
             FloatAccum n_b   = lcl_data_count[lid + red];
             FloatAccum n_new = n_a + n_b;
+            FloatAccum n_new_rcp =
+                n_new != 0.0f ? (1 / n_new)
+                              : 0.f; // Calculates 1 / n_new; Done to handle the case where some of
+                                     // the partitions of mean/variance calculation are zero
             lcl_data_mean[lid] =
-                n_new > 0 ? (lcl_data_mean[lid] * n_a + lcl_data_mean[lid + red] * n_b) / n_new
-                          : 0.f;
-            lcl_data_variance[lid] = n_new > 0
-                                         ? lcl_data_variance[lid] + lcl_data_variance[lid + red] +
-                                               delta * delta * (n_a * n_b / n_new)
-                                         : 0.f;
-            lcl_data_count[lid]    = n_new;
+                (lcl_data_mean[lid] * n_a + lcl_data_mean[lid + red] * n_b) * n_new_rcp;
+            lcl_data_variance[lid] = lcl_data_variance[lid] + lcl_data_variance[lid + red] +
+                                     delta * delta * (n_a * n_b * n_new_rcp);
+            lcl_data_count[lid] = n_new;
         }
         __syncthreads();
     }
