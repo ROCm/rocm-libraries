@@ -287,11 +287,16 @@ def parse_bwd_weight_instances(instances, problem_name):
             m_per_xdl = int(wave_tile[0])
             n_per_xdl = int(wave_tile[1])
 
-            wave_map = args[3].split("x")
+            k1_values = args[3].split("x")
+            ak1 = int(k1_values[0])
+            bk1 = int(k1_values[1])
+            k1 = min(ak1, bk1)
+
+            wave_map = args[4].split("x")
             m_xdl_per_wave = int(wave_map[0])
             n_xdl_per_wave = int(wave_map[1])
 
-            vector_read = args[4].split("x")
+            vector_read = args[5].split("x")
             a_scalar_per_vector = int(vector_read[0])
             b_scalar_per_vector = int(vector_read[1])
             c_scalar_per_vector_seq = [int(x) for x in vector_read[2].strip("Seq").strip("(").strip(")").split(",")]
@@ -304,8 +309,8 @@ def parse_bwd_weight_instances(instances, problem_name):
             num_groups_to_merge = 1
 
             # Block GEMM pipeline parameters
-            blk_gemm_pipeline_schduler = args[5]
-            blk_gemm_pipeline_version = args[6]
+            blk_gemm_pipeline_schduler = args[6]
+            blk_gemm_pipeline_version = args[7]
 
             # TODO: Double buffer pipeline does not currently compile for explicit GEMM.
             if blk_gemm_pipeline_version == "v4" or blk_gemm_pipeline_version == "v5":
@@ -366,15 +371,20 @@ def parse_bwd_weight_instances(instances, problem_name):
         double_smem_buffer = blk_gemm_pipeline_version == "v4" and not is_explicit_gemm
         num_wave_groups = 2 if blk_gemm_pipeline_version == "v5" else 1
         scheduler = blk_gemm_pipeline_schduler
-        pipeline_version = blk_gemm_pipeline_version
+        pipeline_version = blk_gemm_pipeline_version.upper()
+
+        # OLd CK pipeline version V5 maps to V6 for CK Tile
+        if pipeline_version == "v5":
+            pipeline_version = "v6"
 
         m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
         n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
         warp_size = 64
         k_warp = int(block_size / (warp_size * m_warp * n_warp))
         dtype = get_dtype(problem_name)
-        # TODO: Make it more flexible
-        k_per_xdl = 8 if dtype == "float" else 16
+
+        # TODO: k_per_xdl = max(k1, k_mfma) where is compute from the m_per_xdl, n_per_xdl, and data type.
+        k_per_xdl = k1
 
         conv = ConvInstanceTemplateParams(
             spec,
@@ -383,7 +393,7 @@ def parse_bwd_weight_instances(instances, problem_name):
             [m_per_xdl, n_per_xdl, k_per_xdl],
             double_smem_buffer,
             num_wave_groups,
-            pipeline_version.upper(),
+            pipeline_version,
             scheduler,
             [a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector],
             num_groups_to_merge,
