@@ -143,4 +143,12 @@ typedef enum
      */
     HIPDNN_BACKEND_TENSOR_DESCRIPTOR,
 
+    /**
+     * @brief Convolution forward operation descriptor
+     *
+     * Represents a forward convolution operation with input (X),
+     * weight (W), and output (Y) tensors plus convolution parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
+
 } hipdnnBackendDescriptorType_t;
