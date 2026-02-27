@@ -35,7 +35,7 @@ find_package(LLVM CONFIG HINTS ${ROCM_DIR}/../../..)
 
 if (NOT LLVM_DIR)
     message(FATAL_ERROR "HipTensor requires LLVM version 7.0 or higher,"
-        " which cannot be found. Please install rocm-llvm-dev package first." )
+        " which cannot be found. Please install rocm-llvm-dev package first.")
 endif()
 
 # Required:
@@ -60,7 +60,7 @@ if(LLVM_VERSION_MAJOR VERSION_LESS "7")
 endif()
 
 if(NOT LLVMObjectYAML_LIBRARY)
-    message(ERROR "Could not find library: LLVMObjectYAML" )
+    message(ERROR "Could not find library: LLVMObjectYAML")
 endif()
 if(NOT LLVMSupport_LIBRARY)
     message(ERROR "Could not find library: LLVMSupport")

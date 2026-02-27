@@ -27,26 +27,26 @@
 # Find / configure LLVM
 add_subdirectory(llvm)
 
-include( FetchContent )
+include(FetchContent)
 
 FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG release-1.12.1
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG release-1.12.1
 )
 FetchContent_GetProperties(googletest)
 if(NOT googletest_POPULATED)
-  # Fetch the content using default details
-  FetchContent_Populate(googletest)
-  # Save the shared libs setting, then force to static libs
-  set(BUILD_SHARED_LIBS_OLD ${BUILD_SHARED_LIBS})
-  set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "Build SHARED libraries" FORCE)
-  # Turn off gtest installation
-  set(INSTALL_GTEST OFF)
-  # Add gtest targets as static libs
-  add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
-  # Restore shared libs setting
-  set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_OLD} CACHE INTERNAL "Build SHARED libraries" FORCE)
+    # Fetch the content using default details
+    FetchContent_Populate(googletest)
+    # Save the shared libs setting, then force to static libs
+    set(BUILD_SHARED_LIBS_OLD ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "Build SHARED libraries" FORCE)
+    # Turn off gtest installation
+    set(INSTALL_GTEST OFF)
+    # Add gtest targets as static libs
+    add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
+    # Restore shared libs setting
+    set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_OLD} CACHE INTERNAL "Build SHARED libraries" FORCE)
 endif()
 
 get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
@@ -91,7 +91,7 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
     get_filename_component(hiptensor_test_NAME "${YAML_CONFIG_FILE}" NAME_WE)
     set(hiptensor_test_YAML_INCLUDE_FILE "${hiptensor_test_NAME}.hpp")
     configure_file("${PROJECT_SOURCE_DIR}/test/hiptensor-test-yaml.hpp.in"
-                  "${hiptensor_test_YAML_DIR}/${hiptensor_test_YAML_INCLUDE_FILE}" )
+                  "${hiptensor_test_YAML_DIR}/${hiptensor_test_YAML_INCLUDE_FILE}")
 
     # message(STATUS "test config dir: ${hiptensor_test_YAML_DIR}")
     # message(STATUS "test name: ${hiptensor_test_NAME}")
@@ -104,12 +104,8 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
-    # On Windows, use static library to access internal symbols; on other platforms use shared library
-    if(WIN32)
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor_static hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
-    else()
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}" "-fno-rtlib-add-rpath")
-    endif()
+    # Use static library for tests on all platforms to access internal symbols and avoid library path issues
+    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor_static hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
 
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
@@ -138,6 +134,8 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
     # Register with ctest
     add_test(NAME ${BINARY_NAME} COMMAND ${BINARY_NAME})
     set_property(TEST ${BINARY_NAME} PROPERTY SKIP_REGULAR_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH" "unsupported host device")
+    # Set working directory to bin/ for proper DLL/resource loading on Windows
+    set_property(TEST ${BINARY_NAME} PROPERTY WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
     # Install with rocm pkg
     rocm_install_targets(
@@ -161,7 +159,7 @@ endfunction()
 # Differs from hiptensor_test in that src include directory is linked
 function(add_hiptensor_unit_test)
     set(BINARY_NAME ${ARGV0})
-    message( STATUS "adding hiptensor unit test: ${BINARY_NAME}")
+    message(STATUS "adding hiptensor unit test: ${BINARY_NAME}")
 
     list(REMOVE_AT ARGV 0)
     add_executable(${BINARY_NAME} ${ARGV})
@@ -171,12 +169,8 @@ function(add_hiptensor_unit_test)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
-    # On Windows, use static library to access internal symbols; on other platforms use shared library
-    if(WIN32)
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor_static hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
-    else()
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
-    endif()
+    # Use static library for tests on all platforms to access internal symbols and avoid library path issues
+    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor_static hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
                                ${composable_kernel_INCLUDES}
@@ -198,6 +192,8 @@ function(add_hiptensor_unit_test)
     # Register with ctest
     add_test(NAME ${BINARY_NAME} COMMAND ${BINARY_NAME})
     set_property(TEST ${BINARY_NAME} PROPERTY SKIP_REGULAR_EXPRESSION "HIPTENSOR_STATUS_ARCH_MISMATCH" "unsupported host device")
+    # Set working directory to bin/ for proper DLL/resource loading on Windows
+    set_property(TEST ${BINARY_NAME} PROPERTY WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
     # Install with rocm pkg
     rocm_install_targets(

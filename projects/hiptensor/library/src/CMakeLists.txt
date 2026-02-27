@@ -62,7 +62,7 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
     # Use offload compress flag if it is supported
     if(BUILD_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-        target_compile_options(${COMPONENT_NAME} PRIVATE "--offload-compress" )
+        target_compile_options(${COMPONENT_NAME} PRIVATE "--offload-compress")
     endif()
 
     if(HIPTENSOR_BUILD_COMPRESSED_DBG)
@@ -74,100 +74,14 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
 endfunction()
 
-include_directories(BEFORE
-    ${PROJECT_SOURCE_DIR}/library/include
-    ${PROJECT_SOURCE_DIR}/library/src/include
-)
-
-if (ADDRESS_SANITIZER_ENABLED)
-    add_compile_options(-mcmodel=large)
-    add_link_options(-mcmodel=large)
-endif()
-
-# Generates hiptensor_contraction and hiptensor_contraction_instances
-add_subdirectory(contraction)
-# Generates hiptensor_elementwise
-add_subdirectory(elementwise)
-# Generates hiptensor_reduction
-add_subdirectory(reduction)
-
-# Core API code
-set(HIPTENSOR_CORE_SOURCES
-   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/performance.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/hip_device.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/handle.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_options.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache.cpp
-)
-
-add_hiptensor_component(hiptensor_core ${HIPTENSOR_CORE_SOURCES})
-
-# Generate shared lib
-add_library(hiptensor SHARED
-    $<TARGET_OBJECTS:hiptensor_core>
-    $<TARGET_OBJECTS:hiptensor_contraction>
-    $<TARGET_OBJECTS:hiptensor_contraction_instances>
-    $<TARGET_OBJECTS:hiptensor_elementwise>
-    $<TARGET_OBJECTS:hiptensor_reduction>
-    # $<TARGET_OBJECTS:hiptensor_reduction_instances>
-    )
-
-add_library(hiptensor::hiptensor ALIAS hiptensor)
-
-# Add driver mode to both cxx and link flags
-target_compile_options(hiptensor PRIVATE ${CMAKE_CXX_FLAGS} ${CLANG_DRIVER_MODE})
-target_link_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})
-
-target_compile_definitions(hiptensor PRIVATE hiptensor_EXPORTS)
-
-# Use offload compress flag if it is supported
-if(BUILD_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    target_compile_options(hiptensor PRIVATE "--offload-compress" )
-endif()
-
-# Compressed debug symbols flags
-if(HIPTENSOR_BUILD_COMPRESSED_DBG)
-    target_compile_options(hiptensor PRIVATE
-        "$<$<CONFIG:Debug>:-gz>"
-        "$<$<CONFIG:RelWithDebInfo>:-gz>"
-        )
-endif()
-
-set ( hiptensor_SOVERSION 0.1 )
-# nvcc can not recognize shared libraray file name with suffix other than *.so when linking.
-if (NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC")
-  rocm_set_soversion(hiptensor ${hiptensor_SOVERSION})
-endif()
-
-# HIP libs symbols are required by hipTensor and users of hipTensor
-target_link_libraries(hiptensor PUBLIC hip::device hip::host)
-target_link_libraries(hiptensor PRIVATE Threads::Threads)
-set_target_properties(hiptensor PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-# Set visibility for function names exported from shared library
-include(GenerateExportHeader)
-generate_export_header(hiptensor EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hiptensor/internal/hiptensor-export.h)
-
-# -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllexport' is not supported [-Wignored-attributes] which is used by msvc compiler
-# -Wno-unknown-warning-option to suppress warnings from CK headers about unknown warning groups
-if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(hiptensor PRIVATE -Wno-ignored-attributes -Wno-unknown-warning-option)
-endif()
-
-# TODO Better if there was a workaround not requiring static lib
-# On Windows, create an additional static library target for tests
-# This allows tests to access internal symbols without DLL export issues
-if(WIN32)
+# Create static library target for tests to access internal symbols
+function(create_hiptensor_static_library)
     add_library(hiptensor_static STATIC
         $<TARGET_OBJECTS:hiptensor_core>
         $<TARGET_OBJECTS:hiptensor_contraction>
         $<TARGET_OBJECTS:hiptensor_contraction_instances>
         $<TARGET_OBJECTS:hiptensor_elementwise>
         $<TARGET_OBJECTS:hiptensor_reduction>
-        # $<TARGET_OBJECTS:hiptensor_reduction_instances>
     )
 
     # Copy properties from the shared library to the static library
@@ -207,6 +121,100 @@ if(WIN32)
 
     # Create an alias for tests to use
     add_library(hiptensor::hiptensor_static ALIAS hiptensor_static)
+endfunction()
+
+# Create shared library target for production use
+function(create_hiptensor_shared_library)
+    add_library(hiptensor SHARED
+        $<TARGET_OBJECTS:hiptensor_core>
+        $<TARGET_OBJECTS:hiptensor_contraction>
+        $<TARGET_OBJECTS:hiptensor_contraction_instances>
+        $<TARGET_OBJECTS:hiptensor_elementwise>
+        $<TARGET_OBJECTS:hiptensor_reduction>
+    )
+
+    # Create alias for users
+    add_library(hiptensor::hiptensor ALIAS hiptensor)
+
+    # Add driver mode to both cxx and link flags
+    target_compile_options(hiptensor PRIVATE ${CMAKE_CXX_FLAGS} ${CLANG_DRIVER_MODE})
+    target_link_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})
+
+    # Add export definitions
+    target_compile_definitions(hiptensor PRIVATE hiptensor_EXPORTS)
+
+    # Copy other compile flags
+    if(BUILD_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
+        target_compile_options(hiptensor PRIVATE "--offload-compress")
+    endif()
+
+    if(HIPTENSOR_BUILD_COMPRESSED_DBG)
+        target_compile_options(hiptensor PRIVATE
+            "$<$<CONFIG:Debug>:-gz>"
+            "$<$<CONFIG:RelWithDebInfo>:-gz>"
+        )
+    endif()
+
+    # Set version information
+    set(hiptensor_SOVERSION 0.1)
+    # nvcc can not recognize shared library file name with suffix other than *.so when linking.
+    if(NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC")
+        rocm_set_soversion(hiptensor ${hiptensor_SOVERSION})
+    endif()
+
+    # HIP libs symbols are required by hipTensor and users of hipTensor
+    target_link_libraries(hiptensor PUBLIC hip::device hip::host)
+    target_link_libraries(hiptensor PRIVATE Threads::Threads)
+    set_target_properties(hiptensor PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endfunction()
+
+include_directories(BEFORE
+    ${PROJECT_SOURCE_DIR}/library/include
+    ${PROJECT_SOURCE_DIR}/library/src/include
+)
+
+if (ADDRESS_SANITIZER_ENABLED)
+    add_compile_options(-mcmodel=large)
+    add_link_options(-mcmodel=large)
+endif()
+
+# Generates hiptensor_contraction and hiptensor_contraction_instances
+add_subdirectory(contraction)
+# Generates hiptensor_elementwise
+add_subdirectory(elementwise)
+# Generates hiptensor_reduction
+add_subdirectory(reduction)
+
+# Core API code
+set(HIPTENSOR_CORE_SOURCES
+   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/performance.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/data_types.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/hip_device.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/handle.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_options.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache.cpp
+)
+
+add_hiptensor_component(hiptensor_core ${HIPTENSOR_CORE_SOURCES})
+
+# Create shared library for production use
+create_hiptensor_shared_library()
+
+# Set visibility for function names exported from shared library
+include(GenerateExportHeader)
+generate_export_header(hiptensor EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hiptensor/internal/hiptensor-export.h)
+
+# -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllexport' is not supported [-Wignored-attributes] which is used by msvc compiler
+# -Wno-unknown-warning-option to suppress warnings from CK headers about unknown warning groups
+if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(hiptensor PRIVATE -Wno-ignored-attributes -Wno-unknown-warning-option)
+endif()
+
+# Create static library target for tests to access internal symbols
+if(HIPTENSOR_BUILD_TESTS)
+    create_hiptensor_static_library()
 endif()
 
 
