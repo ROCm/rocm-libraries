@@ -225,7 +225,7 @@ class Pack(ValidatorInstruction):
     def done_idx(self) -> SchedulePosition:
         return self.issued_at
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         issued_at = self.issued_at.vmfma_index
 
         if self.must_start_after.done_idx() < self.issued_at < self.needed_by.done_idx():
@@ -258,7 +258,7 @@ class TimedPack(Pack):
     # This is a lower bound estimate (does not account for most stalls and such).
     estimated_quad_cycles_before_result_used: int = 0
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         error = super().validate()
         if error:
             return error
@@ -279,7 +279,7 @@ class MiddlePack(Pack):
     pair_consumer: Optional['MiddlePack'] = None
     next_scheduled_middle_16: Optional['MiddlePack'] = None
 
-    def validate(self) -> str | None:
+    def validate(self) -> Optional[str]:
         error = super().validate()
         if error:
             return error
