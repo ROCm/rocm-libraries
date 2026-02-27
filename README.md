@@ -1,14 +1,14 @@
 # ROCm Libraries
 
-Welcome to the ROCm Libraries superrepo. This repository consolidates multiple ROCm-related libraries and shared components into a single repository to streamline development, CI, and integration.
+Welcome to the ROCm Libraries super-repo. This repository consolidates multiple ROCm-related libraries and shared components into a single repository to streamline development, CI, and integration.
 
-## Superrepo Goals
+## Super-repo Goals
 
 - Enable unified build and test workflows across ROCm libraries.
 - Facilitate shared tooling, CI, and contributor experience.
 - Improve integration, visibility, and collaboration across ROCm library teams.
 
-## Superrepo Project Status
+## Super-repo Project Status
 
 ### TheRock CI Status
 
@@ -21,8 +21,8 @@ TheRock CI performs multi-component testing on top of builds leveraging [TheRock
 This table provides the current status of the migration of specific components as well as a pointer to the health of their legacy CI systems.
 
 **Key:**
-- **Completed**: Fully migrated and integrated. This superrepo should be considered the source of truth for this project. The old repo may still be used for certain release activities.
-- **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the superrepo.
+- **Completed**: Fully migrated and integrated. This super-repo should be considered the source of truth for this project. The old repo may still be used for certain release activities.
+- **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the super-repo.
 - **Pending**: Not yet started or in the early planning stages. The individual repo should be considered the source of truth for this project.
 
 | Component           | Migration Status | Azure CI Status                       | Math CI Status                        |
@@ -99,7 +99,7 @@ To begin contributing or building, see the [CONTRIBUTING.md](./CONTRIBUTING.md) 
 
 ## License
 
-This superrepo contains multiple subprojects, each of which retains the license under which it was originally published.
+This super-repo contains multiple subprojects, each of which retains the license under which it was originally published.
 
 - 📁 Refer to the `LICENSE`, `LICENSE.md`, or `LICENSE.txt` file within each `projects/` or `shared/` directory for specific license terms.
 - 📄 Refer to the header notice in individual files outside `projects/` or `shared/` folders for their specific license terms.
