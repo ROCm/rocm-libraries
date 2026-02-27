@@ -76,13 +76,11 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
     case data_objects::NodeAttributes::MatmulAttributes:
         nodeJson = *node.attributes_as_MatmulAttributes();
         break;
-<<<<<<< HEAD
     case data_objects::NodeAttributes::SdpaAttributes:
         nodeJson = *node.attributes_as_SdpaAttributes();
-=======
+        break;
     case data_objects::NodeAttributes::LayernormAttributes:
         nodeJson = *node.attributes_as_LayernormAttributes();
->>>>>>> origin/develop
         break;
     default:
         throw std::runtime_error(
@@ -142,13 +140,10 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ConvolutionWrwAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MatmulAttributes:
             return to<data_objects::MatmulAttributes>(builder, entry).Union();
-<<<<<<< HEAD
         case data_objects::NodeAttributes::SdpaAttributes:
             return to<data_objects::SdpaAttributes>(builder, entry).Union();
-=======
         case data_objects::NodeAttributes::LayernormAttributes:
             return to<data_objects::LayernormAttributes>(builder, entry).Union();
->>>>>>> origin/develop
         default:
             throw std::runtime_error(
                 "hipdnn_data_sdk::json::to<data_objects::Node>(): Unsupported NodeAttributes type: "
