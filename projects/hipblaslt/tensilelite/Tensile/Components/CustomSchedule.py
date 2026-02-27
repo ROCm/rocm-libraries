@@ -956,7 +956,6 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
     if isNT(kernel) and useLDSTr and TLDS == 0:
         syncTable = [
             -1, SWaitCnt(dscnt= 4, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one LRB1"),
-            # -1, SBarrier(comment=""),
              7, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="wait the rest of LRB1"),
             23, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="wait for all LR0 before starting 2nd sub-iteration"),
             27, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for GRAs before starting LRA1"),
