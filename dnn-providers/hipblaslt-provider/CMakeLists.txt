@@ -10,7 +10,7 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(HIPBLASLT_PLUGIN "0.0.1")
-project(hipDNN VERSION ${HIPBLASLT_PLUGIN} LANGUAGES CXX)
+project(hipblaslt-provider VERSION ${HIPBLASLT_PLUGIN} LANGUAGES CXX)
 
 if(NOT WIN32)
     # Only set if not already specified by user
