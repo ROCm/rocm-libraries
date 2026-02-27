@@ -2268,8 +2268,24 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cublasSgeqrfBatched((cublasHandle_t)handle, m, n, A, lda, tau, devInfo, batch_count));
+    // cuBLAS expects an array of pointers for tau, but hipSOLVER uses strided batched array
+    // Allocate and populate array of pointers on device
+    float** tauArray;
+    CHECK_HIP_ERROR(hipMalloc(&tauArray, batch_count * sizeof(float*)));
+
+    std::vector<float*> h_tauArray(batch_count);
+    for(int i = 0; i < batch_count; i++)
+        h_tauArray[i] = tau + i * strideTau;
+
+    CHECK_HIP_ERROR(hipMemcpy(
+        tauArray, h_tauArray.data(), batch_count * sizeof(float*), hipMemcpyHostToDevice));
+
+    auto status = hipsolver::cuda2hip_status(
+        cublasSgeqrfBatched((cublasHandle_t)handle, m, n, A, lda, tauArray, devInfo, batch_count));
+
+    CHECK_HIP_ERROR(hipFree(tauArray));
+
+    return status;
 }
 catch(...)
 {
@@ -2292,8 +2308,24 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(
-        cublasDgeqrfBatched((cublasHandle_t)handle, m, n, A, lda, tau, devInfo, batch_count));
+    // cuBLAS expects an array of pointers for tau, but hipSOLVER uses strided batched array
+    // Allocate and populate array of pointers on device
+    double** tauArray;
+    CHECK_HIP_ERROR(hipMalloc(&tauArray, batch_count * sizeof(double*)));
+
+    std::vector<double*> h_tauArray(batch_count);
+    for(int i = 0; i < batch_count; i++)
+        h_tauArray[i] = tau + i * strideTau;
+
+    CHECK_HIP_ERROR(hipMemcpy(
+        tauArray, h_tauArray.data(), batch_count * sizeof(double*), hipMemcpyHostToDevice));
+
+    auto status = hipsolver::cuda2hip_status(
+        cublasDgeqrfBatched((cublasHandle_t)handle, m, n, A, lda, tauArray, devInfo, batch_count));
+
+    CHECK_HIP_ERROR(hipFree(tauArray));
+
+    return status;
 }
 catch(...)
 {
@@ -2316,8 +2348,24 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cublasCgeqrfBatched(
-        (cublasHandle_t)handle, m, n, (cuComplex**)A, lda, (cuComplex*)tau, devInfo, batch_count));
+    // cuBLAS expects an array of pointers for tau, but hipSOLVER uses strided batched array
+    // Allocate and populate array of pointers on device
+    cuComplex** tauArray;
+    CHECK_HIP_ERROR(hipMalloc(&tauArray, batch_count * sizeof(cuComplex*)));
+
+    std::vector<cuComplex*> h_tauArray(batch_count);
+    for(int i = 0; i < batch_count; i++)
+        h_tauArray[i] = (cuComplex*)(tau + i * strideTau);
+
+    CHECK_HIP_ERROR(hipMemcpy(
+        tauArray, h_tauArray.data(), batch_count * sizeof(cuComplex*), hipMemcpyHostToDevice));
+
+    auto status = hipsolver::cuda2hip_status(cublasCgeqrfBatched(
+        (cublasHandle_t)handle, m, n, (cuComplex**)A, lda, tauArray, devInfo, batch_count));
+
+    CHECK_HIP_ERROR(hipFree(tauArray));
+
+    return status;
 }
 catch(...)
 {
@@ -2340,14 +2388,26 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
-    return hipsolver::cuda2hip_status(cublasZgeqrfBatched((cublasHandle_t)handle,
-                                                          m,
-                                                          n,
-                                                          (cuDoubleComplex**)A,
-                                                          lda,
-                                                          (cuDoubleComplex*)tau,
-                                                          devInfo,
-                                                          batch_count));
+    // cuBLAS expects an array of pointers for tau, but hipSOLVER uses strided batched array
+    // Allocate and populate array of pointers on device
+    cuDoubleComplex** tauArray;
+    CHECK_HIP_ERROR(hipMalloc(&tauArray, batch_count * sizeof(cuDoubleComplex*)));
+
+    std::vector<cuDoubleComplex*> h_tauArray(batch_count);
+    for(int i = 0; i < batch_count; i++)
+        h_tauArray[i] = (cuDoubleComplex*)(tau + i * strideTau);
+
+    CHECK_HIP_ERROR(hipMemcpy(tauArray,
+                              h_tauArray.data(),
+                              batch_count * sizeof(cuDoubleComplex*),
+                              hipMemcpyHostToDevice));
+
+    auto status = hipsolver::cuda2hip_status(cublasZgeqrfBatched(
+        (cublasHandle_t)handle, m, n, (cuDoubleComplex**)A, lda, tauArray, devInfo, batch_count));
+
+    CHECK_HIP_ERROR(hipFree(tauArray));
+
+    return status;
 }
 catch(...)
 {
