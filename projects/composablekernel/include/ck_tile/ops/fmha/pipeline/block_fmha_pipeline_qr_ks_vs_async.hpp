@@ -279,10 +279,9 @@ struct BlockFmhaPipelineQRKSVSAsync
         using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
 
         // init Oacc, M, L
-        auto o_acc  = OaccBlockTileType{};
-        auto m      = MLBlockTileType{};
-        auto l      = MLBlockTileType{};
-        auto sink_s = sink_v * scale_s;
+        auto o_acc = OaccBlockTileType{};
+        auto m     = MLBlockTileType{};
+        auto l     = MLBlockTileType{};
 
         clear_tile(o_acc);
         if(__builtin_isinf_sign(sink_v) >= 0)
@@ -290,7 +289,7 @@ struct BlockFmhaPipelineQRKSVSAsync
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI ||
                          BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-                set_tile(m, sink_s * LOG2E);
+                set_tile(m, sink_v * scale_s * LOG2E);
             else
                 set_tile(m, sink_v * LOG2E);
 #else
@@ -336,7 +335,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 {
                     auto lse =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
-                    set_tile(lse, SMPLComputeDataType{sink_s});
+                    set_tile(lse, SMPLComputeDataType{sink_v * scale_s});
                     store_tile(lse_dram_window_tmp, tile_elementwise_in(lse_element_func, lse));
                 }
 
