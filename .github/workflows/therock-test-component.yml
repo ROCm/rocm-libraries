@@ -48,6 +48,7 @@ jobs:
       OUTPUT_ARTIFACTS_DIR: "./build"
       THEROCK_BIN_DIR: "./build/bin"
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
     steps:
       - name: "Fetch 'build_tools' from repository"
         if: ${{ runner.os == 'Windows' }}
@@ -67,7 +68,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 1aaf471098e508d41dfc96a944ccf377643e2e29 # 2026-02-11 commit
+          ref: 92ce23132a10477c0a2955b2dd902a628ac50428 # 2026-02-24 commit
 
       - name: Run setup test environment workflow
         timeout-minutes: 15

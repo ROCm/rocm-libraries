@@ -282,6 +282,79 @@ typedef enum
     /** @} */
 
     /**
+     * @name Tensor Attributes (1300-1399)
+     * Attributes for HIPDNN_BACKEND_TENSOR_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Unique ID for this tensor */
+    HIPDNN_ATTR_TENSOR_UNIQUE_ID = 1300,
+
+    /** @brief Tensor name (extension) */
+    HIPDNN_ATTR_TENSOR_NAME_EXT = 1301,
+
+    /** @brief Data type of tensor elements (hipdnnDataType_t) */
+    HIPDNN_ATTR_TENSOR_DATA_TYPE = 1302,
+
+    /** @brief Tensor dimensions */
+    HIPDNN_ATTR_TENSOR_DIMENSIONS = 1303,
+
+    /** @brief Tensor strides */
+    HIPDNN_ATTR_TENSOR_STRIDES = 1304,
+
+    /** @brief Whether this tensor is virtual */
+    HIPDNN_ATTR_TENSOR_IS_VIRTUAL = 1305,
+
+    /** @brief Pass-by-value tensor data (extension) */
+    HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
+
+    /** @} */
+
+    /**
+     * @name Convolution Forward Operation Attributes (1400-1499)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Weight tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W = 1400,
+
+    /** @brief Input tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X = 1401,
+
+    /** @brief Output tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y = 1402,
+
+    /** @} */
+
+    /**
+     * @name Shared Convolution Descriptor Attributes (1500-1599)
+     * Attributes shared across convolution operation descriptors (forward,
+     * dgrad, wgrad). These are set directly on the operation descriptor.
+     * @{
+     */
+
+    /** @brief Compute data type for convolution */
+    HIPDNN_ATTR_CONVOLUTION_COMP_TYPE = 1500,
+
+    /** @brief Convolution mode (e.g., cross-correlation) */
+    HIPDNN_ATTR_CONVOLUTION_CONV_MODE = 1501,
+
+    /** @brief Dilation values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_DILATIONS = 1502,
+
+    /** @brief Filter stride values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES = 1503,
+
+    /** @brief Post-padding values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS = 1504,
+
+    /** @brief Pre-padding values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS = 1505,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
