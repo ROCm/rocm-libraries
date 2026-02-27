@@ -127,5 +127,5 @@ public:
     }
 };
 
-typedef MatmulAttributes Matmul_attributes; ///< @brief cuDNN compatibility alias
+typedef MatmulAttributes Matmul_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

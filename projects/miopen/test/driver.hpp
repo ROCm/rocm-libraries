@@ -1248,8 +1248,7 @@ void test_drive_impl_2(std::string program_name, std::vector<std::string> as)
             }(running_average, elapsed.count(), i + 1); // (avg_acc/N-1) * ((N-1)/N) + y/N;
         }
 
-        std::cout << "Elapsed time: " << elapsed.count() << " s"
-                  << ", "
+        std::cout << "Elapsed time: " << elapsed.count() << " s" << ", "
                   << "Running Average: " << running_average << " s" << std::endl;
     }
 }

@@ -326,5 +326,5 @@ public:
         return attr;
     }
 };
-typedef PointwiseAttributes Pointwise_attributes; ///< @brief cuDNN compatibility alias
+typedef PointwiseAttributes Pointwise_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

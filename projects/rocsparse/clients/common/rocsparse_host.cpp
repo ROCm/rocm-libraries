@@ -4437,8 +4437,11 @@ void host_bsrgemm(rocsparse_direction  dir,
     std::vector<J> col(nnzb);
     std::vector<T> val(block_dim * block_dim * nnzb);
 
-    memcpy(col.data(), bsr_col_ind_C, sizeof(J) * nnzb);
-    memcpy(val.data(), bsr_val_C, sizeof(T) * block_dim * block_dim * nnzb);
+    if(nnzb > 0 && bsr_col_ind_C != nullptr && bsr_val_C != nullptr)
+    {
+        memcpy(col.data(), bsr_col_ind_C, sizeof(J) * nnzb);
+        memcpy(val.data(), bsr_val_C, sizeof(T) * block_dim * block_dim * nnzb);
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
@@ -5236,8 +5239,11 @@ void host_csrgemm(J                    M,
     std::vector<J> col(nnz);
     std::vector<T> val(nnz);
 
-    memcpy(col.data(), csr_col_ind_C, sizeof(J) * nnz);
-    memcpy(val.data(), csr_val_C, sizeof(T) * nnz);
+    if(nnz > 0 && csr_col_ind_C != nullptr && csr_val_C != nullptr)
+    {
+        memcpy(col.data(), csr_col_ind_C, sizeof(J) * nnz);
+        memcpy(val.data(), csr_val_C, sizeof(T) * nnz);
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
