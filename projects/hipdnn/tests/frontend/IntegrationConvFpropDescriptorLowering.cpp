@@ -137,12 +137,12 @@ TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
     ASSERT_NE(rawDesc, nullptr);
 
     size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(serializedSize, 0u);
 
     std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
                   rawDesc, serializedSize, &serializedSize, serializedData.data()),
               HIPDNN_STATUS_SUCCESS);
 
@@ -245,12 +245,12 @@ TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     // Retrieve serialized graph
     auto rawDesc = graph->get_raw_graph_descriptor();
     size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(serializedSize, 0u);
 
     std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
                   rawDesc, serializedSize, &serializedSize, serializedData.data()),
               HIPDNN_STATUS_SUCCESS);
 

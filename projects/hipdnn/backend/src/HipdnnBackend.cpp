@@ -248,10 +248,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
-    hipdnnBackendGetSerializedGraph_ext(hipdnnBackendDescriptor_t descriptor,
-                                        size_t requestedByteSize,
-                                        size_t* graphByteSize,
-                                        uint8_t* serializedGraph)
+    hipdnnBackendGetSerializedBinaryGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                              size_t requestedByteSize,
+                                              size_t* graphByteSize,
+                                              uint8_t* serializedGraph)
 {
     LOG_API_ENTRY("descriptor={}, requestedByteSize={}, graphByteSize_ptr={:p}, "
                   "serializedGraph_ptr={:p}",

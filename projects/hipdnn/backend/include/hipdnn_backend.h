@@ -341,7 +341,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
     hipdnnBackendDescriptor_t* descriptor, const uint8_t* serializedGraph, size_t graphByteSize);
 
 /*!
- * @brief Retrieves the serialized graph from a finalized operation graph descriptor.
+ * @brief Retrieves the binary-serialized graph from a finalized operation graph descriptor.
  *
  * Uses the standard two-call pattern: call first with @p serializedGraph set to @c nullptr to query
  * the required buffer size, then call again with a caller-allocated buffer to receive the data.
@@ -365,10 +365,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
  * @retval HIPDNN_STATUS_INTERNAL_ERROR       An internal error occurred during serialization.
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t
-    hipdnnBackendGetSerializedGraph_ext(hipdnnBackendDescriptor_t descriptor,
-                                        size_t requestedByteSize,
-                                        size_t* graphByteSize,
-                                        uint8_t* serializedGraph);
+    hipdnnBackendGetSerializedBinaryGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                              size_t requestedByteSize,
+                                              size_t* graphByteSize,
+                                              uint8_t* serializedGraph);
 
 /*!
  * @brief Callback function for logging messages.

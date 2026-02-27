@@ -100,7 +100,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsIfNotFinalized)
               HIPDNN_STATUS_SUCCESS);
 
     size_t size = 0;
-    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &size, nullptr),
+    EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &size, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
 
     hipdnnBackendDestroyDescriptor(desc);
@@ -109,7 +109,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsIfNotFinalized)
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithNullParams)
 {
     size_t size = 0;
-    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(nullptr, 0, &size, nullptr),
+    EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(nullptr, 0, &size, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -119,7 +119,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithNullSizeParam)
     ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &desc),
               HIPDNN_STATUS_SUCCESS);
 
-    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, nullptr, nullptr),
+    EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, nullptr, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     hipdnnBackendDestroyDescriptor(desc);
@@ -157,15 +157,16 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize
 
     // Query size
     size_t queriedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &queriedSize, nullptr),
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &queriedSize, nullptr),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(queriedSize, 0u);
 
     // Copy with queried size
     std::vector<uint8_t> buffer(queriedSize);
     size_t copySize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, queriedSize, &copySize, buffer.data()),
-              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(
+        hipdnnBackendGetSerializedBinaryGraph_ext(desc, queriedSize, &copySize, buffer.data()),
+        HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(copySize, queriedSize);
 
     // Verify data is valid FlatBuffer
@@ -209,11 +210,12 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
 
     // Use two-call pattern to get serialized data
     size_t size = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &size, nullptr), HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &size, nullptr),
+              HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(size, 0u);
 
     std::vector<uint8_t> buffer(size);
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, size, &size, buffer.data()),
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(desc, size, &size, buffer.data()),
               HIPDNN_STATUS_SUCCESS);
 
     // Verify graph properties match what we set
@@ -264,14 +266,14 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuf
 
     // Query actual size
     size_t queriedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &queriedSize, nullptr),
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &queriedSize, nullptr),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(queriedSize, 1u);
 
     // Attempt copy with undersized buffer
     std::vector<uint8_t> buffer(1);
     size_t reportedSize = 0;
-    EXPECT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 1, &reportedSize, buffer.data()),
+    EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(desc, 1, &reportedSize, buffer.data()),
               HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT);
 
     hipdnnBackendDestroyDescriptor(desc);
@@ -309,7 +311,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuf
 
     // Query actual size
     size_t queriedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedGraph_ext(desc, 0, &queriedSize, nullptr),
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(desc, 0, &queriedSize, nullptr),
               HIPDNN_STATUS_SUCCESS);
     ASSERT_GT(queriedSize, 0u);
 
@@ -317,9 +319,9 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuf
     auto oversizedSize = queriedSize * 2;
     std::vector<uint8_t> buffer(oversizedSize);
     size_t reportedSize = 0;
-    ASSERT_EQ(
-        hipdnnBackendGetSerializedGraph_ext(desc, oversizedSize, &reportedSize, buffer.data()),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
+                  desc, oversizedSize, &reportedSize, buffer.data()),
+              HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(reportedSize, queriedSize);
 
     // Verify data is valid
