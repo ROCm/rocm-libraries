@@ -286,6 +286,7 @@ struct BlockFmhaPipelineQRKSVS
         {
             if(num_total_loop <= 0)
             {
+                buffer_load_fence(0);
                 if constexpr(kStoreLSE)
                 {
                     auto lse =
