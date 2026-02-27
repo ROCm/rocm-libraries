@@ -1,5 +1,15 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+
+/**
+ * @file Utilities.hpp
+ * @brief Frontend utility functions and macros
+ *
+ * Provides helper functions for creating TensorAttributes from Data SDK
+ * tensor objects, and the HIPDNN_RETURN_ON_BACKEND_FAILURE error-handling
+ * macro used throughout the frontend.
+ */
+
 #pragma once
 
 #include "attributes/TensorAttributes.hpp"
@@ -15,7 +25,11 @@
 namespace hipdnn_frontend
 {
 
-// When an error occurs, get the backend error string and append it to the error_message.
+/** @def HIPDNN_RETURN_ON_BACKEND_FAILURE
+ *  @brief Return an Error if a backend call fails, including the backend error string
+ *  @param backend_status The hipdnnStatus_t returned by the backend call
+ *  @param error_message A human-readable description of the failed operation
+ */
 #define HIPDNN_RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                           \
     do                                                                                            \
     {                                                                                             \
@@ -33,7 +47,14 @@ namespace hipdnn_frontend
 namespace graph
 {
 
-// Utility function to create Tensor_attributes from a Tensor
+/**
+ * @brief Create TensorAttributes from a Data SDK Tensor object
+ * @tparam T Element type of the source tensor
+ * @param name Name to assign to the tensor
+ * @param dataType Frontend data type for the tensor
+ * @param tensor Source tensor whose dims and strides are copied
+ * @return Configured TensorAttributes
+ */
 template <class T,
           class HostAlloc = hipdnn_data_sdk::utilities::HostAllocator<T>,
           class DeviceAlloc = hipdnn_data_sdk::utilities::DeviceAllocator<T>>
@@ -49,6 +70,14 @@ inline TensorAttributes makeTensorAttributes(
         .set_stride(tensor.strides());
 }
 
+/**
+ * @brief Create TensorAttributes from explicit dimensions, strides, and data type
+ * @param name Name to assign to the tensor
+ * @param dataType Frontend data type for the tensor
+ * @param dims Tensor dimensions
+ * @param strides Tensor strides
+ * @return Configured TensorAttributes
+ */
 inline TensorAttributes makeTensorAttributes(const std::string& name,
                                              DataType dataType,
                                              const std::vector<int64_t>& dims,
@@ -58,6 +87,13 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
         strides);
 }
 
+/**
+ * @brief Create TensorAttributes from explicit dimensions and strides (data type from graph context)
+ * @param name Name to assign to the tensor
+ * @param dims Tensor dimensions
+ * @param strides Tensor strides
+ * @return Configured TensorAttributes (data type will be filled from graph context)
+ */
 inline TensorAttributes makeTensorAttributes(const std::string& name,
                                              const std::vector<int64_t>& dims,
                                              const std::vector<int64_t>& strides)
@@ -65,6 +101,11 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
     return TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
 }
 
+/**
+ * @brief Create a Data SDK ITensor from TensorAttributes
+ * @param attribute The tensor attributes describing type, dims, and strides
+ * @return Owning pointer to the created ITensor
+ */
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
     createTensorFromAttribute(const TensorAttributes& attribute)
 {

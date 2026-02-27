@@ -712,6 +712,10 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Verify that no two tensors in the graph share the same UID
+     * @return Error describing the duplicate UIDs, or OK
+     */
     Error checkNoDuplicateTensorIds()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
@@ -720,8 +724,10 @@ public:
         return checkNoDuplicateTensorIdsImpl(allTensors);
     }
 
-    /// Checks if all tensors in the graph have UIDs assigned.
-    /// Returns an error if any tensor is missing a UID.
+    /**
+     * @brief Check that all tensors in the graph have UIDs assigned
+     * @return Error listing tensors without UIDs, or OK
+     */
     Error checkTensorUidsSet() const
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
@@ -730,9 +736,13 @@ public:
         return checkTensorUidsSetImpl(allTensors);
     }
 
-    /// Returns a map of UID -> TensorAttributes for all tensors in the graph.
-    /// Tensors without UIDs are skipped (no error is generated).
-    /// @return Map from tensor UID to tensor attributes
+    /**
+     * @brief Get all tensors in the graph indexed by UID
+     *
+     * Tensors without UIDs are skipped.
+     *
+     * @return Map from tensor UID to tensor attributes
+     */
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> getTensorsByUid() const
     {
         std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> result;
@@ -751,9 +761,13 @@ public:
         return result;
     }
 
-    /// Returns a map of name -> TensorAttributes for all tensors in the graph.
-    /// Tensors without names are skipped (no error is generated).
-    /// @return Map from tensor name to tensor attributes
+    /**
+     * @brief Get all tensors in the graph indexed by name
+     *
+     * Tensors without names are skipped.
+     *
+     * @return Map from tensor name to tensor attributes
+     */
     std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> getTensorsByName() const
     {
         std::unordered_map<std::string, std::shared_ptr<TensorAttributes>> result;
@@ -772,6 +786,15 @@ public:
         return result;
     }
 
+    /**
+     * @brief Topologically sort the graph nodes
+     *
+     * Reorders internal nodes so that every node appears after its
+     * dependencies. Returns an error if the graph has a cycle or is
+     * disconnected.
+     *
+     * @return Error indicating success or describing the structural issue
+     */
     Error topologicallySortGraph()
     {
         size_t nodeCount = _sub_nodes.size();
@@ -803,6 +826,14 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Serialize the graph to a FlatBuffer operation graph
+     *
+     * Assigns UIDs to any tensors that do not already have them, then
+     * serializes the full graph structure into a FlatBuffer.
+     *
+     * @return DetachedBuffer containing the serialized graph
+     */
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
         assignUnsetTensorUids();
@@ -881,6 +912,14 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Get knobs for a specific engine as a lookup map
+     * @param engineId The engine ID to query
+     * @param knobs Output map from knob type to Knob object
+     * @return Error indicating success or failure
+     *
+     * @see get_knobs_for_engine(), Knob
+     */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_knob_lookup_for_engine(int64_t engineId,
                                      std::unordered_map<KnobType_t, Knob>& knobs) const
@@ -1059,6 +1098,10 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /**
+     * @brief Verify that the execution plan is valid and supported
+     * @return Error indicating success or failure
+     */
     Error check_support() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Checking execution plan support for graph "
@@ -1420,24 +1463,29 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+    /// @brief Get the graph name
     const std::string& get_name() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_name();
     }
 
+    /// @brief Get the compute data type used for intermediate calculations
     DataType get_compute_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_compute_data_type();
     }
+    /// @brief Get the intermediate data type for virtual tensors between operations
     DataType get_intermediate_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_intermediate_data_type();
     }
+    /// @brief Get the I/O data type for input and output tensors
     DataType get_io_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_io_data_type();
     }
 
+    /// @brief Get the preferred engine ID, if set
     // NOLINTBEGIN(readability-identifier-naming)
     std::optional<int64_t> get_preferred_engine_id_ext() const
     // NOLINTEND(readability-identifier-naming)
@@ -1445,23 +1493,26 @@ public:
         return _preferredEngineId;
     }
 
-    // Forwarding setters
+    /// @brief Set the graph name
     Graph& set_name(const std::string& name) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_name(name);
         return *this;
     }
+    /// @brief Set the compute data type used for intermediate calculations
     Graph& set_compute_data_type(DataType computeType) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_compute_data_type(computeType);
         return *this;
     }
+    /// @brief Set the intermediate data type for virtual tensors between operations
     // NOLINTNEXTLINE(readability-identifier-naming)
     Graph& set_intermediate_data_type(DataType intermediateType)
     {
         graph_attributes.set_intermediate_data_type(intermediateType);
         return *this;
     }
+    /// @brief Set the I/O data type for input and output tensors
     Graph& set_io_data_type(DataType ioType) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_io_data_type(ioType);
@@ -2132,6 +2183,11 @@ public:
         return dw;
     }
 
+    /**
+     * @brief Set the preferred engine ID for execution plan selection
+     * @param engineId Engine ID to prefer, or std::nullopt to clear
+     * @return Reference to this Graph for method chaining
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     Graph& set_preferred_engine_id_ext(std::optional<int64_t> engineId)
     // NOLINTEND(readability-identifier-naming)
@@ -2140,6 +2196,11 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Set the preferred engine by name
+     * @param engineName Engine name to look up; empty string clears the preference
+     * @return Reference to this Graph for method chaining
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     Graph& set_preferred_engine_id_ext(const std::string& engineName)
     // NOLINTEND(readability-identifier-naming)
