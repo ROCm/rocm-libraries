@@ -847,7 +847,6 @@ TEST(TestCpuFpReferenceLayernormFp32, FpropThrowsOnInvalidNormalizedDimCount)
 
     // normalizedDimCount > ndim is invalid
     EXPECT_THROW(CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, 1e-5, 3), std::runtime_error);
-
 }
 
 // ============================================================================
