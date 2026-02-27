@@ -258,25 +258,17 @@ bool IsFP8Supported(const std::string& device_name)
 
 std::ostream& operator<<(std::ostream& stream, const GemmDescriptor& gemm_desc)
 {
-    return stream << "{"
-                  << "isColMajor " << gemm_desc.isColMajor << ", "
-                  << "transA " << gemm_desc.transA << ", "
-                  << "transB " << gemm_desc.transB << ", "
-                  << "m " << gemm_desc.m << ", "
-                  << "n " << gemm_desc.n << ", "
-                  << "k " << gemm_desc.k << ", "
-                  << "lda " << gemm_desc.lda << ", "
-                  << "ldb " << gemm_desc.ldb << ", "
-                  << "ldc " << gemm_desc.ldc << ", "
-                  << "batch_count " << gemm_desc.batch_count << ", "
-                  << "strideA " << gemm_desc.strideA << ", "
-                  << "strideB " << gemm_desc.strideB << ", "
-                  << "strideC " << gemm_desc.strideC << ", "
-                  << "alpha " << gemm_desc.alpha << ", "
-                  << "beta " << gemm_desc.beta << ", "
-                  << "dataType " << GetDataType(gemm_desc.dataType) << ", "
-                  << "a_cast_type " << GetDataType(gemm_desc.a_cast_type) << ", "
-                  << "b_cast_type " << GetDataType(gemm_desc.b_cast_type) << "} ";
+    return stream << "{" << "isColMajor " << gemm_desc.isColMajor << ", " << "transA "
+                  << gemm_desc.transA << ", " << "transB " << gemm_desc.transB << ", " << "m "
+                  << gemm_desc.m << ", " << "n " << gemm_desc.n << ", " << "k " << gemm_desc.k
+                  << ", " << "lda " << gemm_desc.lda << ", " << "ldb " << gemm_desc.ldb << ", "
+                  << "ldc " << gemm_desc.ldc << ", " << "batch_count " << gemm_desc.batch_count
+                  << ", " << "strideA " << gemm_desc.strideA << ", " << "strideB "
+                  << gemm_desc.strideB << ", " << "strideC " << gemm_desc.strideC << ", "
+                  << "alpha " << gemm_desc.alpha << ", " << "beta " << gemm_desc.beta << ", "
+                  << "dataType " << GetDataType(gemm_desc.dataType) << ", " << "a_cast_type "
+                  << GetDataType(gemm_desc.a_cast_type) << ", " << "b_cast_type "
+                  << GetDataType(gemm_desc.b_cast_type) << "} ";
 }
 
 #if MIOPEN_USE_ROCBLAS

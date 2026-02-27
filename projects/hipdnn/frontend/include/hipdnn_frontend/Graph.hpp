@@ -62,6 +62,8 @@
 
 #pragma once
 
+#include <array>
+
 #include <HipdnnBackendFlatbufferData.h>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -73,6 +75,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
@@ -88,6 +91,7 @@
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -613,6 +617,18 @@ private:
                     }
                     _sub_nodes.emplace_back(
                         std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
+                {
+                    auto attr = LayernormAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_LayernormAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<LayerNormNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -1654,6 +1670,86 @@ public:
             std::move(attributes), graph_attributes));
 
         return y;
+    }
+
+    /** @brief Layer normalization forward pass
+     *
+     * Normalizes the input across the feature dimensions (all dimensions
+     * except the batch dimension).
+     *
+     * Formula:
+     * @code
+     * mean    = (1/m) * sum(x) over normalized dims, where m = product of normalized dims
+     * var     = (1/m) * sum((x - mean)^2) over normalized dims
+     * xhat    = (x - mean) / sqrt(var + epsilon)
+     * y       = scale * xhat + bias
+     * @endcode
+     *
+     * In training phase, mean and inverse variance are also returned as outputs.
+     *
+     * @param x Input tensor [N, D1, D2, ..., Dk]
+     * @param scale Per-feature scale (gamma) tensor [1, D1, D2, ..., Dk]
+     * @param bias Per-feature bias (beta) tensor [1, D1, D2, ..., Dk]
+     * @param attributes Configuration including epsilon and forward phase
+     * @return Array of 3 output tensors:
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] mean: Computed mean (nullptr in inference mode)
+     *         - [2] invVariance: Computed inverse variance (nullptr in inference mode)
+     *
+     * @see LayernormAttributes
+     */
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        layernorm(std::shared_ptr<TensorAttributes> x,
+                  std::shared_ptr<TensorAttributes> scale,
+                  std::shared_ptr<TensorAttributes> bias,
+                  LayernormAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("Layernorm_" + std::to_string(_sub_nodes.size()));
+        }
+
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(scale->get_name().empty())
+        {
+            scale->set_name(attributes.get_name() + "::SCALE");
+        }
+        if(bias->get_name().empty())
+        {
+            bias->set_name(attributes.get_name() + "::BIAS");
+        }
+
+        auto epsilon = attributes.get_epsilon();
+        if(epsilon && epsilon->get_name().empty())
+        {
+            epsilon->set_name(attributes.get_name() + "::EPSILON");
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        std::shared_ptr<TensorAttributes> mean = nullptr;
+        std::shared_ptr<TensorAttributes> invVariance = nullptr;
+
+        if(attributes.get_forward_phase() != NormFwdPhase::INFERENCE)
+        {
+            mean = outputTensor(attributes.get_name() + "::MEAN");
+            invVariance = outputTensor(attributes.get_name() + "::INV_VARIANCE");
+            attributes.set_mean(mean);
+            attributes.set_inv_variance(invVariance);
+        }
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_bias(std::move(bias));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<LayerNormNode>(std::move(attributes), graph_attributes));
+
+        return {y, mean, invVariance};
     }
 
     /** @brief Unary element-wise operation
