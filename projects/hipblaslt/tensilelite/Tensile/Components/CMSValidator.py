@@ -27,12 +27,40 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from copy import deepcopy
 from enum import Enum, auto
-from math import floor
-from typing import Optional, Union
+from typing import Optional
 
 from rocisa.instruction import SWaitCnt, SBarrier
 from Tensile.Common.Utilities import printWarning
 
+
+@functools.total_ordering
+@dataclass(frozen=True)
+class SchedulePosition:
+    """Position in the instruction schedule. Fields ordered for tuple-style comparison."""
+    # Which loop iteration this instruction belongs (larger index means later iteration)
+    loop_index: int
+    # Which VMFMA slot within the loop
+    #   * 0 to num_vmfma-1 for normal positions
+    #   * -1 for wrap-around between iterations 
+    #     (occurs before the first VMFMA in this loop but after the last VMFMA of the previous loop)
+    vmfma_index: int
+    # Ordering among instructions issued at the same (loop_index, vmfma_index).
+    # Multiple instructions can share a VMFMA slot; this field breaks ties.
+    sub_index: int
+
+    def __lt__(self, other: 'SchedulePosition') -> bool:
+        if self.loop_index == other.loop_index:
+            if self.vmfma_index == other.vmfma_index:
+                return self.sub_index < other.sub_index
+            else:
+                return self.vmfma_index < other.vmfma_index
+        else:
+            return self.loop_index < other.loop_index
+
+# Sentinel values for "infinitely far" positions. Values chosen to be well beyond
+# any realistic schedule size (num_vmfma is typically ~48-200).
+POSITION_INF = SchedulePosition(loop_index=9_999, vmfma_index=9_999, sub_index=9_999)
+POSITION_NEG_INF = SchedulePosition(loop_index=-9_999, vmfma_index=-9_999, sub_index=-9_999)
 
 class ValidatorPass(Enum):
     # Structural checks
@@ -72,16 +100,16 @@ class ValidatorInstruction(ABC):
     Abstract class with no method just for type hinting purposes.
     """
     name: str
-    issued_at: float
+    issued_at: SchedulePosition
     # The minimum number of quad-cycles that this instruction takes to issue.
     __min_issue_quad_cycles__: int = 1
 
     @abstractmethod
     def validate(self) -> Optional[str]:
         ...
-    
+
     @abstractmethod
-    def done_idx(self) -> Union[int, float]:
+    def done_idx(self) -> SchedulePosition:
         """
         MFMA Index after which this instruction is done for the purpose of scheduling other instructions
         which rely on something about it.
@@ -95,20 +123,19 @@ class ValidatorInstruction(ABC):
 @dataclass
 class LocalRead(ValidatorInstruction):
     name: str
-    num_vmfma: int
-    issued_at: Union[int, float]
+    issued_at: SchedulePosition
     # The index in the list of Local Read instructions provided by a CMS schedule.
     # Needed to properly calculate must_start_after for Packs.
     issue_index: int
-    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(float('inf')))
-    guaranteed_by: Union[int, float] = float('inf')
+    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(POSITION_INF))
+    guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
 
-    def done_idx(self) -> Union[int, float]:
+    def done_idx(self) -> SchedulePosition:
         return self.guaranteed_by
 
     def validate(self) -> Optional[str]:
         # For when local reads are not being guaranteed by a particular pass.
-        if self.needed_by.issued_at == float('inf'):
+        if self.needed_by.issued_at == POSITION_INF:
             return None
 
         # Needs to be guaranteed BEFORE the index at which it's needed since the
@@ -116,31 +143,25 @@ class LocalRead(ValidatorInstruction):
         if self.guaranteed_by < self.needed_by.issued_at:
             return None
 
-        guaranteed_by = self.guaranteed_by
-        # Modulo for LRs that finish in next iteration.
-        needed_by = int(self.needed_by.issued_at) % self.num_vmfma
-        issued_at = floor(self.issued_at) % self.num_vmfma
-        if guaranteed_by == float('inf'):
+        issued_at = self.issued_at.vmfma_index
+        needed_by = self.needed_by.issued_at.vmfma_index
+        if self.guaranteed_by == POSITION_INF:
             return f"{self.name} @ idx={issued_at} is not valid. There are no guarantees on when it will be done."
-        
-        if self.num_vmfma - 1 + 0.5 <= (guaranteed_by % self.num_vmfma) < self.num_vmfma:
-            # Special case to handle idx=-1 which is in the range of [numVMFMA + 0.5, numVMFMA)
-            guaranteed_by = -1
-        else:
-            guaranteed_by = floor(guaranteed_by) % self.num_vmfma
-        
+
+        guaranteed_by = self.guaranteed_by.vmfma_index
+
         context_str = ""
-        if self.needed_by.issued_at > self.num_vmfma:
+        if self.needed_by.issued_at.loop_index > self.issued_at.loop_index:
             context_str = " (of next iteration)"
 
         return f"{self.name} @ idx={issued_at} issued too late, must be guaranteed before {self.needed_by.name} @ idx={needed_by}{context_str} but only guaranteed @ idx={guaranteed_by}."
 
 @dataclass
 class MFMA(ValidatorInstruction):
-    issued_at: Union[int, float]
+    issued_at: SchedulePosition
     name: str = "MFMA"
 
-    def done_idx(self) -> Union[int, float]:
+    def done_idx(self) -> SchedulePosition:
         return self.issued_at
 
     def validate(self) -> Optional[str]:
@@ -149,13 +170,12 @@ class MFMA(ValidatorInstruction):
 @dataclass
 class Pack(ValidatorInstruction):
     name: str
-    num_vmfma: int
-    issued_at: Union[int, float]
+    issued_at: SchedulePosition
     # The index in the list of Pack instructions provided by a CMS schedule.
     # Needed to properly calculate needed_by and must_start_after.
     issue_index: int
-    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(float('inf')))
-    must_start_after: ValidatorInstruction = field(default_factory=lambda: MFMA(float('-inf')))
+    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(POSITION_INF))
+    must_start_after: ValidatorInstruction = field(default_factory=lambda: MFMA(POSITION_NEG_INF))
 
     # TF32 middle-16 pair constraint fields
     # Regular TF32 case involves 24 Pack instructions per 8 VGPR in 4 logical groups: [first 4], [middle 16], [last 4]
@@ -173,11 +193,11 @@ class Pack(ValidatorInstruction):
     # This is a lower bound estimate (does not account for most stalls and such).
     estimated_quad_cycles_before_result_used: int = 0
 
-    def done_idx(self) -> Union[int, float]:
+    def done_idx(self) -> SchedulePosition:
         return self.issued_at
 
     def validate(self) -> str | None:
-        issued_at = floor(self.issued_at) % self.num_vmfma
+        issued_at = self.issued_at.vmfma_index
 
         if (
             (self.must_start_after.done_idx() < self.issued_at < self.needed_by.done_idx()) 
@@ -191,31 +211,27 @@ class Pack(ValidatorInstruction):
         # Issued too early
         if self.issued_at < self.must_start_after.done_idx():
             # NOTE: Don't have to check equality case, since only 1 instruction can be issued at any point in time.
-            must_start_after_at = floor(self.must_start_after.done_idx()) % self.num_vmfma
-            if self.num_vmfma - 1 + 0.5 <= (self.must_start_after.issued_at % self.num_vmfma) < self.num_vmfma:
-                # Special case to handle idx=-1 which is in the range of [numVMFMA + 0.5, numVMFMA)
-                must_start_after_issued_at = -1
-            else:
-                must_start_after_issued_at = floor(self.must_start_after.issued_at) % self.num_vmfma
+            must_start_after_at = self.must_start_after.done_idx().vmfma_index
+            must_start_after_issued_at = self.must_start_after.issued_at.vmfma_index
             return f"{self.name} @ idx={issued_at} issued too early, must be issued after idx={must_start_after_at} (because of {self.must_start_after.name} issued @ idx={must_start_after_issued_at})."
-        
+
         # Issued too late
         if self.issued_at >= self.needed_by.issued_at:
-            needed_by_at = floor(self.needed_by.issued_at) % self.num_vmfma
+            needed_by_at = self.needed_by.issued_at.vmfma_index
             return f"{self.name} @ idx={issued_at} issued too late, must be issued before {self.needed_by.name} @ idx={needed_by_at}."
-        
+
         # TF32 pair constraint validation
         if self.pair_consumer:
             assert self.next_scheduled_middle_16, "Pair leader must have a next_middle_16_in_schedule."
 
             if not (self.next_scheduled_middle_16 is self.pair_consumer):
-                next_issued_at = floor(self.next_scheduled_middle_16.issued_at) % self.num_vmfma
-                pair_issued_at = floor(self.pair_consumer.issued_at) % self.num_vmfma
+                next_issued_at = self.next_scheduled_middle_16.issued_at.vmfma_index
+                pair_issued_at = self.pair_consumer.issued_at.vmfma_index
                 return f"{self.name} @ idx={issued_at} has wrong interleaving. Should have been followed by {self.pair_consumer.name} @ idx={pair_issued_at} but was followed by {self.next_scheduled_middle_16.name} @ idx={next_issued_at}."
 
         # Not enough time before result was used
         if self.estimated_quad_cycles_before_result_used < self.min_quad_cycles_before_result_used:
-            needed_by_at = floor(self.needed_by.issued_at) % self.num_vmfma
+            needed_by_at = self.needed_by.issued_at.vmfma_index
             return f"{self.name} @ idx={issued_at} has too little gap between it and {self.needed_by.name} @ idx={needed_by_at}. Expected at least {self.min_quad_cycles_before_result_used} quad-cycles but only {self.estimated_quad_cycles_before_result_used} passed."
 
         return f"{self.name} at index {issued_at} is not valid."
@@ -224,16 +240,15 @@ class Pack(ValidatorInstruction):
 @dataclass
 class GlobalRead(ValidatorInstruction):
     name: str
-    num_vmfma: int
-    issued_at: Union[int, float]
+    issued_at: SchedulePosition
     swap_global_read_order: bool
-    needed_by: float = float('inf')
-    guaranteed_by: Union[int, float] = float('inf')
-    barriered_at: list[Union[int, float]] = field(default_factory=list)
-    must_start_after: ValidatorInstruction = field(default_factory=lambda: MFMA(float('-inf')))
-    must_start_after_barriered_at: list[Union[int, float]] = field(default_factory=list)
+    needed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
+    guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
+    barriered_at: list[SchedulePosition] = field(default_factory=list)
+    must_start_after: ValidatorInstruction = field(default_factory=lambda: MFMA(POSITION_NEG_INF))
+    must_start_after_barriered_at: list[SchedulePosition] = field(default_factory=list)
 
-    def done_idx(self) -> Union[int, float]:
+    def done_idx(self) -> SchedulePosition:
         return self.guaranteed_by
 
     def validate(self) -> Optional[str]:
@@ -252,11 +267,11 @@ class GlobalRead(ValidatorInstruction):
     def _validate_must_start_after(self) -> Optional[str]:
         """Validate: last LR0 -> SWaitCnt -> SBarrier -> GR"""
         # If must_start_after is at -inf, the constraint is not active (e.g. no LR0s).
-        if self.must_start_after.done_idx() == float('-inf'):
+        if self.must_start_after.done_idx() == POSITION_NEG_INF:
             return None
 
         name = self._name()
-        issued_at = floor(self.issued_at) % self.num_vmfma
+        issued_at = self.issued_at.vmfma_index
 
         must_start_after_done = self.must_start_after.done_idx()
 
@@ -265,26 +280,22 @@ class GlobalRead(ValidatorInstruction):
             if any(must_start_after_done < b < self.issued_at for b in self.must_start_after_barriered_at):
                 return None
 
-        must_start_after_issued_at = floor(self.must_start_after.issued_at) % self.num_vmfma
-
         context_str = ""
-        if must_start_after_done > self.num_vmfma:
+        if must_start_after_done.loop_index > self.issued_at.loop_index:
             context_str = " (of next iteration)"
 
         # 1. Issued too early (before LR0 is guaranteed done)
         if self.issued_at <= must_start_after_done:
-            must_start_after_at = floor(must_start_after_done) % self.num_vmfma
             return (
                 f"{name} @ idx={issued_at} is issued too early. "
-                f"Must be issued after idx={must_start_after_at}{context_str}, which is when {self.must_start_after.name} is guaranteed done."
+                f"Must be issued after idx={must_start_after_done.vmfma_index}{context_str}, which is when {self.must_start_after.name} is guaranteed done."
             )
 
         # 2. No barrier between LR0 done and GR
         if not any(must_start_after_done < b < self.issued_at for b in self.must_start_after_barriered_at):
-            must_start_after_at = floor(must_start_after_done) % self.num_vmfma
-            must_start_after_issued_at = floor(self.must_start_after.issued_at) % self.num_vmfma
             return (
-                f"There is an SBarrier missing between the SWaitCnt @ idx={must_start_after_at} (which guarantees {self.must_start_after.name} from idx={must_start_after_issued_at} to done) and the {name} @ idx={issued_at}. "
+                f"There is an SBarrier missing between the SWaitCnt @ idx={must_start_after_done.vmfma_index} "
+                f"(which guarantees {self.must_start_after.name} from idx={self.must_start_after.issued_at.vmfma_index} to done) and the {name} @ idx={issued_at}. "
                 f"Order must be {self.must_start_after.name} -> SWait -> SBarrier -> {name}."
             )
 
@@ -294,24 +305,24 @@ class GlobalRead(ValidatorInstruction):
     def _validate_needed_by(self) -> Optional[str]:
         """Validate: GR -> SWait -> SBarrier -> LR1"""
         # If needed_by is at inf, the constraint is not active (e.g. no LR1s).
-        if self.needed_by == float('inf'):
+        if self.needed_by == POSITION_INF:
             return None
 
         if self.issued_at < self.guaranteed_by < self.needed_by:
             if any(self.guaranteed_by < barriered_at < self.needed_by for barriered_at in self.barriered_at):
                     return None
 
-        issued_at = floor(self.issued_at) % self.num_vmfma
-        needed_by = floor(self.needed_by) % self.num_vmfma
+        issued_at = self.issued_at.vmfma_index
+        needed_by = self.needed_by.vmfma_index
 
         name = self._name()
 
         # 1. No SWait
-        if self.guaranteed_by == float('inf'):
+        if self.guaranteed_by == POSITION_INF:
             return f"{name} @ idx={issued_at} is not valid. There are no guarantees on when it will be done."
 
         # NOTE: Must do it after the check above to guard against infinity.
-        guaranteed_by = floor(self.guaranteed_by) % self.num_vmfma
+        guaranteed_by = self.guaranteed_by.vmfma_index
 
         # 2. No Barrier
         if len(self.barriered_at) == 0:
@@ -326,7 +337,7 @@ class GlobalRead(ValidatorInstruction):
             return f"{name} @ idx={issued_at} is not valid. No SBarrier between SWait @ idx={guaranteed_by} and LR1 @ idx={needed_by}. Order must be {name} -> SWait -> SBarrier -> LR1."
 
         # TODO: Did we miss a case and will we ever end up here?
-        return f"{name} @ idx={issued_at} is not valid. issued @ idx={issued_at}, guaranteed @ idx={guaranteed_by}, barriered @ idx={[floor(i) for i in self.barriered_at]}, needed @ idx={needed_by} is not valid."
+        return f"{name} @ idx={issued_at} is not valid. issued @ idx={issued_at}, guaranteed @ idx={guaranteed_by}, barriered @ idx={[b.vmfma_index for b in self.barriered_at]}, needed @ idx={needed_by} is not valid."
 
     def _name(self) -> str:
         name = self.name
@@ -342,39 +353,39 @@ class GlobalRead(ValidatorInstruction):
 
 @dataclass
 class SWait(ValidatorInstruction):
-    issued_at: Union[int, float]
+    issued_at: SchedulePosition
     dscnt: int
     vlcnt: int
     vscnt: int
     comment: str
     name: str = "SWaitCnt"
 
-    def done_idx(self) -> Union[int, float]:
+    def done_idx(self) -> SchedulePosition:
         return self.issued_at
 
     def _is_valid(self) -> bool:
-        return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at >= -1
+        return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at.vmfma_index >= -1
 
     def validate(self) -> Optional[str]:
         if self._is_valid():
             return None
-        return f"SWait at index {floor(self.issued_at)} is invalid: dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}, issued_at={floor(self.issued_at)}."
+        return f"SWait at index {self.issued_at.vmfma_index} is invalid: dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}, issued_at={self.issued_at.vmfma_index}."
 
 @dataclass
 class Barrier(ValidatorInstruction):
-    issued_at: Union[int, float]
+    issued_at: SchedulePosition
     comment: str
     name: str = "SBarrier"
 
-    def done_idx(self) -> Union[int, float]:
+    def done_idx(self) -> SchedulePosition:
         return self.issued_at
 
     def validate(self) -> Optional[str]:
-        return f"Barrier at index {floor(self.issued_at)} is not valid. Must be >= -1." if self.issued_at < -1 else None
+        return f"Barrier at index {self.issued_at.vmfma_index} is not valid. Must be >= -1." if self.issued_at.vmfma_index < -1 else None
 
 @dataclass
 class SNop(ValidatorInstruction):
-    issued_at: Union[int, float]
+    issued_at: SchedulePosition
     wait_state: int
     name: str = "SNop"
 
@@ -382,7 +393,7 @@ class SNop(ValidatorInstruction):
         # Base instruction quad-cycles plus wait_state additional cycles
         return self.__min_issue_quad_cycles__ + self.wait_state
 
-    def done_idx(self) -> Union[int, float]:
+    def done_idx(self) -> SchedulePosition:
         return self.issued_at
 
     def validate(self) -> Optional[str]:
@@ -507,7 +518,6 @@ class Timeline:
 
         # Populate the timeline with instructions
         self._populate_instructions(instruction_names_to_add, code_path, schedule_info, kernel)
-        self._resolve_issued_at_indices()
         self._linearize_timeline()
     
     def _populate_instructions(self, instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> None:
@@ -524,7 +534,7 @@ class Timeline:
             if schedule_info.mfmaReorder:
                 i_vmfma = schedule_info.mfmaReorder[i_vmfma]
                 
-            mfma = MFMA(name="MFMA", issued_at=i_vmfma)
+            mfma = MFMA(name="MFMA", issued_at=POSITION_NEG_INF)
             self._insert(i_vmfma, mfma, kernel)
 
         # NOTE: Relative ordering of instructions must be preserved.
@@ -538,9 +548,9 @@ class Timeline:
                     assert idx_vmfma >= -1, f"Code path {code_path}: SWaitCnt at index {idx_sync} is not valid. Must be >= -1."
                     
                     if isinstance(sync, SWaitCnt):
-                        sync_instruction = SWait(issued_at=idx_vmfma, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
+                        sync_instruction = SWait(issued_at=POSITION_NEG_INF, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
                     elif isinstance(sync, SBarrier):
-                        sync_instruction = Barrier(issued_at=idx_vmfma, comment=sync.comment)
+                        sync_instruction = Barrier(issued_at=POSITION_NEG_INF, comment=sync.comment)
                     else:
                         raise ValueError(f"Unexpected sync instruction type: {type(sync)}")
                     
@@ -550,14 +560,14 @@ class Timeline:
                     assert idx_vmfma >= -1, f"Code path {code_path}: SNop at index {idx_snop} is not valid. Must be >= -1."
                     # The waitState is stored as the first parameter in the rocisa SNop instruction
                     wait_state = snop.getParams()[0]
-                    snop_instruction = SNop(issued_at=idx_vmfma, wait_state=wait_state)
+                    snop_instruction = SNop(issued_at=POSITION_NEG_INF, wait_state=wait_state)
                     self._insert(idx_vmfma, snop_instruction, kernel)
             elif name.startswith("LRA") or name.startswith("LRB"):
                 for idx_LR, idx_vmfma in enumerate(schedule_get(name, code_path, schedule_info)):
                     assert idx_vmfma >= -1, f"Code path {code_path}: LocalRead {name} at index {idx_LR} is not valid. Must be >= -1."
 
                     # TODO: For ForceUnrollSubIter, need to account for register reuse and the fact that the LR0/LR1/LR3s must start after a certain point in the iteration.
-                    local_read = LocalRead(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma, issue_index=idx_LR)
+                    local_read = LocalRead(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_LR)
                     self._insert(idx_vmfma, local_read, kernel)
             elif name.startswith("GRA") or name.startswith("GRB"):
                 global_reads = schedule_get(name, code_path, schedule_info)
@@ -570,37 +580,17 @@ class Timeline:
                     if idx_GR % 2 == 0:
                         continue
 
-                    global_read = GlobalRead(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma, swap_global_read_order=swap_global_read_order)
+                    global_read = GlobalRead(name=name, issued_at=POSITION_NEG_INF, swap_global_read_order=swap_global_read_order)
                     self._insert(idx_vmfma, global_read, kernel)
             elif name.startswith("PackA") or name.startswith("PackB"):
                 packs = schedule_get(name, code_path, schedule_info)
 
                 for idx_pack, idx_vmfma in enumerate(packs):
                     assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
-                    pack = Pack(name=name, num_vmfma=self.num_vmfma, issued_at=idx_vmfma, issue_index=idx_pack)
+                    pack = Pack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack)
                     self._insert(idx_vmfma, pack, kernel)
             else:
                 raise NotImplementedError(f"Instruction {name} not implemented")
-    
-    def _resolve_issued_at_indices(self) -> None:
-        """
-        Resolve issued_at index to a sub-index resolution.
-        E.g. if issuing [GRA, SWaitCnt, SBarrier, LRA1] at index 5, the issued_at indices for each would be [5, 5.25, 5.5, 5.75].
-        I.e. vmfma_index + i/len(instructions @ vmfma_index) 
-        NOTE: Because idx=-1 is special and occurs AFTER the instructions scheduled at idx=numVMFMA-1 but BEFORE the VMFMA at idx=0,
-              we need to adjust the index so that the instructions at idx=(numVMFMA-1) have [0, 0.5) and the instructions at idx=0 have [0.5, 1).
-        """
-        for loop in self.loops:
-            for i_vmfma in range(-1, self.num_vmfma):
-                instructions = self.get_instructions_at(i_vmfma, loop)
-                for i_instruction, instruction in enumerate(instructions):
-                    divisor = len(instructions)
-                    if i_vmfma == -1:
-                        divisor *= 2
-                        instruction.issued_at += 0.5
-                    if i_vmfma == self.num_vmfma - 1:
-                        divisor *= 2
-                    instruction.issued_at += i_instruction / divisor
     
     def _insert(self, vmfma_index: int, instruction: ValidatorInstruction, kernel: 'Solution') -> None:
         """
@@ -612,8 +602,9 @@ class Timeline:
             if self._should_add(instruction, loop, kernel):
                 _instruction = deepcopy(instruction)
 
-                adjust = self.num_vmfma * self.loops.index(loop)
-                _instruction.issued_at += adjust
+                loop_index = self.loops.index(loop)
+                sub_index = len(self._instructions_at_index[loop][vmfma_index + 1])
+                _instruction.issued_at = SchedulePosition(loop_index=loop_index, vmfma_index=vmfma_index, sub_index=sub_index)
 
                 # Adjust for NLL/NGL shifts.
                 if isinstance(_instruction, SWait):
@@ -753,7 +744,7 @@ def apply_must_start_after_barriers(timeline: Timeline) -> None:
 
 def _apply_must_start_after_barriers_single(timeline: Timeline, gr: GlobalRead, i_gr: int) -> None:
     """Apply must_start_after barriers for a single GlobalRead instruction."""
-    if gr.must_start_after.done_idx() == float('-inf'):
+    if gr.must_start_after.done_idx() == POSITION_NEG_INF:
         return
 
     must_start_after_done = gr.must_start_after.done_idx()
@@ -823,8 +814,9 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
     n_local_reads_a = len(timeline.get_instructions("LRA0", MAIN_LOOP))
     n_local_reads_b = len(timeline.get_instructions("LRB0", MAIN_LOOP))
 
-    mfmas_by_index: dict[int, MFMA] = {
-        int(mfma.issued_at): mfma for _, mfma in timeline.get_instructions_combined("MFMA")
+    mfma_for_linear_index: dict[int, MFMA] = {
+        mfma.issued_at.loop_index * timeline.num_vmfma + mfma.issued_at.vmfma_index: mfma
+        for _, mfma in timeline.get_instructions_combined("MFMA")
     }
 
     for i_loop, loop in enumerate(timeline.loops):
@@ -843,8 +835,8 @@ def set_lr_needed_by_for_VMFMA(timeline: Timeline, kernel: 'Solution', mfma_reor
                     n_local_reads_a=n_local_reads_a,
                     n_local_reads_b=n_local_reads_b,
                     force_unroll_sub_iter=kernel.get("ForceUnrollSubIter", False),
-                    use_f32x_emulation=kernel.get("UseF32XEmulation", False))                
-                lr.needed_by = mfmas_by_index[needed_by + loop_offset]
+                    use_f32x_emulation=kernel.get("UseF32XEmulation", False))
+                lr.needed_by = mfma_for_linear_index[needed_by + loop_offset]
 
 
 @applies_only_once
@@ -987,7 +979,7 @@ def find_earliest_mfma_execution(
             for b_tile in range(n_b_tiles)
         )
 
-def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reorder: list[int], mfmas_by_index: dict[int, MFMA], num_vmfma: int, kernel: 'Solution') -> None:
+def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reorder: list[int], mfma_for_linear_index: dict[int, MFMA], num_vmfma: int, kernel: 'Solution') -> None:
     """
     Set the needed_by field for Pack instructions.
     This function handles all cases (BF16 and TF32).
@@ -1011,7 +1003,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
         pack_name: The name of the pack (e.g., "PackA0", "PackB1").
         i_loop: The loop index (0 for MAIN_LOOP_PREV, 1 for MAIN_LOOP, etc.).
         mfma_reorder: The reordering mapping for MFMA indices.
-        mfmas_by_index: Dictionary mapping MFMA indices to MFMA instructions.
+        mfma_for_linear_index: Dictionary mapping linear MFMA indices to MFMA instructions.
         num_vmfma: The number of MFMAs per iteration (not total across loops).
         kernel: The kernel class containing metadata.
     """
@@ -1073,8 +1065,8 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
             
             # Add iteration offset to get final position
             needed_by = iteration_offset + execution_index
-            pack.needed_by = mfmas_by_index[needed_by]
-        return    
+            pack.needed_by = mfma_for_linear_index[needed_by]
+        return
 
     if is_4x4mfma_tf32:
         # TF32 4x4 MFMA: Packs come in groups of 10
@@ -1130,7 +1122,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
             )
             
             # Add iteration offset to get final position
-            mfma_needed_by = mfmas_by_index[iteration_offset + earliest_execution]
+            mfma_needed_by = mfma_for_linear_index[iteration_offset + earliest_execution]
             # Packs 0-3 have multiple needed_by. But since both have the same min quad-cycle wait,
             # We can pick the one that occurs sooner as it's the active constraint.
             if pack.needed_by.issued_at > mfma_needed_by.issued_at:
@@ -1169,7 +1161,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
             )
 
             # Add iteration offset to get final position
-            pack.needed_by = mfmas_by_index[iteration_offset + earliest_execution]
+            pack.needed_by = mfma_for_linear_index[iteration_offset + earliest_execution]
        
 
 def _handle_min_pack_quad_cycles(packs: list[Pack], is_4x4mfma: bool) -> None:
@@ -1467,8 +1459,9 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
     if is_tf32_emulation and not is_direct_32x_emulation:
         raise ValueError("UseDirect32XEmulation is False, case not supported.")
 
-    mfmas_by_index: dict[int, MFMA] = {
-        int(mfma.issued_at): mfma for _, mfma in timeline.get_instructions_combined("MFMA")
+    mfma_for_linear_index: dict[int, MFMA] = {
+        mfma.issued_at.loop_index * timeline.num_vmfma + mfma.issued_at.vmfma_index: mfma
+        for _, mfma in timeline.get_instructions_combined("MFMA")
     }
 
     use_plr_pack = kernel.get("UsePLRPack", False)
@@ -1507,7 +1500,7 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
             else:
                 _hook_up_packs_bf16(packs, local_reads)
             
-            _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfmas_by_index, timeline.num_vmfma, kernel)
+            _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
 
 def precompute_issue_times(instructions: list[ValidatorInstruction], is_4x4mfma_tf32_packs: bool) -> list[int]:
     """
@@ -1638,11 +1631,11 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
 
         if not hasattr(instruction, "needed_by") or instruction.needed_by is None:
             continue
-        # needed_by can be a ValidatorInstruction or a float (e.g. GlobalRead.needed_by)
+        # needed_by can be a ValidatorInstruction or a SchedulePosition (e.g. GlobalRead.needed_by)
         needed_by_obj = instruction.needed_by
         if not isinstance(needed_by_obj, ValidatorInstruction):
             continue
-        if needed_by_obj.issued_at == float("inf"):
+        if needed_by_obj.issued_at == POSITION_INF:
             continue
 
         needed_by = instruction.needed_by
