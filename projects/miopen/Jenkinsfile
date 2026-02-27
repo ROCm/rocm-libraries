@@ -116,7 +116,7 @@ def runDbSyncJob(def flags, def gpu_family)
     }
 }
 
-def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420, def gpu_family)
+def runBuildAndSingleGtestJob(Map conf=[:])
 {
     script {
         withWorkingDir {
