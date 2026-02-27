@@ -9,7 +9,7 @@ if(GPU_TARGETS MATCHES "gfx9")
      NOT EXISTS ${INSTANCES_DIR}/backward_data)
     find_package(Python3 COMPONENTS Interpreter Development)
     execute_process(
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_instances.py
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generate_instances.py --mode=tests
       RESULT_VARIABLE ret
       OUTPUT_VARIABLE output
       ERROR_VARIABLE error
