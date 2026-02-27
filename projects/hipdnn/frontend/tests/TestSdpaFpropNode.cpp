@@ -417,3 +417,31 @@ TEST(TestSdpaFpropNode, InferPropertiesPreservesExplicitOutputShape)
     // Strides should remain unchanged (they were already set)
     EXPECT_EQ(o->get_stride(), (std::vector<int64_t>{8192, 1024, 64, 1}));
 }
+
+TEST(TestSdpaFpropNode, PreValidateFailsBatchMismatchQK)
+{
+    // K batch=4 differs from Q batch=2
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(4, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+
+    GraphAttributes graphAttrs;
+    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaFpropNode, PreValidateFailsBatchMismatchQV)
+{
+    // V batch=4 differs from Q batch=2
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(4, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+
+    GraphAttributes graphAttrs;
+    SdpaFpropNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
