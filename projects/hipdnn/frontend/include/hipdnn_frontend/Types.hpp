@@ -17,6 +17,7 @@
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
@@ -155,6 +156,21 @@ enum class BuildPlanPolicy
     ALL ///< Build all available plans (currently unused)
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
+
+/**
+ * @enum NormFwdPhase
+ * @brief Specifies the forward phase for normalization operations
+ *
+ * Controls whether the normalization operation computes auxiliary outputs
+ * (e.g., inverse variance/RMS) needed for backward pass training.
+ */
+enum class NormFwdPhase
+{
+    NOT_SET = 0, ///< Phase not specified (invalid for execution)
+    INFERENCE = 1, ///< Inference mode: only Y output computed
+    TRAINING = 2 ///< Training mode: Y and inverse RMS/variance outputs computed
+};
+typedef NormFwdPhase NormFwdPhase_t; ///< @brief Type alias for NormFwdPhase
 
 /**
  * @enum KnobValueType
@@ -657,6 +673,33 @@ inline hipdnn_frontend::KnobValueType
     }
 }
 
+inline hipdnn_data_sdk::data_objects::NormFwdPhase toSdkType(const NormFwdPhase& type)
+{
+    switch(type)
+    {
+    case NormFwdPhase::INFERENCE:
+        return hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE;
+    case NormFwdPhase::TRAINING:
+        return hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING;
+    default:
+        return hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET;
+    }
+}
+
+inline hipdnn_frontend::NormFwdPhase
+    fromSdkType(const hipdnn_data_sdk::data_objects::NormFwdPhase& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE:
+        return hipdnn_frontend::NormFwdPhase::INFERENCE;
+    case hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING:
+        return hipdnn_frontend::NormFwdPhase::TRAINING;
+    default:
+        return hipdnn_frontend::NormFwdPhase::NOT_SET;
+    }
+}
+
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const KnobValueType& type)
 {
@@ -676,6 +719,25 @@ inline const char* to_string(const KnobValueType& type)
 inline std::ostream& operator<<(std::ostream& os, const KnobValueType& type)
 {
     return os << to_string(type);
+}
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const NormFwdPhase& phase)
+{
+    switch(phase)
+    {
+    case NormFwdPhase::INFERENCE:
+        return "INFERENCE";
+    case NormFwdPhase::TRAINING:
+        return "TRAINING";
+    default:
+        return "NOT_SET";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const NormFwdPhase& phase)
+{
+    return os << to_string(phase);
 }
 
 // Helper function to get KnobValueType from a variant

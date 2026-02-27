@@ -57,6 +57,12 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   int nta = config.cache_hints_a;
   int ntb = config.cache_hints_b;
 
+  // Early Exit: problem sizes are invalid
+  if(M < 1 || N < 1 || K < 1 || batch < 1)
+  {
+    return workgroup_mapping_t{0, 0, 0};
+  }
+
   // Default values
   size_t numCUs             = hardware.N_CU;
   size_t numXCD             = hardware.NUM_XCD;
@@ -333,6 +339,12 @@ staggerU_t select_staggerU(const problem_t& problem,
 
   int nta = config.cache_hints_a;
   int ntb = config.cache_hints_b;
+
+  // Early Exit: problem sizes are invalid
+  if(M < 1 || N < 1 || K < 1 || batch < 1)
+  {
+    return staggerU_t{0, 0, 0};
+  }
 
   // Default values
   size_t numCUs       = hardware.N_CU;
