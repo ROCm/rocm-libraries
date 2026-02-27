@@ -9,10 +9,10 @@
 #include <vector>
 
 /**
- * @brief Unpack two FP4 nibbles from a packed byte.
+ * @brief Returns true if a 4-bit FP4 E2M1 nibble represents zero.
  *
  * FP4 E2M1 values are packed two-per-byte (low nibble first).
- * Zero is represented by nibble value 0x0 (+0) or 0x8 (-0).
+ * Both 0x0 (+0) and 0x8 (-0) decode to zero.
  */
 static bool isZeroNibble(uint8_t nibble)
 {
@@ -64,7 +64,7 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
     std::vector<size_t> emptySwizzle;
     std::vector<size_t> emptyTile;
 
-    generateMXInput((hipDataType)HIP_R_4F_E2M1_EXT,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     dataBuffer.data(),
                     scaleBuffer.data(),
                     rows,
@@ -83,8 +83,6 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
     size_t zeros       = countZerosFP4(dataBuffer.data(), numPacked);
     double zeroPercent = 100.0 * static_cast<double>(zeros) / static_cast<double>(numElements);
 
-    // Empirically ~12.5–12.9% zeros; naive baseline is 2/16 = 12.5% (2 zero values
-    // out of 16 FP4 nibble values), slightly elevated by MX block scaling bias.
     EXPECT_LT(zeroPercent, 13.0)
         << "Zero frequency " << zeroPercent << "% exceeds 13% upper bound for "
         << rows << "x" << cols << " FP4 matrix (transpose=" << isTranspose << ")";
@@ -103,5 +101,64 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(256u,  256u,  32, true),
         std::make_tuple(2048u, 1026u, 32, true),
         std::make_tuple(2048u, 514u,  32, false)
+    )
+);
+
+/**
+ * @brief Regression guard: generateMXInput must be deterministic (fixed seed).
+ *
+ * Any post-generation overwrite of the MXSA/MXSB buffers (e.g., the general
+ * tensor-init loop in initializeCPUInputs) desynchronises the CPU reference
+ * from GPU data, causing intermittent single-element validation failures.
+ * rows=K (must be mxBlock-aligned), cols=M/N (need not be).
+ */
+class MXScaleDeterminismTest
+    : public ::testing::TestWithParam<std::tuple<uint64_t, uint64_t, int, bool, bool>>
+{
+};
+
+TEST_P(MXScaleDeterminismTest, ScaleBufferIsDeterministic)
+{
+    auto [rows, cols, mxBlock, isTranspose, isMatrixA] = GetParam();
+
+    const size_t numPacked = (rows * cols + 1) / 2;
+    const size_t numScales = (rows / mxBlock) * cols;
+
+    std::vector<uint8_t> data(numPacked);
+    std::vector<uint8_t> scale1(numScales, 0x00);
+    std::vector<uint8_t> scale2(numScales, 0xFF); // sentinel: catches no-write if scale1==scale2 passes
+
+    std::vector<size_t> emptySwizzle, emptyTile;
+
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                    data.data(), scale1.data(),
+                    rows, cols, rows, isTranspose,
+                    emptySwizzle, emptyTile,
+                    mxBlock, 1, isMatrixA, "Bounded", -1.f, 1.f);
+
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                    data.data(), scale2.data(),
+                    rows, cols, rows, isTranspose,
+                    emptySwizzle, emptyTile,
+                    mxBlock, 1, isMatrixA, "Bounded", -1.f, 1.f);
+
+    EXPECT_EQ(scale1, scale2)
+        << "generateMXInput is non-deterministic; any post-generation overwrite will corrupt validation";
+
+    bool allZero = std::all_of(scale1.begin(), scale1.end(), [](uint8_t b){ return b == 0; });
+    bool allOnes = std::all_of(scale1.begin(), scale1.end(), [](uint8_t b){ return b == 0xFF; });
+    EXPECT_FALSE(allZero) << "Scale buffer is all-zero — generator did not write";
+    EXPECT_FALSE(allOnes) << "Scale buffer is all-0xFF — unexpected for bounded [-1,1] input";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ScaleDeterminism,
+    MXScaleDeterminismTest,
+    ::testing::Values(
+        // rows=K, cols=M or N  (tensorA.sizes()={K,M}, tensorB.sizes()={K,N})
+        std::make_tuple(1024u, 128u, 32, true,  true),  // transposed A
+        std::make_tuple(1024u, 128u, 32, false, false), // non-transposed B
+        std::make_tuple(1024u, 204u, 32, true,  true),  // M=204, non-32-aligned (was failing)
+        std::make_tuple(1024u, 213u, 32, true,  true)   // M=213, non-32-aligned (was failing)
     )
 );
