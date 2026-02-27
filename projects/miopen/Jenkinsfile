@@ -118,6 +118,10 @@ def runDbSyncJob(def flags, def gpu_family)
 
 def runBuildAndSingleGtestJob(Map conf=[:])
 {
+    def flags = conf.get('flags', '')
+    def build_timeout_minutes = (conf.get('build_timeout_minutes', 420) as Integer)
+    def gpu_family = conf.get('gpu_family', null)
+
     script {
         withWorkingDir {
             def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
