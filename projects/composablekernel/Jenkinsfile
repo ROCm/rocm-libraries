@@ -273,17 +273,17 @@ def shouldRunCICheck() {
         def testChangedFiles = sh(
             returnStdout: true,
             script: '''
-                echo "Base branch build, checking last commit" >&2
+                echo "Testing -- Base branch build, checking last commit" >&2
                 git log --name-only --pretty=format: HEAD~1..HEAD -- projects/composablekernel/ | sort -u | grep -v '^$'
             '''
         ).trim().split('\n')
 
         if (testChangedFiles.size() == 1 && testChangedFiles[0] == '') {
-            echo "No changed files detected - this might be a manual trigger or merge commit, running CI for safety"
+            echo "Testing -- No changed files detected - this might be a manual trigger or merge commit, running CI for safety"
             return true
         }
         
-        echo "Test Changed files: ${testChangedFiles.join(', ')}"
+        echo "Testing -- Changed files: ${testChangedFiles.join(', ')}"
         
         // Separate files into those requiring CI and those that can be skipped
         def testFilesRequiringCI = []
@@ -299,6 +299,21 @@ def shouldRunCICheck() {
             } else {
                 testFilesRequiringCI.add(file)
             }
+        }
+
+        // Debug output
+        if (skippedFiles.size() > 0) {
+            echo "Files that don't require CI (${skippedFiles.size()}):"
+            skippedFiles.each { echo "  - ${it}" }
+        }
+
+        if (filesRequiringCI.size() > 0) {
+            echo "Files that require CI (${filesRequiringCI.size()}):"
+            filesRequiringCI.each { echo "  - ${it}" }
+            return true
+        } else {
+            echo "Only non-relevant files changed, skipping CI"
+            return false
         }
         /////
 
@@ -364,7 +379,7 @@ def shouldRunCICheck() {
         } else {
             echo "Only non-relevant files changed, skipping CI"
             return false
-        } 
+        }
     } catch (Exception e) {
         echo "Error checking changed files: ${e.getMessage()}, running CI by default"
         return true
