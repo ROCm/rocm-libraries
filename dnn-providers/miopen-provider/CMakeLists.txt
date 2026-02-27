@@ -11,7 +11,7 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(MIOPEN_PLUGIN_VERSION "0.0.1")
-project(miopen_provider VERSION ${MIOPEN_PLUGIN_VERSION} LANGUAGES CXX)
+project(miopen-provider VERSION ${MIOPEN_PLUGIN_VERSION} LANGUAGES CXX)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
 

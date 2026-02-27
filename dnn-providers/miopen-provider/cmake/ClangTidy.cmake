@@ -55,8 +55,8 @@ function(add_clang_tidy_custom_target)
 
         # Use prefixed target names in superbuild to avoid collisions
         if(ROCM_LIBS_SUPERBUILD)
-            set(_TIDY_TARGET miopen_provider_tidy)
-            set(_TIDY_CXX_TARGET miopen_provider_tidy-cxx)
+            set(_TIDY_TARGET ${PROJECT_NAME}_tidy)
+            set(_TIDY_CXX_TARGET ${PROJECT_NAME}_tidy-cxx)
         else()
             set(_TIDY_TARGET tidy)
             set(_TIDY_CXX_TARGET tidy-cxx)
@@ -71,7 +71,7 @@ function(add_clang_tidy_custom_target)
                 -j ${CLANG_TIDY_JOBS} ${CLANG_TIDY_HIP_ARGS}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             COMMENT
-                "Running clang-tidy on miopen-provider source files (${CLANG_TIDY_JOBS} parallel jobs)..."
+                "Running clang-tidy on ${PROJECT_NAME} source files (${CLANG_TIDY_JOBS} parallel jobs)..."
             VERBATIM
         )
 
@@ -83,8 +83,20 @@ function(add_clang_tidy_custom_target)
                 -config-file=${PROJECT_SOURCE_DIR}/.clang-tidy -source-filter
                 "^(?!.*(_deps/)).*" -quiet -j ${CLANG_TIDY_JOBS}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-            COMMENT "Running clang-tidy on miopen-provider C++ files (${CLANG_TIDY_JOBS} parallel jobs)..."
+            COMMENT "Running clang-tidy on ${PROJECT_NAME} C++ files (${CLANG_TIDY_JOBS} parallel jobs)..."
             VERBATIM
+        )
+
+        # Alias targets with consistent hyphenated naming
+        add_custom_target(
+            ${PROJECT_NAME}-tidy
+            DEPENDS ${_TIDY_TARGET}
+            COMMENT "Alias for ${_TIDY_TARGET}"
+        )
+        add_custom_target(
+            ${PROJECT_NAME}-tidy-cxx
+            DEPENDS ${_TIDY_CXX_TARGET}
+            COMMENT "Alias for ${_TIDY_CXX_TARGET}"
         )
     else()
         message(${_not_found_log_level}
