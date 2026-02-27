@@ -24,6 +24,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 24 &&
 #include "layernorm_attributes_generated.h"
 #include "matmul_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
+#include "rmsnorm_attributes_generated.h"
 #include "tensor_attributes_generated.h"
 
 namespace hipdnn_data_sdk {
@@ -54,11 +55,12 @@ enum class NodeAttributes : uint8_t {
   BatchnormInferenceAttributesVarianceExt = 8,
   MatmulAttributes = 9,
   LayernormAttributes = 10,
+  RMSNormAttributes = 11,
   MIN = NONE,
-  MAX = LayernormAttributes
+  MAX = RMSNormAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[11] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[12] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -70,13 +72,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[11] {
     NodeAttributes::ConvolutionWrwAttributes,
     NodeAttributes::BatchnormInferenceAttributesVarianceExt,
     NodeAttributes::MatmulAttributes,
-    NodeAttributes::LayernormAttributes
+    NodeAttributes::LayernormAttributes,
+    NodeAttributes::RMSNormAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[12] = {
+  static const char * const names[13] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -88,13 +91,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "BatchnormInferenceAttributesVarianceExt",
     "MatmulAttributes",
     "LayernormAttributes",
+    "RMSNormAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::LayernormAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::RMSNormAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -143,6 +147,10 @@ template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::LayernormA
   static const NodeAttributes enum_value = NodeAttributes::LayernormAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::RMSNormAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::RMSNormAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -185,6 +193,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::Matmu
 
 template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::LayernormAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::LayernormAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::RMSNormAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::RMSNormAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -297,6 +309,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::LayernormAttributes ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value) : nullptr;
   }
+  hipdnn_data_sdk::data_objects::RMSNormAttributesT *AsRMSNormAttributes() {
+    return type == NodeAttributes::RMSNormAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::RMSNormAttributesT *AsRMSNormAttributes() const {
+    return type == NodeAttributes::RMSNormAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -345,6 +365,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::LayernormAttributes: {
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::RMSNormAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -424,6 +448,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::LayernormAttributes *attributes_as_LayernormAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_data_sdk::data_objects::RMSNormAttributes *attributes_as_RMSNormAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -480,6 +507,10 @@ template<> inline const hipdnn_data_sdk::data_objects::MatmulAttributes *Node::a
 
 template<> inline const hipdnn_data_sdk::data_objects::LayernormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::LayernormAttributes>() const {
   return attributes_as_LayernormAttributes();
+}
+
+template<> inline const hipdnn_data_sdk::data_objects::RMSNormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::RMSNormAttributes>() const {
+  return attributes_as_RMSNormAttributes();
 }
 
 struct NodeBuilder {
@@ -888,6 +919,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::RMSNormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -947,6 +982,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::RMSNormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -994,6 +1033,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value);
       return CreateLayernormAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::RMSNormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value);
+      return CreateRMSNormAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1038,6 +1081,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::LayernormAttributes: {
       value = new hipdnn_data_sdk::data_objects::LayernormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::RMSNormAttributes: {
+      value = new hipdnn_data_sdk::data_objects::RMSNormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(u.value));
       break;
     }
     default:
@@ -1094,6 +1141,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::LayernormAttributes: {
       auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::RMSNormAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value);
       delete ptr;
       break;
     }
