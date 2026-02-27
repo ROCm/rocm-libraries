@@ -97,6 +97,15 @@ TEST_F(CShuffleEpilogueScaleTest, HalfTestWithTensorScale)
 
 int main(int argc, char** argv)
 {
+    // Skip all tests on wave32 devices
+    int warp_size = 0;
+    hipError_t err = hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0);
+    if(err == hipSuccess && warp_size == 32)
+    {
+        std::cout << "Skipping CShuffleEpilogue tests on wave32 device (not supported)" << std::endl;
+        return 0;
+    }
+
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
