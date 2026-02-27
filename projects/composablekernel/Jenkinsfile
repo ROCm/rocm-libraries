@@ -302,18 +302,16 @@ def shouldRunCICheck() {
         }
 
         // Debug output
-        if (skippedFiles.size() > 0) {
-            echo "Files that don't require CI (${skippedFiles.size()}):"
-            skippedFiles.each { echo "  - ${it}" }
+        if (testSkippedFiles.size() > 0) {
+            echo "Files that don't require CI (${testSkippedFiles.size()}):"
+            testSkippedFiles.each { echo "  - ${it}" }
         }
 
-        if (filesRequiringCI.size() > 0) {
-            echo "Files that require CI (${filesRequiringCI.size()}):"
-            filesRequiringCI.each { echo "  - ${it}" }
-            return true
+        if (testFilesRequiringCI.size() > 0) {
+            echo "Files that require CI (${testFilesRequiringCI.size()}):"
+            testFilesRequiringCI.each { echo "  - ${it}" }
         } else {
             echo "Only non-relevant files changed, skipping CI"
-            return false
         }
         /////
 
