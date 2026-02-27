@@ -1,4 +1,3 @@
-# Test
 # Composable Kernel
 
 > [!NOTE]
