@@ -1001,23 +1001,26 @@ namespace rocRoller
                     // are sequenced after Direct2LDS/StoreLDSTile.
                     if(prefetchDirect2LDS && m_params->prefetchMixMemOps)
                     {
-                        auto maybeSegmentBoundaryNop
+                        auto predecessorBySequenceEdge
                             = only(graph.control.getInputNodeIndices<Sequence>(
                                 globalLoads[0].globalChain));
                         auto maybeForLoop = only(
                             graph.control.getInputNodeIndices<Body>(globalLoads[0].globalChain));
                         AssertFatal(
-                            maybeForLoop || maybeSegmentBoundaryNop,
+                            maybeForLoop || predecessorBySequenceEdge,
                             "Expected prefetch global load to be connected to either the for "
-                            "loop body or the segment boundary.");
+                            "loop body or by a single sequence edge to a node, that is either the "
+                            "segment boundary nop or a direct global load.");
 
-                        auto connectingEdge
-                            = maybeForLoop ? ControlEdge{Body()} : ControlEdge{Sequence()};
-
-                        predecessorOfLoadLDSTileChain = graph.control.addElement(NOP());
-                        graph.control.addElement(connectingEdge,
-                                                 {segmentBoundaries[u]},
-                                                 {predecessorOfLoadLDSTileChain});
+                        predecessorOfLoadLDSTileChain = segmentBoundaries[u];
+                        // In segment 0, make LoadLDSTile parallel with
+                        // ForLoop --Body->  NOP --Sequence-> LDSPrefetchChain.
+                        if(u == 0)
+                        {
+                            const auto nop = graph.control.addElement(NOP());
+                            graph.control.addElement(Body(), {segmentBoundaries[u]}, {nop});
+                            predecessorOfLoadLDSTileChain = nop;
+                        }
 
                         graph.control.addElement(Sequence(),
                                                  {globalStores[globalStores.size() - 1].ldsChain},
