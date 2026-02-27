@@ -522,15 +522,7 @@ def query_cms_kernels(dtype: Optional[str] = None, layout: Optional[str] = None)
 
     Returns:
         A list of dicts, each containing the minimum parameter combination
-        needed for a matching CMS kernel. Each dict includes:
-            - name:                     Schedule function name
-            - dtype:                    Data type string
-            - TransposeA, TransposeB:   Layout booleans (e.g. TN = TransposeA=True, TransposeB=False)
-            - MacroTile0, MacroTile1, DepthU
-            - PrefetchGlobalRead, PrefetchLocalRead, DirectToLds
-            - WaveSeparateGlobalReadA, WaveSeparateGlobalReadB
-            - GlobalReadVectorWidthA, GlobalReadVectorWidthB, LocalReadVectorWidth
-            - MatrixInstruction, MIWaveGroup
+        needed for a matching CMS kernel. Each dict includes the minimal parameters/values combinations needed for using each CMS kernel.
 
     """
     results = []
@@ -562,7 +554,7 @@ def get_available_dtypes() -> list[str]:
 
 
 def get_available_layouts(dtype: Optional[str] = None) -> set[str]:
-    """Return a sorted list of all layout strings available for the given data type.
+    """Return a set of all layout strings available for the given data type.
 
     Args:
         dtype: Optional data type filter, or None for all data types.
@@ -571,7 +563,7 @@ def get_available_layouts(dtype: Optional[str] = None) -> set[str]:
         Sorted list of unique layout strings (e.g. ["NN", "NT", "TN", "TT"]).
     """
     def as_str(transpose: bool) -> str:
-            return "T" if transpose else "N"
+        return "T" if transpose else "N"
 
     layouts: set[str] = set()
     for info in _SCHEDULE_METADATA:
