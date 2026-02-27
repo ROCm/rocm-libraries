@@ -1630,8 +1630,8 @@ def estimate_quad_cycles_precomputed(i_start: int, i_end: int, issue_times: list
 @applies_only_once
 def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     """
-    Perform a rough estimate on the number of quad-cycles that pass between when a instruction is issued and when its result is used.
-    Needed to ensure the restrictions laied out in section 7.6 of the CDNA 4 ISA are met. Failing to meet these restrictions will result in deterministic errors.
+    Perform a rough estimate on the number of quad-cycles that pass between when an instruction is issued and when its result is used.
+    Needed to ensure the restrictions laid out in section 7.6 of the CDNA 4 ISA are met. Failing to meet these restrictions will result in deterministic errors.
     
     E.g. for the 4x4 MFMA TF32 route the 6th and 7th pack instructions map to:
     v_mfma_f32_4x4x4_16b_bf16 v[0:3], ..., ..., ...

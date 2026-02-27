@@ -25,7 +25,7 @@
 
 import unittest
 
-from Tensile.Components.CMSValidator import estimate_quad_cycles_precomputed, MFMA, MFMAPack, Pack, TimedPack, CVTPack, MiddlePack, precompute_issue_times, SchedulePosition, SNop, ValidatorInstruction
+from Tensile.Components.CMSValidator import estimate_quad_cycles_precomputed, MFMA, MFMAPack, Pack, precompute_issue_times, SchedulePosition, SNop, ValidatorInstruction
 
 
 def _pos(vmfma_index: int, sub_index: int) -> SchedulePosition:
