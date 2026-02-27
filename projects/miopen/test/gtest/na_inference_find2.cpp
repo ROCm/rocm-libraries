@@ -240,7 +240,7 @@ auto GenCases(bool full = false)
 
 auto GetSmokeCases()
 {
-    static auto cases =  GenCases();
+    static auto cases = GenCases();
     return cases;
 }
 
@@ -411,9 +411,18 @@ TEST_P(GPU_na_inference_find2_test_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_na_inference_find2_test_BFP16, TestBFloat16) { Run(); }
 TEST_P(GPU_na_inference_find2_test_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_FP16, GetSmokeCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_BFP16, GetSmokeCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_inference_find2_test_FP32, GetSmokeCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_inference_find2_test_FP16,
+                         GetSmokeCases(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_inference_find2_test_BFP16,
+                         GetSmokeCases(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_inference_find2_test_FP32,
+                         GetSmokeCases(),
+                         TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_inference_find2_test_FP16,

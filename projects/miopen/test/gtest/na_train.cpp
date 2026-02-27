@@ -712,13 +712,13 @@ auto GenCases(int batchNormMode, bool full = false)
 
 auto GetSmokePeractCases()
 {
-    static auto cases =  GenCases(0);
+    static auto cases = GenCases(0);
     return cases;
 }
 
 auto GetSmokeSpatialCases()
 {
-    static auto cases =  GenCases(1);
+    static auto cases = GenCases(1);
     return cases;
 }
 

@@ -804,13 +804,13 @@ auto GenCases(int batchNormMode, bool full = false)
 
 auto GetSmokePeractCases()
 {
-    static auto cases =  GenCases(0);
+    static auto cases = GenCases(0);
     return cases;
 }
 
 auto GetSmokeSpatialCases()
 {
-    static auto cases =  GenCases(1);
+    static auto cases = GenCases(1);
     return cases;
 }
 
@@ -1145,11 +1145,23 @@ TEST_P(GPU_na_train_find2_peract_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_na_train_find2_spatial_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_na_train_find2_spatial_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_peract_FP16, GetSmokePeractCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_peract_FP32, GetSmokePeractCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_train_find2_peract_FP16,
+                         GetSmokePeractCases(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_train_find2_peract_FP32,
+                         GetSmokePeractCases(),
+                         TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_spatial_FP16, GetSmokeSpatialCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_train_find2_spatial_FP32, GetSmokeSpatialCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_train_find2_spatial_FP16,
+                         GetSmokeSpatialCases(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_train_find2_spatial_FP32,
+                         GetSmokeSpatialCases(),
+                         TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_train_find2_peract_FP16,

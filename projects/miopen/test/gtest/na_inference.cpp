@@ -210,7 +210,7 @@ auto GenCases(bool full = false)
 
 auto GetSmokeCases()
 {
-    static auto cases =  GenCases();
+    static auto cases = GenCases();
     return cases;
 }
 
@@ -392,14 +392,26 @@ TEST_P(GPU_na_fusion_inference_test_BFP16, TestBFloat16) { Run(); }
 TEST_P(GPU_na_fusion_inference_test_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_na_fusion_inference_test_FP64, TestFloat64) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_I8, GetSmokeCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP16, GetSmokeCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_inference_test_I8,
+                         GetSmokeCases(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_inference_test_FP16,
+                         GetSmokeCases(),
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_na_fusion_inference_test_BFP16,
                          GetSmokeCases(),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP32, GetSmokeCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_na_fusion_inference_test_FP64, GetSmokeCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_inference_test_FP32,
+                         GetSmokeCases(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_na_fusion_inference_test_FP64,
+                         GetSmokeCases(),
+                         TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_na_fusion_inference_test_I8,
