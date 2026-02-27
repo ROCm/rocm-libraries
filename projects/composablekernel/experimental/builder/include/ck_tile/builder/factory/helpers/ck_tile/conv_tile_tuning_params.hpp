@@ -145,7 +145,6 @@ consteval ck_tile::ConvolutionSpecialization SetTileConvSpecialization()
     case TileConvSpecialization::FILTER_1X1_STRIDE1_PAD0:
         return ck_tile_conv_spec::Filter1x1Stride1Pad0;
     case TileConvSpecialization::FILTER_3x3: return ck_tile_conv_spec::Filter3x3;
-    case TileConvSpecialization::FILTER_5x5: return ck_tile_conv_spec::Filter5x5;
     default: throw "Unknown ConvFwdSpecialization";
     }
 }

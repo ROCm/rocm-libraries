@@ -192,8 +192,7 @@ enum class TileConvSpecialization
     DEFAULT,
     FILTER_1X1_PAD0,
     FILTER_1X1_STRIDE1_PAD0,
-    FILTER_3x3,
-    FILTER_5x5
+    FILTER_3x3
 };
 
 // Enums for the convolution specializations.
@@ -203,7 +202,6 @@ enum class ConvSpecialization
     FILTER_1X1_PAD0,
     FILTER_1X1_STRIDE1_PAD0,
     FILTER_3x3,
-    FILTER_5x5,
     ODD_C
 };
 
@@ -375,7 +373,6 @@ inline std::string_view to_string(ConvSpecialization spec)
     case FILTER_1X1_PAD0: return "FILTER_1X1_PAD0";
     case FILTER_1X1_STRIDE1_PAD0: return "FILTER_1X1_STRIDE1_PAD0";
     case FILTER_3x3: return "FILTER_3x3";
-    case FILTER_5x5: return "FILTER_5x5";
     case ODD_C: return "ODD_C";
     default: return "Unknown";
     }
