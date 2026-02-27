@@ -5,8 +5,11 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
 #include "HipKernelUtils.hpp"
-#include "PlanInterface.hpp"
+#include "HipdnnHipKernelHandle.hpp"
+#include "HipdnnHipKernelSettings.hpp"
 
 namespace hip_kernel_plugin
 {
@@ -75,11 +78,11 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
-class BatchnormFwdTrainingPlan : public IPlan
+class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<HipdnnHipKernelHandle>
 {
 public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
-                             bool benchmarkingEnabled = false);
+                             const HipdnnHipKernelSettings& executionSettings);
 
     BatchnormFwdTrainingPlan(const BatchnormFwdTrainingPlan&) = delete;
     BatchnormFwdTrainingPlan& operator=(const BatchnormFwdTrainingPlan&) = delete;
@@ -87,16 +90,16 @@ public:
     BatchnormFwdTrainingPlan(BatchnormFwdTrainingPlan&&) = default;
     BatchnormFwdTrainingPlan& operator=(BatchnormFwdTrainingPlan&&) = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnHipKernelHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnHipKernelHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormFwdTrainingParams _trainingParams;
-    [[maybe_unused]] bool _benchmarkingEnabled;
+    HipdnnHipKernelSettings _executionSettings;
 };
 
 }

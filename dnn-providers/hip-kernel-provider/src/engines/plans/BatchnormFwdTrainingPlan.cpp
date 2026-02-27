@@ -3,7 +3,6 @@
 
 #include "BatchnormFwdTrainingPlan.hpp"
 #include "BatchnormCommon.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
 #include "hip/HipKernel.hpp"
 #include "hip/HipProgram.hpp"
 #include "hip/HipUtils.hpp"
@@ -218,20 +217,20 @@ const hipdnn_data_sdk::data_objects::TensorAttributes*
 }
 
 BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams,
-                                                   bool benchmarkingEnabled)
+                                                   const HipdnnHipKernelSettings& executionSettings)
     : _trainingParams(std::move(trainingParams))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _executionSettings(executionSettings)
 {
 }
 
 size_t BatchnormFwdTrainingPlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle) const
 {
     // No workspace needed for batchnorm training
     return 0;
 }
 
-void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
+void BatchnormFwdTrainingPlan::execute(const HipdnnHipKernelHandle& handle,
                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                        uint32_t numDeviceBuffers,
                                        [[maybe_unused]] void* workspace) const
