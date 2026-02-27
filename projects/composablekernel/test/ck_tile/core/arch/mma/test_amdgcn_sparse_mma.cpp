@@ -13,6 +13,8 @@
 #include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 
+#include "get_wave_size_helper.hpp"
+
 using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace ck_tile::core::arch::mma;
@@ -249,9 +251,9 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
     HIP_CHECK_ERROR(hipMemcpy(d_b, h_b.data(), BSize, hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemcpy(d_c, h_c.data(), CSize, hipMemcpyHostToDevice));
 
-    // Need at least 1 WG with 64 threads to get defined MFMA/WMMA behaviour
+    const auto wave_size = getDeviceWaveSize();
     test_sparse_accum_over_k<AType, BType, CType, FragM, FragN, FragK>
-        <<<1, 64>>>(d_a, d_b, d_c, d_out);
+        <<<1, wave_size>>>(d_a, d_b, d_c, d_out);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
 
     HIP_CHECK_ERROR(hipMemcpy(h_out.data(), d_out, CSize, hipMemcpyDeviceToHost));
