@@ -355,14 +355,14 @@ void buildPlanFwdTrainingSingleNode(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
-    HipdnnEnginePluginExecutionContext& executionContext)
+    HipdnnHipKernelContext& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormAttributes>();
 
     BatchnormFwdTrainingParams params(attr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params),
-                                                           executionContext.benchmarkingEnabled());
+                                                           executionContext.executionSettings());
     executionContext.setPlan(std::move(plan));
 }
 

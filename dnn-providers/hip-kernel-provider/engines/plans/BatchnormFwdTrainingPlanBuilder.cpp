@@ -7,8 +7,6 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "BatchnormFwdTrainingPlanBuilder.hpp"
-#include "HipKernelUtils.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/BatchnormApplicabilityChecks.hpp"
 #include "engines/plans/BatchnormFwdTrainingPlan.hpp"
 
@@ -251,7 +249,7 @@ void checkTensorVirtuality2Node(
 } // namespace
 
 bool BatchnormFwdTrainingPlanBuilder::isApplicable(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
@@ -311,19 +309,28 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
     }
 }
 
-size_t BatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
-    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+size_t BatchnormFwdTrainingPlanBuilder::getMaxWorkspaceSize(
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const HipdnnHipKernelSettings& executionSettings) const
 {
     // No workspace needed for batchnorm forward training
     return 0;
 }
 
+void BatchnormFwdTrainingPlanBuilder::initializeExecutionSettings(
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] HipdnnHipKernelSettings& executionSettings) const
+{
+}
+
 void BatchnormFwdTrainingPlanBuilder::buildPlan(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    HipdnnHipKernelContext& executionContext) const
 {
     if(opGraph.nodeCount() == 1)
     {
@@ -334,7 +341,7 @@ void BatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else if(opGraph.nodeCount() == 2)
@@ -349,7 +356,7 @@ void BatchnormFwdTrainingPlanBuilder::buildPlan(
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(
-            std::move(params), executionContext.benchmarkingEnabled());
+            std::move(params), executionContext.executionSettings());
         executionContext.setPlan(std::move(plan));
     }
     else
@@ -361,7 +368,7 @@ void BatchnormFwdTrainingPlanBuilder::buildPlan(
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> BatchnormFwdTrainingPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle,
     [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     return {};
