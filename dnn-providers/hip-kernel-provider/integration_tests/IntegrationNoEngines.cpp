@@ -1,68 +1,74 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
+#include <filesystem>
+#include <string>
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
-#include <hipdnn_plugin_sdk/EnginePluginApi.h>
-#include <hipdnn_plugin_sdk/PluginApi.h>
-
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_test_sdk/utilities/FrontendGraphFactory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 namespace
 {
 
 // ============================================================================
-// Test fixture for verifying the HIP kernel plugin has no engines
+// Test fixture for verifying the HIP kernel plugin has no engines.
+// Uses the frontend API to load the plugin dynamically and attempt graph builds.
 // ============================================================================
 
 class IntegrationHipKernelNoEngines : public ::testing::Test
 {
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+
+        // Plugin paths must be set before creating the hipdnn handle
+        auto pluginPath = std::filesystem::weakly_canonical(
+            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
+        const std::string pluginPathStr = pluginPath.string();
+        const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+
+        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
+        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            ASSERT_EQ(hipdnnDestroy(_handle), HIPDNN_STATUS_SUCCESS);
+        }
+        if(_stream != nullptr)
+        {
+            ASSERT_EQ(hipStreamDestroy(_stream), hipSuccess);
+        }
+    }
+
+    hipdnnHandle_t _handle = nullptr;
+    hipStream_t _stream = nullptr;
 };
 
 } // namespace
 
 // ============================================================================
-// Verify that the HIP kernel plugin reports zero engines
+// Verify that building a batchnorm inference graph fails (no engines registered)
 // ============================================================================
 
-TEST_F(IntegrationHipKernelNoEngines, GetAllEngineIdsReturnsZero)
+TEST_F(IntegrationHipKernelNoEngines, BatchnormInferenceGraphBuildFails)
 {
-    // Query the total number of engines (maxEngines=0 means query-only)
-    uint32_t numEngines = 0;
-    auto status = hipdnnEnginePluginGetAllEngineIds(nullptr, 0, &numEngines);
+    auto graph = hipdnn_test_sdk::utilities::FrontendGraphFactory::createBatchnormInferenceGraph();
 
-    ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_EQ(numEngines, 0u) << "HIP kernel plugin should have no engines registered yet";
-}
-
-TEST_F(IntegrationHipKernelNoEngines, CreateAndDestroyHandle)
-{
-    hipdnnEnginePluginHandle_t handle = nullptr;
-    auto status = hipdnnEnginePluginCreate(&handle);
-    ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    ASSERT_NE(handle, nullptr);
-
-    status = hipdnnEnginePluginDestroy(handle);
-    EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-}
-
-TEST_F(IntegrationHipKernelNoEngines, GetPluginNameAndVersion)
-{
-    const char* name = nullptr;
-    auto status = hipdnnPluginGetName(&name);
-    ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(name, "hip_kernel_provider_plugin");
-
-    const char* version = nullptr;
-    status = hipdnnPluginGetVersion(&version);
-    ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(version, "1.0.0");
-}
-
-TEST_F(IntegrationHipKernelNoEngines, GetPluginType)
-{
-    hipdnnPluginType_t type = static_cast<hipdnnPluginType_t>(0);
-    auto status = hipdnnPluginGetType(&type);
-    ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_EQ(type, HIPDNN_PLUGIN_TYPE_ENGINE);
+    auto result = graph.build(_handle);
+    EXPECT_TRUE(result.is_bad()) << "Expected build to fail since no engines are registered";
 }

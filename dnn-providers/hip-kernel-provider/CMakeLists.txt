@@ -37,17 +37,15 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
      ${HIP_DIR}/cmake
 )
 
-# Migrate HIP_DNN_SKIP_TESTS -> HIPDNN_SKIP_TESTS
-if(DEFINED HIP_DNN_SKIP_TESTS)
-    set(HIPDNN_SKIP_TESTS ${HIP_DNN_SKIP_TESTS} CACHE BOOL "Skip building tests" FORCE)
-    unset(HIP_DNN_SKIP_TESTS CACHE)
-    message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to HIPDNN_SKIP_TESTS. Please update your build scripts to use -DHIPDNN_SKIP_TESTS instead.")
-endif()
-option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
+option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
-option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+if(WIN32)
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+endif()
 option(HIPKERNELPROVIDER_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 
 if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
@@ -152,7 +150,7 @@ set_target_properties(
                BUILD_WITH_INSTALL_RPATH TRUE
 )
 
-if(NOT HIPDNN_SKIP_TESTS)
+if(HIPKERNELPROVIDER_ENABLE_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 

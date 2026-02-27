@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-if(NOT HIPDNN_SKIP_TESTS)
+if(HIPKERNELPROVIDER_ENABLE_TESTS)
     include(FetchContent)
 
     # Try to find GTest first

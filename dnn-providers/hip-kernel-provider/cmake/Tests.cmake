@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIPDNN_SKIP_TESTS)
+if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
     return()
 endif()
 

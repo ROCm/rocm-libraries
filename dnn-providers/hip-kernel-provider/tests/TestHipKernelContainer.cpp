@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
+
 #include <gtest/gtest.h>
 
 #include "HipKernelContainer.hpp"
@@ -23,9 +25,9 @@ TEST(TestHipKernelContainer, CopyEngineIdsReturnsZeroEngines)
 
 TEST(TestHipKernelContainer, CopyEngineIdsWithBufferReturnsZero)
 {
-    int64_t engineIds[1] = {0};
+    std::array<int64_t, 1> engineIds = {0};
     uint32_t numEngines = 0;
-    auto totalEngines = HipKernelContainer::copyEngineIds(engineIds, 1, numEngines);
+    auto totalEngines = HipKernelContainer::copyEngineIds(engineIds.data(), 1, numEngines);
 
     EXPECT_EQ(totalEngines, 0u);
     EXPECT_EQ(numEngines, 0u);
