@@ -5,9 +5,9 @@
 // otherwise the dependencies will be pretty messed up.
 // TODO: actually these headers are not that independent due to the Macros that being used
 // currently. we should remove as more macros as we can.
-#include "BatchnormActivation.hpp"
 #include "BatchnormFunctions.hpp"
 #include "Configuration.hpp"
+#include "HipKernelActivation.hpp"
 #include "HipKernelMath.hpp"
 #include "ReductionFunctions.hpp"
 #include "StaticUnroll.hpp"
@@ -165,11 +165,10 @@ struct BatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
                 nid = n * segihw + lidihw;
                 index = nid * hip_plugin_bn_config::chw + chwid;
                 value = cast<FpPrecType>(fma(pvscale, inhat, pvbias));
-                out[index] = cast<FpType>(
-                    hip_kernel_plugin::batchnorm::applyActivation<
-                        FpPrecType,
-                        hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
-                        value, _alpha, _beta));
+                out[index] = cast<FpType>(hip_kernel_plugin::applyActivation<
+                                          FpPrecType,
+                                          hip_kernel_plugin::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                    value, _alpha, _beta));
             }};
 
             // Tail of loop
@@ -179,11 +178,10 @@ struct BatchNormFwdTrainSpatialImpl<0, FpType, FpPrecType, FpAccumType>
             if(index < hip_plugin_bn_config::nchw)
             {
                 value = cast<FpPrecType>(fma(pvscale, inhat, pvbias));
-                out[index] = cast<FpType>(
-                    hip_kernel_plugin::batchnorm::applyActivation<
-                        FpPrecType,
-                        hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
-                        value, _alpha, _beta));
+                out[index] = cast<FpType>(hip_kernel_plugin::applyActivation<
+                                          FpPrecType,
+                                          hip_kernel_plugin::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                    value, _alpha, _beta));
             }
         }
     }
@@ -409,9 +407,9 @@ struct BatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         }
 
                         out[index] = cast<FpType>(
-                            hip_kernel_plugin::batchnorm::applyActivation<
-                                FpPrecType,
-                                hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                            hip_kernel_plugin::applyActivation<FpPrecType,
+                                                               hip_kernel_plugin::ActivationMode{
+                                                                   HIP_PLUGIN_NRN_OP_ID}>(
                                 fma(pvscale,
                                     (cast<FpPrecType>(in[index]) - mean) * invVariance,
                                     pvbias),
@@ -445,9 +443,9 @@ struct BatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         hwidx = l - (nidx * hip_plugin_bn_config::hw);
                         index = nidx * hip_plugin_bn_config::chw + chwid + hwidx;
                         out[index] = cast<FpType>(
-                            hip_kernel_plugin::batchnorm::applyActivation<
-                                FpPrecType,
-                                hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                            hip_kernel_plugin::applyActivation<FpPrecType,
+                                                               hip_kernel_plugin::ActivationMode{
+                                                                   HIP_PLUGIN_NRN_OP_ID}>(
                                 fma(pvscale, xhat[j], pvbias), alpha, beta));
                     }
                 }
@@ -480,9 +478,9 @@ struct BatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                     if(index < hip_plugin_bn_config::nchw)
                     {
                         out[index] = cast<FpType>(
-                            hip_kernel_plugin::batchnorm::applyActivation<
-                                FpPrecType,
-                                hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                            hip_kernel_plugin::applyActivation<FpPrecType,
+                                                               hip_kernel_plugin::ActivationMode{
+                                                                   HIP_PLUGIN_NRN_OP_ID}>(
                                 fma(pvscale, xhat[j], pvbias), alpha, beta));
                     }
                 }
@@ -599,9 +597,9 @@ struct BatchNormFwdTrainSpatialImpl<3, FpType, FpPrecType, FpAccumType>
                     inhat = (cast<FpPrecType>(*(in + index)) - mean) * invVariance;
 #endif
                     out[index] = cast<FpType>(
-                        hip_kernel_plugin::batchnorm::applyActivation<
-                            FpPrecType,
-                            hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                        hip_kernel_plugin::applyActivation<FpPrecType,
+                                                           hip_kernel_plugin::ActivationMode{
+                                                               HIP_PLUGIN_NRN_OP_ID}>(
                             fma(pvscale, inhat, pvbias), alpha, beta));
                 }}; // end for
 
@@ -735,11 +733,10 @@ struct BatchNormFwdTrainSpatialImplVar2
                 inhat = hip_kernel_plugin::fma(
                     cast<FpPrecLsType>(pvt_scale), inhat, cast<FpPrecLsType>(pvt_bias));
 
-                value = cast<FpLsType>(
-                    hip_kernel_plugin::batchnorm::applyActivation<
-                        FpPrecLsType,
-                        hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
-                        inhat, cast<FpPrecLsType>(alpha), cast<FpPrecLsType>(beta)));
+                value = cast<FpLsType>(hip_kernel_plugin::applyActivation<
+                                       FpPrecLsType,
+                                       hip_kernel_plugin::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
+                    inhat, cast<FpPrecLsType>(alpha), cast<FpPrecLsType>(beta)));
 
                 *((FpLsType*)(out + index)) = value;
             } // end for(n)
