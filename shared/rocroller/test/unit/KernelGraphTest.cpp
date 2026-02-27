@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -2224,30 +2201,6 @@ namespace KernelGraphTest
         double rnorm = relativeNormL2(r, example.referenceSolution(a, b));
 
         ASSERT_LT(rnorm, 1.e-12);
-    }
-
-    TEST_F(KernelGraphTest, CleanExpression)
-    {
-        VariableType doubleVal{DataType::Double, PointerType::Value};
-        auto         command = std::make_shared<Command>();
-
-        auto aTag = command->allocateTag();
-        auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
-        auto bTag = command->allocateTag();
-        auto b    = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value));
-
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
-        auto expr1 = a + b;
-        auto expr2 = b * expr1;
-
-        auto clean_expr = cleanArguments(expr2, m_context->kernel());
-
-        EXPECT_EQ(
-            Expression::toString(clean_expr),
-            "Multiply(user_Int32_Value_1:I, Add(user_Int32_Value_0:I, user_Int32_Value_1:I)I)I");
     }
 
     TEST_F(KernelGraphTest, CleanArguments)

@@ -1,28 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
 cmake_policy(SET CMP0057 NEW)
 
@@ -59,6 +36,7 @@ set( MIOpen_SOVERSION 1.0 )
 
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
+    set(INSERT_KERNELS_LIST)
     set(KERNELS_DECLS)
     foreach(KERNEL_FILE ${KERNEL_FILES})
         get_filename_component(KERNEL_FILENAME ${KERNEL_FILE} NAME)
@@ -68,11 +46,12 @@ function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
         string(APPEND KERNELS_DECLS "extern const size_t ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}_SIZE;\n")
         string(APPEND KERNELS_DECLS "extern const char ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}[];\n")
         list(APPEND INIT_KERNELS_LIST "    { \"${KERNEL_FILENAME}\", { ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}, ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}_SIZE } }")
+        list(APPEND INSERT_KERNELS_LIST "    ADD_KERNEL(*map, \"${KERNEL_FILENAME}\", ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}, ${VAR_PREFIX}${VAR_NAME}${VAR_SUFFIX}_SIZE)")
     endforeach()
     string(REPLACE ";" ",\n" INIT_KERNELS "${INIT_KERNELS_LIST}")
+    string(REPLACE ";" ";\n" INSERT_KERNELS "${INSERT_KERNELS_LIST}")
     configure_file(kernels/${FILE_NAME}.in ${PROJECT_BINARY_DIR}/${FILE_NAME})
 endfunction()
-
 set( MIOpen_Source
     activ/problem_description.cpp
     activ_api.cpp
@@ -107,6 +86,7 @@ set( MIOpen_Source
     ctc_api.cpp
     db.cpp
     db_record.cpp
+    demangle.cpp
     driver_arguments.cpp
     dropout.cpp
     dropout_api.cpp
@@ -301,6 +281,7 @@ set( MIOpen_Source
     solver/kthvalue/forward_kthvalue.cpp
     solver/layernorm/backward_layernorm.cpp
     solver/layernorm/backward_t5layernorm.cpp
+    solver/layernorm/common_layernorm.cpp
     solver/layernorm/forward_addlayernorm.cpp
     solver/layernorm/forward_layernorm.cpp
     solver/layernorm/forward_t5layernorm.cpp
@@ -349,6 +330,7 @@ set( MIOpen_Source
     tensor_api.cpp
     transformers_adam_w_api.cpp
     seq_tensor.cpp
+    unique_path.cpp
 )
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
@@ -1072,22 +1054,23 @@ target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann
 
 target_internal_library(MIOpen Boost::filesystem)
 list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
+
 if(NOT WIN32 AND NOT APPLE)
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
-MIOPEN_${MIOPEN_BACKEND}_1
-{
-global:
-    miopen*;
-    extern \"C++\" {
-        miopen::*;
-    };
-local:
-    *boost*;
-    extern \"C++\" {
-        std::*;
-    };
-};
-")
+        MIOPEN_${MIOPEN_BACKEND}_1
+        {
+            global:
+                miopen*;
+                extern \"C++\" {
+                    miopen::*;
+                };
+            local:
+                *boost*;
+                extern \"C++\" {
+                    std::*;
+                };
+        };
+    ")
     target_link_libraries(MIOpen PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/lib.def")
     target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
     # set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)

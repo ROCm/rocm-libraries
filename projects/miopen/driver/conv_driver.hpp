@@ -3479,10 +3479,8 @@ std::string ConvDriver<Tgpu, Tref>::GetVerificationCacheFileName(
     miopen::LogRange(ss << "_", trans_output_pads, "x");
     ss << "_" << inflags.GetValueInt("pad_val");
     ss << "_" << inflags.GetValueInt("bias");
-    ss << "_"
-       << "GPU" << get_datatype_string(Tgpu{});
-    ss << "_"
-       << "REF" << get_datatype_string(Tref{});
+    ss << "_" << "GPU" << get_datatype_string(Tgpu{});
+    ss << "_" << "REF" << get_datatype_string(Tref{});
 
     return ss.str();
 }

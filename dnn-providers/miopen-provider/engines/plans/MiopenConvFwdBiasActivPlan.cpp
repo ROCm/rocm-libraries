@@ -4,7 +4,6 @@
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 
-#include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdBiasActivPlan.hpp"
 
 namespace miopen_plugin
@@ -105,9 +104,9 @@ const MiopenTensor& ConvFwdBiasActivParams::y() const
     return _y;
 }
 
-ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handle,
+ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnMiopenHandle& handle,
                                            ConvFwdBiasActivParams&& params,
-                                           const MiopenExecutionSettings& executionSettings,
+                                           const HipdnnMiopenSettings& executionSettings,
                                            bool compile,
                                            bool getWsSize)
     : _params(std::move(params))
@@ -166,13 +165,13 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
         static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
 }
 
-size_t ConvFwdBiasActivPlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+size_t
+    ConvFwdBiasActivPlan::getWorkspaceSize([[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     return _workspaceSize;
 }
 
-void ConvFwdBiasActivPlan::execute(const HipdnnEnginePluginHandle& handle,
+void ConvFwdBiasActivPlan::execute(const HipdnnMiopenHandle& handle,
                                    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                    uint32_t numDeviceBuffers,
                                    void* workspace) const
