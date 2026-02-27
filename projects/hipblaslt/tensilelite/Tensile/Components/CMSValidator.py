@@ -1385,16 +1385,17 @@ def _hook_up_packs_f32(packs: list[Pack], all_middle_16_packs: list['MiddlePack'
     # For the middle-16 packs, hook up the consumer Pack to the producer Pack to handle temporary register re-use.
     # The middle 16 packs are scheduled sequentially in pairs, and no other middle-16 pack
     # (even from other groups) can be scheduled between a pair.
-    for i, pack in enumerate(packs):
-        if isinstance(pack, MiddlePack) and pack.issue_index % 2 == 0:
-            pack.pair_consumer = packs[i + 1]
+    for group_idx in sorted(pack_groups.keys()):
+        middle_packs = [p for p in pack_groups[group_idx] if isinstance(p, MiddlePack)]
+        for i in range(0, len(middle_packs), 2):
+            middle_packs[i].pair_consumer = middle_packs[i + 1]
 
     # Hook up the producer Pack in each pair to the middle-16 Pack scheduled immediately after it.
     # Only modify the packs that were passed in, rather than all packs in all_middle_16_packs.
     for pack in packs:
         if not isinstance(pack, MiddlePack):
             continue
-        if pack.issue_index % 2 != 0:  # Not a producer
+        if pack.pair_consumer is None:  # Not a producer (pair_consumer set above)
             continue
         pack.next_scheduled_middle_16 = all_middle_16_packs[all_middle_16_packs.index(pack) + 1]
 
