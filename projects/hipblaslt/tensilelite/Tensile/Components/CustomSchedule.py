@@ -955,33 +955,40 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
 
     if isNT(kernel) and useLDSTr and TLDS == 0:
         syncTable = [
-            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write for iteration == 0"),
-            19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for previous set of global reads"),
-            31, SWaitCnt(dscnt=0, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+            -1, SWaitCnt(dscnt= 4, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one LRB1"),
+             7, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="wait the rest of LRB1"),
+            23, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="wait for all LR0 before starting 2nd sub-iteration"),
+            31, SWaitCnt(dscnt=-1, vlcnt= 8, vscnt=-1, comment="wait for GRAs before starting LRA1"),
             31, SBarrier(comment=""),
-            41, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+            41, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for GRBs before starting LRB1"),
             41, SBarrier(comment=""),
         ]
 
         optSchedule = {
             'SYNC': [syncTable[::2]],
-            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
-            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
 
-            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]],
-            'LRB0': [[9, 10, 12, 13, 15, 16]],
+            'LRA0': [[0,0, 2,2, 4,4, 6,6, 8,8, 10,10, 12,12, 14,14],
+                     [  1,1, 3,3, 5,5, 7,7, 9,9, 11,11, 13,13, 15,15]],
+            'LRB0': [                    [8,   10,    12,    14,  16,16],
+                                          [ 9,   11,    13,    15, 17,17]],
 
-            'GRA': [[3,4, 5,6, 7,8, 11,12, 15,16, 19,20, 24,25, 28,29]],
+            'GRIncA': [[0,1,1, 1,2,3, 3,3,4],
+                       [0,0,0, 1,2,2, 2,3,4]],
+            'GRIncB': [                                                   [18,18,18,  21,21,21, 22,22,22]],
+
+            'GRA': [             [5,5, 5,6, 7, 9, 11,11, 15,16, 19,20, 24,25, 28,29],
+                                 [5,6, 6,6, 7,10, 11,12, 15,16, 19,20, 24,25, 28,29]],
             'GRB': [[34,35, 36,37, 38,39]],
 
             'LRA1': [[32,32, 33,33, 34,34, 35,35, 36,36, 37,37, 38,38, 39,39]],
-            'LRB1': [[42,43, 44,45, 46,47]],
+            'LRB1': [[                                                      41,41, 43,43, 45,45],
+                     [                                                         42,42, 44,44, 46,46]],
 
             'LRSA': [[30, 30, 30, 30]],
             'LRSB': [[30]],
             'LWSA': [[40, 40, 40]],
             'LWSB': [[]],
-            'LCC': [[47, 47]],
+            'LCC': [[45, 46]],
         }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 11
@@ -990,6 +997,9 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
 
     numMfma = 48
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidationPass(cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS, "GR validation is not yet supported for DtlPlusLdsBuf")
+    opt1.disableValidationPass(cmsv.ValidatorPass.ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS, "GR validation is not yet supported for DtlPlusLdsBuf")
+    opt1.disableValidationPass(cmsv.ValidatorPass.VERIFY_SCC_OVERLAP, "SCC overlap validation is not yet supported for DtlPlusLdsBuf")
     return True, opt1
 
 @RegisterSchedule(

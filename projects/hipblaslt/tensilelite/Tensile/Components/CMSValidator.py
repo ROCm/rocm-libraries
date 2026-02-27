@@ -2057,7 +2057,7 @@ def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: ValidatorPassCo
 TIMELINE_PASSES: dict[ValidatorPass, Callable[['Timeline', 'ValidatorPassContext'], None]] = {
     ValidatorPass.ADD_LOCAL_READ_CONSTRAINTS: add_local_read_constraints,
     ValidatorPass.ADD_PACK_CONSTRAINTS: add_pack_constraints,
-    # ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS: add_gr_not_too_early_constraints,
+    ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS: add_gr_not_too_early_constraints,
     ValidatorPass.ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS: add_gr_finish_before_lr_constraints,
 }
 
