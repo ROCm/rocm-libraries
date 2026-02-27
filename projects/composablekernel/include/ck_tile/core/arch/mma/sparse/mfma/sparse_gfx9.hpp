@@ -99,8 +99,7 @@ struct amdgcn_mma<
         const AVecCompressed a_vec_pruned = {aVec[0], aVec[1], aVec[2], aVec[3]};
 
         using namespace sparse::detail;
-        static constexpr BuiltinParams PARAMS =
-            get_builtin_params<CtrlFlags::CompressionIndex>::value;
+        static constexpr BuiltinParams PARAMS = getBuiltinParams<CtrlFlags::CompressionIndex>();
         return {__builtin_amdgcn_smfmac_f32_16x16x32_f16(
             a_vec_pruned, bVec, cVec, idx, PARAMS.UseFirstIndex, PARAMS.ByteIndexToOverride)};
     }

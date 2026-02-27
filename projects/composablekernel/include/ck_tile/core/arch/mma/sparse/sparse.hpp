@@ -41,24 +41,21 @@ struct BuiltinParams
 };
 
 template <SparseCompressionIndex Idx>
-struct get_builtin_params
+static constexpr BuiltinParams getBuiltinParams()
 {
-    private:
-    static constexpr BuiltinParams getBuiltinParams()
+    BuiltinParams params;
+    if constexpr(Idx == SparseCompressionIndex::FIRST)
     {
-        if constexpr(Idx == SparseCompressionIndex::FIRST)
-        {
-            return {.UseFirstIndex = 1, .ByteIndexToOverride = 0};
-        }
-        else
-        {
-            return {.UseFirstIndex = 0, .ByteIndexToOverride = static_cast<int>(Idx)};
-        }
+        params.UseFirstIndex       = 1;
+        params.ByteIndexToOverride = 0;
     }
-
-    public:
-    static constexpr BuiltinParams value = getBuiltinParams();
-};
+    else
+    {
+        params.UseFirstIndex       = 0;
+        params.ByteIndexToOverride = static_cast<int>(Idx);
+    }
+    return params;
+}
 
 } // namespace sparse::detail
 
