@@ -81,71 +81,77 @@ struct MmaLayoutTestKernel
                                     BlockN,
                                     BlockK,
                                     decltype(ck_tile::core::arch::get_compiler_target())>;
-        using MmaOp                   = typename Selector::SelectedOp;
-        using MmaTraits               = mma::MmaOpTraits<MmaOp>;
-        using AVecType                = typename MmaTraits::AVecType;
-        using BVecType                = typename MmaTraits::BVecType;
-        using CVecType                = typename MmaTraits::CVecType;
-        constexpr uint32_t a_vec_size = vector_traits<AVecType>::vector_size;
-        constexpr uint32_t b_vec_size = vector_traits<BVecType>::vector_size;
-        constexpr uint32_t c_vec_size = vector_traits<CVecType>::vector_size;
+        using MmaOp     = typename Selector::SelectedOp;
+        using MmaTraits = mma::MmaOpTraits<MmaOp>;
 
-        const uint32_t lane = threadIdx.x;
-
-        AVecType a_frag{};
-        BVecType b_frag{};
-        CVecType c_frag{};
-
-        // get (m, k, n), where "1" should be placed for this block
-        const uint32_t case_idx = static_cast<uint32_t>(blockIdx.x);
-        const uint32_t m        = case_idx / (MmaTraits::BlockK * MmaTraits::BlockN);
-        const uint32_t k        = (case_idx / MmaTraits::BlockN) % MmaTraits::BlockK;
-        const uint32_t n        = case_idx % MmaTraits::BlockN;
-
-        // place a single "1" in A/B fragments using (lane, vecIdx) -> (row, col) mapping
-        for(uint32_t v = 0; v < a_vec_size; ++v)
+        if constexpr(MmaTraits::IsSupported)
         {
-            auto a_coords = RegisterMap<MmaOp>::Register2AMap(lane, v);
-            if(static_cast<uint32_t>(a_coords[0]) == m && static_cast<uint32_t>(a_coords[1]) == k)
+            using AVecType                = typename MmaTraits::AVecType;
+            using BVecType                = typename MmaTraits::BVecType;
+            using CVecType                = typename MmaTraits::CVecType;
+            constexpr uint32_t a_vec_size = vector_traits<AVecType>::vector_size;
+            constexpr uint32_t b_vec_size = vector_traits<BVecType>::vector_size;
+            constexpr uint32_t c_vec_size = vector_traits<CVecType>::vector_size;
+
+            const uint32_t lane = threadIdx.x;
+
+            AVecType a_frag{};
+            BVecType b_frag{};
+            CVecType c_frag{};
+
+            // get (m, k, n), where "1" should be placed for this block
+            const uint32_t case_idx = static_cast<uint32_t>(blockIdx.x);
+            const uint32_t m        = case_idx / (MmaTraits::BlockK * MmaTraits::BlockN);
+            const uint32_t k        = (case_idx / MmaTraits::BlockN) % MmaTraits::BlockK;
+            const uint32_t n        = case_idx % MmaTraits::BlockN;
+
+            // place a single "1" in A/B fragments using (lane, vecIdx) -> (row, col) mapping
+            for(uint32_t v = 0; v < a_vec_size; ++v)
             {
-                a_frag[v] = static_cast<ADataType>(1);
+                auto a_coords = RegisterMap<MmaOp>::Register2AMap(lane, v);
+                if(static_cast<uint32_t>(a_coords[0]) == m &&
+                   static_cast<uint32_t>(a_coords[1]) == k)
+                {
+                    a_frag[v] = static_cast<ADataType>(1);
+                }
             }
-        }
 
-        for(uint32_t v = 0; v < b_vec_size; ++v)
-        {
-            auto b_coords = RegisterMap<MmaOp>::Register2BMap(lane, v);
-            if(static_cast<uint32_t>(b_coords[0]) == n && static_cast<uint32_t>(b_coords[1]) == k)
+            for(uint32_t v = 0; v < b_vec_size; ++v)
             {
-                b_frag[v] = static_cast<BDataType>(1);
+                auto b_coords = RegisterMap<MmaOp>::Register2BMap(lane, v);
+                if(static_cast<uint32_t>(b_coords[0]) == n &&
+                   static_cast<uint32_t>(b_coords[1]) == k)
+                {
+                    b_frag[v] = static_cast<BDataType>(1);
+                }
             }
-        }
 
-        c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
+            c_frag = MmaOp::exec(a_frag, b_frag, c_frag);
 
-        uint32_t err        = 0;
-        const CDataType tol = static_cast<CDataType>(
-            1.0e-1f); // TODO: this tolerance might not be suitable for all data types and should be
-                      // revisited if we add more configurations
-        for(uint32_t v = 0; v < c_vec_size; ++v)
-        {
-            auto c_coords    = RegisterMap<MmaOp>::Register2CMap(lane, v);
-            const uint32_t i = static_cast<uint32_t>(c_coords[0]);
-            const uint32_t j = static_cast<uint32_t>(c_coords[1]);
-
-            const CDataType expected =
-                (i == m && j == n) ? static_cast<CDataType>(1) : static_cast<CDataType>(0);
-            const CDataType value = static_cast<CDataType>(c_frag[v]);
-            if(fabsf(static_cast<float>(value - expected)) > static_cast<float>(tol))
+            uint32_t err        = 0;
+            const CDataType tol = static_cast<CDataType>(
+                1.0e-1f); // TODO: this tolerance might not be suitable for all data types and
+                          // should be revisited if we add more configurations
+            for(uint32_t v = 0; v < c_vec_size; ++v)
             {
-                err = 1;
-            }
-        }
+                auto c_coords    = RegisterMap<MmaOp>::Register2CMap(lane, v);
+                const uint32_t i = static_cast<uint32_t>(c_coords[0]);
+                const uint32_t j = static_cast<uint32_t>(c_coords[1]);
 
-        const uint32_t any_err = __any(err);
-        if(threadIdx.x == 0)
-        {
-            error_flags[case_idx] = any_err;
+                const CDataType expected =
+                    (i == m && j == n) ? static_cast<CDataType>(1) : static_cast<CDataType>(0);
+                const CDataType value = static_cast<CDataType>(c_frag[v]);
+                if(fabsf(static_cast<float>(value - expected)) > static_cast<float>(tol))
+                {
+                    err = 1;
+                }
+            }
+
+            const uint32_t any_err = __any(err);
+            if(threadIdx.x == 0)
+            {
+                error_flags[case_idx] = any_err;
+            }
         }
     }
 };
