@@ -142,7 +142,7 @@ class ValidatorInstruction(ABC):
     name: str
     issued_at: SchedulePosition
     # The minimum number of quad-cycles that this instruction takes to issue.
-    __min_issue_quad_cycles__: int = 1
+    min_issue_quad_cycles_base: int = 1
 
     @abstractmethod
     def validate(self) -> Optional[str]:
@@ -158,7 +158,7 @@ class ValidatorInstruction(ABC):
         ...
 
     def min_issue_quad_cycles(self) -> int:
-        return self.__min_issue_quad_cycles__
+        return self.min_issue_quad_cycles_base
 
 @dataclass
 class LocalRead(ValidatorInstruction):
@@ -200,7 +200,7 @@ class LocalRead(ValidatorInstruction):
 class MFMA(ValidatorInstruction):
     issued_at: SchedulePosition
     name: str = "MFMA"
-    __mfma_finish_cycles__ = QUAD_CYCLES_STANDARD_MFMA_FINISH
+    mfma_finish_cycles = QUAD_CYCLES_STANDARD_MFMA_FINISH
 
     def done_idx(self) -> SchedulePosition:
         return self.issued_at
@@ -217,7 +217,8 @@ class Pack(ValidatorInstruction):
     # Needed to properly calculate needed_by and must_start_after.
     issue_index: int
     # Which tile/group this pack belongs to, computed at construction time.
-    group_index: int = 0
+    # Only meaningful for TF32 subclasses (CVTPack, MiddlePack, MFMAPack); None for BF16 packs.
+    group_index: Optional[int] = None
     needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(POSITION_INF))
     must_start_after: ValidatorInstruction = field(default_factory=lambda: MFMA(POSITION_NEG_INF))
 
@@ -310,16 +311,14 @@ class MFMAPack(TimedPack, MFMA):
     # `name = 'MFMA'` class attribute and re-introduces the default.
 
     # Override MFMA's finish cycles for 4x4 timing
-    __mfma_finish_cycles__ = QUAD_CYCLES_MFMA_4X4_FINISH
+    mfma_finish_cycles = QUAD_CYCLES_MFMA_4X4_FINISH
 
     # NOTE: min_quad_cycles_before_result_used is NOT overridden here.
-    # It keeps Pack's default (0) and is set by _handle_min_pack_quad_cycles
+    # It keeps TimedPack's default (0) and is set by _handle_min_pack_quad_cycles
     # only when the constraint is active (when local reads exist).
     #
-    # NOTE: validate() is NOT overridden here. Pack.validate() already handles
-    # MFMAPack correctly: pair_consumer and next_scheduled_middle_16 are both
-    # None, so the pair interleaving check is naturally skipped (None is None
-    # in the happy path, and `if self.pair_consumer:` is False in the error path).
+    # NOTE: validate() is NOT overridden here. The MRO chain
+    # (TimedPack.validate → Pack.validate) handles MFMAPack correctly.
 
 
 @dataclass
@@ -476,7 +475,7 @@ class SNop(ValidatorInstruction):
 
     def min_issue_quad_cycles(self) -> int:
         # Base instruction quad-cycles plus wait_state additional cycles
-        return self.__min_issue_quad_cycles__ + self.wait_state
+        return self.min_issue_quad_cycles_base + self.wait_state
 
     def done_idx(self) -> SchedulePosition:
         return self.issued_at
@@ -1153,10 +1152,12 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
             # Separate by type within each group
             cvt_packs = [p for p in group_packs if isinstance(p, CVTPack)]
             mfma_packs = [p for p in group_packs if isinstance(p, MFMAPack)]
-            # First 4 CVTPacks are CVT0 (before MFMAPacks by construction order)
+            assert len(cvt_packs) == 8, f"Expected 8 CVT packs per group, got {len(cvt_packs)}"
+            assert len(mfma_packs) == 2, f"Expected 2 MFMA packs per group, got {len(mfma_packs)}"
+            # CVT0 come before CVT1 by construction order (sorted by issue_index)
             cvt0 = cvt_packs[:4]
-            # Last 4 CVTPacks are CVT1 (after MFMAPacks by construction order)
             cvt1 = cvt_packs[4:]
+            assert cvt0[-1].issue_index < cvt1[0].issue_index, "CVT0 packs must have lower issue_index than CVT1 packs"
 
             # CVT0 → MFMAPack inter-pack dependencies
             # Packs 0 and 1 are needed by first 4x4 MFMA
@@ -1170,37 +1171,36 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
             mfma_packs[0].needed_by = cvt1[2]
             mfma_packs[1].needed_by = cvt1[0]
 
-            # External MFMA needed_by for CVT0 packs
+            # External MFMA needed_by for CVT0 packs (all share the same MFMA target)
+            cvt0_earliest = find_earliest_mfma_execution(
+                is_pack_B=is_pack_B,
+                tile_index=group_index,
+                mfma_in_tile=0,  # CVT0 feeds into 1st MFMA (bf16*bf16)
+                base_offset=base_offset,
+                n_a_tiles=n_tiles_a,
+                n_b_tiles=n_tiles_b,
+                mfma_reorder=mfma_reorder,
+            )
+            cvt0_mfma_needed_by = mfma_for_linear_index[iteration_offset + cvt0_earliest]
             for pack in cvt0:
-                earliest_execution = find_earliest_mfma_execution(
-                    is_pack_B=is_pack_B,
-                    tile_index=group_index,
-                    mfma_in_tile=0,  # CVT0 feeds into 1st MFMA (bf16*bf16)
-                    base_offset=base_offset,
-                    n_a_tiles=n_tiles_a,
-                    n_b_tiles=n_tiles_b,
-                    mfma_reorder=mfma_reorder,
-                )
-                mfma_needed_by = mfma_for_linear_index[iteration_offset + earliest_execution]
                 # CVT0 packs have both inter-pack and MFMA needed_by; take the earlier one
-                if pack.needed_by.issued_at > mfma_needed_by.issued_at:
-                    pack.needed_by = mfma_needed_by
+                if pack.needed_by.issued_at > cvt0_mfma_needed_by.issued_at:
+                    pack.needed_by = cvt0_mfma_needed_by
 
-            # External MFMA needed_by for CVT1 packs
+            # External MFMA needed_by for CVT1 packs (all share the same MFMA target)
+            cvt1_earliest = find_earliest_mfma_execution(
+                is_pack_B=is_pack_B,
+                tile_index=group_index,
+                mfma_in_tile=2 if is_pack_B else 1,
+                base_offset=base_offset,
+                n_a_tiles=n_tiles_a,
+                n_b_tiles=n_tiles_b,
+                mfma_reorder=mfma_reorder,
+            )
+            cvt1_mfma_needed_by = mfma_for_linear_index[iteration_offset + cvt1_earliest]
             for pack in cvt1:
-                pack_offset = 2 if is_pack_B else 1
-                earliest_execution = find_earliest_mfma_execution(
-                    is_pack_B=is_pack_B,
-                    tile_index=group_index,
-                    mfma_in_tile=pack_offset,
-                    base_offset=base_offset,
-                    n_a_tiles=n_tiles_a,
-                    n_b_tiles=n_tiles_b,
-                    mfma_reorder=mfma_reorder,
-                )
-                mfma_needed_by = mfma_for_linear_index[iteration_offset + earliest_execution]
-                if pack.needed_by.issued_at > mfma_needed_by.issued_at:
-                    pack.needed_by = mfma_needed_by
+                if pack.needed_by.issued_at > cvt1_mfma_needed_by.issued_at:
+                    pack.needed_by = cvt1_mfma_needed_by
     else:
         # Regular TF32: Packs come in groups of 24
         # Half tile count since each quarter uses half of the A tiles and half of the B tiles.
@@ -1216,36 +1216,38 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
             # MiddlePacks don't need needed_by set (handled implicitly)
             cvt_packs = [p for p in group_packs if isinstance(p, CVTPack)]
             assert len(cvt_packs) == 8, f"Expected 8 CVT packs per group, got {len(cvt_packs)}"
-            # First 4 CVTPacks are CVT0, last 4 are CVT1 (by construction order)
+            # CVT0 come before CVT1 by construction order (sorted by issue_index)
             cvt0 = cvt_packs[:4]
             cvt1 = cvt_packs[4:]
+            assert cvt0[-1].issue_index < cvt1[0].issue_index, "CVT0 packs must have lower issue_index than CVT1 packs"
 
+            # CVT0 packs (bf16 approximations) are used by MFMA 0 (bf16*bf16)
+            cvt0_earliest = find_earliest_mfma_execution(
+                is_pack_B=is_pack_B,
+                tile_index=group_index,
+                mfma_in_tile=0,
+                base_offset=base_offset,
+                n_a_tiles=n_tiles_a,
+                n_b_tiles=n_tiles_b,
+                mfma_reorder=mfma_reorder,
+            )
+            cvt0_needed_by = mfma_for_linear_index[iteration_offset + cvt0_earliest]
             for pack in cvt0:
-                # CVT0 packs (bf16 approximations) are used by MFMA 0 (bf16*bf16)
-                earliest_execution = find_earliest_mfma_execution(
-                    is_pack_B=is_pack_B,
-                    tile_index=group_index,
-                    mfma_in_tile=0,
-                    base_offset=base_offset,
-                    n_a_tiles=n_tiles_a,
-                    n_b_tiles=n_tiles_b,
-                    mfma_reorder=mfma_reorder,
-                )
-                pack.needed_by = mfma_for_linear_index[iteration_offset + earliest_execution]
+                pack.needed_by = cvt0_needed_by
 
+            # CVT1 packs (error terms): A_error -> 2nd MFMA, B_error -> 3rd MFMA
+            cvt1_earliest = find_earliest_mfma_execution(
+                is_pack_B=is_pack_B,
+                tile_index=group_index,
+                mfma_in_tile=2 if is_pack_B else 1,
+                base_offset=base_offset,
+                n_a_tiles=n_tiles_a,
+                n_b_tiles=n_tiles_b,
+                mfma_reorder=mfma_reorder,
+            )
+            cvt1_needed_by = mfma_for_linear_index[iteration_offset + cvt1_earliest]
             for pack in cvt1:
-                # CVT1 packs (error terms): A_error -> 2nd MFMA, B_error -> 3rd MFMA
-                mfma_in_tile = 2 if is_pack_B else 1
-                earliest_execution = find_earliest_mfma_execution(
-                    is_pack_B=is_pack_B,
-                    tile_index=group_index,
-                    mfma_in_tile=mfma_in_tile,
-                    base_offset=base_offset,
-                    n_a_tiles=n_tiles_a,
-                    n_b_tiles=n_tiles_b,
-                    mfma_reorder=mfma_reorder,
-                )
-                pack.needed_by = mfma_for_linear_index[iteration_offset + earliest_execution]
+                pack.needed_by = cvt1_needed_by
        
 
 def _handle_min_pack_quad_cycles(packs: list[Pack]) -> None:
@@ -1595,7 +1597,7 @@ def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int
                 if gap < threshold:
                     current_issue += 1
 
-            mfma_free_at = current_issue + 1 + instruction.__mfma_finish_cycles__  # 1 to issue + finish_cycles to complete
+            mfma_free_at = current_issue + 1 + instruction.mfma_finish_cycles  # 1 to issue + finish_cycles to complete
 
             last_mfma_issue = current_issue
             last_mfma_class = current_mfma_class
@@ -1652,7 +1654,7 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     During the finish cycles of an MFMA we can issue other instructions.
     E.g.: MFMA, SNop(2)
     There will have an execution time of 4 quad-cycles.
-    The SNop(2) which takes 3 quad-cycles (1 issue + 2 finish) will be executed in parallel with the MFMA finishing and fit intirely behind the 3 cycles the mfma takes to finish.
+    The SNop(2) which takes 3 quad-cycles (1 issue + 2 finish) will be executed in parallel with the MFMA finishing and fit entirely behind the 3 cycles the mfma takes to finish.
     """
     if not kernel.get("UseF32XEmulation", False):
         # Only F32 emulation issues instructions (Packs) which need estimation of quad-cycles for correctness.
