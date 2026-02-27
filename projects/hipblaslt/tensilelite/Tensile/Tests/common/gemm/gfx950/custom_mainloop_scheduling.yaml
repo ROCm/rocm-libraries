@@ -2555,7 +2555,7 @@ BenchmarkProblems:
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [0]
-        - WorkGroupMapping: [16]
+        - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [2]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
