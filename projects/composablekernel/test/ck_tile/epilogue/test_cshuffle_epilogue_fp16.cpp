@@ -20,17 +20,24 @@ using HalfTestTypes = ::testing::Types<HalfConfig_128x128_2x2x1_32x32x8,
 
 CK_INSTANTIATE_TYPED_TEST_SUITE(FP16, CShuffleEpilogueTypedTest, HalfTestTypes)
 
+// Global test environment to check for wave32 devices
+class Wave32CheckEnvironment : public ::testing::Environment
+{
+public:
+    void SetUp() override
+    {
+        int warp_size = 0;
+        hipError_t err = hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0);
+        if(err == hipSuccess && warp_size == 32)
+        {
+            GTEST_SKIP() << "CShuffleEpilogue tests not supported on wave32 devices";
+        }
+    }
+};
+
 int main(int argc, char** argv)
 {
-    // Skip all tests on wave32 devices
-    int warp_size = 0;
-    hipError_t err = hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0);
-    if(err == hipSuccess && warp_size == 32)
-    {
-        std::cout << "Skipping CShuffleEpilogue tests on wave32 device (not supported)" << std::endl;
-        return 0;
-    }
-
     ::testing::InitGoogleTest(&argc, argv);
+    ::testing::AddGlobalTestEnvironment(new Wave32CheckEnvironment);
     return RUN_ALL_TESTS();
 }
