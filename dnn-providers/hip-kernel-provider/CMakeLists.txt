@@ -81,6 +81,7 @@ list(
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
+find_package(hiprtc REQUIRED)
 find_package(hipdnn_data_sdk CONFIG REQUIRED)
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 
@@ -105,6 +106,11 @@ set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
 message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
+
+# ============================================================================
+# Kernel embedding (must come before src so KERNEL_GENERATED_SOURCES is set)
+# ============================================================================
+add_subdirectory(kernels)
 
 # ============================================================================
 # Plugin library targets and tests

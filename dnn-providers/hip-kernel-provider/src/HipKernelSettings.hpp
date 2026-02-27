@@ -7,8 +7,19 @@
  * @brief HIP kernel provider plugin-specific execution settings.
  *
  * This structure holds settings that control HIP kernel execution behavior.
- * Currently empty - will be extended as plan builders are added.
  */
 struct HipKernelSettings
 {
+    void setBenchmarkingEnabled(bool enabled)
+    {
+        _benchmarkingEnabled = enabled;
+    }
+
+    bool isBenchmarkingEnabled() const
+    {
+        return _benchmarkingEnabled;
+    }
+
+private:
+    bool _benchmarkingEnabled = false;
 };

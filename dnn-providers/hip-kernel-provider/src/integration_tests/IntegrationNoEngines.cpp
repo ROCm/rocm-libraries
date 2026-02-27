@@ -16,11 +16,11 @@ namespace
 {
 
 // ============================================================================
-// Test fixture for verifying the HIP kernel plugin has no engines.
+// Test fixture for verifying the HIP kernel plugin engine registration.
 // Uses the frontend API to load the plugin dynamically and attempt graph builds.
 // ============================================================================
 
-class IntegrationHipKernelNoEngines : public ::testing::Test
+class IntegrationHipKernelEngine : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -62,13 +62,16 @@ protected:
 } // namespace
 
 // ============================================================================
-// Verify that building a batchnorm inference graph fails (no engines registered)
+// Verify that building a batchnorm inference graph succeeds with the engine
 // ============================================================================
 
-TEST_F(IntegrationHipKernelNoEngines, BatchnormInferenceGraphBuildFails)
+TEST_F(IntegrationHipKernelEngine, BatchnormInferenceGraphBuildSucceeds)
 {
     auto graph = hipdnn_test_sdk::utilities::FrontendGraphFactory::createBatchnormInferenceGraph();
 
     auto result = graph.build(_handle);
-    EXPECT_TRUE(result.is_bad()) << "Expected build to fail since no engines are registered";
+    EXPECT_TRUE(result.is_good())
+        << "Expected build to succeed since batchnorm inference engine is "
+           "registered. Status: "
+        << result.get_message();
 }
