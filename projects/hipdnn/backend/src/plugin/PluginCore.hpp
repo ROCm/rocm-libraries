@@ -48,6 +48,7 @@ public:
 
     virtual std::string_view name() const;
     virtual std::string_view version() const;
+    virtual std::string_view apiVersion() const;
     virtual hipdnnPluginType_t type() const;
 
     static hipdnnPluginType_t getPluginType();
@@ -71,6 +72,21 @@ protected:
         }
     }
 
+    template <class F>
+    bool tryAssignSymbol(F& functionPtr, const char* symbolName)
+    {
+        try
+        {
+            functionPtr = _lib.getSymbol<F>(symbolName);
+            return true;
+        }
+        catch(const HipdnnException&)
+        {
+            functionPtr = nullptr;
+            return false;
+        }
+    }
+
     SharedLibrary _lib;
 
 private:
@@ -81,6 +97,7 @@ private:
 #endif
     hipdnnPluginStatus_t (*_funcGetName)(const char**);
     hipdnnPluginStatus_t (*_funcGetVersion)(const char**);
+    hipdnnPluginStatus_t (*_funcGetApiVersion)(const char**);
     hipdnnPluginStatus_t (*_funcGetType)(hipdnnPluginType_t*);
     void (*_funcGetLastErrorStr)(const char**);
     hipdnnPluginStatus_t (*_funcSetLoggingCallback)(hipdnnCallback_t);

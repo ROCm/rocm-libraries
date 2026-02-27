@@ -50,7 +50,7 @@ if(REGRESSION_TEST_SOURCES)
         ${CMAKE_CURRENT_SOURCE_DIR}/../hip_device.cpp)
 
     # Link against rocWMMA and GTest
-    target_link_libraries(${TEST_TARGET} rocwmma GTest::gtest GTest::gtest_main)
+    target_link_libraries(${TEST_TARGET} rocwmma GTest::gtest GTest::gtest_main hiprtc::hiprtc)
     target_link_libraries(${TEST_TARGET} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
     if(UNIX)
         set_target_properties(${TEST_TARGET} PROPERTIES INSTALL_RPATH "\$ORIGIN/../llvm/lib")

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,37 +25,52 @@
 #include <gtest/gtest.h>
 #include <rocsparse/rocsparse.h>
 
+#include "rocsparse_data.hpp"
+
 #include <cmath>
 #include <complex>
 #include <sstream>
+
+// Fixture that skips tests when --yaml filter is active (non-yaml tests)
+class complex_types_pre_checkin : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if(RocSPARSE_TestData::is_yaml_filter_active())
+        {
+            GTEST_SKIP() << "Skipping non-yaml test when --yaml filter is active";
+        }
+    }
+};
 
 // =============================================================================
 // Float Complex Tests
 // =============================================================================
 
 // Test Constructors
-TEST(complex_types_pre_checkin, FloatDefaultConstructor)
+TEST_F(complex_types_pre_checkin, FloatDefaultConstructor)
 {
     rocsparse_float_complex c;
     // Default constructed, should not crash
     (void)c;
 }
 
-TEST(complex_types_pre_checkin, FloatRealImaginaryConstructor)
+TEST_F(complex_types_pre_checkin, FloatRealImaginaryConstructor)
 {
     rocsparse_float_complex c(3.0f, 4.0f);
     EXPECT_FLOAT_EQ(std::real(c), 3.0f);
     EXPECT_FLOAT_EQ(std::imag(c), 4.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatRealOnlyConstructor)
+TEST_F(complex_types_pre_checkin, FloatRealOnlyConstructor)
 {
     rocsparse_float_complex c(5.0f);
     EXPECT_FLOAT_EQ(std::real(c), 5.0f);
     EXPECT_FLOAT_EQ(std::imag(c), 0.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatStdComplexConstructor)
+TEST_F(complex_types_pre_checkin, FloatStdComplexConstructor)
 {
     std::complex<float>     std_c(2.0f, 3.0f);
     rocsparse_float_complex c(std_c);
@@ -63,7 +78,7 @@ TEST(complex_types_pre_checkin, FloatStdComplexConstructor)
     EXPECT_FLOAT_EQ(std::imag(c), 3.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatConversionToStdComplex)
+TEST_F(complex_types_pre_checkin, FloatConversionToStdComplex)
 {
     rocsparse_float_complex c(3.0f, 4.0f);
     std::complex<float>     std_c = static_cast<std::complex<float>>(c);
@@ -71,7 +86,7 @@ TEST(complex_types_pre_checkin, FloatConversionToStdComplex)
     EXPECT_FLOAT_EQ(std_c.imag(), 4.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatCopyConstructor)
+TEST_F(complex_types_pre_checkin, FloatCopyConstructor)
 {
     rocsparse_float_complex c1(3.0f, 4.0f);
     rocsparse_float_complex c2(c1);
@@ -80,7 +95,7 @@ TEST(complex_types_pre_checkin, FloatCopyConstructor)
 }
 
 // Test Unary Operators
-TEST(complex_types_pre_checkin, FloatUnaryMinus)
+TEST_F(complex_types_pre_checkin, FloatUnaryMinus)
 {
     rocsparse_float_complex c(3.0f, 4.0f);
     rocsparse_float_complex neg = -c;
@@ -89,7 +104,7 @@ TEST(complex_types_pre_checkin, FloatUnaryMinus)
 }
 
 // Test Arithmetic Operations
-TEST(complex_types_pre_checkin, FloatAddition)
+TEST_F(complex_types_pre_checkin, FloatAddition)
 {
     rocsparse_float_complex a(3.0f, 4.0f);
     rocsparse_float_complex b(1.0f, 2.0f);
@@ -98,7 +113,7 @@ TEST(complex_types_pre_checkin, FloatAddition)
     EXPECT_FLOAT_EQ(std::imag(sum), 6.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatSubtraction)
+TEST_F(complex_types_pre_checkin, FloatSubtraction)
 {
     rocsparse_float_complex a(3.0f, 4.0f);
     rocsparse_float_complex b(1.0f, 2.0f);
@@ -107,7 +122,7 @@ TEST(complex_types_pre_checkin, FloatSubtraction)
     EXPECT_FLOAT_EQ(std::imag(diff), 2.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatMultiplication)
+TEST_F(complex_types_pre_checkin, FloatMultiplication)
 {
     // (3+4i) * (1+2i) = 3 + 6i + 4i + 8i² = 3 + 10i - 8 = -5 + 10i
     rocsparse_float_complex a(3.0f, 4.0f);
@@ -117,7 +132,7 @@ TEST(complex_types_pre_checkin, FloatMultiplication)
     EXPECT_FLOAT_EQ(std::imag(prod), 10.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatDivision)
+TEST_F(complex_types_pre_checkin, FloatDivision)
 {
     // (3+4i) / (1+2i) = 2.2 - 0.4i
     rocsparse_float_complex a(3.0f, 4.0f);
@@ -128,7 +143,7 @@ TEST(complex_types_pre_checkin, FloatDivision)
 }
 
 // Test Compound Assignment
-TEST(complex_types_pre_checkin, FloatAddAssign)
+TEST_F(complex_types_pre_checkin, FloatAddAssign)
 {
     rocsparse_float_complex a(3.0f, 4.0f);
     rocsparse_float_complex b(1.0f, 2.0f);
@@ -137,7 +152,7 @@ TEST(complex_types_pre_checkin, FloatAddAssign)
     EXPECT_FLOAT_EQ(std::imag(a), 6.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatSubtractAssign)
+TEST_F(complex_types_pre_checkin, FloatSubtractAssign)
 {
     rocsparse_float_complex a(3.0f, 4.0f);
     rocsparse_float_complex b(1.0f, 2.0f);
@@ -146,7 +161,7 @@ TEST(complex_types_pre_checkin, FloatSubtractAssign)
     EXPECT_FLOAT_EQ(std::imag(a), 2.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatMultiplyAssign)
+TEST_F(complex_types_pre_checkin, FloatMultiplyAssign)
 {
     rocsparse_float_complex a(3.0f, 4.0f);
     rocsparse_float_complex b(1.0f, 2.0f);
@@ -155,7 +170,7 @@ TEST(complex_types_pre_checkin, FloatMultiplyAssign)
     EXPECT_FLOAT_EQ(std::imag(a), 10.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatDivideAssign)
+TEST_F(complex_types_pre_checkin, FloatDivideAssign)
 {
     rocsparse_float_complex a(3.0f, 4.0f);
     rocsparse_float_complex b(1.0f, 2.0f);
@@ -165,7 +180,7 @@ TEST(complex_types_pre_checkin, FloatDivideAssign)
 }
 
 // Test Comparison
-TEST(complex_types_pre_checkin, FloatEquality)
+TEST_F(complex_types_pre_checkin, FloatEquality)
 {
     rocsparse_float_complex a(3.0f, 4.0f);
     rocsparse_float_complex b(3.0f, 4.0f);
@@ -175,7 +190,7 @@ TEST(complex_types_pre_checkin, FloatEquality)
     EXPECT_FALSE(a == c);
 }
 
-TEST(complex_types_pre_checkin, FloatInequality)
+TEST_F(complex_types_pre_checkin, FloatInequality)
 {
     rocsparse_float_complex a(3.0f, 4.0f);
     rocsparse_float_complex b(3.0f, 4.0f);
@@ -186,7 +201,7 @@ TEST(complex_types_pre_checkin, FloatInequality)
 }
 
 // Test std namespace functions
-TEST(complex_types_pre_checkin, FloatStdConj)
+TEST_F(complex_types_pre_checkin, FloatStdConj)
 {
     // (3+4i)* = 3-4i
     rocsparse_float_complex c(3.0f, 4.0f);
@@ -195,7 +210,7 @@ TEST(complex_types_pre_checkin, FloatStdConj)
     EXPECT_FLOAT_EQ(std::imag(conj), -4.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatStdAbs)
+TEST_F(complex_types_pre_checkin, FloatStdAbs)
 {
     // |3+4i| = sqrt(9+16) = 5
     rocsparse_float_complex c(3.0f, 4.0f);
@@ -203,28 +218,28 @@ TEST(complex_types_pre_checkin, FloatStdAbs)
     EXPECT_NEAR(magnitude, 5.0f, 0.001f);
 }
 
-TEST(complex_types_pre_checkin, FloatStdAbsPureImaginary)
+TEST_F(complex_types_pre_checkin, FloatStdAbsPureImaginary)
 {
     rocsparse_float_complex c(0.0f, 5.0f);
     float                   magnitude = std::abs(c);
     EXPECT_NEAR(magnitude, 5.0f, 0.001f);
 }
 
-TEST(complex_types_pre_checkin, FloatStdAbsPureReal)
+TEST_F(complex_types_pre_checkin, FloatStdAbsPureReal)
 {
     rocsparse_float_complex c(5.0f, 0.0f);
     float                   magnitude = std::abs(c);
     EXPECT_NEAR(magnitude, 5.0f, 0.001f);
 }
 
-TEST(complex_types_pre_checkin, FloatStdAbsZero)
+TEST_F(complex_types_pre_checkin, FloatStdAbsZero)
 {
     rocsparse_float_complex c(0.0f, 0.0f);
     float                   magnitude = std::abs(c);
     EXPECT_FLOAT_EQ(magnitude, 0.0f);
 }
 
-TEST(complex_types_pre_checkin, FloatStdFma)
+TEST_F(complex_types_pre_checkin, FloatStdFma)
 {
     // fma(p, q, r) = p*q + r
     // (2+i)(3+2i) = 6 + 4i + 3i + 2i² = 4 + 7i
@@ -238,7 +253,7 @@ TEST(complex_types_pre_checkin, FloatStdFma)
 }
 
 // Test Special Cases
-TEST(complex_types_pre_checkin, FloatMultiplicationByConjugate)
+TEST_F(complex_types_pre_checkin, FloatMultiplicationByConjugate)
 {
     // (a+bi)(a-bi) = a² + b²
     rocsparse_float_complex c(3.0f, 4.0f);
@@ -248,7 +263,7 @@ TEST(complex_types_pre_checkin, FloatMultiplicationByConjugate)
     EXPECT_NEAR(std::imag(prod), 0.0f, 0.001f);
 }
 
-TEST(complex_types_pre_checkin, FloatStreamOutput)
+TEST_F(complex_types_pre_checkin, FloatStreamOutput)
 {
     rocsparse_float_complex c(3.0f, 4.0f);
     std::ostringstream      oss;
@@ -266,27 +281,27 @@ TEST(complex_types_pre_checkin, FloatStreamOutput)
 // Double Complex Tests
 // =============================================================================
 
-TEST(complex_types_pre_checkin, DoubleDefaultConstructor)
+TEST_F(complex_types_pre_checkin, DoubleDefaultConstructor)
 {
     rocsparse_double_complex c;
     (void)c;
 }
 
-TEST(complex_types_pre_checkin, DoubleRealImaginaryConstructor)
+TEST_F(complex_types_pre_checkin, DoubleRealImaginaryConstructor)
 {
     rocsparse_double_complex c(3.0, 4.0);
     EXPECT_DOUBLE_EQ(std::real(c), 3.0);
     EXPECT_DOUBLE_EQ(std::imag(c), 4.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleRealOnlyConstructor)
+TEST_F(complex_types_pre_checkin, DoubleRealOnlyConstructor)
 {
     rocsparse_double_complex c(5.0);
     EXPECT_DOUBLE_EQ(std::real(c), 5.0);
     EXPECT_DOUBLE_EQ(std::imag(c), 0.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleStdComplexConstructor)
+TEST_F(complex_types_pre_checkin, DoubleStdComplexConstructor)
 {
     std::complex<double>     std_c(2.0, 3.0);
     rocsparse_double_complex c(std_c);
@@ -294,7 +309,7 @@ TEST(complex_types_pre_checkin, DoubleStdComplexConstructor)
     EXPECT_DOUBLE_EQ(std::imag(c), 3.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleConversionToStdComplex)
+TEST_F(complex_types_pre_checkin, DoubleConversionToStdComplex)
 {
     rocsparse_double_complex c(3.0, 4.0);
     std::complex<double>     std_c = static_cast<std::complex<double>>(c);
@@ -302,7 +317,7 @@ TEST(complex_types_pre_checkin, DoubleConversionToStdComplex)
     EXPECT_DOUBLE_EQ(std_c.imag(), 4.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleUnaryMinus)
+TEST_F(complex_types_pre_checkin, DoubleUnaryMinus)
 {
     rocsparse_double_complex c(3.0, 4.0);
     rocsparse_double_complex neg = -c;
@@ -310,7 +325,7 @@ TEST(complex_types_pre_checkin, DoubleUnaryMinus)
     EXPECT_DOUBLE_EQ(std::imag(neg), -4.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleAddition)
+TEST_F(complex_types_pre_checkin, DoubleAddition)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(1.0, 2.0);
@@ -319,7 +334,7 @@ TEST(complex_types_pre_checkin, DoubleAddition)
     EXPECT_DOUBLE_EQ(std::imag(sum), 6.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleSubtraction)
+TEST_F(complex_types_pre_checkin, DoubleSubtraction)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(1.0, 2.0);
@@ -328,7 +343,7 @@ TEST(complex_types_pre_checkin, DoubleSubtraction)
     EXPECT_DOUBLE_EQ(std::imag(diff), 2.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleMultiplication)
+TEST_F(complex_types_pre_checkin, DoubleMultiplication)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(1.0, 2.0);
@@ -337,7 +352,7 @@ TEST(complex_types_pre_checkin, DoubleMultiplication)
     EXPECT_DOUBLE_EQ(std::imag(prod), 10.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleDivision)
+TEST_F(complex_types_pre_checkin, DoubleDivision)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(1.0, 2.0);
@@ -346,7 +361,7 @@ TEST(complex_types_pre_checkin, DoubleDivision)
     EXPECT_NEAR(std::imag(quot), -0.4, 0.001);
 }
 
-TEST(complex_types_pre_checkin, DoubleAddAssign)
+TEST_F(complex_types_pre_checkin, DoubleAddAssign)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(1.0, 2.0);
@@ -355,7 +370,7 @@ TEST(complex_types_pre_checkin, DoubleAddAssign)
     EXPECT_DOUBLE_EQ(std::imag(a), 6.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleSubtractAssign)
+TEST_F(complex_types_pre_checkin, DoubleSubtractAssign)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(1.0, 2.0);
@@ -364,7 +379,7 @@ TEST(complex_types_pre_checkin, DoubleSubtractAssign)
     EXPECT_DOUBLE_EQ(std::imag(a), 2.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleMultiplyAssign)
+TEST_F(complex_types_pre_checkin, DoubleMultiplyAssign)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(1.0, 2.0);
@@ -373,7 +388,7 @@ TEST(complex_types_pre_checkin, DoubleMultiplyAssign)
     EXPECT_DOUBLE_EQ(std::imag(a), 10.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleDivideAssign)
+TEST_F(complex_types_pre_checkin, DoubleDivideAssign)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(1.0, 2.0);
@@ -382,7 +397,7 @@ TEST(complex_types_pre_checkin, DoubleDivideAssign)
     EXPECT_NEAR(std::imag(a), -0.4, 0.001);
 }
 
-TEST(complex_types_pre_checkin, DoubleEquality)
+TEST_F(complex_types_pre_checkin, DoubleEquality)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(3.0, 4.0);
@@ -392,7 +407,7 @@ TEST(complex_types_pre_checkin, DoubleEquality)
     EXPECT_FALSE(a == c);
 }
 
-TEST(complex_types_pre_checkin, DoubleInequality)
+TEST_F(complex_types_pre_checkin, DoubleInequality)
 {
     rocsparse_double_complex a(3.0, 4.0);
     rocsparse_double_complex b(3.0, 4.0);
@@ -402,7 +417,7 @@ TEST(complex_types_pre_checkin, DoubleInequality)
     EXPECT_TRUE(a != c);
 }
 
-TEST(complex_types_pre_checkin, DoubleStdConj)
+TEST_F(complex_types_pre_checkin, DoubleStdConj)
 {
     rocsparse_double_complex c(3.0, 4.0);
     rocsparse_double_complex conj = std::conj(c);
@@ -410,21 +425,21 @@ TEST(complex_types_pre_checkin, DoubleStdConj)
     EXPECT_DOUBLE_EQ(std::imag(conj), -4.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleStdAbs)
+TEST_F(complex_types_pre_checkin, DoubleStdAbs)
 {
     rocsparse_double_complex c(3.0, 4.0);
     double                   magnitude = std::abs(c);
     EXPECT_NEAR(magnitude, 5.0, 0.001);
 }
 
-TEST(complex_types_pre_checkin, DoubleStdAbsZero)
+TEST_F(complex_types_pre_checkin, DoubleStdAbsZero)
 {
     rocsparse_double_complex c(0.0, 0.0);
     double                   magnitude = std::abs(c);
     EXPECT_DOUBLE_EQ(magnitude, 0.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleStdFma)
+TEST_F(complex_types_pre_checkin, DoubleStdFma)
 {
     rocsparse_double_complex p(2.0, 1.0);
     rocsparse_double_complex q(3.0, 2.0);
@@ -434,7 +449,7 @@ TEST(complex_types_pre_checkin, DoubleStdFma)
     EXPECT_DOUBLE_EQ(std::imag(result), 8.0);
 }
 
-TEST(complex_types_pre_checkin, DoubleMultiplicationByConjugate)
+TEST_F(complex_types_pre_checkin, DoubleMultiplicationByConjugate)
 {
     rocsparse_double_complex c(3.0, 4.0);
     rocsparse_double_complex c_conj = std::conj(c);
@@ -447,7 +462,7 @@ TEST(complex_types_pre_checkin, DoubleMultiplicationByConjugate)
 // Cross-Precision Tests
 // =============================================================================
 
-TEST(complex_types_pre_checkin, FloatToDoubleConversion)
+TEST_F(complex_types_pre_checkin, FloatToDoubleConversion)
 {
     rocsparse_float_complex  cf(1.5f, 2.5f);
     rocsparse_double_complex cd(cf);
@@ -455,7 +470,7 @@ TEST(complex_types_pre_checkin, FloatToDoubleConversion)
     EXPECT_DOUBLE_EQ(std::imag(cd), 2.5);
 }
 
-TEST(complex_types_pre_checkin, DoubleToFloatConversion)
+TEST_F(complex_types_pre_checkin, DoubleToFloatConversion)
 {
     rocsparse_double_complex cd(1.5, 2.5);
     rocsparse_float_complex  cf(cd);
