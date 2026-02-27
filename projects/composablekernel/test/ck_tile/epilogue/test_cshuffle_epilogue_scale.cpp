@@ -98,10 +98,10 @@ TEST_F(CShuffleEpilogueScaleTest, HalfTestWithTensorScale)
 // Global test environment to check for wave32 devices
 class Wave32CheckEnvironment : public ::testing::Environment
 {
-public:
+    public:
     void SetUp() override
     {
-        int warp_size = 0;
+        int warp_size  = 0;
         hipError_t err = hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0);
         if(err == hipSuccess && warp_size == 32)
         {
