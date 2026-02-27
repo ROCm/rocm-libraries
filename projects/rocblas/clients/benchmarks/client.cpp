@@ -1201,15 +1201,6 @@ void gpu_thread_run_bench(int id, const Arguments& arg, const std::string& filte
     run_bench_test(false, a, filter, name_filter, any_stride, false);
 }
 
-void gpu_thread_init_device_and_run_bench(int                id,
-                                          const Arguments&   arg,
-                                          const std::string& filter,
-                                          bool               any_stride)
-{
-    gpu_thread_init_device(id, arg, filter, any_stride);
-    gpu_thread_run_bench(id, arg, filter, any_stride);
-}
-
 void run_bench_gpu_test(int                parallel_devices,
                         Arguments&         arg,
                         const std::string& filter,
@@ -1229,7 +1220,6 @@ void run_bench_gpu_test(int                parallel_devices,
 
     for(int id = 0; id < parallel_devices; ++id)
         thread_init[id] = std::thread(::gpu_thread_init_device, id, arg, filter, any_stride);
-    //thread_init[id] = std::thread(::gpu_thread_init_device_and_run_bench, id, arg, filter, any_stride);
 
     for(int id = 0; id < parallel_devices; ++id)
         thread_init[id].join();
@@ -1242,9 +1232,6 @@ void run_bench_gpu_test(int                parallel_devices,
 
     for(int id = 0; id < parallel_devices; ++id)
         thread[id].join();
-
-    //for(int id = 0; id < parallel_devices; ++id)
-    //    thread_init[id].join();
 }
 
 // Replace --batch with --batch_count for backward compatibility
