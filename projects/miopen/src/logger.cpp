@@ -76,22 +76,27 @@ namespace miopen {
 
 size_t GetBufferSize() { return env::value(MIOPEN_LOG_BUFFER_SIZE); }
 
-bool IsLogBufferOn() { return GetBufferSize() != 0; }
+size_t& GetBufferIdx()
+{
+    static thread_local size_t log_buffer_i = 0;
+    return log_buffer_i;
+}
 
 std::vector<std::string>& GetLogBuffer()
 {
     auto log_buffer_size = GetBufferSize();
     static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
     if(log_buffer_size != log_buffer.size())
+    {
         log_buffer.resize(log_buffer_size);
+        auto& log_buffer_i = GetBufferIdx();
+        if(log_buffer_i >= log_buffer_size)
+            log_buffer_i = 0;
+    }
     return log_buffer;
 }
 
-size_t& GetBufferIdx()
-{
-    static thread_local size_t log_buffer_i = 0;
-    return log_buffer_i;
-}
+bool IsLogBufferOn() { return GetBufferSize() != 0; }
 
 void ClearLogBuffer()
 {
