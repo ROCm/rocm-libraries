@@ -73,7 +73,7 @@ public:
         this->reduceAllDims = this->invariantDims.empty();
     };
 
-    ~miopenReductionHost() {};
+    ~miopenReductionHost(){};
 
     void Run(float alpha, const Tgpu* in_data, float beta, Tref* out_data, int* indices)
     {

@@ -448,8 +448,7 @@ struct verify_reduce_with_indices
     void fail() const
     {
         std::cout << "verify_reduce_with_indices failed" << std::endl;
-        std::cout << "Input Tensor"
-                  << " " << input.desc.ToString() << std::endl;
+        std::cout << "Input Tensor" << " " << input.desc.ToString() << std::endl;
     }
 };
 
@@ -759,8 +758,7 @@ struct verify_reduce_no_indices
     void fail() const
     {
         std::cout << "verify_reduce_no_indices failed" << std::endl;
-        std::cout << "Input Tensor"
-                  << " " << input.desc.ToString() << std::endl;
+        std::cout << "Input Tensor" << " " << input.desc.ToString() << std::endl;
     }
 };
 
