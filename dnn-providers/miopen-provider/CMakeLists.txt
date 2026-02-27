@@ -207,7 +207,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets("miopen-provider")
+    finalize_test_targets("${PROJECT_NAME}")
 
     # For standalone builds we need to install the ctest files
     if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")

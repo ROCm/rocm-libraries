@@ -222,7 +222,7 @@ add_subdirectory(tools)
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets("hipdnn")
+    finalize_test_targets("${PROJECT_NAME}")
 endif()
 
 # keep this after all the targets have been added that could use the HIP language compiler.
