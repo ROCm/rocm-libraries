@@ -1348,15 +1348,15 @@ namespace rocsparse
 
             if(lid < WF_SIZE / 2) // same as lid < stride2
             {
-                if(lid < m && (NUM_RHS * bid + rhs) < n)
+                if(((BLOCKSIZE / WF_SIZE) * lid + wid) < m && (NUM_RHS * bid + rhs) < n)
                 {
                     B[ldb * (NUM_RHS * bid + rhs) + (BLOCKSIZE / WF_SIZE) * lid + wid]
                         = (bj * x[rhs] - c * xj) * det;
                 }
-                if((lid + stride2) < m && (NUM_RHS * bid + rhs) < n)
+                if(((BLOCKSIZE / WF_SIZE) * (lid + stride2) + wid) < m && (NUM_RHS * bid + rhs) < n)
                 {
-                    B[ldb * (NUM_RHS * bid + rhs) + (BLOCKSIZE / WF_SIZE) * (lid + stride2) + wid]
-                        = (xj * b - x[rhs] * aj) * det;
+                   B[ldb * (NUM_RHS * bid + rhs) + (BLOCKSIZE / WF_SIZE) * (lid + stride2) + wid]
+                       = (xj * b - x[rhs] * aj) * det;
                 }
             }
         }
@@ -1454,531 +1454,8 @@ namespace rocsparse
 
 
 
-//     template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
-//     __device__ void wavefront_transpose(float* row)
-//     {
-//         static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
 
-//         // laneId within the WF_SIZE-thread warp (0-WF_SIZE-1)
-//         int laneId = threadIdx.x % WF_SIZE;
-        
-//         // Each thread only swaps with partners within its own 8-lane segment
-//         // Group 0: 0-7, Group 1: 8-15, etc.        
-//         for(int i = 0; i < NUM_STAGES; ++i)
-//         {
-//             int mask = 1 << i;
 
-//             for(int j = 0; j < NUM_ELEMENTS; ++j)
-//             {
-//                 // The logic here mimics your square transpose but localized
-//                 if((j & mask) == 0)
-//                 {
-//                     int  regA   = j;
-//                     int  regB   = j | mask;
-                    
-//                     // Determine if this specific thread is the 'high' or 'low' partner
-//                     bool bitSet = (laneId & mask) != 0;
-
-//                     float val        = bitSet ? row[regA] : row[regB];
-                    
-//                     // __shfl_xor restricted to the 8-thread sub-group
-//                     float partnerVal = __shfl_xor(val, mask, SUB_GROUP_SIZE);
-
-//                     if(bitSet)
-//                         row[regA] = partnerVal;
-//                     else
-//                         row[regB] = partnerVal;
-//                 }
-//             }
-//         }
-//     }
-
-// #if ROCSPARSE_USE_MOVE_DPP
-//     // DPP-based wavefront transpose (same semantics as shuffle version).
-//     // Uses __hip_move_dpp for XOR lane exchange: mask 1 -> 0x142, mask 2 -> 0x143, mask 4 -> 0x130.
-//     template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
-//     __device__ void wavefront_transpose_dpp(float* row)
-//     {
-//         static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
-//         int                  laneId   = threadIdx.x % WF_SIZE;
-
-//         typedef union
-//         {
-//             float    f;
-//             uint32_t u32;
-//         } flt_u32;
-
-//         for(int i = 0; i < NUM_STAGES; ++i)
-//         {
-//             int mask = 1 << i;
-//             // DPP control: 0x142 = quad swap (XOR 1), 0x143 = quad swap (XOR 2), 0x130 = row_ror:4 (XOR 4)
-//             int dpp_ctrl = (mask == 1) ? 0x142 : (mask == 2) ? 0x143 : 0x130;
-
-//             for(int j = 0; j < NUM_ELEMENTS; ++j)
-//             {
-//                 if((j & mask) == 0)
-//                 {
-//                     int  regA   = j;
-//                     int  regB   = j | mask;
-//                     bool bitSet = (laneId & mask) != 0;
-
-//                     flt_u32 val;
-//                     val.f = bitSet ? row[regA] : row[regB];
-
-//                     flt_u32 partner;
-//                     partner.u32 = __hip_move_dpp(val.u32, dpp_ctrl, 0xf, 0xf, false);
-
-//                     if(bitSet)
-//                         row[regA] = partner.f;
-//                     else
-//                         row[regB] = partner.f;
-//                 }
-//             }
-//         }
-//     }
-
-//     template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
-//     __device__ void wavefront_transpose_dpp(double* row)
-//     {
-//         static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
-//         int                  laneId   = threadIdx.x % WF_SIZE;
-
-//         typedef union
-//         {
-//             double   d;
-//             uint32_t u32[2];
-//         } dbl_u32;
-
-//         for(int i = 0; i < NUM_STAGES; ++i)
-//         {
-//             int mask     = 1 << i;
-//             int dpp_ctrl = (mask == 1) ? 0x142 : (mask == 2) ? 0x143 : 0x130;
-
-//             for(int j = 0; j < NUM_ELEMENTS; ++j)
-//             {
-//                 if((j & mask) == 0)
-//                 {
-//                     int  regA   = j;
-//                     int  regB   = j | mask;
-//                     bool bitSet = (laneId & mask) != 0;
-
-//                     dbl_u32 val;
-//                     val.d = bitSet ? row[regA] : row[regB];
-
-//                     dbl_u32 partner;
-//                     partner.u32[0] = __hip_move_dpp(val.u32[0], dpp_ctrl, 0xf, 0xf, false);
-//                     partner.u32[1] = __hip_move_dpp(val.u32[1], dpp_ctrl, 0xf, 0xf, false);
-
-//                     if(bitSet)
-//                         row[regA] = partner.d;
-//                     else
-//                         row[regB] = partner.d;
-//                 }
-//             }
-//         }
-//     }
-
-//     template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
-//     __device__ void wavefront_transpose_dpp(rocsparse_float_complex* row)
-//     {
-//         static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
-//         int                  laneId   = threadIdx.x % WF_SIZE;
-
-//         typedef union
-//         {
-//             float    f;
-//             uint32_t u32;
-//         } flt_u32;
-
-//         for(int i = 0; i < NUM_STAGES; ++i)
-//         {
-//             int mask     = 1 << i;
-//             int dpp_ctrl = (mask == 1) ? 0x142 : (mask == 2) ? 0x143 : 0x130;
-
-//             for(int j = 0; j < NUM_ELEMENTS; ++j)
-//             {
-//                 if((j & mask) == 0)
-//                 {
-//                     int  regA   = j;
-//                     int  regB   = j | mask;
-//                     bool bitSet = (laneId & mask) != 0;
-
-//                     flt_u32 valRe, valIm;
-//                     valRe.f = bitSet ? std::real(row[regA]) : std::real(row[regB]);
-//                     valIm.f = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
-
-//                     flt_u32 partnerRe, partnerIm;
-//                     partnerRe.u32 = __hip_move_dpp(valRe.u32, dpp_ctrl, 0xf, 0xf, false);
-//                     partnerIm.u32 = __hip_move_dpp(valIm.u32, dpp_ctrl, 0xf, 0xf, false);
-
-//                     if(bitSet)
-//                         row[regA] = rocsparse_float_complex(partnerRe.f, partnerIm.f);
-//                     else
-//                         row[regB] = rocsparse_float_complex(partnerRe.f, partnerIm.f);
-//                 }
-//             }
-//         }
-//     }
-
-//     template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
-//     __device__ void wavefront_transpose_dpp(rocsparse_double_complex* row)
-//     {
-//         static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
-//         int                  laneId   = threadIdx.x % WF_SIZE;
-
-//         typedef union
-//         {
-//             double   d;
-//             uint32_t u32[2];
-//         } dbl_u32;
-
-//         for(int i = 0; i < NUM_STAGES; ++i)
-//         {
-//             int mask     = 1 << i;
-//             int dpp_ctrl = (mask == 1) ? 0x142 : (mask == 2) ? 0x143 : 0x130;
-
-//             for(int j = 0; j < NUM_ELEMENTS; ++j)
-//             {
-//                 if((j & mask) == 0)
-//                 {
-//                     int  regA   = j;
-//                     int  regB   = j | mask;
-//                     bool bitSet = (laneId & mask) != 0;
-
-//                     dbl_u32 valRe, valIm;
-//                     valRe.d = bitSet ? std::real(row[regA]) : std::real(row[regB]);
-//                     valIm.d = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
-
-//                     dbl_u32 partnerRe, partnerIm;
-//                     partnerRe.u32[0] = __hip_move_dpp(valRe.u32[0], dpp_ctrl, 0xf, 0xf, false);
-//                     partnerRe.u32[1] = __hip_move_dpp(valRe.u32[1], dpp_ctrl, 0xf, 0xf, false);
-//                     partnerIm.u32[0] = __hip_move_dpp(valIm.u32[0], dpp_ctrl, 0xf, 0xf, false);
-//                     partnerIm.u32[1] = __hip_move_dpp(valIm.u32[1], dpp_ctrl, 0xf, 0xf, false);
-
-//                     if(bitSet)
-//                         row[regA] = rocsparse_double_complex(partnerRe.d, partnerIm.d);
-//                     else
-//                         row[regB] = rocsparse_double_complex(partnerRe.d, partnerIm.d);
-//                 }
-//             }
-//         }
-//     }
-// #endif /* ROCSPARSE_USE_MOVE_DPP */
-
-//     template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
-//     __device__ void wavefront_transpose(double* row)
-//     {
-//         static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
-
-//         // laneId within the WF_SIZE-thread warp (0-WF_SIZE-1)
-//         int laneId = threadIdx.x % WF_SIZE;
-        
-//         // Each thread only swaps with partners within its own 8-lane segment
-//         // Group 0: 0-7, Group 1: 8-15, etc.        
-//         for(int i = 0; i < NUM_STAGES; ++i)
-//         {
-//             int mask = 1 << i;
-
-//             for(int j = 0; j < NUM_ELEMENTS; ++j)
-//             {
-//                 // The logic here mimics your square transpose but localized
-//                 if((j & mask) == 0)
-//                 {
-//                     int  regA   = j;
-//                     int  regB   = j | mask;
-                    
-//                     // Determine if this specific thread is the 'high' or 'low' partner
-//                     bool bitSet = (laneId & mask) != 0;
-
-//                     double val        = bitSet ? row[regA] : row[regB];
-                    
-//                     // __shfl_xor restricted to the 8-thread sub-group
-//                     double partnerVal = __shfl_xor(val, mask, SUB_GROUP_SIZE);
-
-//                     if(bitSet)
-//                         row[regA] = partnerVal;
-//                     else
-//                         row[regB] = partnerVal;
-//                 }
-//             }
-//         }
-//     }
-
-//     template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
-//     __device__ void wavefront_transpose(rocsparse_float_complex* row)
-//     {
-//         static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
-
-//         // laneId within the WF_SIZE-thread warp (0-WF_SIZE-1)
-//         int laneId = threadIdx.x % WF_SIZE;
-        
-//         // Each thread only swaps with partners within its own 8-lane segment
-//         // Group 0: 0-7, Group 1: 8-15, etc.        
-//         for(int i = 0; i < NUM_STAGES; ++i)
-//         {
-//             int mask = 1 << i;
-
-//             for(int j = 0; j < NUM_ELEMENTS; ++j)
-//             {
-//                 // The logic here mimics your square transpose but localized
-//                 if((j & mask) == 0)
-//                 {
-//                     int  regA   = j;
-//                     int  regB   = j | mask;
-                    
-//                     // Determine if this specific thread is the 'high' or 'low' partner
-//                     bool bitSet = (laneId & mask) != 0;
-
-//                     float valRe     = bitSet ? std::real(row[regA]) : std::real(row[regB]);
-//                     float valIm     = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
-//                     float partnerRe = __shfl_xor(valRe, mask, SUB_GROUP_SIZE);
-//                     float partnerIm = __shfl_xor(valIm, mask, SUB_GROUP_SIZE);
-
-//                     if(bitSet)
-//                         row[regA] = rocsparse_float_complex(partnerRe, partnerIm);
-//                     else
-//                         row[regB] = rocsparse_float_complex(partnerRe, partnerIm);
-//                 }
-//             }
-//         }
-//     }
-
-//     template <uint32_t WF_SIZE, int NUM_ELEMENTS = 8, int SUB_GROUP_SIZE = 8>
-//     __device__ void wavefront_transpose(rocsparse_double_complex* row)
-//     {
-//         static constexpr int NUM_STAGES = rocsparse::log2_pow2<SUB_GROUP_SIZE>::value;
-
-//         // laneId within the WF_SIZE-thread warp (0-WF_SIZE-1)
-//         int laneId = threadIdx.x & (WF_SIZE - 1);
-        
-//         // Each thread only swaps with partners within its own 8-lane segment
-//         // Group 0: 0-7, Group 1: 8-15, etc.        
-//         for(int i = 0; i < NUM_STAGES; ++i)
-//         {
-//             int mask = 1 << i;
-
-//             for(int j = 0; j < NUM_ELEMENTS; ++j)
-//             {
-//                 // The logic here mimics your square transpose but localized
-//                 if((j & mask) == 0)
-//                 {
-//                     int  regA   = j;
-//                     int  regB   = j | mask;
-                    
-//                     // Determine if this specific thread is the 'high' or 'low' partner
-//                     bool bitSet = (laneId & mask) != 0;
-
-//                     double valRe     = bitSet ? std::real(row[regA]) : std::real(row[regB]);
-//                     double valIm     = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
-//                     double partnerRe = __shfl_xor(valRe, mask, SUB_GROUP_SIZE);
-//                     double partnerIm = __shfl_xor(valIm, mask, SUB_GROUP_SIZE);
-
-//                     if(bitSet)
-//                         row[regA] = rocsparse_double_complex(partnerRe, partnerIm);
-//                     else
-//                         row[regB] = rocsparse_double_complex(partnerRe, partnerIm);
-//                 }
-//             }
-//         }
-//     }
-
-
-
-//     // // WF_SIZE must be power of 2 (2, 4, 8, 16, 32). Uses rocsparse::log2_pow2<WF_SIZE> for stages.
-//     // template <uint32_t WF_SIZE>
-//     // ROCSPARSE_DEVICE_ILF void wavefront_transpose(float* row)
-//     // {
-//     //     static constexpr int NUM_STAGES = rocsparse::log2_pow2<WF_SIZE>::value;
-//     //     int                  laneId    = threadIdx.x % WF_SIZE;
-
-//     //     for(int i = 0; i < NUM_STAGES; ++i)
-//     //     {
-//     //         int mask = 1 << i;
-
-//     //         for(int j = 0; j < WF_SIZE; ++j)
-//     //         {
-//     //             if((j & mask) == 0)
-//     //             {
-//     //                 int  regA   = j;
-//     //                 int  regB   = j | mask;
-//     //                 bool bitSet = (laneId & mask) != 0;
-
-//     //                 float val         = bitSet ? row[regA] : row[regB];
-//     //                 float partnerVal  = __shfl_xor(val, mask, WF_SIZE);
-
-//     //                 if(bitSet)
-//     //                     row[regA] = partnerVal;
-//     //                 else
-//     //                     row[regB] = partnerVal;
-//     //             }
-//     //         }
-//     //     }
-//     // }
-
-//     // template <uint32_t WF_SIZE>
-//     // ROCSPARSE_DEVICE_ILF void wavefront_transpose(double* row)
-//     // {
-//     //     static constexpr int NUM_STAGES = rocsparse::log2_pow2<WF_SIZE>::value;
-//     //     int                  laneId    = threadIdx.x % WF_SIZE;
-
-//     //     for(int i = 0; i < NUM_STAGES; ++i)
-//     //     {
-//     //         int mask = 1 << i;
-
-//     //         for(int j = 0; j < WF_SIZE; ++j)
-//     //         {
-//     //             if((j & mask) == 0)
-//     //             {
-//     //                 int  regA   = j;
-//     //                 int  regB   = j | mask;
-//     //                 bool bitSet = (laneId & mask) != 0;
-
-//     //                 double val         = bitSet ? row[regA] : row[regB];
-//     //                 double partnerVal  = __shfl_xor(val, mask, WF_SIZE);
-
-//     //                 if(bitSet)
-//     //                     row[regA] = partnerVal;
-//     //                 else
-//     //                     row[regB] = partnerVal;
-//     //             }
-//     //         }
-//     //     }
-//     // }
-
-//     // template <uint32_t WF_SIZE>
-//     // ROCSPARSE_DEVICE_ILF void wavefront_transpose(
-//     //     rocsparse_float_complex* row)
-//     // {
-//     //     static constexpr int NUM_STAGES = rocsparse::log2_pow2<WF_SIZE>::value;
-//     //     int                  laneId    = threadIdx.x % WF_SIZE;
-
-//     //     for(int i = 0; i < NUM_STAGES; ++i)
-//     //     {
-//     //         int mask = 1 << i;
-
-//     //         for(int j = 0; j < WF_SIZE; ++j)
-//     //         {
-//     //             if((j & mask) == 0)
-//     //             {
-//     //                 int  regA   = j;
-//     //                 int  regB   = j | mask;
-//     //                 bool bitSet = (laneId & mask) != 0;
-
-//     //                 float valRe     = bitSet ? std::real(row[regA]) : std::real(row[regB]);
-//     //                 float valIm     = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
-//     //                 float partnerRe = __shfl_xor(valRe, mask, WF_SIZE);
-//     //                 float partnerIm = __shfl_xor(valIm, mask, WF_SIZE);
-
-//     //                 if(bitSet)
-//     //                     row[regA] = rocsparse_float_complex(partnerRe, partnerIm);
-//     //                 else
-//     //                     row[regB] = rocsparse_float_complex(partnerRe, partnerIm);
-//     //             }
-//     //         }
-//     //     }
-//     // }
-
-//     // template <uint32_t WF_SIZE>
-//     // ROCSPARSE_DEVICE_ILF void wavefront_transpose(
-//     //     rocsparse_double_complex* row)
-//     // {
-//     //     static constexpr int NUM_STAGES = rocsparse::log2_pow2<WF_SIZE>::value;
-//     //     int                  laneId    = threadIdx.x % WF_SIZE;
-
-//     //     for(int i = 0; i < NUM_STAGES; ++i)
-//     //     {
-//     //         int mask = 1 << i;
-
-//     //         for(int j = 0; j < WF_SIZE; ++j)
-//     //         {
-//     //             if((j & mask) == 0)
-//     //             {
-//     //                 int   regA   = j;
-//     //                 int   regB   = j | mask;
-//     //                 bool  bitSet = (laneId & mask) != 0;
-
-//     //                 double valRe     = bitSet ? std::real(row[regA]) : std::real(row[regB]);
-//     //                 double valIm     = bitSet ? std::imag(row[regA]) : std::imag(row[regB]);
-//     //                 double partnerRe = __shfl_xor(valRe, mask, WF_SIZE);
-//     //                 double partnerIm = __shfl_xor(valIm, mask, WF_SIZE);
-
-//     //                 if(bitSet)
-//     //                     row[regA] = rocsparse_double_complex(partnerRe, partnerIm);
-//     //                 else
-//     //                     row[regB] = rocsparse_double_complex(partnerRe, partnerIm);
-//     //             }
-//     //         }
-//     //     }
-//     // }
-    
-//     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t NUM_ELEMENTS, uint32_t SUB_GROUP_SIZE, typename T>
-//     ROCSPARSE_KERNEL(BLOCKSIZE)
-//     void gtsv_nopivot_thomas_transpose_kernel(rocsparse_int m,
-//                                               rocsparse_int n,
-//                                               rocsparse_int ldb,
-//                                               const T* __restrict__ dl,
-//                                               const T* __restrict__ d,
-//                                               const T* __restrict__ du,
-//                                               T* __restrict__ B,
-//                                               T* __restrict__ temp)
-//     {
-//         const int tid = hipThreadIdx_x;
-//         const int bid = hipBlockIdx_x;
-
-//         const int lid = tid & (WF_SIZE - 1);
-//         const int wid = tid / WF_SIZE;
-
-//         T B_local[NUM_ELEMENTS];
-
-//         // Each thread loads one column of the WF_SIZExNUM_ELEMENTS block (thread lid has column lid)
-//         for(int i = 0; i < NUM_ELEMENTS; i++)
-//         {
-//             //B_local[i]
-//             //    = temp[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid];
-//             B_local[i]
-//                 = B[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid];
-//             // B_local[i]
-//                 // = B[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * lid + i];
-//         }
-
-//         wavefront_transpose<WF_SIZE, NUM_ELEMENTS, SUB_GROUP_SIZE>(B_local);
-
-//         T du_prime[WF_SIZE];
-//         T B_prime[WF_SIZE];
-
-//         // Forward sweep
-//         du_prime[0] = du[0] / d[0];
-//         for(int i = 1; i < WF_SIZE - 1; i++)
-//         {
-//             T num       = du[i];
-//             T denom     = d[i] - dl[i] * du_prime[i - 1];
-//             du_prime[i] = num / denom;
-//         }
-
-//         B_prime[0] = B_local[0] / d[0];
-//         for(int i = 1; i < WF_SIZE; i++)
-//         {
-//             T num      = B_local[i] - dl[i] * B_prime[i - 1];
-//             T denom    = d[i] - dl[i] * du_prime[i - 1];
-//             B_prime[i] = num / denom;
-//         }
-
-//         // Backward sweep
-//         B_local[WF_SIZE - 1] = B_prime[WF_SIZE - 1];
-//         for(int i = WF_SIZE - 2; i >= 0; i--)
-//         {
-//             B_local[i] = B_prime[i] - du_prime[i] * B_local[i + 1];
-//         }
-
-//         wavefront_transpose<WF_SIZE, NUM_ELEMENTS, SUB_GROUP_SIZE>(B_local);
-
-//         for(int i = 0; i < NUM_ELEMENTS; i++)
-//         {
-//             // temp[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid] = B_local[i];
-//             B[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * i + lid] = B_local[i];
-//             // B[WF_SIZE * NUM_ELEMENTS * ((BLOCKSIZE / WF_SIZE) * bid + wid) + WF_SIZE * lid + i] = B_local[i];
-//         }
-//     }
 
     // Parallel cyclic reduction algorithm
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t M, typename T>
@@ -2475,14 +1952,14 @@ namespace rocsparse
             __syncthreads();
         }
 
-        if(tid < PCR_SIZE)
-        {
-            temp_a[tid]             = spa[tid];
-            temp_b[tid]             = spb[tid];
-            temp_c[tid]             = spc[tid];
-            temp_d[tid]             = sprhs[tid];
-        }
-        __syncthreads();
+        // if(tid < PCR_SIZE)
+        // {
+        //     temp_a[tid]             = spa[tid];
+        //     temp_b[tid]             = spb[tid];
+        //     temp_c[tid]             = spc[tid];
+        //     temp_d[tid]             = sprhs[tid];
+        // }
+        // __syncthreads();
 
         if(tid < pcr_stride) // same as PCR_SIZE / 2
         {
@@ -2568,6 +2045,14 @@ namespace rocsparse
         __shared__ T sx[2 * BLOCKSIZE];
 
         // Fill cyclic reduction shared memory
+        // sa[tid]               = (tid < m) ? dl[tid] : static_cast<T>(0);
+        // sa[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? dl[tid + BLOCKSIZE] : static_cast<T>(0);
+        // sb[tid]               = (tid < m) ? d[tid]: static_cast<T>(1);
+        // sb[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? d[tid + BLOCKSIZE] : static_cast<T>(1);
+        // sc[tid]               = (tid < m) ? du[tid] : static_cast<T>(0);
+        // sc[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? du[tid + BLOCKSIZE] : static_cast<T>(0);
+        // srhs[tid]             = (tid < m) ? B[tid + ldb * hipBlockIdx_x] : static_cast<T>(0);
+        // srhs[tid + BLOCKSIZE] = (tid + BLOCKSIZE < m) ? B[tid + BLOCKSIZE + ldb * hipBlockIdx_x] : static_cast<T>(0);
         sa[tid]               = dl[tid];
         sa[tid + BLOCKSIZE]   = dl[tid + BLOCKSIZE];
         sb[tid]               = d[tid];
@@ -2637,8 +2122,8 @@ namespace rocsparse
             if(tid < PCR_SIZE)
             {
                 rocsparse_int right = index + pcr_stride;
-                if(right >= PCR_SIZE)
-                    right = PCR_SIZE - 1;
+                if(right >= 2 * BLOCKSIZE)
+                    right = 2 * BLOCKSIZE - 1;
 
                 rocsparse_int left = index - pcr_stride;
                 if(left < 0)
@@ -2698,13 +2183,13 @@ namespace rocsparse
             //     c_left = (left >= 0) ? sc[left] : static_cast<T>(0);
             //     rhs_left = (left >= 0) ? srhs[left] : static_cast<T>(0);
 
-            //     a_right = (right <= PCR_SIZE - 1) ? sa[right] : static_cast<T>(0);
-            //     b_right = (right <= PCR_SIZE - 1) ? sb[right] : static_cast<T>(0);
-            //     c_right = (right <= PCR_SIZE - 1) ? sc[right] : static_cast<T>(0);
-            //     rhs_right = (right <= PCR_SIZE - 1) ? srhs[right] : static_cast<T>(0);    
+            //     a_right = (right <= 2 * BLOCKSIZE - 1) ? sa[right] : static_cast<T>(0);
+            //     b_right = (right <= 2 * BLOCKSIZE - 1) ? sb[right] : static_cast<T>(0);
+            //     c_right = (right <= 2 * BLOCKSIZE - 1) ? sc[right] : static_cast<T>(0);
+            //     rhs_right = (right <= 2 * BLOCKSIZE - 1) ? srhs[right] : static_cast<T>(0);    
 
             //     k1 = (left >= 0) ? a / b_left : static_cast<T>(0);
-            //     k2 = (right <= PCR_SIZE - 1) ? c / b_right : static_cast<T>(0);
+            //     k2 = (right <= 2 * BLOCKSIZE - 1) ? c / b_right : static_cast<T>(0);
             // }
 
             // __syncthreads();
@@ -2720,15 +2205,15 @@ namespace rocsparse
             // pcr_stride *= 2;
         }
 
-        temp_a[tid]             = sa[tid];
-        temp_a[tid + BLOCKSIZE] = sa[tid + BLOCKSIZE];
-        temp_b[tid]             = sb[tid];
-        temp_b[tid + BLOCKSIZE] = sb[tid + BLOCKSIZE];
-        temp_c[tid]             = sc[tid];
-        temp_c[tid + BLOCKSIZE] = sc[tid + BLOCKSIZE];
-        temp_d[tid]             = srhs[tid];
-        temp_d[tid + BLOCKSIZE] = srhs[tid + BLOCKSIZE];
-        __syncthreads();
+        // temp_a[tid]             = sa[tid];
+        // temp_a[tid + BLOCKSIZE] = sa[tid + BLOCKSIZE];
+        // temp_b[tid]             = sb[tid];
+        // temp_b[tid + BLOCKSIZE] = sb[tid + BLOCKSIZE];
+        // temp_c[tid]             = sc[tid];
+        // temp_c[tid + BLOCKSIZE] = sc[tid + BLOCKSIZE];
+        // temp_d[tid]             = srhs[tid];
+        // temp_d[tid + BLOCKSIZE] = srhs[tid + BLOCKSIZE];
+        // __syncthreads();
 
         if(tid < PCR_SIZE / 2)
         {
@@ -2769,6 +2254,14 @@ namespace rocsparse
 
         __syncthreads();
 
+        // if(tid < m)
+        // {
+        //     B[tid + ldb * hipBlockIdx_x]             = sx[tid];
+        // }
+        // if(tid + BLOCKSIZE < m)
+        // {
+        //     B[tid + BLOCKSIZE + ldb * hipBlockIdx_x] = sx[tid + BLOCKSIZE];
+        // }
         B[tid + ldb * hipBlockIdx_x]             = sx[tid];
         B[tid + BLOCKSIZE + ldb * hipBlockIdx_x] = sx[tid + BLOCKSIZE];
     }

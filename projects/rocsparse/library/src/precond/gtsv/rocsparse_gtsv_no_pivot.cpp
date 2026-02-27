@@ -158,7 +158,7 @@
         dl,                                                                       \
         d,                                                                        \
         du,                                                                       \
-        B);
+        B, (T*)nullptr, (T*)nullptr, (T*)nullptr, (T*)nullptr);
 
 #define LAUNCH_GTSV_NOPIVOT_PCR_SHARED(block_size)                                              \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gtsv_nopivot_pcr_shared_kernel<block_size>), \
@@ -351,513 +351,145 @@ namespace rocsparse
 
         rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
 
-        // Define function pointer type for kernel dispatch
-        using KernelFuncPtr = rocsparse_status (*)(
-            rocsparse_handle, rocsparse_int, rocsparse_int, const T*, const T*, const T*, T*);
-
-        // Kernel dispatch table for small matrix sizes
-        static const std::map<int, KernelFuncPtr> s_kernel_dispatch = {
-            {2, launch_cramer_rule_kernel<T>},   {3, launch_thomas_kernel_3<T>},
-            {4, launch_thomas_kernel_4<T>},      {5, launch_thomas_kernel_m<5, T>},
-            {6, launch_thomas_kernel_m<6, T>},   {7, launch_thomas_kernel_m<7, T>},
-            {8, launch_thomas_kernel_m<8, T>},   {9, launch_thomas_kernel_m<9, T>},
-            {10, launch_thomas_kernel_m<10, T>}, {11, launch_thomas_kernel_m<11, T>},
-            {12, launch_thomas_kernel_m<12, T>}, {13, launch_thomas_kernel_m<13, T>},
-            {14, launch_thomas_kernel_m<14, T>}, {14, launch_thomas_kernel_m<15, T>},
-            {16, launch_thomas_kernel_m<16, T>}, {17, launch_thomas_kernel_m<17, T>},
-            {18, launch_thomas_kernel_m<18, T>}, {19, launch_thomas_kernel_m<19, T>},
-            {20, launch_thomas_kernel_m<20, T>}, {21, launch_thomas_kernel_m<21, T>},
-            {22, launch_thomas_kernel_m<22, T>}, {23, launch_thomas_kernel_m<23, T>},
-            {24, launch_thomas_kernel_m<24, T>}, {25, launch_thomas_kernel_m<25, T>},
-            {26, launch_thomas_kernel_m<26, T>}, {27, launch_thomas_kernel_m<27, T>},
-            {28, launch_thomas_kernel_m<28, T>}, {29, launch_thomas_kernel_m<29, T>},
-            {30, launch_thomas_kernel_m<30, T>}, {31, launch_thomas_kernel_m<31, T>},
-            {32, launch_thomas_kernel_m<32, T>},
-
-            // {33, launch_thomas_kernel_m<33, T>}, {34, launch_thomas_kernel_m<34, T>},
-            // {35, launch_thomas_kernel_m<35, T>}, {36, launch_thomas_kernel_m<36, T>},
-            // {37, launch_thomas_kernel_m<37, T>}, {38, launch_thomas_kernel_m<38, T>},
-            // {39, launch_thomas_kernel_m<39, T>}, {40, launch_thomas_kernel_m<40, T>},
-            // {41, launch_thomas_kernel_m<41, T>}, {42, launch_thomas_kernel_m<42, T>},
-            // {43, launch_thomas_kernel_m<43, T>}, {44, launch_thomas_kernel_m<44, T>},
-            // {45, launch_thomas_kernel_m<45, T>}, {46, launch_thomas_kernel_m<46, T>},
-            // {47, launch_thomas_kernel_m<47, T>}, {48, launch_thomas_kernel_m<48, T>},
-            // {49, launch_thomas_kernel_m<49, T>}, {50, launch_thomas_kernel_m<50, T>},
-            // {51, launch_thomas_kernel_m<51, T>}, {52, launch_thomas_kernel_m<52, T>},
-            // {53, launch_thomas_kernel_m<53, T>}, {54, launch_thomas_kernel_m<54, T>},
-            // {55, launch_thomas_kernel_m<55, T>}, {56, launch_thomas_kernel_m<56, T>},
-            // {57, launch_thomas_kernel_m<57, T>}, {58, launch_thomas_kernel_m<58, T>},
-            // {59, launch_thomas_kernel_m<59, T>}, {60, launch_thomas_kernel_m<60, T>},
-            // {61, launch_thomas_kernel_m<61, T>}, {62, launch_thomas_kernel_m<62, T>},
-            // {63, launch_thomas_kernel_m<63, T>}, {64, launch_thomas_kernel_m<64, T>},
-        };
-
-        // if(m == 8)
-        // {
-        //     //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
-        //     constexpr uint32_t WF_SIZE = 32;
-        //     constexpr uint32_t TILE_X = 8;
-        //     constexpr uint32_t TILE_Y = 4;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::thomas_shared_transpose_kernel1<256, WF_SIZE, 8, TILE_X, TILE_Y>),
-        //         dim3((n - 1) / 256 + 1),
-        //         dim3(256),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m == 16)
-        // {
-        //     //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
-        //     constexpr uint32_t WF_SIZE = 32;
-        //     constexpr uint32_t TILE_X = 16;
-        //     constexpr uint32_t TILE_Y = 2;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::thomas_shared_transpose_kernel1<128, WF_SIZE, 16, TILE_X, TILE_Y>),
-        //         dim3((n - 1) / 128 + 1),
-        //         dim3(128),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m == 32)
-        // {
-        //     //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
-        //     constexpr uint32_t WF_SIZE = 32;
-        //     constexpr uint32_t TILE_X = 32;
-        //     constexpr uint32_t TILE_Y = 1;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::thomas_shared_transpose_kernel1<64, WF_SIZE, 32, TILE_X, TILE_Y>),
-        //         dim3((n - 1) / 64 + 1),
-        //         dim3(64),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m == 64)
-        // {
-        //     //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
-        //     constexpr uint32_t WF_SIZE = 32;
-        //     constexpr uint32_t TILE_X = 32;
-        //     constexpr uint32_t TILE_Y = 1;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 64, TILE_X, TILE_Y>),
-        //         dim3((n - 1) / 64 + 1),
-        //         dim3(64),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m == 96)
-        // {
-        //     //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
-        //     constexpr uint32_t WF_SIZE = 32;
-        //     constexpr uint32_t TILE_X = 32;
-        //     constexpr uint32_t TILE_Y = 1;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 96, TILE_X, TILE_Y>),
-        //         dim3((n - 1) / 64 + 1),
-        //         dim3(64),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m == 128)
-        // {
-        //     //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
-        //     constexpr uint32_t WF_SIZE = 32;
-        //     constexpr uint32_t TILE_X = 32;
-        //     constexpr uint32_t TILE_Y = 1;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 128, TILE_X, TILE_Y>),
-        //         dim3((n - 1) / 64 + 1),
-        //         dim3(64),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m <= 256)
-        // {
-        //     LAUNCH_GTSV_NOPIVOT_PCR_SHARED(256);
-        //     return rocsparse_status_success;
-        // }
-
-        // if(m <= 8)
-        // {
-        //     constexpr int NUM_RHS = 8;
-        //     constexpr int WF_SIZE = 8;
-        //     constexpr int BLOCKSIZE = 256;
-        //     T* dtemp_a = nullptr;
-        //     T* dtemp_b = nullptr;
-        //     T* dtemp_c = nullptr;
-        //     T* dtemp_B = nullptr;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::gtsv_nopivot_pcr_wavefront_kernel_32<BLOCKSIZE, WF_SIZE, NUM_RHS>),
-        //         dim3((n - 1) / (BLOCKSIZE / (WF_SIZE / NUM_RHS)) + 1),
-        //         dim3(BLOCKSIZE),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B,
-        //         dtemp_a,
-        //         dtemp_b,
-        //         dtemp_c,
-        //         dtemp_B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m <= 16)
-        // {
-        //     constexpr int NUM_RHS = 8;
-        //     constexpr int WF_SIZE = 16;
-        //     constexpr int BLOCKSIZE = 256;
-        //     T* dtemp_a = nullptr;
-        //     T* dtemp_b = nullptr;
-        //     T* dtemp_c = nullptr;
-        //     T* dtemp_B = nullptr;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::gtsv_nopivot_pcr_wavefront_kernel_32<BLOCKSIZE, WF_SIZE, NUM_RHS>),
-        //         dim3((n - 1) / (BLOCKSIZE / (WF_SIZE / NUM_RHS)) + 1),
-        //         dim3(BLOCKSIZE),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B,
-        //         dtemp_a,
-        //         dtemp_b,
-        //         dtemp_c,
-        //         dtemp_B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m <= 32)
-        // {
-        //     //std::cout << "A" << std::endl;
-        //     constexpr int NUM_RHS = 8;
-        //     constexpr int WF_SIZE = 32;
-        //     constexpr int BLOCKSIZE = 256;
-        
-        //     T* dtemp_a = nullptr;
-        //     T* dtemp_b = nullptr;
-        //     T* dtemp_c = nullptr;
-        //     T* dtemp_B = nullptr;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::gtsv_nopivot_pcr_wavefront_kernel_32<BLOCKSIZE, WF_SIZE, NUM_RHS>),
-        //         dim3((n - 1) / (BLOCKSIZE / (WF_SIZE / NUM_RHS)) + 1),
-        //         dim3(BLOCKSIZE),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B,
-        //         dtemp_a,
-        //         dtemp_b,
-        //         dtemp_c,
-        //         dtemp_B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m <= 64)
-        // {
-        //     constexpr int NUM_RHS = 8;
-        //     constexpr int WF_SIZE = 32;
-        //     constexpr int BLOCKSIZE = 64;
-        //     T* dtemp_a = nullptr;
-        //     T* dtemp_b = nullptr;
-        //     T* dtemp_c = nullptr;
-        //     T* dtemp_B = nullptr;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
-        //         dim3((n - 1) / NUM_RHS + 1),
-        //         dim3(BLOCKSIZE),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B,
-        //         dtemp_a,
-        //         dtemp_b,
-        //         dtemp_c,
-        //         dtemp_B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m <= 128)
-        // {
-        //     constexpr int NUM_RHS = 8;
-        //     constexpr int WF_SIZE = 32;
-        //     constexpr int BLOCKSIZE = 128;
-        //     T* dtemp_a = nullptr;
-        //     T* dtemp_b = nullptr;
-        //     T* dtemp_c = nullptr;
-        //     T* dtemp_B = nullptr;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
-        //         dim3((n - 1) / NUM_RHS + 1),
-        //         dim3(BLOCKSIZE),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B,
-        //         dtemp_a,
-        //         dtemp_b,
-        //         dtemp_c,
-        //         dtemp_B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m <= 256)
-        // {
-        //     constexpr int NUM_RHS = 8;
-        //     constexpr int WF_SIZE = 32;
-        //     constexpr int BLOCKSIZE = 256;
-        //     T* dtemp_a = nullptr;
-        //     T* dtemp_b = nullptr;
-        //     T* dtemp_c = nullptr;
-        //     T* dtemp_B = nullptr;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
-        //         dim3((n - 1) / NUM_RHS + 1),
-        //         dim3(BLOCKSIZE),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B,
-        //         dtemp_a,
-        //         dtemp_b,
-        //         dtemp_c,
-        //         dtemp_B);
-        //     return rocsparse_status_success;
-        // }
-        // else if(m <= 512)
-        // {
-        //     std::cout << "AAAA" << std::endl;
-        //     // constexpr int NUM_RHS = 4;
-        //     // constexpr int WF_SIZE = 32;
-        //     // constexpr int BLOCKSIZE = 512;
-        //     // T* dtemp_a = nullptr;
-        //     // T* dtemp_b = nullptr;
-        //     // T* dtemp_c = nullptr;
-        //     // T* dtemp_B = nullptr;
-        //     // RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //     //     (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
-        //     //     dim3((n - 1) / NUM_RHS + 1),
-        //     //     dim3(BLOCKSIZE),
-        //     //     0,
-        //     //     handle->stream,
-        //     //     m,
-        //     //     n,
-        //     //     ldb,
-        //     //     dl,
-        //     //     d,
-        //     //     du,
-        //     //     B,
-        //     //     dtemp_a,
-        //     //     dtemp_b,
-        //     //     dtemp_c,
-        //     //     dtemp_B);
-        //     // return rocsparse_status_success;
-
-
-        //     constexpr int BLOCKSIZE = 256;
-        //     std::vector<T> htemp_a(2 * BLOCKSIZE, 0);
-        //     std::vector<T> htemp_b(2 * BLOCKSIZE, 0);
-        //     std::vector<T> htemp_c(2 * BLOCKSIZE, 0);
-        //     std::vector<T> htemp_d(2 * BLOCKSIZE, 0);
-        //     T* dtemp_a = nullptr;
-        //     T* dtemp_b = nullptr;
-        //     T* dtemp_c = nullptr;
-        //     T* dtemp_d = nullptr;
-        //     RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_a, sizeof(T) * 2 * BLOCKSIZE));
-        //     RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_b, sizeof(T) * 2 * BLOCKSIZE));
-        //     RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_c, sizeof(T) * 2 * BLOCKSIZE));
-        //     RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_d, sizeof(T) * 2 * BLOCKSIZE));
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::gtsv_nopivot_crpcr_pow2_shared_kernel2<BLOCKSIZE, 64>),
-        //         dim3(n),
-        //         dim3(BLOCKSIZE),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B,
-        //         dtemp_a,
-        //         dtemp_b,
-        //         dtemp_c,
-        //         dtemp_d);
-
-        //     RETURN_IF_HIP_ERROR(hipMemcpy(htemp_a.data(), dtemp_a, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
-        //     RETURN_IF_HIP_ERROR(hipMemcpy(htemp_b.data(), dtemp_b, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
-        //     RETURN_IF_HIP_ERROR(hipMemcpy(htemp_c.data(), dtemp_c, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
-        //     RETURN_IF_HIP_ERROR(hipMemcpy(htemp_d.data(), dtemp_d, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
-
-        //     std::cout << "htemp_a" << std::endl;
-        //     for(size_t i = 0; i < htemp_a.size(); i++)
-        //     {
-        //         std::cout << htemp_a[i] << " ";
-        //     }
-        //     std::cout << "" << std::endl;
-
-        //     std::cout << "htemp_b" << std::endl;
-        //     for(size_t i = 0; i < htemp_b.size(); i++)
-        //     {
-        //         std::cout << htemp_b[i] << " ";
-        //     }
-        //     std::cout << "" << std::endl;
-
-        //     std::cout << "htemp_c" << std::endl;
-        //     for(size_t i = 0; i < htemp_c.size(); i++)
-        //     {
-        //         std::cout << htemp_c[i] << " ";
-        //     }
-        //     std::cout << "" << std::endl;
-
-        //     std::cout << "htemp_d" << std::endl;
-        //     for(size_t i = 0; i < htemp_d.size(); i++)
-        //     {
-        //         std::cout << htemp_d[i] << " ";
-        //     }
-        //     std::cout << "" << std::endl;
-
-        //     RETURN_IF_HIP_ERROR(hipFree(dtemp_a));
-        //     RETURN_IF_HIP_ERROR(hipFree(dtemp_b));
-        //     RETURN_IF_HIP_ERROR(hipFree(dtemp_c));
-        //     RETURN_IF_HIP_ERROR(hipFree(dtemp_d));
-
-        //     return rocsparse_status_success;
-        // }
-        // else if(m <= 1024)
-        // {
-        //     constexpr int NUM_RHS = 1;
-        //     constexpr int WF_SIZE = 32;
-        //     constexpr int BLOCKSIZE = 1024;
-        //     T* dtemp_a = nullptr;
-        //     T* dtemp_b = nullptr;
-        //     T* dtemp_c = nullptr;
-        //     T* dtemp_B = nullptr;
-        //     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        //         (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
-        //         dim3((n - 1) / NUM_RHS + 1),
-        //         dim3(BLOCKSIZE),
-        //         0,
-        //         handle->stream,
-        //         m,
-        //         n,
-        //         ldb,
-        //         dl,
-        //         d,
-        //         du,
-        //         B,
-        //         dtemp_a,
-        //         dtemp_b,
-        //         dtemp_c,
-        //         dtemp_B);
-        //     return rocsparse_status_success;
-        // }
-
-
-
-
-
-
-
-
-
-
-
-        if(m <= 32)
+        if(m == 8)
         {
-            std::cout << "AAAA" << std::endl;
-            constexpr int BLOCKSIZE = 16;
-            constexpr int PCR_SIZE = 4;
-            std::vector<T> htemp_a(2 * BLOCKSIZE, 0);
-            std::vector<T> htemp_b(2 * BLOCKSIZE, 0);
-            std::vector<T> htemp_c(2 * BLOCKSIZE, 0);
-            std::vector<T> htemp_d(2 * BLOCKSIZE, 0);
+            //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
+            constexpr uint32_t WF_SIZE = 32;
+            constexpr uint32_t TILE_X = 8;
+            constexpr uint32_t TILE_Y = 4;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::thomas_shared_transpose_kernel1<256, WF_SIZE, 8, TILE_X, TILE_Y>),
+                dim3((n - 1) / 256 + 1),
+                dim3(256),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B);
+            return rocsparse_status_success;
+        }
+        else if(m == 16)
+        {
+            //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
+            constexpr uint32_t WF_SIZE = 32;
+            constexpr uint32_t TILE_X = 16;
+            constexpr uint32_t TILE_Y = 2;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::thomas_shared_transpose_kernel1<128, WF_SIZE, 16, TILE_X, TILE_Y>),
+                dim3((n - 1) / 128 + 1),
+                dim3(128),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B);
+            return rocsparse_status_success;
+        }
+        else if(m == 32)
+        {
+            //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
+            constexpr uint32_t WF_SIZE = 32;
+            constexpr uint32_t TILE_X = 32;
+            constexpr uint32_t TILE_Y = 1;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::thomas_shared_transpose_kernel1<64, WF_SIZE, 32, TILE_X, TILE_Y>),
+                dim3((n - 1) / 64 + 1),
+                dim3(64),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B);
+            return rocsparse_status_success;
+        }
+        else if(m == 64)
+        {
+            //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
+            constexpr uint32_t WF_SIZE = 32;
+            constexpr uint32_t TILE_X = 32;
+            constexpr uint32_t TILE_Y = 1;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 64, TILE_X, TILE_Y>),
+                dim3((n - 1) / 64 + 1),
+                dim3(64),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B);
+            return rocsparse_status_success;
+        }
+        else if(m == 96)
+        {
+            //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
+            constexpr uint32_t WF_SIZE = 32;
+            constexpr uint32_t TILE_X = 32;
+            constexpr uint32_t TILE_Y = 1;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 96, TILE_X, TILE_Y>),
+                dim3((n - 1) / 64 + 1),
+                dim3(64),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B);
+            return rocsparse_status_success;
+        }
+        else if(m == 128)
+        {
+            //std::cout << "AAAA m: " << m << " n: " << n << " ldb: " << ldb << std::endl;
+            constexpr uint32_t WF_SIZE = 32;
+            constexpr uint32_t TILE_X = 32;
+            constexpr uint32_t TILE_Y = 1;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::thomas_shared_transpose_kernel2<64, WF_SIZE, 128, TILE_X, TILE_Y>),
+                dim3((n - 1) / 64 + 1),
+                dim3(64),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B);
+            return rocsparse_status_success;
+        }
+
+        if(m <= 8)
+        {
+            constexpr int NUM_RHS = 8;
+            constexpr int WF_SIZE = 8;
+            constexpr int BLOCKSIZE = 256;
             T* dtemp_a = nullptr;
             T* dtemp_b = nullptr;
             T* dtemp_c = nullptr;
-            T* dtemp_d = nullptr;
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_a, sizeof(T) * 2 * BLOCKSIZE));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_b, sizeof(T) * 2 * BLOCKSIZE));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_c, sizeof(T) * 2 * BLOCKSIZE));
-            RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_d, sizeof(T) * 2 * BLOCKSIZE));
-            RETURN_IF_HIP_ERROR(hipMemset(dtemp_a, 0, sizeof(T) * 2 * BLOCKSIZE));
-            RETURN_IF_HIP_ERROR(hipMemset(dtemp_b, 0, sizeof(T) * 2 * BLOCKSIZE));
-            RETURN_IF_HIP_ERROR(hipMemset(dtemp_c, 0, sizeof(T) * 2 * BLOCKSIZE));
-            RETURN_IF_HIP_ERROR(hipMemset(dtemp_d, 0, sizeof(T) * 2 * BLOCKSIZE));
+            T* dtemp_B = nullptr;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::gtsv_nopivot_crpcr_pow2_shared_kernel<BLOCKSIZE, PCR_SIZE>),
-                dim3(n),
+                (rocsparse::gtsv_nopivot_pcr_wavefront_kernel_32<BLOCKSIZE, WF_SIZE, NUM_RHS>),
+                dim3((n - 1) / (BLOCKSIZE / (WF_SIZE / NUM_RHS)) + 1),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
@@ -871,50 +503,315 @@ namespace rocsparse
                 dtemp_a,
                 dtemp_b,
                 dtemp_c,
-                dtemp_d);
+                dtemp_B);
+            return rocsparse_status_success;
+        }
+        else if(m <= 16)
+        {
+            constexpr int NUM_RHS = 8;
+            constexpr int WF_SIZE = 16;
+            constexpr int BLOCKSIZE = 256;
+            T* dtemp_a = nullptr;
+            T* dtemp_b = nullptr;
+            T* dtemp_c = nullptr;
+            T* dtemp_B = nullptr;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::gtsv_nopivot_pcr_wavefront_kernel_32<BLOCKSIZE, WF_SIZE, NUM_RHS>),
+                dim3((n - 1) / (BLOCKSIZE / (WF_SIZE / NUM_RHS)) + 1),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B,
+                dtemp_a,
+                dtemp_b,
+                dtemp_c,
+                dtemp_B);
+            return rocsparse_status_success;
+        }
+        else if(m <= 32)
+        {
+            //std::cout << "A" << std::endl;
+            constexpr int NUM_RHS = 8;
+            constexpr int WF_SIZE = 32;
+            constexpr int BLOCKSIZE = 256;
+        
+            T* dtemp_a = nullptr;
+            T* dtemp_b = nullptr;
+            T* dtemp_c = nullptr;
+            T* dtemp_B = nullptr;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::gtsv_nopivot_pcr_wavefront_kernel_32<BLOCKSIZE, WF_SIZE, NUM_RHS>),
+                dim3((n - 1) / (BLOCKSIZE / (WF_SIZE / NUM_RHS)) + 1),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B,
+                dtemp_a,
+                dtemp_b,
+                dtemp_c,
+                dtemp_B);
+            return rocsparse_status_success;
+        }
+        else if(m <= 64)
+        {
+            constexpr int NUM_RHS = 8;
+            constexpr int WF_SIZE = 32;
+            constexpr int BLOCKSIZE = 64;
+            T* dtemp_a = nullptr;
+            T* dtemp_b = nullptr;
+            T* dtemp_c = nullptr;
+            T* dtemp_B = nullptr;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
+                dim3((n - 1) / NUM_RHS + 1),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B,
+                dtemp_a,
+                dtemp_b,
+                dtemp_c,
+                dtemp_B);
+            return rocsparse_status_success;
+        }
+        else if(m <= 128)
+        {
+            constexpr int NUM_RHS = 8;
+            constexpr int WF_SIZE = 32;
+            constexpr int BLOCKSIZE = 128;
+            T* dtemp_a = nullptr;
+            T* dtemp_b = nullptr;
+            T* dtemp_c = nullptr;
+            T* dtemp_B = nullptr;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
+                dim3((n - 1) / NUM_RHS + 1),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B,
+                dtemp_a,
+                dtemp_b,
+                dtemp_c,
+                dtemp_B);
+            return rocsparse_status_success;
+        }
+        else if(m <= 256)
+        {
+            constexpr int NUM_RHS = 8;
+            constexpr int WF_SIZE = 32;
+            constexpr int BLOCKSIZE = 256;
+            T* dtemp_a = nullptr;
+            T* dtemp_b = nullptr;
+            T* dtemp_c = nullptr;
+            T* dtemp_B = nullptr;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
+                dim3((n - 1) / NUM_RHS + 1),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B,
+                dtemp_a,
+                dtemp_b,
+                dtemp_c,
+                dtemp_B);
+            return rocsparse_status_success;
+        }
+        else if(m <= 512)
+        {
+            //std::cout << "AAAA" << std::endl;
+            // constexpr int NUM_RHS = 4;
+            // constexpr int WF_SIZE = 32;
+            // constexpr int BLOCKSIZE = 512;
+            // T* dtemp_a = nullptr;
+            // T* dtemp_b = nullptr;
+            // T* dtemp_c = nullptr;
+            // T* dtemp_B = nullptr;
+            // RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            //     (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
+            //     dim3((n - 1) / NUM_RHS + 1),
+            //     dim3(BLOCKSIZE),
+            //     0,
+            //     handle->stream,
+            //     m,
+            //     n,
+            //     ldb,
+            //     dl,
+            //     d,
+            //     du,
+            //     B,
+            //     dtemp_a,
+            //     dtemp_b,
+            //     dtemp_c,
+            //     dtemp_B);
+            // return rocsparse_status_success;
 
-            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_a.data(), dtemp_a, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_b.data(), dtemp_b, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_c.data(), dtemp_c, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
-            RETURN_IF_HIP_ERROR(hipMemcpy(htemp_d.data(), dtemp_d, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
 
-            std::cout << "htemp_a" << std::endl;
-            for(size_t i = 0; i < htemp_a.size(); i++)
-            {
-                std::cout << htemp_a[i] << " ";
-            }
-            std::cout << "" << std::endl;
+            constexpr int BLOCKSIZE = 256;
+            //std::vector<T> htemp_a(2 * BLOCKSIZE, 0);
+            //std::vector<T> htemp_b(2 * BLOCKSIZE, 0);
+            //std::vector<T> htemp_c(2 * BLOCKSIZE, 0);
+            //std::vector<T> htemp_d(2 * BLOCKSIZE, 0);
+            T* dtemp_a = nullptr;
+            T* dtemp_b = nullptr;
+            T* dtemp_c = nullptr;
+            T* dtemp_d = nullptr;
+            //RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_a, sizeof(T) * 2 * BLOCKSIZE));
+            //RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_b, sizeof(T) * 2 * BLOCKSIZE));
+            //RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_c, sizeof(T) * 2 * BLOCKSIZE));
+            //RETURN_IF_HIP_ERROR(hipMalloc((void**)&dtemp_d, sizeof(T) * 2 * BLOCKSIZE));
+            // RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            //     (rocsparse::gtsv_nopivot_crpcr_pow2_shared_kernel2<BLOCKSIZE, 64>),
+            //     dim3(n),
+            //     dim3(BLOCKSIZE),
+            //     0,
+            //     handle->stream,
+            //     m,
+            //     n,
+            //     ldb,
+            //     dl,
+            //     d,
+            //     du,
+            //     B,
+            //     dtemp_a,
+            //     dtemp_b,
+            //     dtemp_c,
+            //     dtemp_d);
+            LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(256, 128);
 
-            std::cout << "htemp_b" << std::endl;
-            for(size_t i = 0; i < htemp_b.size(); i++)
-            {
-                std::cout << htemp_b[i] << " ";
-            }
-            std::cout << "" << std::endl;
+            // RETURN_IF_HIP_ERROR(hipMemcpy(htemp_a.data(), dtemp_a, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
+            // RETURN_IF_HIP_ERROR(hipMemcpy(htemp_b.data(), dtemp_b, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
+            // RETURN_IF_HIP_ERROR(hipMemcpy(htemp_c.data(), dtemp_c, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
+            // RETURN_IF_HIP_ERROR(hipMemcpy(htemp_d.data(), dtemp_d, sizeof(T) * 2 * BLOCKSIZE, hipMemcpyDeviceToHost));
 
-            std::cout << "htemp_c" << std::endl;
-            for(size_t i = 0; i < htemp_c.size(); i++)
-            {
-                std::cout << htemp_c[i] << " ";
-            }
-            std::cout << "" << std::endl;
+            // std::cout << "htemp_a" << std::endl;
+            // for(size_t i = 0; i < htemp_a.size(); i++)
+            // {
+            //     std::cout << htemp_a[i] << " ";
+            // }
+            // std::cout << "" << std::endl;
 
-            std::cout << "htemp_d" << std::endl;
-            for(size_t i = 0; i < htemp_d.size(); i++)
-            {
-                std::cout << htemp_d[i] << " ";
-            }
-            std::cout << "" << std::endl;
+            // std::cout << "htemp_b" << std::endl;
+            // for(size_t i = 0; i < htemp_b.size(); i++)
+            // {
+            //     std::cout << htemp_b[i] << " ";
+            // }
+            // std::cout << "" << std::endl;
 
-            RETURN_IF_HIP_ERROR(hipFree(dtemp_a));
-            RETURN_IF_HIP_ERROR(hipFree(dtemp_b));
-            RETURN_IF_HIP_ERROR(hipFree(dtemp_c));
-            RETURN_IF_HIP_ERROR(hipFree(dtemp_d));
+            // std::cout << "htemp_c" << std::endl;
+            // for(size_t i = 0; i < htemp_c.size(); i++)
+            // {
+            //     std::cout << htemp_c[i] << " ";
+            // }
+            // std::cout << "" << std::endl;
 
+            // std::cout << "htemp_d" << std::endl;
+            // for(size_t i = 0; i < htemp_d.size(); i++)
+            // {
+            //     std::cout << htemp_d[i] << " ";
+            // }
+            // std::cout << "" << std::endl;
+
+            // RETURN_IF_HIP_ERROR(hipFree(dtemp_a));
+            // RETURN_IF_HIP_ERROR(hipFree(dtemp_b));
+            // RETURN_IF_HIP_ERROR(hipFree(dtemp_c));
+            // RETURN_IF_HIP_ERROR(hipFree(dtemp_d));
+
+            return rocsparse_status_success;
+        }
+        else if(m <= 1024)
+        {
+            constexpr int NUM_RHS = 1;
+            constexpr int WF_SIZE = 32;
+            constexpr int BLOCKSIZE = 1024;
+            T* dtemp_a = nullptr;
+            T* dtemp_b = nullptr;
+            T* dtemp_c = nullptr;
+            T* dtemp_B = nullptr;
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::gtsv_no_pivot_pcr_shared_kernel2<BLOCKSIZE, WF_SIZE, NUM_RHS>),
+                dim3((n - 1) / NUM_RHS + 1),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                n,
+                ldb,
+                dl,
+                d,
+                du,
+                B,
+                dtemp_a,
+                dtemp_b,
+                dtemp_c,
+                dtemp_B);
             return rocsparse_status_success;
         }
 
 
+
+
+
+
+
+
+
+
+
+        // // Define function pointer type for kernel dispatch
+        // using KernelFuncPtr = rocsparse_status (*)(
+        //     rocsparse_handle, rocsparse_int, rocsparse_int, const T*, const T*, const T*, T*);
+
+        // // Kernel dispatch table for small matrix sizes
+        // static const std::map<int, KernelFuncPtr> s_kernel_dispatch = {
+        //     {2, launch_cramer_rule_kernel<T>},   {3, launch_thomas_kernel_3<T>},
+        //     {4, launch_thomas_kernel_4<T>},      {5, launch_thomas_kernel_m<5, T>},
+        //     {6, launch_thomas_kernel_m<6, T>},   {7, launch_thomas_kernel_m<7, T>},
+        //     {8, launch_thomas_kernel_m<8, T>},   {9, launch_thomas_kernel_m<9, T>},
+        //     {10, launch_thomas_kernel_m<10, T>}, {11, launch_thomas_kernel_m<11, T>},
+        //     {12, launch_thomas_kernel_m<12, T>}, {13, launch_thomas_kernel_m<13, T>},
+        //     {14, launch_thomas_kernel_m<14, T>}, {14, launch_thomas_kernel_m<15, T>},
+        //     {16, launch_thomas_kernel_m<16, T>}, {17, launch_thomas_kernel_m<17, T>},
+        //     {18, launch_thomas_kernel_m<18, T>}, {19, launch_thomas_kernel_m<19, T>},
+        //     {20, launch_thomas_kernel_m<20, T>}, {21, launch_thomas_kernel_m<21, T>},
+        //     {22, launch_thomas_kernel_m<22, T>}, {23, launch_thomas_kernel_m<23, T>},
+        //     {24, launch_thomas_kernel_m<24, T>}, {25, launch_thomas_kernel_m<25, T>},
+        //     {26, launch_thomas_kernel_m<26, T>}, {27, launch_thomas_kernel_m<27, T>},
+        //     {28, launch_thomas_kernel_m<28, T>}, {29, launch_thomas_kernel_m<29, T>},
+        //     {30, launch_thomas_kernel_m<30, T>}, {31, launch_thomas_kernel_m<31, T>},
+        //     {32, launch_thomas_kernel_m<32, T>}
+        // };
 
         // // Thomas algorithm good up to m=64
         // if(m <= 32)
@@ -933,81 +830,81 @@ namespace rocsparse
         // }
         // return rocsparse_status_not_implemented;
 
-        // // Run special algorithm if m is power of 2
-        // if((m & (m - 1)) == 0)
-        // {
-        //     if(m == 2)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(2);
-        //     }
-        //     else if(m == 4)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(4);
-        //     }
-        //     else if(m == 8)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(8);
-        //     }
-        //     else if(m == 16)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(16);
-        //     }
-        //     else if(m == 32)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(32);
-        //     }
-        //     else if(m == 64)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(64);
-        //     }
-        //     else if(m == 128)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(64, 64);
-        //     }
-        //     else if(m == 256)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(128, 64);
-        //     }
-        //     else if(m == 512)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(256, 64);
-        //     }
-        // }
-        // else
-        // {
-        //     if(m <= 4)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_SHARED(4);
-        //     }
-        //     else if(m <= 8)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_SHARED(8);
-        //     }
-        //     else if(m <= 16)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_SHARED(16);
-        //     }
-        //     else if(m <= 32)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_SHARED(32);
-        //     }
-        //     else if(m <= 64)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_SHARED(64);
-        //     }
-        //     else if(m <= 128)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_SHARED(128);
-        //     }
-        //     else if(m <= 256)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_SHARED(256);
-        //     }
-        //     else if(m <= 512)
-        //     {
-        //         LAUNCH_GTSV_NOPIVOT_PCR_SHARED(512);
-        //     }
-        // }
+        // Run special algorithm if m is power of 2
+        if((m & (m - 1)) == 0)
+        {
+            if(m == 2)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(2);
+            }
+            else if(m == 4)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(4);
+            }
+            else if(m == 8)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(8);
+            }
+            else if(m == 16)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(16);
+            }
+            else if(m == 32)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(32);
+            }
+            else if(m == 64)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_POW2_SHARED(64);
+            }
+            else if(m == 128)
+            {
+                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(64, 64);
+            }
+            else if(m == 256)
+            {
+                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(128, 64);
+            }
+            else if(m == 512)
+            {
+                LAUNCH_GTSV_NOPIVOT_CRPCR_POW2_SHARED(256, 64);
+            }
+        }
+        else
+        {
+            if(m <= 4)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(4);
+            }
+            else if(m <= 8)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(8);
+            }
+            else if(m <= 16)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(16);
+            }
+            else if(m <= 32)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(32);
+            }
+            else if(m <= 64)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(64);
+            }
+            else if(m <= 128)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(128);
+            }
+            else if(m <= 256)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(256);
+            }
+            else if(m <= 512)
+            {
+                LAUNCH_GTSV_NOPIVOT_PCR_SHARED(512);
+            }
+        }
 
         return rocsparse_status_success;
     }
