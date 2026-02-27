@@ -30,6 +30,7 @@ add_executable(
     TestConvolutionDgradNode.cpp
     TestConvolutionNode.cpp
     TestConvolutionWgradAttributes.cpp
+    TestDescriptorHelpers.cpp
     TestConvolutionWgradNode.cpp
     TestEngineOverrideConfig.cpp
     TestError.cpp
@@ -41,6 +42,8 @@ add_executable(
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
+    TestLayernormAttributes.cpp
+    TestLayerNormNode.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp

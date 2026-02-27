@@ -17,6 +17,7 @@
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>

@@ -13,6 +13,7 @@
 #include <hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/LayernormAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/RMSNormAttributes.hpp>
@@ -32,6 +33,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ConvolutionBwdAttributes, "ConvolutionBwdAttributes"},
      {NodeAttributes::ConvolutionWrwAttributes, "ConvolutionWrwAttributes"},
      {NodeAttributes::MatmulAttributes, "MatmulAttributes"},
+     {NodeAttributes::LayernormAttributes, "LayernormAttributes"},
      {NodeAttributes::RMSNormAttributes, "RMSNormAttributes"},
      {NodeAttributes::NONE, ""}})
 
@@ -73,6 +75,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::MatmulAttributes:
         nodeJson = *node.attributes_as_MatmulAttributes();
+        break;
+    case data_objects::NodeAttributes::LayernormAttributes:
+        nodeJson = *node.attributes_as_LayernormAttributes();
         break;
     case data_objects::NodeAttributes::RMSNormAttributes:
         nodeJson = *node.attributes_as_RMSNormAttributes();
@@ -135,6 +140,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ConvolutionWrwAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MatmulAttributes:
             return to<data_objects::MatmulAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::LayernormAttributes:
+            return to<data_objects::LayernormAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::RMSNormAttributes:
             return to<data_objects::RMSNormAttributes>(builder, entry).Union();
         default:
