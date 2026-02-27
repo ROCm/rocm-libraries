@@ -1590,6 +1590,59 @@ TEST_P(TestGraphSerializationRoundTrip, LayernormNodeTraining)
     roundTripAndCompare(graph);
 }
 
+TEST_P(TestGraphSerializationRoundTrip, RMSNormNode)
+{
+    Graph graph;
+    graph.set_name("rmsnorm_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto scale = createTensor1D("scale", 64, DataType::FLOAT, 2);
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(3);
+
+    RMSNormAttributes rmsnormAttrs;
+    rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+
+    auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
+    y->set_output(true);
+
+    if(GetParam() == SerializationFormat::JSON)
+    {
+        auto json = graph.toJson();
+        EXPECT_EQ(json["nodes"].size(), 1);
+        EXPECT_EQ(json["tensors"].size(), 5); // x, scale, epsilon, y, inv_rms
+    }
+
+    roundTripAndCompare(graph);
+}
+
+TEST_P(TestGraphSerializationRoundTrip, RMSNormNodeWithBias)
+{
+    Graph graph;
+    graph.set_name("rmsnorm_bias_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {1, 64, 32, 32}, DataType::FLOAT, 1);
+    auto scale = createTensor1D("scale", 64, DataType::FLOAT, 2);
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(3);
+    auto bias = createTensor1D("bias", 64, DataType::FLOAT, 4);
+
+    RMSNormAttributes rmsnormAttrs;
+    rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_bias(bias);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+
+    auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
+    y->set_output(true);
+
+    roundTripAndCompare(graph);
+}
+
 //==============================================================================
 // Test Suite Instantiation
 //==============================================================================
