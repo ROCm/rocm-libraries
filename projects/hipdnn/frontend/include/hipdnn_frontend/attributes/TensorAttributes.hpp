@@ -512,5 +512,5 @@ private:
     bool _isVirtual = false;
     ValueVariant _value;
 };
-typedef TensorAttributes Tensor_attributes; ///< @brief Type alias for cuDNN compatibility
+typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

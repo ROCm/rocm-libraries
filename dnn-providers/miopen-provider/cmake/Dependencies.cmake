@@ -3,8 +3,7 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-# Only setup dependencies for standalone builds
-if(NOT BUILD_PLUGIN_AS_DEPENDENCY AND NOT HIPDNN_SKIP_TESTS)
+if(NOT MIOPENPROVIDER_SKIP_TESTS)
     include(FetchContent)
 
     # Try to find GTest first

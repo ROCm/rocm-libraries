@@ -115,6 +115,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid matmul graph)";
             break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid layernorm graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;
