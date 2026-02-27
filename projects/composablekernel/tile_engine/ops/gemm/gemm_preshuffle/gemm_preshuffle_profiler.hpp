@@ -16,7 +16,7 @@ class GemmPreshuffleProfiler
     using BaseGemm = GemmProfiler<GemmPreshuffleProfiler, GemmProblem, ck_tile::GemmHostArgs>;
     using BaseGemm::benchmark;
 
-    GemmPreshuffleProfiler(Setting setting)
+    GemmPreshuffleProfiler(Settings setting)
         : GemmProfiler<GemmPreshuffleProfiler, GemmProblem, ck_tile::GemmHostArgs>(setting)
     {
     }
@@ -43,17 +43,17 @@ class GemmPreshuffleProfiler
         ck_tile::HostTensor<CDataType> c_m_n_dev_result(ck_tile::host_tensor_descriptor(
             gemm_problem.m_, gemm_problem.n_, gemm_problem.stride_c_, is_row_major(layout_c)));
 
-        if(setting_.init_method_ == 0)
+        if(setting_.init_method == 0)
         {
             ck_tile::FillUniformDistribution<ADataType>{-.5f, .5f}(a_m_k);
             ck_tile::FillUniformDistribution<BDataType>{-.5f, .5f}(b_k_n);
         }
-        else if(setting_.init_method_ == 1)
+        else if(setting_.init_method == 1)
         {
             ck_tile::FillMonotonicSeq<ADataType>{}(a_m_k);
             ck_tile::FillMonotonicSeq<BDataType>{}(b_k_n);
         }
-        else if(setting_.init_method_ == 2)
+        else if(setting_.init_method == 2)
         {
             ck_tile::FillUniformDistribution<ADataType>{1.f, 1.f}(a_m_k);
             ck_tile::FillUniformDistribution<BDataType>{1.f, 1.f}(b_k_n);
@@ -73,9 +73,9 @@ class GemmPreshuffleProfiler
             gemm_problem.m_, gemm_problem.n_, gemm_problem.stride_c_, is_row_major(layout_c)));
         c_m_n_ref.SetZero();
 
-        if(setting_.verify_)
+        if(setting_.verify)
         {
-            gemm_host_reference(setting_.verify_,
+            gemm_host_reference(setting_.verify,
                                 a_m_k,
                                 b_k_n,
                                 c_m_n_ref,
@@ -89,7 +89,7 @@ class GemmPreshuffleProfiler
                                 gemm_problem.stride_c_);
         }
 
-        // Kerenl Execution
+        // Kernel Execution
 
         a_m_k_dev_buf.ToDevice(a_m_k.data());
         c_m_n_dev_buf.SetZero();
@@ -126,12 +126,12 @@ class GemmPreshuffleProfiler
             auto kernel_run_result = callable(gemm_args,
                                               ck_tile::stream_config{nullptr,
                                                                      true,
-                                                                     setting_.log_,
-                                                                     setting_.n_warmup_,
-                                                                     setting_.n_repeat_,
-                                                                     setting_.is_gpu_timer_,
-                                                                     setting_.flush_cache_,
-                                                                     setting_.rotating_count_});
+                                                                     setting_.log,
+                                                                     setting_.n_warmup,
+                                                                     setting_.n_repeat,
+                                                                     setting_.is_gpu_timer,
+                                                                     setting_.flush_cache,
+                                                                     setting_.rotating_count});
 
             process_result(
                 gemm_problem, c_m_n_dev_buf, c_m_n_ref, c_m_n_dev_result, kernel_run_result);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include <hip/hip_version.h>
 #include <iostream>
 #include <functional>
 #include <tuple>
@@ -9,6 +10,7 @@
 #include <sstream>
 #include <vector>
 #include <string>
+#include <cstdlib>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
@@ -54,17 +56,6 @@ struct PerformanceResult
         default: throw std::invalid_argument("Unsupported metric type");
         }
     }
-
-    friend std::ostream& operator<<(std::ostream& os, const PerformanceResult& result)
-    {
-        os << "{\n"
-           << "   \"latency(ms)\": " << std::fixed << std::setprecision(2) << result.latency_
-           << ",\n"
-           << "   \"tflops(TFlops)\": " << result.tflops_ << ",\n"
-           << "   \"bandwidth(GB/s)\": " << result.bandwidth_ << "\n"
-           << "}";
-        return os;
-    }
 };
 
 template <typename Problem>
@@ -78,42 +69,46 @@ struct KernelInstance
     {
         return PerformanceResult::compare(a.perf_result_, b.perf_result_, m);
     }
-
-    friend std::ostream& operator<<(std::ostream& os, const KernelInstance& obj)
-    {
-        os << "{\n"
-           << " \"name\": \"" << obj.name_ << "\",\n"
-           << " \"problem\": " << obj.problem_ << ",\n"
-           << " \"perf_result\": " << obj.perf_result_ << "\n"
-           << "}";
-        return os;
-    }
 };
 
-struct Setting
+template <typename Problem>
+std::ostream& operator<<(std::ostream& os, const KernelInstance<Problem>& obj)
 {
-    int n_warmup_;
-    int n_repeat_;
-    bool is_gpu_timer_;
-    int verify_;
-    int init_method_;
-    bool log_;
-    std::string csv_filename_;
-    bool flush_cache_;
-    int rotating_count_;
-    bool json_output_;
+    os << "{\n"
+       << " \"name\": \"" << obj.name_ << "\",\n"
+       << " \"problem\": " << obj.problem_ << ",\n"
+       << " \"perf_result\": " << obj.perf_result_ << "\n"
+       << "}";
+    return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const PerformanceResult& result)
+{
+    os << "{\n"
+       << "   \"latency(ms)\": " << std::fixed << std::setprecision(2) << result.latency_ << ",\n"
+       << "   \"tflops(TFlops)\": " << result.tflops_ << ",\n"
+       << "   \"bandwidth(GB/s)\": " << result.bandwidth_ << "\n"
+       << "}";
+    return os;
+}
+
+struct Settings
+{
+    int n_warmup;
+    int n_repeat;
+    bool is_gpu_timer;
+    int verify;
+    int init_method;
+    bool log;
+    std::string csv_filename;
+    bool flush_cache;
+    int rotating_count;
+    bool json_output;
 };
 
 inline std::string get_rocm_version()
 {
-    std::ifstream version_file("/opt/rocm/.info/version");
-    if(version_file.is_open())
-    {
-        std::string version;
-        std::getline(version_file, version);
-        return version;
-    }
-    return "Unknown";
+    return std::to_string(HIP_VERSION_MAJOR) + "." + std::to_string(HIP_VERSION_MINOR);
 }
 
 template <typename ADataType, typename BDataType, typename AccDataType, typename CDataType>

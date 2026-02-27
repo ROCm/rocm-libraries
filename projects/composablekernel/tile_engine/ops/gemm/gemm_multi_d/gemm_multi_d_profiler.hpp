@@ -27,7 +27,7 @@ class GemmMultiDProfiler : public GemmProfiler<GemmMultiDProfiler,
                                   ck_tile::GemmMultiDHostArgs<DsDataType::size()>>;
     using BaseGemm::benchmark;
 
-    GemmMultiDProfiler(Setting setting)
+    GemmMultiDProfiler(Settings setting)
         : GemmProfiler<GemmMultiDProfiler,
                        GemmMultiDProblem,
                        ck_tile::GemmMultiDHostArgs<DsDataType::size()>>(setting)
@@ -141,18 +141,23 @@ class GemmMultiDProfiler : public GemmProfiler<GemmMultiDProfiler,
                                             gemm_multi_d_problem.stride_c_,
                                             is_row_major(layout_c)));
 
-        if(setting_.verify_)
+        if(setting_.verify)
         {
             gemm_multi_d_host_reference(
-                setting_.verify_, a_m_k, b_k_n, d0_m_n, d1_m_n, c_m_n_host_result);
+                setting_.verify, a_m_k, b_k_n, d0_m_n, d1_m_n, c_m_n_host_result);
         }
 
         for(auto& callable : callables)
         {
-            auto kernel_run_result =
-                callable(gemm_multi_d_args,
-                         ck_tile::stream_config{
-                             nullptr, true, setting_.log_, setting_.n_warmup_, setting_.n_repeat_});
+            auto kernel_run_result = callable(gemm_multi_d_args,
+                                              ck_tile::stream_config{nullptr,
+                                                                     true,
+                                                                     setting_.log,
+                                                                     setting_.n_warmup,
+                                                                     setting_.n_repeat,
+                                                                     setting_.is_gpu_timer,
+                                                                     setting_.flush_cache,
+                                                                     setting_.rotating_count});
             process_result(gemm_multi_d_problem,
                            c_m_n_dev_buf,
                            c_m_n_host_result,

@@ -58,17 +58,17 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                                            layout_d0,
                                            layout_d1};
 
-    // Create Setting struct
-    Setting setting{arg_parser.get_int("warmup"),
-                    arg_parser.get_int("repeat"),
-                    arg_parser.get_bool("timer"),
-                    arg_parser.get_int("verify"),
-                    arg_parser.get_int("init"),
-                    arg_parser.get_bool("log"),
-                    arg_parser.get_str("csv_filename"),
-                    arg_parser.get_bool("flush_cache"),
-                    arg_parser.get_int("rotating_count"),
-                    arg_parser.get_bool("json_output")};
+    // Create Settings struct
+    Settings setting{arg_parser.get_int("warmup"),
+                     arg_parser.get_int("repeat"),
+                     arg_parser.get_bool("timer"),
+                     arg_parser.get_int("verify"),
+                     arg_parser.get_int("init"),
+                     arg_parser.get_bool("log"),
+                     arg_parser.get_str("csv_filename"),
+                     arg_parser.get_bool("flush_cache"),
+                     arg_parser.get_int("rotating_count"),
+                     arg_parser.get_bool("json_output")};
 
     // Get the profiler instance
     auto& profiler = GemmMultiDProfiler::instance(setting);

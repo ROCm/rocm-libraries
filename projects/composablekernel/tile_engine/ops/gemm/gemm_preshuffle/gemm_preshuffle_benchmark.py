@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
@@ -9,7 +10,7 @@ import importlib.util
 
 
 def _import_gemm_benchmark():
-    """Import validation utilities from commons directory."""
+    """Import gemm benchmark from parent directory."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(current_dir)
 

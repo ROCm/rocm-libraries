@@ -19,7 +19,7 @@ template <typename Gemm, typename Problem, typename GemmArgs>
 class GemmProfiler
 {
     public:
-    static Gemm& instance(Setting setting)
+    static Gemm& instance(Settings setting)
     {
         static Gemm instance{setting};
         return instance;
@@ -68,7 +68,7 @@ class GemmProfiler
             ck_tile::static_for<0, DDataType::size(), 1>{}([&](auto i) {
                 using DType = ck_tile::remove_cvref_t<std::tuple_element_t<i, DDataType>>;
                 num_byte += sizeof(DType) * gemm_problem.m_ * gemm_problem.n_;
-                flop += sizeof(DType) * gemm_problem.m_ * gemm_problem.n_;
+                flop += gemm_problem.m_ * gemm_problem.n_;
             });
         }
 
@@ -77,7 +77,7 @@ class GemmProfiler
         kernel_instance.perf_result_.tflops_    = static_cast<float>(flop) / 1.E9 / avg_time;
         kernel_instance.perf_result_.bandwidth_ = num_byte / 1.E6 / avg_time;
 
-        if(setting_.log_ > 0 && !setting_.json_output_)
+        if(setting_.log > 0 && !setting_.json_output)
         {
             std::cout << kernel_instance << std::endl;
         }
@@ -90,7 +90,7 @@ class GemmProfiler
             split_k = gemm_problem.split_k_;
         }
         bool verified_correct =
-            !setting_.verify_ ||
+            !setting_.verify ||
             compare<Problem>(name, gemm_problem.k_, split_k, c_m_n_dev_result, c_m_n_host_result);
 
         if(verified_correct)
@@ -119,7 +119,7 @@ class GemmProfiler
                                                          b.perf_result_, a.perf_result_, metric);
                                                  });
 
-        if(setting_.json_output_)
+        if(setting_.json_output)
         {
             // Output clean JSON only
             std::cout << kernel_instance << std::endl;
@@ -132,9 +132,9 @@ class GemmProfiler
             std::cout << "**********************************" << std::endl;
         }
 
-        if(!setting_.csv_filename_.empty())
+        if(!setting_.csv_filename.empty())
         {
-            std::ofstream file(setting_.csv_filename_ + ".csv", std::ios::app);
+            std::ofstream file(setting_.csv_filename + ".csv", std::ios::app);
 
             if(!file.is_open())
             {
@@ -182,9 +182,9 @@ class GemmProfiler
 
     protected:
     virtual ~GemmProfiler() { kernel_instances_.clear(); }
-    GemmProfiler(Setting setting) : setting_(setting) {}
+    GemmProfiler(Settings setting) : setting_(setting) {}
 
-    Setting setting_;
+    Settings setting_;
 
     std::vector<KernelInstance<Problem>> kernel_instances_;
 };
