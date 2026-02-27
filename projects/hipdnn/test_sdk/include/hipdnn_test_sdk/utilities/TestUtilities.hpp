@@ -47,3 +47,16 @@
     } while(0)
 
 #endif
+
+#ifdef THREAD_SANITIZER
+#define SKIP_IF_TSAN()                                            \
+    do                                                            \
+    {                                                             \
+        GTEST_SKIP() << "Disable this test when TSAN is Enabled"; \
+    } while(0)
+#else
+#define SKIP_IF_TSAN() \
+    do                 \
+    {                  \
+    } while(0)
+#endif
