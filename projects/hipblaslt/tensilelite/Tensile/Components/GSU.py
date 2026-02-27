@@ -307,9 +307,9 @@ class GSUOn(GSU):
         _DepthU = kernel["_DepthU%s" % tc]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
-            _DepthU = (_DepthU * 16) # MI_M = 16
+            _DepthU = (_DepthU * 16)
         elif (tP["isSwizzled"] and tc == 'B'):
-            _DepthU = (_DepthU * 16) # MI_N = 16
+            _DepthU = (_DepthU * 16)
 
         gsucLabel    = Label(label=writer.labels.getNameInc(f"GSUC_{tc}"), comment="")
         gsucLabelEnd = Label(label=writer.labels.getNameInc(f"GSUC_{tc}_End"), comment="")

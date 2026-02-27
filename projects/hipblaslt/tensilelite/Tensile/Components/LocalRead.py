@@ -252,7 +252,7 @@ class LocalReadMFMA(LocalRead):
         # fp64 TLU=1 reading 0.5element/lane/read..
         # for TLU=0 case, blockWidth and LRVW should match
         miInputPerGroup = kernel["MIInputPerThread%s"%tc]
-        if writer.states.asmCaps["HasMFMA_f8f6f4"] and ((tP["bpeDS"] * miInputPerGroup) > 24):
+        if writer.states.asmCaps["HasMFMA_f8f6f4"] and ((tP["bpeDS"] * miInputPerGroup) > 24) and not kernel["UseF32XEmulation"]:
           miInputPerGroup = int(16 / tP["bpeDS"])
         miInputGroup = kernel["MIInputPerThread%s"%tc] // miInputPerGroup
         numReadsPerUnroll = ceil(tP["bpeDS"] * miInputPerGroup / int(unrollBlockWidth * bpr))

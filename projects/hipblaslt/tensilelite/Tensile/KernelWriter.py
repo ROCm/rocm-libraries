@@ -1872,7 +1872,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         localReads += (localReadsA + localReadsB + localReadsMXSA + localReadsMXSB)
 
         # some of localReads is interleaved after waitcnt in SIA3
-        if kernel["ScheduleIterAlg"] == 3 and self.states.numItersPLR and\
+        if scheduleIterAlg == 3 and self.states.numItersPLR and\
           (iteration < maxNumberReadIter or numPrefetchIter):
           if ((iteration < numReadsIterA and not dataAtIterA < maxDataAtIter) or numPrefetchIter) and (not kernel["DirectToVgprA"]):
             localReads -= self.states.numReadsPerIterA * readFactorA
@@ -4024,9 +4024,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       unitA = 1
       unitB = 1
       if ((not tluA) and (bpeGRA * asem < 4) and grvwa > 1):
-        unitA = 4 // (bpeGRA * asem)
+        unitA = int(4 / (bpeGRA * asem))
       if ((not tluB) and (bpeGRB * asem < 4) and grvwb > 1):
-        unitB = 4 // (bpeGRB * asem)
+        unitB = int(4 / (bpeGRB * asem))
       self.states.tailloopInNllmaxUnit = max(unitA, unitB)
 
     # Only assembly supports scheduling
