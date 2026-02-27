@@ -44,6 +44,12 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static constexpr index_t NWarpTiles = NPerBlock / WarpTileN;
     static constexpr index_t KWarpTiles = KPerBlock / WarpTileK;
 
+    using AQuantGroupSize = remove_cvref_t<typename Problem::AQuantGroupSize>;
+    using BQuantGroupSize = remove_cvref_t<typename Problem::BQuantGroupSize>;
+
+    static constexpr index_t KPerBlockAQ = KPerBlock / AQuantGroupSize::kK;
+    static constexpr index_t KPerBlockBQ = KPerBlock / BQuantGroupSize::kK;
+
     static constexpr index_t MWarps       = BlockWarps::at(I0);
     static constexpr index_t NWarps       = BlockWarps::at(I1);
     static constexpr index_t KWarps       = BlockWarps::at(I2);
@@ -74,6 +80,9 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
 
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeAQ() { return 1; }
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeBQ() { return 1; }
+    CK_TILE_HOST_DEVICE static constexpr auto GetKStepAQ() { return KPerBlockAQ; }
+    CK_TILE_HOST_DEVICE static constexpr auto GetKStepBQ() { return KPerBlockBQ; }
+
     CK_TILE_HOST_DEVICE static constexpr auto MakeAQBlockDistribution()
     {
         return make_static_tile_distribution(
@@ -141,6 +150,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy : public GemmPipelineAgBgCrCompAsync
     FORWARD_METHOD_(MakeAQBlockDistribution);
     FORWARD_METHOD_(MakeBQBlockDistribution);
     FORWARD_METHOD_(GetBlockGemm);
+    FORWARD_METHOD_(GetKStepAQ);
+    FORWARD_METHOD_(GetKStepBQ);
 
 #undef FORWARD_METHOD_
 };

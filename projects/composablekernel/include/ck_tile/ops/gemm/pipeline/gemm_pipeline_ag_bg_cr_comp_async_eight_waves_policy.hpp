@@ -37,7 +37,35 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     using BlockWarps     = typename BlockGemmShape::BlockWarps;
     using WarpTile       = typename BlockGemmShape::WarpTile;
 
-    static constexpr bool Preshuffle    = Problem::Preshuffle;
+    // Check if Preshuffle or PreshuffleB exists. In this way it will work for both GEMM and ABQuant
+    template <typename T>
+    using has_preshuffle_type = decltype(T::Preshuffle);
+    template <typename T>
+    using has_preshuffleb_type = decltype(T::PreshuffleB);
+
+    static constexpr bool IsPreshuffle_ = [] {
+        if constexpr(is_detected<has_preshuffle_type, Problem>{})
+        {
+            return Problem::Preshuffle;
+        }
+        else
+        {
+            return false;
+        }
+    }();
+
+    static constexpr bool IsPreshuffleB_ = [] {
+        if constexpr(is_detected<has_preshuffleb_type, Problem>{})
+        {
+            return Problem::PreshuffleB;
+        }
+        else
+        {
+            return false;
+        }
+    }();
+
+    static constexpr bool Preshuffle    = IsPreshuffle_ || IsPreshuffleB_;
     static constexpr index_t BlockSize  = Problem::kBlockSize;
     static constexpr index_t MPerBlock  = BlockGemmShape::kM;
     static constexpr index_t NPerBlock  = BlockGemmShape::kN;
@@ -88,6 +116,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
         else
             return make_pass_through_transform(number<KWarps>{});
     }();
+
+    CK_TILE_DEVICE static constexpr bool IsPreshuffle() { return Preshuffle; }
 
     CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
     {
@@ -389,6 +419,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     FORWARD_METHOD_(GetVectorSizeB);
     FORWARD_METHOD_(GetSmemPackA);
     FORWARD_METHOD_(GetSmemPackB);
+    FORWARD_METHOD_(IsPreshuffle);
 
 #undef FORWARD_METHOD_
 };
