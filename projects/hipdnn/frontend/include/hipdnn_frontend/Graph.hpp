@@ -78,6 +78,7 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
@@ -95,6 +96,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
@@ -629,6 +631,18 @@ private:
                     }
                     _sub_nodes.emplace_back(
                         std::make_shared<LayerNormNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
+                {
+                    auto attr = RMSNormAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_RMSNormAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<RMSNormNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -1750,6 +1764,58 @@ public:
             std::make_shared<LayerNormNode>(std::move(attributes), graph_attributes));
 
         return {y, mean, invVariance};
+    }
+
+    /** @brief RMS normalization forward pass
+     *
+     * Normalizes the input using the root mean square, without mean subtraction.
+     * Unlike layer normalization, RMSNorm does not center the activations.
+     *
+     * Formula:
+     * @code
+     * rms     = sqrt((1/m) * sum(x^2) over normalized dims + epsilon)
+     * y       = scale * (x / rms)
+     * @endcode
+     *
+     * In training phase, the inverse RMS is also returned as an output for use
+     * in the backward pass.
+     *
+     * @param x Input tensor [N, D1, D2, ..., Dk]
+     * @param scale Per-channel scale (gamma) tensor [1, C, 1, 1, ...]
+     * @param attributes Configuration including epsilon and forward phase
+     * @return Array of 2 output tensors:
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] invRms: Inverse RMS values (nullptr in inference mode)
+     *
+     * @see RMSNormAttributes, LayernormAttributes
+     */
+    std::array<std::shared_ptr<TensorAttributes>, 2>
+        rmsnorm(std::shared_ptr<TensorAttributes> x,
+                std::shared_ptr<TensorAttributes> scale,
+                RMSNormAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("RMSNorm_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        std::shared_ptr<TensorAttributes> invRmsOut;
+        if(attributes.get_forward_phase() == NormFwdPhase::TRAINING)
+        {
+            invRmsOut = outputTensor(attributes.get_name() + "::INV_RMS");
+            attributes.set_inv_rms(invRmsOut);
+        }
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<RMSNormNode>(std::move(attributes), graph_attributes));
+
+        return {y, invRmsOut};
     }
 
     /** @brief Unary element-wise operation
