@@ -125,6 +125,15 @@ public:
     }
 
     /**
+     * @brief Get the raw value variant for type-erased access to the scalar value
+     * @return Const reference to the internal ValueVariant
+     */
+    const ValueVariant& get_value_variant() const // NOLINT(readability-identifier-naming)
+    {
+        return _value;
+    }
+
+    /**
      * @brief Clear the pass-by-value scalar
      * @return Reference to this for method chaining
      */

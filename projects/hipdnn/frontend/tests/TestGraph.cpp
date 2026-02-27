@@ -5819,3 +5819,131 @@ TEST_F(TestGraph, GetRankedEngineIdsFailsWhenHeuristicCreationFails)
     EXPECT_NE(result.get_message().find("Failed to finalize engine heuristic descriptor"),
               std::string::npos);
 }
+
+// ── Engine Override Config integration ───────────────────────────────────────
+
+// Helper: build a conv_fprop graph with fixed tensor dims (x={1,3,32,32}, w={64,3,3,3})
+// and return (x, w) so callers can use them for matching assertions.
+static std::pair<std::shared_ptr<TensorAttributes>, std::shared_ptr<TensorAttributes>>
+    buildConvFpropGraph(Graph& graph)
+{
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_dim({1, 3, 32, 32})
+        .set_stride({3072, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(2).set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    ConvFpropAttributes convAttr;
+    convAttr.set_name("EngineOverrideConv")
+        .set_pre_padding({1, 1})
+        .set_post_padding({1, 1})
+        .set_stride({1, 1})
+        .set_dilation({1, 1});
+
+    graph.conv_fprop(x, w, convAttr);
+    return {x, w};
+}
+
+// Test 1: an explicitly set engine ID must survive build_operation_graph.
+// applyEngineOverride() is gated on !_preferredEngineId.has_value(), so any
+// value the user sets before build must be left intact.
+TEST_F(TestGraph, EngineOverrideDoesNotReplaceExplicitlySetEngineId)
+{
+    Graph graph;
+    buildConvFpropGraph(graph);
+
+    constexpr int64_t EXPLICIT_ENGINE_ID = 42;
+    graph.set_preferred_engine_id_ext(EXPLICIT_ENGINE_ID);
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    ASSERT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), EXPLICIT_ENGINE_ID);
+}
+
+// Test 2: EngineOverrideConfig::matchOperation identifies conv_fprop tensors
+// with the same dims that getPreferredIdFromOverrideConfig() would pass to
+// checkEngineOverride() at build time.
+TEST_F(TestGraph, EngineOverrideConfigMatchesConvFpropTensors)
+{
+    using namespace hipdnn_frontend::engine_override;
+
+    // Tensors with the same dims used by buildConvFpropGraph
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    // Exact rule for this shape
+    OperationRule exactRule;
+    exactRule.op = "conv_fprop";
+    exactRule.engineName = hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME;
+    exactRule.tensors = {TensorPattern{{1, 3, 32, 32}, {}}, TensorPattern{{64, 3, 3, 3}, {}}};
+
+    EngineOverrideConfig config({std::move(exactRule)});
+
+    auto result = config.matchOperation("conv_fprop", {x, w});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+
+    // Wrong op must not match
+    EXPECT_FALSE(config.matchOperation("conv_dgrad", {x, w}).has_value());
+
+    // Different batch size must not match (no wildcard in rule)
+    auto x8 = std::make_shared<TensorAttributes>();
+    x8->set_dim({8, 3, 32, 32}).set_data_type(DataType::FLOAT);
+    EXPECT_FALSE(config.matchOperation("conv_fprop", {x8, w}).has_value());
+}
+
+// Test 3: loading a JSON config from an in-memory string and matching against
+// conv_fprop tensors.  This exercises the full loadFromContent() → matchOperation()
+// path with the same shapes that the graph presents during build_operation_graph().
+TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
+{
+    using namespace hipdnn_frontend::engine_override;
+
+    const int64_t kEngine = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    const std::string kJson = R"({
+  "engine_overrides": [
+    {
+      "op": "conv_fprop",
+      "engine_name": "MIOPEN_ENGINE",
+      "tensors": [
+        { "dim": [1, 3, 32, 32] },
+        { "dim": [64, 3, 3, 3] }
+      ]
+    }
+  ]
+})";
+
+    auto config = EngineOverrideConfig::loadFromContent(kJson);
+    ASSERT_TRUE(config.has_value());
+
+    // Same tensor dims as buildConvFpropGraph
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    auto result = config->matchOperation("conv_fprop", {x, w});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, kEngine);
+
+    // A different batch size must not match the exact rule
+    auto x8 = std::make_shared<TensorAttributes>();
+    x8->set_dim({8, 3, 32, 32}).set_data_type(DataType::FLOAT);
+    EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
+}
