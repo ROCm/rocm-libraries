@@ -26,12 +26,25 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from collections import defaultdict
 from copy import deepcopy
-from enum import Enum
+from enum import Enum, auto
 from math import floor
 from typing import Optional, Union
 
 from rocisa.instruction import SWaitCnt, SBarrier
 from Tensile.Common.Utilities import printWarning
+
+
+class ValidatorPass(Enum):
+    # Structural checks
+    VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS = auto()
+    VERIFY_ASCENDING_ORDER = auto()
+    VERIFY_SCC_OVERLAP = auto()
+    VERIFY_GR_INC_ORDER = auto()
+    # Timeline passes
+    ADD_LOCAL_READ_CONSTRAINTS = auto()
+    ADD_PACK_CONSTRAINTS = auto()
+    ADD_GR_NOT_TOO_EARLY_CONSTRAINTS = auto()
+    ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS = auto()
 
 
 def invert_mfma_reorder(mfma_reorder: list[int]) -> dict[int, int]:
@@ -2048,12 +2061,12 @@ def add_gr_finish_before_lr_constraints(timeline: Timeline, ctx: ValidatorPassCo
     apply_barriers(timeline)
 
 
-TIMELINE_PASSES: list[Callable[['Timeline', 'ValidatorPassContext'], None]] = [
-    add_local_read_constraints,
-    add_pack_constraints,
-    add_gr_not_too_early_constraints,
-    add_gr_finish_before_lr_constraints,
-]
+TIMELINE_PASSES: dict[ValidatorPass, Callable[['Timeline', 'ValidatorPassContext'], None]] = {
+    ValidatorPass.ADD_LOCAL_READ_CONSTRAINTS: add_local_read_constraints,
+    ValidatorPass.ADD_PACK_CONSTRAINTS: add_pack_constraints,
+    ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS: add_gr_not_too_early_constraints,
+    ValidatorPass.ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS: add_gr_finish_before_lr_constraints,
+}
 
 
 def index_for_force_unroll_sub_iter(original_idx: int, M: int, N: int) -> int:
@@ -2159,6 +2172,24 @@ def verify_ascending_order(scheduleInfo, context: dict, code_path: int) -> tuple
     return True, ""
 
 
+STRUCTURAL_CHECKS: dict[ValidatorPass, Callable] = {
+    ValidatorPass.VERIFY_CORRECT_NUMBER_OF_INSTRUCTIONS: verify_correct_number_of_instructions,
+    ValidatorPass.VERIFY_ASCENDING_ORDER: verify_ascending_order,
+    ValidatorPass.VERIFY_SCC_OVERLAP: verify_scc_overlap,
+    ValidatorPass.VERIFY_GR_INC_ORDER: verify_gr_inc_order,
+}
+
+
+def format_kernel_string(kernel: 'Solution') -> str:
+    """Format a human-readable description of the kernel's tile dimensions and transpose modes."""
+    mt0 = kernel.get("MacroTile0", "?")
+    mt1 = kernel.get("MacroTile1", "?")
+    du = kernel.get("DepthU", "?")
+    transA = "T" if kernel.get("TransA") else "N"
+    transB = "T" if kernel.get("TransB") else "N"
+    return f"MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
+
+
 def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     """
     Return True if all the validation rules pass, False otherwise.
@@ -2170,33 +2201,36 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     Note 2: if False is returned, this is not proof that the schedule
     is invalid. It may be a false positive.
     """
-    # Case where there was an explicit request to skip validation.
-    if scheduleInfo.isValidationDisabled():
-        mt0 = context.get("kernel", {}).get("MacroTile0", "?")
-        mt1 = context.get("kernel", {}).get("MacroTile1", "?")
-        du = context.get("kernel", {}).get("DepthU", "?")
-        transA = context.get("kernel", {}).get("TransA")
-        transB = context.get("kernel", {}).get("TransB")
-        transA = "T" if transA else "N"
-        transB = "T" if transB else "N"
-        message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
-        printWarning(f"{message}")
-
-        # All rules bypassed, considered valid.
-        return True, message
-
     kernel = context["kernel"]
 
-    structural_checks = [
-        verify_correct_number_of_instructions,
-        verify_ascending_order,
-        verify_scc_overlap,
-        verify_gr_inc_order,
-    ]
+    # Log disabled passes once, before iterating over code paths.
+    kernel_desc = format_kernel_string(kernel)
+
+    # Check if ALL passes are disabled — single warning + early return
+    all_disabled_reasons = {p: scheduleInfo.reasonForDisablingValidationPass(p) for p in ValidatorPass}
+    if all(all_disabled_reasons.values()):
+        reasons = set(all_disabled_reasons.values())
+        reason_str = "; ".join(reasons)
+        printWarning(f"All validation passes disabled on {kernel_desc}: {reason_str}")
+        return True, ""
+
+    disabled_structural = {}
+    for pass_id in STRUCTURAL_CHECKS:
+        if reason := scheduleInfo.reasonForDisablingValidationPass(pass_id):
+            disabled_structural[pass_id] = reason
+            printWarning(f"Skipping {pass_id.name} on {kernel_desc}: {reason}")
+
+    disabled_timeline = {}
+    for pass_id in TIMELINE_PASSES:
+        if reason := scheduleInfo.reasonForDisablingValidationPass(pass_id):
+            disabled_timeline[pass_id] = reason
+            printWarning(f"Skipping {pass_id.name} on {kernel_desc}: {reason}")
 
     for code_path in range(scheduleInfo.numCodePaths):
         # === Structural checks (no Timeline needed) ===
-        for check in structural_checks:
+        for pass_id, check in STRUCTURAL_CHECKS.items():
+            if pass_id in disabled_structural:
+                continue
             status, message = check(scheduleInfo, context, code_path)
             if not status:
                 return False, f"Code path {code_path}: {message}"
@@ -2210,7 +2244,9 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
 
         timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
 
-        for add_constraints in TIMELINE_PASSES:
+        for pass_id, add_constraints in TIMELINE_PASSES.items():
+            if pass_id in disabled_timeline:
+                continue
             add_constraints(timeline, ctx)
             if error := validate_timeline(timeline):
                 return False, f"Code path {code_path}: {error}"
