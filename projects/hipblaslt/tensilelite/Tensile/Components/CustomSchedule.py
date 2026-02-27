@@ -956,10 +956,11 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
     if isNT(kernel) and useLDSTr and TLDS == 0:
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write for iteration == 0"),
-            19, SWaitCnt(dscnt=0, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
-            19, SBarrier(comment=""),
-            40, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
-            40, SBarrier(comment=""),
+            19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for previous set of global reads"),
+            31, SWaitCnt(dscnt=0, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+            31, SBarrier(comment=""),
+            41, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+            41, SBarrier(comment=""),
         ]
 
         optSchedule = {
@@ -968,17 +969,17 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
 
             'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]],
-            'LRB0': [[9, 10, 11, 12, 13, 14]],
+            'LRB0': [[9, 10, 12, 13, 15, 16]],
 
-            'GRA': [[3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]],
-            'GRB': [[27, 27, 28, 28, 29, 29]],
+            'GRA': [[3,4, 5,6, 7,8, 11,12, 15,16, 19,20, 24,25, 28,29]],
+            'GRB': [[34,35, 36,37, 38,39]],
 
-            'LRA1': [[21, 21, 23, 23, 25, 25, 27, 27, 31, 31, 33, 33, 35, 35, 37, 37]],
-            'LRB1': [[41, 41, 43, 43, 45, 45]],
+            'LRA1': [[32,32, 33,33, 34,34, 35,35, 36,36, 37,37, 38,38, 39,39]],
+            'LRB1': [[42,43, 44,45, 46,47]],
 
-            'LRSA': [[18, 18, 18, 18]],
-            'LRSB': [[24]],
-            'LWSA': [[39, 39, 39]],
+            'LRSA': [[30, 30, 30, 30]],
+            'LRSB': [[30]],
+            'LWSA': [[40, 40, 40]],
             'LWSB': [[]],
             'LCC': [[47, 47]],
         }
