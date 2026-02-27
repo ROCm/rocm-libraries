@@ -443,6 +443,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Utilities/Settings.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Utilities/Settings_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Utilities/Settings_impl.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Utilities/String.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Utilities/String_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Utilities/Timer.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Utilities/Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Utilities/Utils_impl.hpp"

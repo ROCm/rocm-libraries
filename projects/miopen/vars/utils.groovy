@@ -246,17 +246,162 @@ def getDockerImageName(dockerArgs)
     return image
 }
 
+def buildDevDockerImage(Map conf=[:])
+{
+    env.DOCKER_BUILDKIT=1
+    def prefixpath = conf.get("prefixpath", "/opt/rocm") 
+
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_dev_build"
+
+    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151;gfx1201" // multiarch builds
+
+    def theRockHash = sh(
+            script: """
+                grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml \
+                | grep '^ *ref:' \
+                | awk '{print \$2}'
+            """.stripIndent(),
+            returnStdout: true
+        ).trim()
+
+    def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
+                     "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" " +
+                     "--build-arg THEROCK_ASIC=\"${gpu_arch}\" " +
+                     " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
+
+    if (params.USE_SCCACHE_DOCKER && check_host() && "${env.MIOPEN_SCCACHE}" != "null")
+    {
+        dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache "
+    }
+
+    echo "Docker Args: ${dockerArgs}"
+
+    def buildDate = sh(script: "date +%Y%m%d", returnStdout: true).trim()
+    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}-dev:multiarch_dev_${buildDate}"
+
+    def dockerImage
+    try{
+        echo "Pulling down image: ${image}"
+        dockerImage = docker.image("${image}")
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            dockerImage.pull()
+        }
+    }
+    catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
+        echo "The job was cancelled or aborted"
+        throw e
+    }
+    catch(Exception ex)
+    {
+        echo "Building image..."
+        def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd,mode=max " +
+                              "--cache-from type=registry,ref=${cacheRef} "
+
+        try {
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                sh """
+                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                    docker buildx create --name ci-builder --driver docker-container --use
+                    docker buildx use ci-builder
+                    docker buildx inspect --bootstrap
+                """.stripIndent()
+            
+                sh """
+                    DOCKER_BUILDKIT=1 docker buildx build \
+                    --push \
+                    --tag ${image} \
+                    ${dockerCacheArgs} \
+                    ${dockerArgs} \
+                    ${buildContext}
+                """.stripIndent()
+            }
+            dockerImage = docker.image("${image}")
+        } catch (Exception bex) {
+            echo "Buildx not available or failed, falling back to docker.build"
+            dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                dockerImage.push()
+            }
+        }
+    }
+
+    return [dockerImage, image]
+}
+
+
 def getDockerImage(Map conf=[:])
 {
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") // one image for each prefix 1: /usr/local 2:/opt/rocm
-    // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
-    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx11-generic;gfx12-generic" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
-    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
+    def gpu_family = conf.get("gpu_family")
+
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_${gpu_family}"
+
+    def theRockHash = sh(
+            script: """
+                grep -A 5 'repository: "ROCm/TheRock"' ${env.WORKSPACE}/.github/workflows/therock-ci-linux.yml \
+                | grep '^ *ref:' \
+                | awk '{print \$2}'
+            """.stripIndent(),
+            returnStdout: true
+        ).trim()
+
+    def cacheRefFrom = "${cacheRef}_${theRockHash}"
+    def cacheRefTo = "${cacheRef}_${theRockHash}"
+
+    // With the docker credentials check if the cacheRefFrom exists in the registry
+    def cacheExists = ""
+
+    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        cacheExists = sh(
+            script: """
+                if docker manifest inspect ${cacheRefFrom} > /dev/null 2>&1; then
+                    echo "true"
+                else
+                    echo "false"
+                fi
+            """.stripIndent(),
+            returnStdout: true
+        ).trim()
+    }
+
+    if (cacheExists != "true") {
+    // If cache tag does not exist then default to the dev build cache
+        cacheRefFrom = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache_dev_build"
+    }
+
+    // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
+    def gpu_arch
+    if (gpu_family == "ci")
+    {
+        gpu_arch = "gfx908;gfx90a;gfx942;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
+    }
+    else if (gpu_family == "gfx90X")
+    {
+        gpu_arch = "gfx908;gfx90a"
+    }
+    else if (gpu_family == "gfx942")
+    {
+        gpu_arch = "gfx942"
+    }
+    else if (gpu_family == "gfx950")
+    {
+        gpu_arch = "gfx950"
+    }
+    else if (gpu_family == "navi")
+    {
+        gpu_arch = "gfx1101;gfx1151"
+    }
+    else
+    {
+        error("Unsupported GPU family: ${gpu_family}")
+    }
 
     def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
-                     "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
+                     "--build-arg THEROCK_GIT_HASH=\"${theRockHash}\" "
+
     if(env.CCACHE_HOST)
     {
         def check_host = sh(script:"""(printf "PING\r\n";) | nc -N ${env.CCACHE_HOST} 6379 """, returnStdout: true).trim()
@@ -274,10 +419,18 @@ def getDockerImage(Map conf=[:])
     }
     else if (params.USE_SCCACHE_DOCKER && check_host() && "${env.MIOPEN_SCCACHE}" != "null")
     {
-        dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache"
+        dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache "
     }
 
     def image = getDockerImageName(dockerArgs)
+
+    // Do not append gpu family for common ci image
+    if(gpu_family != "ci"){
+        image = image + "_${gpu_family}"
+    }
+
+    // Append GPU arch after image name for a common hash
+    dockerArgs = dockerArgs + "--build-arg THEROCK_ASIC=\"${gpu_arch}\" "
 
     // Append Dockerfile path after image name is generated to avoid affecting the hash.
     dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
@@ -299,20 +452,21 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
-                              "--cache-from type=registry,ref=${cacheRef} "
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRefTo},compression=zstd,mode=max,registry.insecure=true " +
+                              "--cache-from type=registry,ref=${cacheRefFrom},registry.insecure=true "
 
         try {
+
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 sh """
-                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                    docker buildx rm ci-builder || true
                     docker buildx create --name ci-builder --driver docker-container --use
                     docker buildx use ci-builder
                     docker buildx inspect --bootstrap
                 """.stripIndent()
-            
                 sh """
                     DOCKER_BUILDKIT=1 docker buildx build \
+                    --builder ci-builder \
                     --push \
                     --tag ${image} \
                     ${dockerCacheArgs} \

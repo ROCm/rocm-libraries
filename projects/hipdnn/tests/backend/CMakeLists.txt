@@ -11,6 +11,7 @@ add_executable(
     main.cpp
     IntegrationBackendDescriptor.cpp
     IntegrationBackendExecuteApi.cpp
+    IntegrationConvOperationDescriptorApi.cpp
     IntegrationEngineApi.cpp
     IntegrationEngineConfigApi.cpp
     IntegrationEngineHeuristicApi.cpp
@@ -22,6 +23,7 @@ add_executable(
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationSetPluginUnloadingModeExt.cpp
+    IntegrationTensorDescriptorApi.cpp
     IntegrationVariantPackApi.cpp
     TestUtil.cpp
 )
