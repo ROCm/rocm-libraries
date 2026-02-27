@@ -177,6 +177,66 @@ TEST(TestTensorValueAttributes, PackUnpackDoubleValue)
     EXPECT_DOUBLE_EQ(doubleVal->value(), PI_DOUBLE);
 }
 
+TEST(TestTensorValueAttributes, PackUnpackUint8Value)
+{
+    constexpr uint8_t K_UINT8_VALUE = 200;
+
+    hipdnn_frontend::graph::TensorAttributes tensor;
+    tensor.set_uid(11)
+        .set_name("uint8_tensor")
+        .set_data_type(hipdnn_frontend::DataType::UINT8)
+        .set_is_virtual(false)
+        .set_value(K_UINT8_VALUE);
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto fbOffset = tensor.pack_attributes(builder);
+    builder.Finish(fbOffset);
+
+    auto bufferPointer = builder.GetBufferPointer();
+    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
+
+    EXPECT_EQ(fbTensor->value_type(), TensorValue::Float8Value);
+    auto u8val = fbTensor->value_as_Float8Value();
+    ASSERT_NE(u8val, nullptr);
+    EXPECT_EQ(u8val->value(), K_UINT8_VALUE);
+
+    auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
+    ASSERT_EQ(unpacked->value.type, TensorValue::Float8Value);
+    auto* float8Val = unpacked->value.AsFloat8Value();
+    ASSERT_NE(float8Val, nullptr);
+    EXPECT_EQ(float8Val->value(), K_UINT8_VALUE);
+}
+
+TEST(TestTensorValueAttributes, PackUnpackInt32Value)
+{
+    constexpr int32_t K_INT32_VALUE = -42;
+
+    hipdnn_frontend::graph::TensorAttributes tensor;
+    tensor.set_uid(12)
+        .set_name("int32_tensor")
+        .set_data_type(hipdnn_frontend::DataType::INT32)
+        .set_is_virtual(false)
+        .set_value(K_INT32_VALUE);
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto fbOffset = tensor.pack_attributes(builder);
+    builder.Finish(fbOffset);
+
+    auto bufferPointer = builder.GetBufferPointer();
+    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
+
+    EXPECT_EQ(fbTensor->value_type(), TensorValue::Int32Value);
+    auto i32val = fbTensor->value_as_Int32Value();
+    ASSERT_NE(i32val, nullptr);
+    EXPECT_EQ(i32val->value(), K_INT32_VALUE);
+
+    auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
+    ASSERT_EQ(unpacked->value.type, TensorValue::Int32Value);
+    auto* int32Val = unpacked->value.AsInt32Value();
+    ASSERT_NE(int32Val, nullptr);
+    EXPECT_EQ(int32Val->value(), K_INT32_VALUE);
+}
+
 TEST(TestTensorValueAttributes, PackUnpackEmptyValue)
 {
     hipdnn_frontend::graph::TensorAttributes tensor;

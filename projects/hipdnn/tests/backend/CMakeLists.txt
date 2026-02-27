@@ -22,6 +22,7 @@ add_executable(
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationSetPluginUnloadingModeExt.cpp
+    IntegrationTensorDescriptorApi.cpp
     IntegrationVariantPackApi.cpp
     TestUtil.cpp
 )

@@ -221,7 +221,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_256x256x128_8bit": ["TN"],
             "_get_schedule_256x256x64_16bit": ["NN", "NT", "TN", "TT"],
             "_get_schedule_160x256x64_16bit": ["NN", "NT", "TN"],
-            "_get_schedule_96x256x64_16bit": ["NT", "TN"],
+            "_get_schedule_96x256x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_256x160x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_256x240x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_256x208x64_16bit": ["NN", "TN"],
@@ -231,6 +231,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_192x320x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_256x224x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_320x192x64_16bit": ["NN", "NT", "TN"],
+            "_get_schedule_352x192x64_16bit": ["TN"],
             "_get_schedule_240x256x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_208x256x64_16bit": ["NN", "NT", "TN"],
             "_get_schedule_128x224x64_16bit": ["NN", "NT", "TN"],
@@ -241,7 +242,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_256x256x32_TF32": ["NT", "TN"],
             "_get_schedule_192x128x32_TF32": ["TN"],
             "_get_schedule_128x128x32_TF32": ["TN"],
-            "_get_schedule_128x128x32_TF32_plr1": ["NN", "TN"],
+            "_get_schedule_128x128x32_TF32_plr1": ['NN', 'NT', 'TN'],
             "_get_schedule_128x128x64_TF32": ["NN", "TN"],
             "_get_schedule_128x256x32_TF32": ["TN"],
             "_get_schedule_128x160x64_TF32": ["TN"],
@@ -250,6 +251,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_128x64x64_TF32": ["TN"],
             "_get_schedule_160x128x64_TF32": ["NN", "TN"],
             "_get_schedule_128x256x64_16bit": ["NN"],
+            "_get_schedule_224x320x64_16bit": ["TN"],
         }
 
         for info in _SCHEDULE_METADATA:
