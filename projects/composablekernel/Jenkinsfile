@@ -269,51 +269,14 @@ def shouldRunCICheck() {
     ]
     
     try {
-        // Additional testing
-        def testChangedFiles = sh(
-            returnStdout: true,
-            script: '''
-                echo "Testing -- Base branch build, checking last commit" >&2
-                git log --name-only --pretty=format: HEAD~1..HEAD -- projects/composablekernel/ | sort -u | grep -v '^$'
-            '''
-        ).trim().split('\n')
+        // Always run if this is a base branch build
+        def baseBranch = "develop"
+        def isBaseBranchBuild = (env.CHANGE_ID == null && env.BRANCH_NAME == baseBranch)
 
-        if (testChangedFiles.size() == 1 && testChangedFiles[0] == '') {
-            echo "Testing -- No changed files detected - this might be a manual trigger or merge commit, running CI for safety"
+        if (isBaseBranchBuild) {
+            echo "Base branch (${baseBranch}) build detected - always running CI for safety"
             return true
         }
-        
-        echo "Testing -- Changed files: ${testChangedFiles.join(', ')}"
-        
-        // Separate files into those requiring CI and those that can be skipped
-        def testFilesRequiringCI = []
-        def testSkippedFiles = []
-
-        testChangedFiles.each { file ->
-            def shouldSkip = skipFilePatterns.any { pattern ->
-                file ==~ pattern
-            }
-
-            if (shouldSkip) {
-                testSkippedFiles.add(file)
-            } else {
-                testFilesRequiringCI.add(file)
-            }
-        }
-
-        // Debug output
-        if (testSkippedFiles.size() > 0) {
-            echo "Files that don't require CI (${testSkippedFiles.size()}):"
-            testSkippedFiles.each { echo "  - ${it}" }
-        }
-
-        if (testFilesRequiringCI.size() > 0) {
-            echo "Files that require CI (${testFilesRequiringCI.size()}):"
-            testFilesRequiringCI.each { echo "  - ${it}" }
-        } else {
-            echo "Only non-relevant files changed, skipping CI"
-        }
-        /////
 
         // Get the list of changed files (all files touched in any commit, even if reverted)
         def changedFiles = sh(
@@ -326,17 +289,10 @@ def shouldRunCICheck() {
                     echo "PR build detected, checking all touched files against origin/$CHANGE_TARGET" >&2
                     git log --name-only --pretty=format: origin/$CHANGE_TARGET..HEAD -- projects/composablekernel/ | sort -u | grep -v '^$'
                 else
-                    # For branch builds, compare against merge-base with base branch
-                    if [ "$BRANCH_NAME" = "$BASE_BRANCH" ]; then
-                        # If we're on the base branch itself, just check the last commit
-                        echo "Base branch build, checking last commit" >&2
-                        git log --name-only --pretty=format: HEAD~1..HEAD -- projects/composablekernel/ | sort -u | grep -v '^$'
-                    else
-                        # Find the merge-base and get all touched files since then
-                        MERGE_BASE=$(git merge-base HEAD origin/$BASE_BRANCH 2>/dev/null || echo "HEAD~1")
-                        echo "Branch build detected, checking all touched files since merge-base: $MERGE_BASE" >&2
-                        git log --name-only --pretty=format: $MERGE_BASE..HEAD -- projects/composablekernel/ | sort -u | grep -v '^$'
-                    fi
+                    # For feature branch builds, compare against merge-base with base branch
+                    MERGE_BASE=$(git merge-base HEAD origin/$BASE_BRANCH 2>/dev/null || echo "HEAD~1")
+                    echo "Branch build detected, checking all touched files since merge-base: $MERGE_BASE" >&2
+                    git log --name-only --pretty=format: $MERGE_BASE..HEAD -- projects/composablekernel/ | sort -u | grep -v '^$'
                 fi
             '''
         ).trim().split('\n')
