@@ -1569,8 +1569,8 @@ struct Verifier
     }
 
     template <class F, class V, class... Ts>
-    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
-                                                                          v.gpu(xs...)))
+    auto verify_impl(F&& f, V&& v, Ts&&... xs)
+        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
     {
         decltype(v.cpu(xs...)) cpu;
         decltype(v.gpu(xs...)) gpu;
@@ -1674,11 +1674,16 @@ struct LSTM_test : Verifier
 
     LSTM_test()
     {
-        if constexpr (std::is_same_v<T, half_float::half>) {
+        if constexpr(std::is_same_v<T, half_float::half>)
+        {
             dataType = miopenHalf;
-        } else if constexpr (std::is_same_v<T, double>) {
+        }
+        else if constexpr(std::is_same_v<T, double>)
+        {
             dataType = miopenDouble;
-        } else {
+        }
+        else
+        {
             dataType = miopenFloat;
         }
     }
