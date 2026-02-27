@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,53 +24,50 @@
  *
  *******************************************************************************/
 
+// HIP RTC (Runtime Compilation) regression tests with the rocWMMA headers
+// These tests ensure that the HIP RTC flow works when we include rocwmma.hpp,
+// and that we are able to compile and run a simple GEMM kernel written using
+// rocWMMA.
+
 #include <cstdlib>
-#include <iostream>
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+#include <hip/hiprtc.h>
 #include <string>
 #include <vector>
 
-#include <hip/hip_runtime.h>
-#include <hip/hiprtc.h>
-
 #include <rocwmma/rocwmma.hpp>
 
-#include "common.hpp"
+#include "regression/reg_common.hpp"
+#include "reference.hpp"
 
-using rocwmma::bfloat16_t;
-using rocwmma::float16_t;
-using rocwmma::float32_t;
-using rocwmma::float64_t;
+// ============================================================================
+// Kernel Sources
+// ============================================================================
 
-using rocwmma::col_major;
-using rocwmma::row_major;
+// Simple vector addition kernel with rocWMMA include
+static const char* vectorAddSourceRocwmmaInclude = R"(
 
-// Types
-using InputT   = bfloat16_t;
-using OutputT  = float32_t;
-using ComputeT = float32_t;
+// FIXME: Remove once ROCM-864 is resolved.
+typedef signed char int8_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+// FIXME
 
-// Supports ROCWMMA_M/N square sizes of
-// : 16 x 16
-// : 32 x 32
-const int ROCWMMA_M = 16;
-const int ROCWMMA_N = 16;
+#include <rocwmma/rocwmma.hpp>
+extern "C"
+__global__ void vectorAdd(const int* a, const int* b, int* c, int n)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n)
+    {
+        c[idx] = a[idx] + b[idx];
+    }
+}
+)";
 
-// Supports ROCWMMA_K sizes as
-// : multiples of 16.
-const int ROCWMMA_K = 16;
-
-// Device warp size
-const int WAVE_SIZE = getWarpSize();
-
-// Thread block
-// : T_BLOCK_X must be multiple of WAVE_SIZE.
-// Note: Each wave will compute one BLOCK_M x BLOCK_N output block
-// Note: Workgroup will compute
-//  T_BLOCK_X / WAVE_SIZE x T_BLOCK_Y output blocks
-const int T_BLOCK_X = 4 * WAVE_SIZE;
-const int T_BLOCK_Y = 4;
-
-std::string source = R"(
+static const char* basicRocwmmaGemmSource = R"(
 
 // FIXME: Remove once ROCM-864 is resolved.
 typedef signed char int8_t;
@@ -182,16 +179,197 @@ __global__ void gemm_rocwmma_d(uint32_t         m,
 }
 )";
 
-char const* src = source.c_str();
 
-int main()
+// ============================================================================
+// Test Suite
+// ============================================================================
+
+class HipRTC_rocWMMA : public ::testing::Test
 {
-    /// Determine the rocm path to use for build
-    // 1. Environment variable
-    // 2. Default path
-    std::string rocm_path
-        = (std::getenv("ROCM_PATH") == nullptr) ? "/opt/rocm" : std::getenv("ROCM_PATH");
-    std::string rocWMMAIncludePath = std::string("-I") + rocm_path + std::string("/include");
+protected:
+    void SetUp() override
+    {
+        // Check if a ROCm device is available
+        int deviceCount = 0;
+        CHECK_HIP_ERROR(hipGetDeviceCount(&deviceCount));
+
+        if(deviceCount == 0)
+        {
+            GTEST_SKIP() << "No ROCm-capable device available";
+        }
+    }
+};
+
+
+// ============================================================================
+// Test 1: Basic rocWMMA include chain
+// ============================================================================
+// Tests that HIP RTC works with the rocWMMA headers
+// - Simple kernel that includes the rocWMMA header
+
+TEST_F(HipRTC_rocWMMA, RocwmmaBasicIncludeTest)
+{
+    // Test parameters
+    const int n         = 1024;
+    const int blockSize = 256;
+    const int gridSize  = rocwmma::ceil_div(n, blockSize);
+
+    // Initialize host data
+    std::vector<int> h_a(n);
+    std::vector<int> h_b(n);
+    std::vector<int> h_c(n);
+    std::vector<int> h_reference(n);
+
+    // Fill with sequential values for predictable debugging
+    for(int i = 0; i < n; i++)
+    {
+        h_a[i] = i;
+        h_b[i] = i * 2;
+    }
+
+    // Compute reference result on CPU
+    vectorAddCPU(h_a.data(), h_b.data(), h_reference.data(), n);
+
+    // Allocate device memory
+    int* d_a;
+    int* d_b;
+    int* d_c;
+    CHECK_HIP_ERROR(hipMalloc(&d_a, n * sizeof(int)));
+    CHECK_HIP_ERROR(hipMalloc(&d_b, n * sizeof(int)));
+    CHECK_HIP_ERROR(hipMalloc(&d_c, n * sizeof(int)));
+
+    // Copy input data to device
+    CHECK_HIP_ERROR(hipMemcpy(d_a, h_a.data(), n * sizeof(int), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(d_b, h_b.data(), n * sizeof(int), hipMemcpyHostToDevice));
+
+    // Create HIP RTC program
+    hiprtcProgram prog;
+    ASSERT_HIPRTC_SUCCESS(hiprtcCreateProgram(&prog, vectorAddSourceRocwmmaInclude, nullptr, 0, nullptr, nullptr));
+
+    // Build compile options
+    auto options    = buildCompileOptions();
+    int  numOptions = options.size();
+
+    // Compile the program
+    hiprtcResult compileResult = hiprtcCompileProgram(prog, numOptions, options.data());
+
+    // Handle compilation errors
+    if(compileResult != HIPRTC_SUCCESS)
+    {
+        std::size_t log_size;
+        hiprtcGetProgramLogSize(prog, &log_size);
+        std::string log(log_size, '\0');
+        hiprtcGetProgramLog(prog, &log[0]);
+        std::string options_str = "";
+        for (auto s: options) {
+            options_str += std::string(s) + " ";
+        }
+        FAIL() << "Build Options: " << options_str << "\nCompilation log:\n" << log;
+    }
+
+    // Extract compiled code
+    std::size_t code_size;
+    ASSERT_HIPRTC_SUCCESS(hiprtcGetCodeSize(prog, &code_size));
+    std::vector<char> code(code_size);
+    ASSERT_HIPRTC_SUCCESS(hiprtcGetCode(prog, code.data()));
+
+    // Load module and get function
+    hipModule_t   module;
+    hipFunction_t func;
+    CHECK_HIP_ERROR(hipModuleLoadData(&module, code.data()));
+    CHECK_HIP_ERROR(hipModuleGetFunction(&func, module, "vectorAdd"));
+
+    // Set up kernel parameters using parameter buffer
+    struct
+    {
+        int* d_a;
+        int* d_b;
+        int* d_c;
+        int  n;
+    } args{d_a, d_b, d_c, n};
+
+    std::size_t args_size = sizeof(args);
+
+    void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
+                      &args,
+                      HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                      &args_size,
+                      HIP_LAUNCH_PARAM_END};
+
+    // Launch kernel
+    CHECK_HIP_ERROR(hipModuleLaunchKernel(func,
+                                          gridSize,
+                                          1,
+                                          1,
+                                          blockSize,
+                                          1,
+                                          1,
+                                          0,
+                                          nullptr,
+                                          nullptr,
+                                          (void**)&config));
+
+    // Wait for completion
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
+
+    // Copy results back to host
+    CHECK_HIP_ERROR(hipMemcpy(h_c.data(), d_c, n * sizeof(int), hipMemcpyDeviceToHost));
+
+    // Verify results
+    for(int i = 0; i < n; i++)
+    {
+        EXPECT_EQ(h_c[i], h_reference[i]) << "Mismatch at index " << i;
+    }
+
+    // Cleanup
+    CHECK_HIP_ERROR(hipModuleUnload(module));
+    ASSERT_HIPRTC_SUCCESS(hiprtcDestroyProgram(&prog));
+    CHECK_HIP_ERROR(hipFree(d_a));
+    CHECK_HIP_ERROR(hipFree(d_b));
+    CHECK_HIP_ERROR(hipFree(d_c));
+}
+
+// ============================================================================
+// Test 2: Basic rocWMMA GEMM
+// ============================================================================
+// Tests that HIP RTC works with the rocWMMA headers
+// - Simple GEMM kernel using the rocWMMA header
+
+TEST_F(HipRTC_rocWMMA, RocwmmaGemmTest)
+{
+    using rocwmma::bfloat16_t;
+    using rocwmma::float16_t;
+    using rocwmma::float32_t;
+    using rocwmma::float64_t;
+
+    using rocwmma::col_major;
+    using rocwmma::row_major;
+
+    // Types
+    using InputT   = bfloat16_t;
+    using OutputT  = float32_t;
+    using ComputeT = float32_t;
+
+    // Supports ROCWMMA_M/N square sizes of
+    // : 16 x 16
+    // : 32 x 32
+    const int ROCWMMA_M = 16;
+    const int ROCWMMA_N = 16;
+
+    // Supports ROCWMMA_K sizes as
+    // : multiples of 16.
+    const int ROCWMMA_K = 16;
+
+    // Device warp size
+    const int WAVE_SIZE = getWarpSize();
+
+    // Thread block
+    // : T_BLOCK_X must be multiple of WAVE_SIZE.
+    // Note: Each wave will compute one BLOCK_M x BLOCK_N output block
+    // Note: Workgroup will compute
+    //  T_BLOCK_X / WAVE_SIZE x T_BLOCK_Y output blocks
+    const int T_BLOCK_X = 4 * WAVE_SIZE;
+    const int T_BLOCK_Y = 4;
 
     // gemm parameters
     uint32_t m     = 256;
@@ -200,37 +378,38 @@ int main()
     ComputeT alpha = 2.1f;
     ComputeT beta  = 2.1f;
 
+    // Create HIP RTC program
     hiprtcProgram prog;
-    CHECK_HIPRTC_ERROR(hiprtcCreateProgram(&prog, src, nullptr, 0, nullptr, nullptr));
-    hiprtcResult result;
-    hiprtcResult logResult;
-    const char*  opts[] = {"-D__HIP_PLATFORM_AMD__", "--std=c++17", rocWMMAIncludePath.c_str()};
+    ASSERT_HIPRTC_SUCCESS(hiprtcCreateProgram(&prog, basicRocwmmaGemmSource, nullptr, 0, nullptr, nullptr));
 
-    result = hiprtcCompileProgram(prog, sizeof(opts) / sizeof(opts[0]), opts);
-    if(result != HIPRTC_SUCCESS)
+    // Build compile options
+    auto options    = buildCompileOptions();
+    int  numOptions = options.size();
+
+    // Compile the program
+    hiprtcResult compileResult = hiprtcCompileProgram(prog, numOptions, options.data());
+
+    // Handle compilation errors
+    if(compileResult != HIPRTC_SUCCESS)
     {
-        std::cout << "HipRTC compile failed." << std::endl;
-        std::cout << result << std::endl;
-        std::string s_error = hiprtcGetErrorString(result);
-        std::cout << s_error << std::endl;
         std::size_t log_size;
-        CHECK_HIPRTC_ERROR(hiprtcGetProgramLogSize(prog, &log_size));
-        std::cout << "Log Size: " << log_size << std::endl;
-        std::string log;
-
-        log.reserve(log_size);
-        CHECK_HIPRTC_ERROR(hiprtcGetProgramLog(prog, &log[0]));
-
-        std::cout << log.c_str() << std::endl;
-        exit(EXIT_FAILURE);
+        hiprtcGetProgramLogSize(prog, &log_size);
+        std::string log(log_size, '\0');
+        hiprtcGetProgramLog(prog, &log[0]);
+        std::string options_str = "";
+        for (auto s: options) {
+            options_str += std::string(s) + " ";
+        }
+        FAIL() << "Build Options: " << options_str << "\nCompilation log:\n" << log;
     }
 
+    // Extract compiled code
     std::size_t code_size;
-    CHECK_HIPRTC_ERROR(hiprtcGetCodeSize(prog, &code_size));
+    ASSERT_HIPRTC_SUCCESS(hiprtcGetCodeSize(prog, &code_size));
     std::vector<char> code(code_size);
+    ASSERT_HIPRTC_SUCCESS(hiprtcGetCode(prog, code.data()));
 
-    CHECK_HIPRTC_ERROR(hiprtcGetCode(prog, code.data()));
-
+    // Load module and get function
     hipModule_t   module;
     hipFunction_t func;
     CHECK_HIP_ERROR(hipModuleLoadData(&module, code.data()));
@@ -241,15 +420,13 @@ int main()
        || (m % ROCWMMA_M || n % ROCWMMA_N || k % ROCWMMA_K))
     {
         std::cout << "Unsupported size!\n";
-        return 0;
+        FAIL();
     }
 
     uint32_t lda = k;
     uint32_t ldb = k;
     uint32_t ldc = n;
     uint32_t ldd = ldc;
-
-    std::cout << "Initializing host data..." << std::endl;
 
     // Initialize input matrices
     std::vector<InputT>  matrixA(m * k);
@@ -262,10 +439,8 @@ int main()
     fillRand(matrixB.data(), k, n);
     fillRand(matrixC.data(), m, n);
 
-    std::cout << "Initializing device data..." << std::endl;
-
     // Allocate and copy device memory
-    hipDeviceptr_t d_a, d_b, d_c, d_d;
+    hipDeviceptr_t d_a, d_b, d_c, d_d, d_d_ref;
 
     const size_t bytesA = matrixA.size() * sizeof(InputT);
     const size_t bytesB = matrixB.size() * sizeof(InputT);
@@ -276,6 +451,7 @@ int main()
     CHECK_HIP_ERROR(hipMalloc(&d_b, bytesB));
     CHECK_HIP_ERROR(hipMalloc(&d_c, bytesC));
     CHECK_HIP_ERROR(hipMalloc(&d_d, bytesD));
+    CHECK_HIP_ERROR(hipMalloc(&d_d_ref, bytesD));
 
     CHECK_HIP_ERROR(hipMemcpy(d_a, matrixA.data(), bytesA, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_b, matrixB.data(), bytesB, hipMemcpyHostToDevice));
@@ -311,8 +487,6 @@ int main()
                       &args_size,
                       HIP_LAUNCH_PARAM_END};
 
-    std::cout << "Launching GEMM kernel..." << std::endl;
-
     hipEvent_t startEvent, stopEvent;
     CHECK_HIP_ERROR(hipEventCreate(&startEvent));
     CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
@@ -339,59 +513,43 @@ int main()
     CHECK_HIP_ERROR(hipEventDestroy(startEvent));
     CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
 
-    // GEMM flops converge to 2*mnk
-    auto gFlops       = calculateGFlops(m, n, k);
-    auto tFlopsPerSec = calculateTFlopsPerSec(m, n, k, static_cast<double>(elapsedTimeMs));
-
     // Echo performance
     std::cout << "BlkM, BlkN, BlkK, "
               << "MatM, MatN, MatK, "
               << "alpha, lda, ldb, "
               << "beta, ldc, ldd, "
-              << "elapsedMs, Problem Size(GFlops), TFlops/s" << std::endl;
+              << "elapsedMs" << std::endl;
 
     std::cout << ROCWMMA_M << ", " << ROCWMMA_N << ", " << ROCWMMA_K << ", " << m << ", " << n
               << ", " << k << ", " << alpha << ", " << lda << ", " << ldb << ", " << beta << ", "
-              << ldc << ", " << ldd << ", " << elapsedTimeMs << ", " << gFlops << ", "
-              << tFlopsPerSec << std::endl;
-
-#if !NDEBUG
-
-    std::cout << "Validating result with reference..." << std::endl;
+              << ldc << ", " << ldd << ", " << elapsedTimeMs << ", " << std::endl;
 
     // Bring kernel result back to host
     CHECK_HIP_ERROR(hipMemcpy(matrixD.data(), d_d, bytesD, hipMemcpyDeviceToHost));
 
-    // Setup and run reference computation
     std::vector<OutputT> matrixD_ref(m * n, std::numeric_limits<OutputT>::signaling_NaN());
-    gemm_cpu_h<InputT, OutputT, ComputeT, row_major, col_major, row_major>(m,
-                                                                           n,
-                                                                           k,
-                                                                           matrixA.data(),
-                                                                           matrixB.data(),
-                                                                           matrixC.data(),
-                                                                           matrixD_ref.data(),
-                                                                           lda,
-                                                                           ldb,
-                                                                           ldc,
-                                                                           ldd,
-                                                                           alpha,
-                                                                           beta);
 
-    auto res = compareEqual<OutputT>(matrixD.data(), matrixD_ref.data(), m * n);
+    rocwmma::gemm_CPU<InputT, OutputT, ComputeT, row_major, col_major, row_major, row_major>(
+                    m,
+                    n,
+                    k,
+                    matrixA.data(),
+                    matrixB.data(),
+                    matrixC.data(),
+                    matrixD_ref.data(),
+                    alpha,
+                    beta);
 
-    if(std::get<0>(res) == false)
-    {
-        std::cout << "FAILED!\n";
-    }
-    else
-    {
-        std::cout << "PASSED!\n";
-    }
+    CHECK_HIP_ERROR(hipMemcpy(d_d_ref, matrixD_ref.data(), bytesD, hipMemcpyHostToDevice));
 
-    std::cout << "Max relative error: " << std::get<1>(res) << std::endl;
+    bool result = false;
+    double error = 0.0;
+    double errorTolerance = sizeof(ComputeT) < sizeof(float32_t) ? 100.0 : 10.0;
+    std::tie(result, error)
+            = rocwmma::compareEqualLaunchKernel<OutputT, OutputT, row_major, row_major>(
+                            (OutputT*)d_d, (OutputT*)d_d_ref, m, n, errorTolerance);
 
-#endif // !NDEBUG
+    ASSERT_EQ(result, true) << "Result: " << result << "(expecting 1); Error: " << error << " (expecting ~0)\n";
 
     // Release device memory
     CHECK_HIP_ERROR(hipFree(d_a));
@@ -399,10 +557,6 @@ int main()
     CHECK_HIP_ERROR(hipFree(d_c));
     CHECK_HIP_ERROR(hipFree(d_d));
 
-    std::cout << "Finished!" << std::endl;
-
     CHECK_HIP_ERROR(hipModuleUnload(module));
-    CHECK_HIPRTC_ERROR(hiprtcDestroyProgram(&prog));
-
-    return 0;
+    ASSERT_HIPRTC_SUCCESS(hiprtcDestroyProgram(&prog));
 }
