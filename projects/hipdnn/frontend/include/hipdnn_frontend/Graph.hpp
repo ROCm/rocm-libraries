@@ -1440,6 +1440,35 @@ public:
 
     /** @brief Batch normalization forward pass for training
      *
+     * Normalizes the input across the batch dimension and computes statistics.
+     *
+     * Formula:
+     * @code
+     * mean[c]    = (1/m) * sum(x[n,c,h,w])        where m = N*H*W
+     * var[c]     = (1/m) * sum((x[n,c,h,w] - mean[c])^2)
+     * invVar[c]  = 1 / sqrt(var[c] + epsilon)
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) * invVar[c] + bias[c]
+     * @endcode
+     *
+     * When previous running statistics are provided:
+     * @code
+     * nextRunningMean = (1 - momentum) * prevRunningMean + momentum * mean
+     * nextRunningVar  = (1 - momentum) * prevRunningVar  + momentum * var
+     * @endcode
+     *
+     * @param x Input tensor [N, C, H, W]
+     * @param scale Per-channel scale (gamma) [1, C, 1, 1]
+     * @param bias Per-channel bias (beta) [1, C, 1, 1]
+     * @param attributes Configuration including epsilon; optionally
+     *        prev_running_mean, prev_running_variance, and momentum for
+     *        exponential moving average of running statistics
+     * @return Array of 5 output tensors:
+     *         - [0] y: Normalized output [N, C, H, W]
+     *         - [1] mean: Batch mean [1, C, 1, 1]
+     *         - [2] invVariance: Batch inverse variance [1, C, 1, 1]
+     *         - [3] nextRunningMean: Updated running mean (nullptr if not tracking)
+     *         - [4] nextRunningVariance: Updated running variance (nullptr if not tracking)
+     *
      * @see BatchnormAttributes
      */
     std::array<std::shared_ptr<TensorAttributes>, 5>
@@ -1486,6 +1515,18 @@ public:
 
     /** @brief Batch normalization backward pass
      *
+     * Computes gradients with respect to input, scale, and bias.
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. output) [N, C, H, W]
+     * @param x Original input from forward pass [N, C, H, W]
+     * @param scale Per-channel scale (gamma) [1, C, 1, 1]
+     * @param attributes Configuration; optionally set saved mean and inverse
+     *        variance from the forward pass via set_saved_mean_and_inv_variance()
+     * @return Array of 3 output tensors:
+     *         - [0] dx: Gradient w.r.t. input [N, C, H, W]
+     *         - [1] dscale: Gradient w.r.t. scale [1, C, 1, 1]
+     *         - [2] dbias: Gradient w.r.t. bias [1, C, 1, 1]
+     *
      * @see BatchnormBackwardAttributes
      */
     std::array<std::shared_ptr<TensorAttributes>, 3>
@@ -1518,6 +1559,21 @@ public:
 
     /** @brief Batch normalization inference
      *
+     * Applies pre-computed normalization statistics for inference.
+     *
+     * Formula:
+     * @code
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) * invVariance[c] + bias[c]
+     * @endcode
+     *
+     * @param x Input tensor [N, C, H, W]
+     * @param mean Pre-computed mean [1, C, 1, 1]
+     * @param invVariance Pre-computed inverse variance (1/sqrt(var+epsilon)) [1, C, 1, 1]
+     * @param scale Per-channel scale (gamma) [1, C, 1, 1]
+     * @param bias Per-channel bias (beta) [1, C, 1, 1]
+     * @param attributes Additional configuration
+     * @return y: Normalized output tensor [N, C, H, W]
+     *
      * @see BatchnormInferenceAttributes
      */
     std::shared_ptr<TensorAttributes>
@@ -1549,6 +1605,23 @@ public:
     }
 
     /** @brief Batch normalization inference with variance and epsilon tensors
+     *
+     * Variant that accepts variance (instead of inverse variance) and epsilon
+     * as separate input tensors, computing inverse variance internally.
+     *
+     * Formula:
+     * @code
+     * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) / sqrt(variance[c] + epsilon) + bias[c]
+     * @endcode
+     *
+     * @param x Input tensor [N, C, H, W]
+     * @param mean Pre-computed mean [1, C, 1, 1]
+     * @param variance Pre-computed variance [1, C, 1, 1]
+     * @param scale Per-channel scale (gamma) [1, C, 1, 1]
+     * @param bias Per-channel bias (beta) [1, C, 1, 1]
+     * @param epsilon Epsilon tensor for numerical stability (pass-by-value scalar)
+     * @param attributes Additional configuration
+     * @return y: Normalized output tensor [N, C, H, W]
      *
      * @see BatchnormInferenceAttributesVarianceExt
      */
@@ -1585,7 +1658,15 @@ public:
 
     /** @brief Unary element-wise operation
      *
-     * @see PointwiseAttributes
+     * Applies an element-wise function to a single input tensor. The operation
+     * is specified by PointwiseAttributes::set_mode().
+     *
+     * @param in0 Input tensor (arbitrary shape)
+     * @param attributes Configuration specifying the pointwise mode and any
+     *        mode-specific parameters (e.g., relu_lower_clip, elu_alpha)
+     * @return out0: Output tensor (same shape as in0)
+     *
+     * @see PointwiseAttributes, PointwiseMode
      */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
@@ -1612,7 +1693,15 @@ public:
 
     /** @brief Binary element-wise operation
      *
-     * @see PointwiseAttributes
+     * Applies an element-wise function to two input tensors. Inputs support
+     * broadcasting.
+     *
+     * @param in0 First input tensor
+     * @param in1 Second input tensor (broadcastable to in0 shape)
+     * @param attributes Configuration specifying the pointwise mode
+     * @return out0: Output tensor (broadcast shape of in0 and in1)
+     *
+     * @see PointwiseAttributes, PointwiseMode
      */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
@@ -1645,7 +1734,15 @@ public:
 
     /** @brief Ternary element-wise operation
      *
-     * @see PointwiseAttributes
+     * Applies an element-wise function to three input tensors.
+     *
+     * @param in0 First input tensor
+     * @param in1 Second input tensor
+     * @param in2 Third input tensor (e.g., condition for BINARY_SELECT)
+     * @param attributes Configuration specifying the pointwise mode
+     * @return out0: Output tensor
+     *
+     * @see PointwiseAttributes, PointwiseMode
      */
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 std::shared_ptr<TensorAttributes> in1,
@@ -1684,6 +1781,21 @@ public:
 
     /** @brief Matrix multiplication
      *
+     * Computes the matrix product of two tensors with optional batch dimensions.
+     *
+     * Formula:
+     * @code
+     * C[..., i, j] = sum_k( A[..., i, k] * B[..., k, j] )
+     * @endcode
+     *
+     * Batch dimensions are broadcast when they differ (one must be divisible
+     * by the other).
+     *
+     * @param a Left input matrix [..., M, K]
+     * @param b Right input matrix [..., K, N]
+     * @param attributes Additional configuration
+     * @return c: Output matrix [..., M, N]
+     *
      * @see MatmulAttributes
      */
     std::shared_ptr<TensorAttributes> matmul(std::shared_ptr<TensorAttributes> a,
@@ -1716,6 +1828,24 @@ public:
     }
 
     /** @brief Convolution forward pass
+     *
+     * Computes a cross-correlation (or convolution) of the input with filters.
+     *
+     * For 2D with NCHW layout:
+     * @code
+     * y[n,k,oh,ow] = sum_c,r,s  x[n, c, oh*stride_h + r*dilation_h - pad_h,
+     *                                     ow*stride_w + s*dilation_w - pad_w]
+     *                           * w[k, c, r, s]
+     *
+     * output_dim = floor((input + pad_before + pad_after
+     *              - dilation * (kernel - 1) - 1) / stride) + 1
+     * @endcode
+     *
+     * @param x Input activation tensor [N, C, H, W] or [N, H, W, C]
+     * @param w Filter/weight tensor [K, C, R, S] or [K, R, S, C]
+     * @param attributes Convolution parameters: padding, stride, dilation,
+     *        convolution mode
+     * @return y: Output activation tensor [N, K, OH, OW]
      *
      * @see ConvFpropAttributes
      */
@@ -1752,6 +1882,16 @@ public:
 
     /** @brief Convolution data gradient (backward data)
      *
+     * Computes the gradient of the loss with respect to the convolution input,
+     * given the output gradient and the filter weights. Used during
+     * backpropagation.
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. conv output) [N, K, OH, OW]
+     * @param w Filter/weight tensor [K, C, R, S]
+     * @param attributes Convolution parameters: padding, stride, dilation
+     *        (must match forward pass)
+     * @return dx: Gradient w.r.t. input [N, C, H, W]
+     *
      * @see ConvDgradAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
@@ -1786,6 +1926,16 @@ public:
     }
 
     /** @brief Convolution weight gradient (backward weights)
+     *
+     * Computes the gradient of the loss with respect to the filter weights,
+     * given the output gradient and the original input. Used during
+     * backpropagation.
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. conv output) [N, K, OH, OW]
+     * @param x Original input activation tensor [N, C, H, W]
+     * @param attributes Convolution parameters: padding, stride, dilation
+     *        (must match forward pass)
+     * @return dw: Gradient w.r.t. filter weights [K, C, R, S]
      *
      * @see ConvWgradAttributes
      */
