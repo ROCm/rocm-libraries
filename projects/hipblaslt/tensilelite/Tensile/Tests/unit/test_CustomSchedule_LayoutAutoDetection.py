@@ -325,7 +325,20 @@ class TestLayoutAutoDetection:
             f"Expected {expected_dtypes}, got {dtypes} (Please update the expected dtypes in the test if needed)"
 
     def test_get_cms_kernel_info_objects(self):
-        
+        @RegisterSchedule(
+            tile_config=self.TILE,
+            dtype_predicate=is16bit,
+            vector_widths=[8, 8, 8],
+            matrix_inst=[16, 16, 32, 1],
+            mfma_wave_group=[2, 2],
+        )
+        def _fake_cms(kernel, useLDSTr, TLDS):
+            if isTN(kernel) and TLDS == 1:
+                return True, None
+            if isNN(kernel) and useLDSTr and TLDS == 1:
+                return True, None
+            return False, None
+
         EXPECTED_FIELDS = {
             "name", "dtype", "MacroTile0", "MacroTile1", "DepthU",
             "PrefetchGlobalRead", "PrefetchLocalRead", "DirectToLds",
@@ -362,3 +375,43 @@ class TestLayoutAutoDetection:
         obj_results = get_cms_kernel_info_objects()
         assert len(dict_results) == len(obj_results), \
             f"query_cms_kernels returned {len(dict_results)} results but get_cms_kernel_info_objects returned {len(obj_results)}"
+
+
+        assert "_fake_cms" in [info.name for info in obj_results], \
+            "'_fake_cms' not found in get_cms_kernel_info_objects"
+        assert "_fake_cms" in [info.name for info in dict_results], \
+
+        for info in obj_results:
+            if info.name == "_fake_cms":
+                assert info.dtype == "16bit", \
+                    f"{info.name}: expected dtype 16bit, got {info.dtype}"
+                assert info.TransposeA == True, \
+                    f"{info.name}: expected TransposeA True, got {info.TransposeA}"
+                assert info.TransposeB == False, \
+                    f"{info.name}: expected TransposeB False, got {info.TransposeB}"
+                assert info.MacroTile0 == 256, \
+                    f"{info.name}: expected MacroTile0 256, got {info.MacroTile0}"
+                assert info.MacroTile1 == 256, \
+                    f"{info.name}: expected MacroTile1 256, got {info.MacroTile1}"
+                assert info.DepthU == 64, \
+                    f"{info.name}: expected DepthU 64, got {info.DepthU}"
+                assert info.PrefetchGlobalRead == 2, \
+                    f"{info.name}: expected PrefetchGlobalRead 2, got {info.PrefetchGlobalRead}"
+                assert info.PrefetchLocalRead == 1, \
+                    f"{info.name}: expected PrefetchLocalRead 1, got {info.PrefetchLocalRead}"
+                assert info.DirectToLds == 1, \
+                    f"{info.name}: expected DirectToLds 1, got {info.DirectToLds}"
+                assert info.DtlPlusLdsBuf == True, \
+                    f"{info.name}: expected DtlPlusLdsBuf True, got {info.DtlPlusLdsBuf}"
+                assert info.WaveSeparateGlobalReadA == 0, \
+                    f"{info.name}: expected WaveSeparateGlobalReadA 0, got {info.WaveSeparateGlobalReadA}"
+                assert info.WaveSeparateGlobalReadB == 0, \
+                    f"{info.name}: expected WaveSeparateGlobalReadB 0, got {info.WaveSeparateGlobalReadB}"
+                assert info.GlobalReadVectorWidthA == 8, \
+                    f"{info.name}: expected GlobalReadVectorWidthA 8, got {info.GlobalReadVectorWidthA}"
+                assert info.GlobalReadVectorWidthB == 8, \
+                    f"{info.name}: expected GlobalReadVectorWidthB 8, got {info.GlobalReadVectorWidthB}"
+                assert info.LocalReadVectorWidth == 8, \
+                    f"{info.name}: expected LocalReadVectorWidth 8, got {info.LocalReadVectorWidth}"
+                assert info.MatrixInstruction == 16, \
+                    f"{info.name}: expected MatrixInstruction 16, got {info.MatrixInstruction}"
