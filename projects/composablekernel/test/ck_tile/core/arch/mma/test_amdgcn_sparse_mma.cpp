@@ -139,9 +139,25 @@ TEST(SparseMMATrait, SparseSelector)
     });
 }
 
-template <typename MmaOp, uint32_t FragK>
+template <typename AType,
+          typename BType,
+          typename CType,
+          uint32_t FragM,
+          uint32_t FragN,
+          uint32_t FragK>
 __global__ void test_sparse_accum_over_k(void* a, void* b, void* c, void* out)
 {
+    using CompilerTarget = decltype(get_compiler_target());
+    using Selector       = MmaDefaultSelector<AType,
+                                              BType,
+                                              CType,
+                                              FragM,
+                                              FragN,
+                                              FragK,
+                                              CompilerTarget,
+                                              MmaOpFamily::SPARSE>;
+
+    using MmaOp     = typename Selector::SelectedOp;
     using MmaTraits = MmaOpTraits<MmaOp>;
 
     using CVecType = typename MmaOp::CVecType;
@@ -177,8 +193,13 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
     bool hasDevice     = static_cast<bool>(devCount > 0);
     int deviceWarpSize = devProp.warpSize;
 
+    bool isSupportedWmma = (currentArchId >= amdgcn_target_id::GFX1200) &&
+                           (currentArchId <= amdgcn_target_id::GFX12_GENERIC);
+    bool isSupportedMfma =
+        (currentArchId >= amdgcn_target_id::GFX942) && (currentArchId <= amdgcn_target_id::GFX950);
     // TODO: c++20 add check for arch id
-    if(!hasDevice || (currentArchId == amdgcn_target_id::HOST))
+    if(!hasDevice || (currentArchId == amdgcn_target_id::HOST) ||
+       !(isSupportedWmma || isSupportedMfma))
     {
         GTEST_SKIP() << "No HIP device found. Skipping test.";
     }
@@ -198,35 +219,10 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
     static constexpr uint32_t BlockN = FragN;
     static constexpr uint32_t BlockK = FragK;
 
-    using Selector = MmaDefaultSelector<AType,
-                                        BType,
-                                        CType,
-                                        FragM,
-                                        FragN,
-                                        FragK,
-                                        decltype(get_compiler_target()),
-                                        MmaOpFamily::SPARSE>;
-
-    using MmaOp     = typename Selector::SelectedOp;
-    using MmaTraits = MmaOpTraits<MmaOp>;
-
-    if(!MmaTraits::IsSupported)
-    {
-        GTEST_SKIP() << "No SPARSE implementation found. Skipping test.";
-    }
-
-    // Gfx11 has input data duplication and no accumulator padding (MultiplierC = 1)
-    // TODO: c++20 use is_target_family_gfx11(currentArchId)
-    bool isGfx11 = (currentArchId >= amdgcn_target_id::GFX1100) &&
-                   (currentArchId <= amdgcn_target_id::GFX11_GENERIC);
-    uint32_t MultiplierA = isGfx11 ? 2 : 1;
-    uint32_t MultiplierB = isGfx11 ? 2 : 1;
-    uint32_t MultiplierC = 1;
-
     // The number of elements per thread
-    uint32_t AElements = BlockM * BlockK / deviceWarpSize * MultiplierA;
-    uint32_t BElements = BlockN * BlockK / deviceWarpSize * MultiplierB;
-    uint32_t CElements = BlockM * BlockN / deviceWarpSize * MultiplierC;
+    uint32_t AElements = BlockM * BlockK / deviceWarpSize;
+    uint32_t BElements = BlockN * BlockK / deviceWarpSize;
+    uint32_t CElements = BlockM * BlockN / deviceWarpSize;
 
     uint32_t ASize = AElements * sizeof(AType);
     uint32_t BSize = BElements * sizeof(BType);
@@ -254,7 +250,8 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
     HIP_CHECK_ERROR(hipMemcpy(d_c, h_c.data(), CSize, hipMemcpyHostToDevice));
 
     // Need at least 1 WG with 64 threads to get defined MFMA/WMMA behaviour
-    test_sparse_accum_over_k<MmaOp, FragK><<<1, 64>>>(d_a, d_b, d_c, d_out);
+    test_sparse_accum_over_k<AType, BType, CType, FragM, FragN, FragK>
+        <<<1, 64>>>(d_a, d_b, d_c, d_out);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
 
     HIP_CHECK_ERROR(hipMemcpy(h_out.data(), d_out, CSize, hipMemcpyDeviceToHost));
@@ -262,7 +259,8 @@ TEST(SparseMMATrait, MmaSelector_Sparse_F16_F16_F32_16x16x32_Real)
     // Output should be FragK for all elements, because the inputs are all 1's
     for(size_t i = 0; i < CElements; ++i)
     {
-        CType expected = static_cast<CType>(FragK);
+        // In sparse only half of the A values are non-zero, thus the /2.
+        CType expected = static_cast<CType>(FragK) / 2;
 
         EXPECT_NEAR(h_out[i], expected, 1e-3);
     }
