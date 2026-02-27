@@ -418,7 +418,7 @@ struct StreamKKernel
             {0, 0},
             MakePartialsDistribution());
 
-        auto partials_tile [[maybe_unused]] = load_tile(partial_tile_window);
+        auto partials_tile = load_tile(partial_tile_window);
 
         // Since the partials distribution is not the same as the C block distribution, we must
         // describe the contents in the partials tile with the C block distribution.
