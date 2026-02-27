@@ -3,10 +3,10 @@
 
 #pragma once
 
+#include <charconv>
 #include <chrono>
+#include <cstring>
 #include <iostream>
-#include <mutex>
-#include <sstream>
 #include <string>
 
 namespace TensileLite
@@ -17,65 +17,57 @@ namespace TensileLite
         // Set via command line: --timing-instrumentation
         inline bool g_timingInstrumentationEnabled = false;
 
-        // Buffer for timing output to avoid per-event stderr writes.
-        // Accumulates into a single ostringstream and flushes to stderr
-        // when flush() is called or the buffer exceeds a size threshold.
-        class TimingBuffer
+        // Fast formatters — to_chars into a caller-supplied buffer
+        inline char* fmtOne(char* p, char* end, const char* s)
         {
-        public:
-            static TimingBuffer& instance()
-            {
-                static TimingBuffer buf;
-                return buf;
-            }
+            auto len = std::strlen(s);
+            auto avail = static_cast<size_t>(end - p);
+            if(len > avail)
+                len = avail;
+            std::memcpy(p, s, len);
+            return p + len;
+        }
 
-            void append(const char* data, size_t len)
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                m_stream.write(data, len);
-                m_stream.put('\n');
-                m_size += len + 1;
-                if(m_size >= FlushThreshold)
-                    flushLocked();
-            }
+        inline char* fmtOne(char* p, char* end, const std::string& s)
+        {
+            return fmtOne(p, end, s.c_str());
+        }
 
-            void flush()
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                flushLocked();
-            }
+        inline char* fmtOne(char* p, char* end, size_t v)
+        {
+            auto result = std::to_chars(p, end, v);
+            return result.ptr;
+        }
 
-        private:
-            static constexpr size_t FlushThreshold = 1 << 20; // 1 MB
+        inline char* fmtOne(char* p, char* end, double v)
+        {
+            auto result = std::to_chars(p, end, v);
+            return result.ptr;
+        }
 
-            void flushLocked()
-            {
-                if(m_size == 0)
-                    return;
-                std::cerr << m_stream.str();
-                m_stream.str(std::string());
-                m_stream.clear();
-                m_size = 0;
-            }
-
-            TimingBuffer() = default;
-            std::mutex         m_mutex;
-            std::ostringstream m_stream;
-            size_t             m_size = 0;
-        };
+        // Format args into a stack buffer and write as a single line to std::clog
+        template<typename... Args>
+        inline void writeLine(Args&&... args)
+        {
+            char buf[256];
+            char*       p   = buf;
+            char* const end = buf + sizeof(buf) - 1;
+            ((p = fmtOne(p, end, args)), ...);
+            *p++ = '\n';
+            std::clog.write(buf, p - buf);
+        }
 
         inline void flushTimingBuffer()
         {
-            TimingBuffer::instance().flush();
+            std::clog.flush();
         }
 
         // Simple RAII timer that records timing on destruction
         // Output format: TIMING:<category>:<duration_ms>
         // This format is easily parseable by post-processing scripts
         //
-        // Timing records are buffered in memory and flushed periodically
-        // (every ~1 MB) or via flushTimingBuffer() to avoid per-event
-        // stderr syscall overhead.
+        // Timing records are written to std::clog (buffered stderr).
+        // Call flushTimingBuffer() to ensure all records are flushed.
         class ScopedTimer
         {
         public:
@@ -93,11 +85,7 @@ namespace TensileLite
                 {
                     auto end      = clock::now();
                     auto duration = std::chrono::duration<double, std::milli>(end - m_start);
-                    char buf[256];
-                    int  n = snprintf(buf, sizeof(buf), "TIMING:%s:%.6f",
-                                      m_category.c_str(), duration.count());
-                    if(n > 0)
-                        TimingBuffer::instance().append(buf, n);
+                    writeLine("TIMING:", m_category, ":", duration.count());
                 }
             }
 
@@ -119,11 +107,7 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
-                char buf[256];
-                int  n = snprintf(buf, sizeof(buf), "TIMING:%s:%.6f",
-                                  category.c_str(), ms);
-                if(n > 0)
-                    TimingBuffer::instance().append(buf, n);
+                writeLine("TIMING:", category, ":", ms);
             }
         }
 
@@ -133,12 +117,8 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
-                char buf[256];
-                int  n = snprintf(buf, sizeof(buf),
-                                  "TIMING_CONTEXT:M=%zu,N=%zu,K=%zu,batch=%zu,typeA=%s,typeD=%s",
-                                  M, N, K, batchCount, typeA.c_str(), typeD.c_str());
-                if(n > 0)
-                    TimingBuffer::instance().append(buf, n);
+                writeLine("TIMING_CONTEXT:M=", M, ",N=", N, ",K=", K,
+                          ",batch=", batchCount, ",typeA=", typeA, ",typeD=", typeD);
             }
         }
 
@@ -149,14 +129,9 @@ namespace TensileLite
         {
             if(g_timingInstrumentationEnabled)
             {
-                char buf[256];
-                int  n = snprintf(buf, sizeof(buf),
-                                  "TIMING_CONTEXT_GROUPED:index=%zu,total=%zu,"
-                                  "M=%zu,N=%zu,K=%zu,batch=%zu,typeA=%s,typeD=%s",
-                                  index, totalGemms, M, N, K, batchCount,
-                                  typeA.c_str(), typeD.c_str());
-                if(n > 0)
-                    TimingBuffer::instance().append(buf, n);
+                writeLine("TIMING_CONTEXT_GROUPED:index=", index, ",total=", totalGemms,
+                          ",M=", M, ",N=", N, ",K=", K,
+                          ",batch=", batchCount, ",typeA=", typeA, ",typeD=", typeD);
             }
         }
 
