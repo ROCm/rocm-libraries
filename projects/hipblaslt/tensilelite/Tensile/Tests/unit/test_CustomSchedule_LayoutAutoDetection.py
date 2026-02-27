@@ -380,6 +380,7 @@ class TestLayoutAutoDetection:
         assert "_fake_cms" in [info.name for info in obj_results], \
             "'_fake_cms' not found in get_cms_kernel_info_objects"
         assert "_fake_cms" in [info.name for info in dict_results], \
+             "'_fake_cms' not found in query_cms_kernels"
 
         for info in obj_results:
             if info.name == "_fake_cms":
