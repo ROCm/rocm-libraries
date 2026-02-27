@@ -25,9 +25,9 @@ from typing import Set
 
 from Tensile.Components.CustomSchedule import (
     hasCustomSchedule, ScheduleInfo, RegisterSchedule, TileConfig,
-    _SCHEDULE_METADATA, _SCHEDULE_REGISTRY,
+    CMSKernelInfo, _SCHEDULE_METADATA, _SCHEDULE_REGISTRY,
     isTN, isNT, isNN, isTT, is16bit, query_cms_kernels, get_available_layouts,
-    get_available_dtypes
+    get_available_dtypes, get_cms_kernel_info_objects
 )
 
 def _get_compact_layout_string(transposeA: bool, transposeB: bool):
@@ -323,3 +323,42 @@ class TestLayoutAutoDetection:
         expected_dtypes = {"16bit", "8bit", "TF32"}
         assert dtypes == expected_dtypes, \
             f"Expected {expected_dtypes}, got {dtypes} (Please update the expected dtypes in the test if needed)"
+
+    def test_get_cms_kernel_info_objects(self):
+        
+        EXPECTED_FIELDS = {
+            "name", "dtype", "MacroTile0", "MacroTile1", "DepthU",
+            "PrefetchGlobalRead", "PrefetchLocalRead", "DirectToLds",
+            "DtlPlusLdsBuf", "WaveSeparateGlobalReadA", "WaveSeparateGlobalReadB",
+            "GlobalReadVectorWidthA", "GlobalReadVectorWidthB", "LocalReadVectorWidth",
+            "MatrixInstruction", "MIWaveGroup", "LDSTrInst", "TransposeLDS",
+            "TransposeA", "TransposeB",
+        }
+
+        all_results = get_cms_kernel_info_objects()
+        assert len(all_results) > 0
+        for info in all_results:
+            assert isinstance(info, CMSKernelInfo), \
+                f"Expected CMSKernelInfo, got {type(info).__name__}"
+            actual_fields = {f.name for f in info.__dataclass_fields__.values()}
+            assert EXPECTED_FIELDS.issubset(actual_fields), \
+                f"Missing fields on {info.name}: {EXPECTED_FIELDS - actual_fields}"
+
+        for dtype in ["16bit", "TF32"]:
+            filtered = get_cms_kernel_info_objects(dtype=dtype)
+            assert len(filtered) > 0, f"No results for dtype={dtype}"
+            assert all(info.dtype.lower() == dtype.lower() for info in filtered)
+
+        for layout in ["TN", "NT", "NN"]:
+            filtered = get_cms_kernel_info_objects(dtype="16bit", layout=layout)
+            assert len(filtered) > 0, f"No results for dtype=16bit, layout={layout}"
+            expected_a = layout[0] == "T"
+            expected_b = layout[1] == "T"
+            for info in filtered:
+                assert info.TransposeA == expected_a and info.TransposeB == expected_b, \
+                    f"{info.name}: expected layout {layout}, got TransposeA={info.TransposeA}, TransposeB={info.TransposeB}"
+
+        dict_results = query_cms_kernels()
+        obj_results = get_cms_kernel_info_objects()
+        assert len(dict_results) == len(obj_results), \
+            f"query_cms_kernels returned {len(dict_results)} results but get_cms_kernel_info_objects returned {len(obj_results)}"
