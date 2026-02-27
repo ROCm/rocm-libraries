@@ -32,6 +32,7 @@ add_executable(
     descriptors/TestExecutionPlanDescriptor.cpp
     descriptors/TestGraphDescriptor.cpp
     descriptors/TestTensorDescriptor.cpp
+    descriptors/TestConvolutionFwdOperationDescriptor.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp

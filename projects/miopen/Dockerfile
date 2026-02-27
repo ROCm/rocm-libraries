@@ -1,184 +1,364 @@
-FROM ubuntu:22.04 as miopen
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-ARG PROJ="miopen"
-ARG DEBIAN_FRONTEND=noninteractive
-# install to /opt/rocm will cause permission issue
-ARG PREFIX=/usr/local
-ARG USE_FIN="OFF"
+# ============================================================================
+# Common base image with all dependencies
+# ============================================================================
+FROM ubuntu:24.04 AS base
 
-ARG CCACHE_SECONDARY_STORAGE=""
-ARG CCACHE_DIR="/tmp"
-ARG CCACHE_COMMIT=7f1572ae9ca958fa923a66235f6a64a360b03523
-ARG MIOPEN_SCCACHE=""
-ARG MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="MiOpen-Docker-CK"
+ARG CCACHE_COMMIT=8c107aada09df2a40930d7064bbec8120ee76c91
 
-# GPU_ARCHS should be defined as a build arg rather than hardcoded here.
-ARG GPU_ARCHS=none
-
-ARG COMPILER_LAUNCHER=""
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HIP_PLATFORM=amd
 ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
 
-# Support multiarch
-RUN dpkg --add-architecture i386 && \
-# Install preliminary dependencies and add rocm gpg key
-    apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
-        apt-utils ca-certificates curl libnuma-dev gnupg2 wget  && \
-    curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/rocm-keyring.gpg && \
-# Get and install amdgpu-install.
-    wget https://repo.radeon.com/amdgpu-install/7.1/ubuntu/jammy/amdgpu-install_7.1.70100-1_all.deb --no-check-certificate && \
-    apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
-       ./amdgpu-install_7.1.70100-1_all.deb
+# Setup ubsan environment to printstacktrace
+ENV UBSAN_OPTIONS=print_stacktrace=1
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
 
-# Add rocm repository
-RUN export ROCM_APT_VER=7.1; \
-    echo $ROCM_APT_VER &&\
-    sh -c 'echo deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/30.20/ubuntu jammy main > /etc/apt/sources.list.d/amdgpu.list' &&\
-    sh -c 'echo deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/$ROCM_APT_VER jammy main > /etc/apt/sources.list.d/rocm.list' && \
-# Install rocm components
-    sh -c "echo deb http://mirrors.kernel.org/ubuntu jammy main universe | tee -a /etc/apt/sources.list" && \
-    amdgpu-install -y --usecase=rocm --no-dkms
-
-## Sccache binary built from source for ROCm, only install if MIOPEN_SCCACHE is defined
-ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
-ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
-ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
-ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
-
-# Install DVC + other dependencies
-RUN mkdir -p /etc/apt/keyrings && \
-    wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | sudo tee /etc/apt/sources.list.d/dvc.list && \
-    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
-    wget -qO - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /etc/apt/keyrings/llvm-snapshot.gpg && \
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" > /etc/apt/sources.list.d/llvm18.list && \
-    chmod 644 /etc/apt/keyrings/llvm-snapshot.gpg /etc/apt/sources.list.d/llvm18.list && \
-    apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
+# Install dependencies
+RUN apt-get update && apt-get install -y --allow-unauthenticated \
+    apt-utils \
+    automake \
+    bison \
     build-essential \
+    ca-certificates \
     cmake \
-    clang-format-18 \
+    curl \
     doxygen \
+    flex \
+    g++ \
     gdb \
+    gfortran \
     git \
     git-lfs \
-    half \
+    gnupg2 \
     lbzip2 \
     lcov \
+    libegl1-mesa-dev \
     libncurses5-dev \
-    stunnel \
+    libnuma-dev \
+    libtool \
+    ninja-build \
+    patchelf \
     pkg-config \
     python3-dev \
     python3-pip \
     python3-venv \
     redis \
-    rocblas-dev \
-    rocm-developer-tools \
-    rocm-llvm-dev \
-    rocrand-dev \
     rpm \
+    rsync \
     software-properties-common \
-    dvc && \
+    stunnel \
+    sudo \
+    texinfo \
+    unzip \
+    vim \
+    wget \
+    xxd 
+    
+# Install DVC
+RUN mkdir -p /etc/apt/keyrings && \
+    wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | sudo tee /etc/apt/sources.list.d/dvc.list && \
+    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
+    apt-get update && apt-get install -y dvc && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/* &&\
-    rm -rf amdgpu-install* && \
-# Remove unnecessary rocm components that take a lot of space
-    apt-get remove -y miopen-hip
-
-# Setup ubsan environment to printstacktrace
-ENV UBSAN_OPTIONS=print_stacktrace=1
-
-ENV LC_ALL=C.UTF-8
-ENV LANG=C.UTF-8
-
-# Add requirements files
-ADD ${PROJ}/rbuild.ini /rbuild.ini
-ADD ${PROJ}/requirements.txt /requirements.txt
-ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
-ADD ${PROJ}/docs/sphinx/requirements.txt /doc-requirements.txt
+    rm -rf /var/lib/apt/lists/* 
 
 # Install an init system
-RUN wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
-    dpkg -i dumb-init_*.deb && rm dumb-init_*.deb && \
-# Install cget && rbuild
-    pip3 install https://github.com/pfultz2/cget/archive/a426e4e5147d87ea421a3101e6a3beca541c8df8.tar.gz && \
-    pip3 install https://github.com/RadeonOpenCompute/rbuild/archive/6d78a0553babdaea8d2da5de15cbda7e869594b8.tar.gz && \
-# Add symlink to /opt/rocm
-    [ -d /opt/rocm ] || ln -sd $(realpath /opt/rocm-*) /opt/rocm && \
-# clear ccachc temp
-    rm -rf /tmp/ccache* && mkdir /tmp/ccache && \
-# Install selected Ccache commit
-    wget -O /tmp/ccache.tar.gz https://github.com/ccache/ccache/archive/${CCACHE_COMMIT}.tar.gz && \
+RUN wget -O /tmp/ccache.tar.gz https://github.com/ccache/ccache/archive/${CCACHE_COMMIT}.tar.gz && \
     tar zxvf /tmp/ccache.tar.gz -C /tmp/ && mkdir /tmp/ccache-${CCACHE_COMMIT}/build && \
     cd /tmp/ccache-${CCACHE_COMMIT}/build && \
     cmake -DZSTD_FROM_INTERNET=ON -DHIREDIS_FROM_INTERNET=ON .. && make -j install && rm -rf /tmp/* && \
     ccache -s && \
-    cd / && \
+    cd / 
+
+# Purge packages conflicting with doc-requirements
+RUN apt-get remove --purge -y python3-pyparsing python3-cryptography 
+
+# Add requirements files
+ADD miopen/docs/sphinx/requirements.txt /doc-requirements.txt
+
 # Install doc requirements
-    pip3 install -r /doc-requirements.txt && \
-# Composable Kernel requires this version cmake
-    pip3 install --upgrade cmake==3.27.5 && \
+RUN pip3 install --break-system-packages -r /doc-requirements.txt && \
+# Install an init system
+    wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
+    dpkg -i dumb-init_*.deb && rm dumb-init_*.deb && \
+# Install cget && rbuild
+    pip3 install --break-system-packages https://github.com/pfultz2/cget/archive/b5dd36cafa2804e6146c5021eb2469c4b2d3ad42.tar.gz && \
+    pip3 install --break-system-packages https://github.com/RadeonOpenCompute/rbuild/archive/c33b1a7e74ae7f72379364b523f73d30fd4d765c.tar.gz && \
 # groupadd render && video
     groupadd -f render && \
     groupadd -f video && \
     usermod -a -G render,video root
 
-# Make sure /opt/rocm is in the paths
-ENV PATH="/opt/rocm:${PATH}"
+# ========================================================================================
+# Build from source stage - clones and builds projects from TheRock that MIOpen depends on
+# with the exception of CK and external MIOpen deps which are built separately
+# ========================================================================================
+FROM base AS build_therock
 
-ADD ${PROJ}/script/redis-cli.conf /redis-cli.conf
-ADD ${PROJ}/script/sccache_wrapper.sh /sccache_wrapper.sh
+ARG THEROCK_ASIC=gfx90a
+ARG THEROCK_GIT_HASH=default
+ARG THEROCK_BUILD_MODE=Release
+ARG THEROCK_BUILD_PRESET=linux-release-package
+ARG BUILD_JOBS=0
+ARG ROCM_LIBRARIES_REF=default
+ARG ROCM_SYSTEMS_REF=default
+
+ARG USE_FIN="OFF"
+ARG PREFIX=/usr/local
+
+RUN git config --global user.email "docker@build.local" && \
+    git config --global user.name "Docker Build"
+
+RUN git clone https://github.com/ROCm/TheRock.git
+
+WORKDIR /TheRock
+
+RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
+        echo "Checking out specific hash: $THEROCK_GIT_HASH"; \
+        git fetch; \
+        git checkout $THEROCK_GIT_HASH; \
+    else \
+        echo "Using default branch"; \
+    fi
+
+# Update rocm-libraries submodule to specific ref if provided
+# we need to commit the change so that fetch_sources.py does not overwrite the change
+RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
+        echo "Updating rocm-libraries submodule to: $ROCM_LIBRARIES_REF"; \
+        git submodule update --init rocm-libraries && \
+        cd rocm-libraries && \
+        git fetch origin && \
+        git checkout $ROCM_LIBRARIES_REF && \
+        cd .. && \
+        git add rocm-libraries && \
+        git commit -m "Update rocm-libraries submodule to $ROCM_LIBRARIES_REF"; \
+    fi
+
+# Update rocm-systems submodule to specific ref if provided
+# we need to commit the change so that fetch_sources.py does not overwrite the change
+RUN if [ "$ROCM_SYSTEMS_REF" != "default" ]; then \
+        echo "Updating rocm-systems submodule to: $ROCM_SYSTEMS_REF"; \
+        git submodule update --init rocm-systems && \
+        cd rocm-systems && \
+        git fetch origin && \
+        git checkout $ROCM_SYSTEMS_REF && \
+        cd .. && \
+        git add rocm-systems && \
+        git commit -m "Update rocm-systems submodule to $ROCM_SYSTEMS_REF"; \
+    fi
+
+RUN python3 -m venv /opt/venv
+
+# Adding the venv into the path activates the python virtual env in a way.  We cant source it the
+# normal way due to how dockerfiles run
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install -r requirements.txt
+
+RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
+    git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
+    python ./build_tools/fetch_sources.py
+
+RUN mkdir build
+WORKDIR /TheRock/build
+
+RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
+        echo "Building with TheRock preset: $THEROCK_BUILD_PRESET"; \
+        cmake .. \
+            --preset=$THEROCK_BUILD_PRESET \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+            -DTHEROCK_ENABLE_ALL=OFF \
+            -DTHEROCK_ENABLE_PROFILER=ON \
+            -DTHEROCK_ENABLE_SYSDEPS=ON \
+            -DTHEROCK_ENABLE_BASE=ON \
+            -DTHEROCK_ENABLE_COMPILER=ON \
+            -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+            -DTHEROCK_ENABLE_HOST_BLAS=ON \
+            -DTHEROCK_ENABLE_HOST_SUITE_SPARSE=ON \
+            -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            -DTHEROCK_ENABLE_OCL_RUNTIME=ON \
+            -DTHEROCK_ENABLE_ROCPROFV3=ON \
+            -DTHEROCK_ENABLE_ROCPROFILER_COMPUTE=ON \
+            -DTHEROCK_ENABLE_BLAS=ON \
+            -DTHEROCK_ENABLE_RAND=ON \
+            -DTHEROCK_ENABLE_ROCPROFSYS=ON \
+            -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
+            -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
+            -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
+    else \
+        echo "Building with CMake build type: $THEROCK_BUILD_MODE"; \
+        cmake .. \
+            -GNinja \
+            -DCMAKE_BUILD_TYPE=$THEROCK_BUILD_MODE \
+            -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+            -DTHEROCK_ENABLE_ALL=OFF \
+            -DTHEROCK_ENABLE_PROFILER=ON \
+            -DTHEROCK_ENABLE_SYSDEPS=ON \
+            -DTHEROCK_ENABLE_BASE=ON \
+            -DTHEROCK_ENABLE_COMPILER=ON \
+            -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+            -DTHEROCK_ENABLE_HOST_BLAS=ON \
+            -DTHEROCK_ENABLE_HOST_SUITE_SPARSE=ON \
+            -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+            -DTHEROCK_ENABLE_OCL_RUNTIME=ON \
+            -DTHEROCK_ENABLE_ROCPROFV3=ON \
+            -DTHEROCK_ENABLE_ROCPROFILER_COMPUTE=ON \
+            -DTHEROCK_ENABLE_BLAS=ON \
+            -DTHEROCK_ENABLE_RAND=ON \
+            -DTHEROCK_ENABLE_ROCPROFSYS=ON \
+            -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
+            -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
+            -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
+    fi
+
+RUN if [ "$BUILD_JOBS" = "0" ]; then \
+        cmake --build .; \
+    else \
+        echo "Building with $BUILD_JOBS parallel jobs"; \
+        cmake --build . -j$BUILD_JOBS; \
+    fi && \
+    cmake --install .
+
+# ================================================================================
+# Build and install other 3rd party deps 
+# ================================================================================
+FROM build_therock AS miopen_deps
+ARG PREFIX="/usr/local"
+ARG USE_FIN="OFF"
+
+# Add requirements files
+ADD miopen/rbuild.ini /rbuild.ini
+ADD miopen/requirements.txt /requirements.txt
+ADD miopen/dev-requirements.txt /dev-requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 # Composable Kernel install separated from rbuild 
-RUN sed -i '/composablekernel/d' /requirements.txt && \
+# Remove components that are already built by TheRock.
+RUN cd / && \
+    sed -i '/composablekernel/d; /half/d; /nlohmann/d' /requirements.txt && \
     if [ "$USE_FIN" = "ON" ]; then \
-        rbuild prepare -s fin -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
+        rbuild prepare -s fin -d ${PREFIX} -DGPU_ARCHS="${THEROCK_ASIC}"; \
     else \
-        rbuild prepare -s develop -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
-    fi && \
-    ccache -s
+        rbuild prepare -s develop -d ${PREFIX} -DGPU_ARCHS="${THEROCK_ASIC}"; \
+    fi
+
+# ============================================================================
+# Build and install CK
+# ============================================================================
+ADD miopen/script/redis-cli.conf /redis-cli.conf
+ADD miopen/script/sccache_wrapper.sh /sccache_wrapper.sh
+
+## Sccache binary built from source for ROCm, only install if MIOPEN_SCCACHE is defined
+ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
+ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
+ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
+ARG MIOPEN_SCCACHE=""
+ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
+ARG COMPILER_LAUNCHER=""
+ARG MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER="MiOpen-Docker-CK"
+ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
+ARG THEROCK_ASIC=""
+ENV THEROCK_ASIC=${THEROCK_ASIC}
 
 # Copy Composable Kernel
-COPY composablekernel /composable_kernel
+COPY /composablekernel /composable_kernel
 
 # Build and install Composable Kernel
-RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
+RUN set -x && \
+    echo Building for GPU Archs: ${THEROCK_ASIC} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
-    mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-    curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
-    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
-    export ROCM_PATH=/opt/rocm && \
-    export SCCACHE_ENABLED=true && \
-    export SCCACHE_LOG_LEVEL=debug && \
-    export SCCACHE_IDLE_TIMEOUT=14400 && \
-    export COMPILERS_HASH_DIR=/tmp/.sccache && \
-    export SCCACHE_BIN=/usr/local/.cargo/bin/sccache && \
-    export SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file && \
-    export SCCACHE_REDIS="redis://$MIOPEN_SCCACHE" && \
-    echo "connect = $MIOPEN_SCCACHE" >> redis-cli.conf && \
-    export SCCACHE_C_CUSTOM_CACHE_BUSTER="${MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER}" && \
-    echo $SCCACHE_C_CUSTOM_CACHE_BUSTER && \
-    stunnel redis-cli.conf && \
-    export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
-    ./sccache_wrapper.sh --enforce_redis; \
+        mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
+        export SCCACHE_VERSION=$(curl -s "https://api.github.com/repos/mozilla/sccache/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+') && \
+        wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/latest/download/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
+        tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
+        chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache && \
+        export ROCM_PATH=/opt/rocm && \
+        export SCCACHE_ENABLED=true && \
+        export SCCACHE_LOG_LEVEL=debug && \
+        export SCCACHE_IDLE_TIMEOUT=14400 && \
+        export COMPILERS_HASH_DIR=/tmp/.sccache && \
+        export SCCACHE_BIN=${SCCACHE_INSTALL_LOCATION}/sccache && \
+        export SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file && \
+        export SCCACHE_REDIS="redis://$MIOPEN_SCCACHE" && \
+        cd / && \
+        echo "connect = $MIOPEN_SCCACHE" >> redis-cli.conf && \
+        export SCCACHE_C_CUSTOM_CACHE_BUSTER="${MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER}" && \
+        echo $SCCACHE_C_CUSTOM_CACHE_BUSTER && \
+        stunnel redis-cli.conf && \
+        export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
+        ./sccache_wrapper.sh --enforce_redis; \
     fi &&\
+    # Clear the ROCM_PATH TheRock causes HIP errors
+    unset ROCM_PATH && \
     cd /composable_kernel && \
     mkdir build && cd build && \
-    num_threads=64 && \
-    echo Building CK with ${num_threads} threads && \
-    CXX=/opt/rocm/bin/amdclang++ cmake \
-    -D CMAKE_PREFIX_PATH=/opt/rocm \
-    -D CMAKE_CXX_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
-    -D CMAKE_C_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
-    -D CMAKE_BUILD_TYPE=Release \
-    -D GPU_ARCHS=${GPU_ARCHS} \
-    -D MIOPEN_REQ_LIBS_ONLY=ON \
-    -D CMAKE_CXX_FLAGS=" -O3 " .. && \
-    make -j ${num_threads} install && \   
-    if [ "$MIOPEN_SCCACHE" != "" ]; then \
-    sccache -s; \
+    #Get the number of threads and RAM available
+    num_threads=$(nproc) && \
+    ram_gb=$(free -g | awk '/^Mem:/{print $7}') && \
+    # CK's ram req per thread is ~4 GB,
+    # so limit the number of threads accordingly
+    if [ "$num_threads" -le 0 ]; then \
+        num_threads=1; \
     fi && \
-# Remove CK source once built and installed
-    rm -rf /composable_kernel
+    if [ "$ram_gb" -lt $((num_threads * 4)) ]; then \
+        if [ "$ram_gb" -ge 4 ]; then \
+            num_threads=$((ram_gb / 4)); \
+        else \
+            num_threads=1; \
+        fi; \
+    fi && \
+    echo Building CK with ${num_threads} threads && \
+    CXX=/opt/rocm/llvm/bin/amdclang++ cmake \
+    -G Ninja \
+    -D CMAKE_PREFIX_PATH=/opt/rocm \
+    -D CMAKE_CXX_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+    -D CMAKE_HIP_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+    -D CMAKE_C_COMPILER_LAUNCHER=${COMPILER_LAUNCHER} \
+    -D CMAKE_BUILD_TYPE=Release \
+    -D GPU_TARGETS="${THEROCK_ASIC}" \
+    -D MIOPEN_REQ_LIBS_ONLY=ON \
+    -D CMAKE_CXX_FLAGS=" -O3 " .. && \    
+    ninja -j ${num_threads} install && \
+    if [ "$MIOPEN_SCCACHE" != "" ]; then \
+        sccache -s; \
+    fi
+
+# ============================================================================
+# Common miopen development environment
+# ============================================================================
+FROM base AS miopen
+
+COPY --from=miopen_deps /opt/rocm /opt/rocm
+COPY --from=miopen_deps /usr/local /usr/local
+
+# Install explicit version of tools that are supported for miopen development
+# (clang-format, clang-tidy)
+RUN apt-get update && apt-get install -y \
+    clang-format-18 \
+    clang-tidy-20 \
+    clang-tools-20 \
+    llvm-20 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Workaround for broken clang-tidy in TheRock
+RUN mv /opt/rocm/llvm/bin/clang-tidy /opt/rocm/llvm/bin/clang-tidy.disabled || true
+RUN ln -sf /usr/bin/clang-tidy-20 /opt/rocm/llvm/bin/clang-tidy
+
+# Use update-alternatives to set default versions
+RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
+RUN update-alternatives --install /opt/rocm/llvm/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
+RUN update-alternatives --set clang-tidy /usr/bin/clang-tidy-20
+
+# Ensure the dynamic linker can find ROCm libraries by adding /opt/rocm/lib to the linker cache. 
+RUN printf '%s\n' /opt/rocm/lib > /etc/ld.so.conf.d/rocm.conf && ldconfig
+
+ENV HIP_PLATFORM=amd
+ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
+ENV ROCM_PATH=/opt/rocm
+
+WORKDIR /workspace

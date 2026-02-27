@@ -21,6 +21,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 #include "convolution_fwd_attributes_generated.h"
 #include "convolution_wrw_attributes_generated.h"
 #include "data_types_generated.h"
+#include "layernorm_attributes_generated.h"
 #include "matmul_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "sdpa_attributes_generated.h"
@@ -53,12 +54,13 @@ enum class NodeAttributes : uint8_t {
   ConvolutionWrwAttributes = 7,
   BatchnormInferenceAttributesVarianceExt = 8,
   MatmulAttributes = 9,
-  SdpaAttributes = 10,
+  LayernormAttributes = 10,
+  SdpaAttributes = 11,
   MIN = NONE,
   MAX = SdpaAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[11] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[12] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -70,13 +72,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[11] {
     NodeAttributes::ConvolutionWrwAttributes,
     NodeAttributes::BatchnormInferenceAttributesVarianceExt,
     NodeAttributes::MatmulAttributes,
+    NodeAttributes::LayernormAttributes,
     NodeAttributes::SdpaAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[12] = {
+  static const char * const names[13] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -87,6 +90,7 @@ inline const char * const *EnumNamesNodeAttributes() {
     "ConvolutionWrwAttributes",
     "BatchnormInferenceAttributesVarianceExt",
     "MatmulAttributes",
+    "LayernormAttributes",
     "SdpaAttributes",
     nullptr
   };
@@ -139,6 +143,10 @@ template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::MatmulAttr
   static const NodeAttributes enum_value = NodeAttributes::MatmulAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::LayernormAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::LayernormAttributes;
+};
+
 template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::SdpaAttributes> {
   static const NodeAttributes enum_value = NodeAttributes::SdpaAttributes;
 };
@@ -181,6 +189,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::Batch
 
 template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::MatmulAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::MatmulAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::LayernormAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::LayernormAttributes;
 };
 
 template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::SdpaAttributesT> {
@@ -289,6 +301,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::MatmulAttributes ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value) : nullptr;
   }
+  hipdnn_data_sdk::data_objects::LayernormAttributesT *AsLayernormAttributes() {
+    return type == NodeAttributes::LayernormAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::LayernormAttributesT *AsLayernormAttributes() const {
+    return type == NodeAttributes::LayernormAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value) : nullptr;
+  }
   hipdnn_data_sdk::data_objects::SdpaAttributesT *AsSdpaAttributes() {
     return type == NodeAttributes::SdpaAttributes ?
       reinterpret_cast<hipdnn_data_sdk::data_objects::SdpaAttributesT *>(value) : nullptr;
@@ -341,6 +361,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::MatmulAttributes: {
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::LayernormAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(rhs.value));
     }
     case NodeAttributes::SdpaAttributes: {
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributesT *>(lhs.value)) ==
@@ -421,6 +445,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::MatmulAttributes *attributes_as_MatmulAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes ? static_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_data_sdk::data_objects::LayernormAttributes *attributes_as_LayernormAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(attributes()) : nullptr;
+  }
   const hipdnn_data_sdk::data_objects::SdpaAttributes *attributes_as_SdpaAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes ? static_cast<const hipdnn_data_sdk::data_objects::SdpaAttributes *>(attributes()) : nullptr;
   }
@@ -476,6 +503,10 @@ template<> inline const hipdnn_data_sdk::data_objects::BatchnormInferenceAttribu
 
 template<> inline const hipdnn_data_sdk::data_objects::MatmulAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::MatmulAttributes>() const {
   return attributes_as_MatmulAttributes();
+}
+
+template<> inline const hipdnn_data_sdk::data_objects::LayernormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::LayernormAttributes>() const {
+  return attributes_as_LayernormAttributes();
 }
 
 template<> inline const hipdnn_data_sdk::data_objects::SdpaAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::SdpaAttributes>() const {
@@ -884,6 +915,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::LayernormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     case NodeAttributes::SdpaAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributes *>(obj);
       return verifier.VerifyTable(ptr);
@@ -943,6 +978,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::LayernormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     case NodeAttributes::SdpaAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributes *>(obj);
       return ptr->UnPack(resolver);
@@ -990,6 +1029,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value);
       return CreateMatmulAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::LayernormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value);
+      return CreateLayernormAttributes(_fbb, ptr, _rehasher).Union();
+    }
     case NodeAttributes::SdpaAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributesT *>(value);
       return CreateSdpaAttributes(_fbb, ptr, _rehasher).Union();
@@ -1034,6 +1077,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::MatmulAttributes: {
       value = new hipdnn_data_sdk::data_objects::MatmulAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::MatmulAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::LayernormAttributes: {
+      value = new hipdnn_data_sdk::data_objects::LayernormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(u.value));
       break;
     }
     case NodeAttributes::SdpaAttributes: {
@@ -1089,6 +1136,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::MatmulAttributes: {
       auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::LayernormAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value);
       delete ptr;
       break;
     }
