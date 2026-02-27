@@ -8,6 +8,10 @@ set(TEST_NAME "test_ck_tile_fmha")
 
 function(add_gtest_fwd test_group)
     set(V_TYPES "fp16" "bf16" "fp8bf16" "fp32" "mxfp8" "mxfp4")
+    if(GPU_TARGETS MATCHES "gfx908|gfx90a" AND NOT CK_USE_FP8_ON_UNSUPPORTED_ARCH)
+        # fp8 instances are built for all gfx9, do not test on archs without hardware support
+        list(REMOVE_ITEM V_TYPES "fp8bf16")
+    endif()
     set(CPP_TYPE_fp16 "FmhaFwdFp16")
     set(CPP_TYPE_bf16 "FmhaFwdBf16")
     set(CPP_TYPE_fp8bf16 "FmhaFwdFp8Bf16")

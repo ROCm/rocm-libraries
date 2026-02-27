@@ -53,13 +53,16 @@ namespace TensileLite
         , deviceName(name)
         , skDynamicGrid(getSKDynamicGrid())
         , skDynamicWGM(getSKDynamicWGM())
-        , fixedWGM(getFixedWGM())
-        , fixedWGMXCC(getFixedWGMXCC())
-        , fixedWGMXCCCHUNK(getFixedWGMXCCCHUNK())
         , skMaxCUs(getSKMaxCUs())
         , skGridMultiplier(getSKGridMultiplier())
         , skFixedGrid(getSKFixedGrid())
         , skFullTiles(getSKFullTiles())
+        , fixedWGM(getFixedWGM())
+        , fixedWGMXCC(getFixedWGMXCC())
+        , fixedWGMXCCCHUNK(getFixedWGMXCCCHUNK())
+        , fixedStaggerUMapping(getFixedStaggerUMapping())
+        , fixedStaggerU(getFixedStaggerU())
+        , fixedStaggerUStrideShift(getFixedStaggerUStrideShift())
     {
     }
 
