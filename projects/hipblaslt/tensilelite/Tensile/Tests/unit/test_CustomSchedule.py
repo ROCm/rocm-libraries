@@ -24,7 +24,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
-from Tensile.Components.CMSValidator import isValid, ValidatorPass
+from Tensile.Components.CMSValidator import isValid, SchedulePosition, ValidatorPass
 from Tensile.Common import IsaVersion
 
 # Helper to create a mock data type
@@ -1220,3 +1220,59 @@ class TestCustomScheduleValidation:
         assert status == True
         assert message == ""
 
+class TestSchedulePositionOrdering:
+    """Test that SchedulePosition comparison handles vmfma_index=-1 correctly.
+
+    vmfma_index=-1 is a wrap-around position: it represents instructions
+    scheduled between iterations (after the last VMFMA of the previous
+    iteration, before the first VMFMA of the current iteration). With
+    explicit loop_index tracking, -1 naturally sorts before 0 within the
+    same loop via integer comparison.
+    """
+
+    def test_neg1_after_last_vmfma_same_loop(self):
+        """vmfma=-1 in loop 0 must be < vmfma=0 in loop 0."""
+        a = SchedulePosition(loop_index=0, vmfma_index=-1, sub_index=0)
+        b = SchedulePosition(loop_index=0, vmfma_index=0, sub_index=0)
+        assert a < b
+        assert b > a
+
+    def test_neg1_loop1_after_last_vmfma_loop0(self):
+        """vmfma=-1 in loop 1 must be > vmfma=num_vmfma-1 in loop 0."""
+        a = SchedulePosition(loop_index=1, vmfma_index=-1, sub_index=0)
+        b = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
+        assert a > b
+        assert b < a
+
+    def test_neg1_before_next_loop_vmfma0(self):
+        """vmfma=-1 in loop 0 must be < vmfma=0 in loop 1."""
+        a = SchedulePosition(loop_index=0, vmfma_index=-1, sub_index=0)
+        b = SchedulePosition(loop_index=1, vmfma_index=0, sub_index=0)
+        assert a < b
+        assert b > a
+
+    def test_equal_positions(self):
+        """Identical positions must be equal."""
+        a = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
+        b = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
+        assert a == b
+        assert not (a != b)
+        assert not (a < b)
+        assert not (a > b)
+        assert a <= b
+        assert a >= b
+
+    def test_not_equal_different_sub_index(self):
+        """Same (loop, vmfma) but different sub_index must not be equal."""
+        a = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=0)
+        b = SchedulePosition(loop_index=0, vmfma_index=3, sub_index=1)
+        assert a != b
+        assert a < b
+
+    def test_sub_index_ordering(self):
+        """Within same (loop, vmfma), sub_index determines order."""
+        a = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=0)
+        b = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=5)
+        c = SchedulePosition(loop_index=0, vmfma_index=2, sub_index=10)
+        assert a < b < c
+        assert c > b > a
