@@ -872,24 +872,36 @@ int main(int argc, const char* argv[])
                                 TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
 
+                                if(warmupInvocations > 0)
                                 {
-                                    ScopedTimer timer("warmup_runs");
-                                    listeners.preWarmup();
-                                    for(int i = 0; i < warmupInvocations; i++)
                                     {
-                                        size_t kIdx = i % kernels.size();
-                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
+                                        ScopedTimer timer("warmup_runs");
+                                        listeners.preWarmup();
+                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[0],
                                                                             stream,
-                                                                            warmupStartEvents[i],
-                                                                            warmupStopEvents[i]));
+                                                                            warmupStartEvents[0],
+                                                                            warmupStopEvents[0]));
                                     }
-                                    listeners.postWarmup(warmupStartEvents, warmupStopEvents, stream);
-                                }
 
-                                {
-                                    ScopedTimer timer("validate_warmups");
-                                    listeners.validateWarmups(
-                                        inputs, warmupStartEvents, warmupStopEvents);
+                                    {
+                                        ScopedTimer timer("validate_warmups");
+                                        listeners.validateWarmups(
+                                            inputs, warmupStartEvents, warmupStopEvents);
+                                    }
+
+                                    {
+                                        ScopedTimer timer("warmup_runs");
+                                        for(int i = 1; i < warmupInvocations; i++)
+                                        {
+                                            size_t kIdx = i % kernels.size();
+                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
+                                                                                stream,
+                                                                                warmupStartEvents[i],
+                                                                                warmupStopEvents[i]));
+                                        }
+                                        listeners.postWarmup(
+                                            warmupStartEvents, warmupStopEvents, stream);
+                                    }
                                 }
 
                                 size_t syncs      = listeners.numSyncs();
