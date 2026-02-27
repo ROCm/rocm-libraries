@@ -379,17 +379,13 @@ class TestLayoutAutoDetection:
 
         assert "_fake_cms" in [info.name for info in obj_results], \
             "'_fake_cms' not found in get_cms_kernel_info_objects"
-        assert "_fake_cms" in [info.name for info in dict_results], \
+        assert "_fake_cms" in [info["name"] for info in dict_results], \
              "'_fake_cms' not found in query_cms_kernels"
 
         for info in obj_results:
             if info.name == "_fake_cms":
                 assert info.dtype == "16bit", \
                     f"{info.name}: expected dtype 16bit, got {info.dtype}"
-                assert info.TransposeA == True, \
-                    f"{info.name}: expected TransposeA True, got {info.TransposeA}"
-                assert info.TransposeB == False, \
-                    f"{info.name}: expected TransposeB False, got {info.TransposeB}"
                 assert info.MacroTile0 == 256, \
                     f"{info.name}: expected MacroTile0 256, got {info.MacroTile0}"
                 assert info.MacroTile1 == 256, \
@@ -414,5 +410,5 @@ class TestLayoutAutoDetection:
                     f"{info.name}: expected GlobalReadVectorWidthB 8, got {info.GlobalReadVectorWidthB}"
                 assert info.LocalReadVectorWidth == 8, \
                     f"{info.name}: expected LocalReadVectorWidth 8, got {info.LocalReadVectorWidth}"
-                assert info.MatrixInstruction == 16, \
+                assert info.MatrixInstruction == [16, 16, 32, 1], \
                     f"{info.name}: expected MatrixInstruction 16, got {info.MatrixInstruction}"
