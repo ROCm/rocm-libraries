@@ -24,12 +24,18 @@
 
 #include "primbench.hpp"
 
-#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT) executor.queue<warp_sort_benchmark<K, BS, WS, IPT>>();
+#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT)                  \
+    if(is_warp_size_supported(WS, device_id))                  \
+    {                                                          \
+        executor.queue<warp_sort_benchmark<K, BS, WS, IPT>>(); \
+    }
 
-#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT) \
-    executor.queue<warp_sort_benchmark<K, BS, WS, IPT, V>>();
+#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)             \
+    if(is_warp_size_supported(WS, device_id))                     \
+    {                                                             \
+        executor.queue<warp_sort_benchmark<K, BS, WS, IPT, V>>(); \
+    }
 
-// clang-format off
 #define BENCHMARK_TYPE(type)                \
     CREATE_SORT_BENCHMARK(type, 64, 64, 1)  \
     CREATE_SORT_BENCHMARK(type, 64, 64, 2)  \
@@ -45,9 +51,7 @@
     CREATE_SORT_BENCHMARK(type, 64, 16, 1)  \
     CREATE_SORT_BENCHMARK(type, 64, 16, 2)  \
     CREATE_SORT_BENCHMARK(type, 64, 16, 4)
-// clang-format on
 
-// clang-format off
 #define BENCHMARK_KEY_TYPE(type, value)                 \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 1)  \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64, 2)  \
@@ -55,7 +59,6 @@
     CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 1) \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 2) \
     CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64, 4)
-// clang-format on
 
 int main(int argc, char* argv[])
 {
@@ -63,6 +66,9 @@ int main(int argc, char* argv[])
     settings.size                    = 128 * primbench::MiB;
     settings.noise_tolerance_percent = 2;
     primbench::executor executor(argc, argv, settings);
+
+    int device_id;
+    HIP_CHECK(hipGetDevice(&device_id));
 
     BENCHMARK_TYPE(int32_t)
     BENCHMARK_TYPE(float)

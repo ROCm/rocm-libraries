@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>
+#include <rocRoller/Scheduling/LDSModel.hpp>
 #include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
@@ -29,11 +30,6 @@ namespace rocRoller
             void modify(Instruction& inst) const;
 
             void observe(Instruction const& inst);
-
-            constexpr static bool required(GPUArchitectureTarget const& target)
-            {
-                return true;
-            }
 
             static Scheduling::Weights getWeights(ContextPtr ctx);
 
@@ -71,6 +67,11 @@ namespace rocRoller
 
             bool isMEMInstruction(Instruction const& inst) const override;
             int  getWait(Instruction const& inst) const override;
+
+            constexpr static bool required(GPUArchitectureTarget const& target)
+            {
+                return true;
+            }
         };
 
         class DSMEMObserver : public MEMObserver<DSMEMObserver>
@@ -80,6 +81,8 @@ namespace rocRoller
 
             bool isMEMInstruction(Instruction const& inst) const override;
             int  getWait(Instruction const& inst) const override;
+
+            static bool runtimeRequired(ContextPtr const& ctx);
         };
 
         template <typename Derived>
@@ -87,8 +90,26 @@ namespace rocRoller
         {
         }
 
+        struct WeightlessDSMemObserver
+        {
+            WeightlessDSMemObserver(ContextPtr ctx);
+
+            InstructionStatus peek(Instruction const& inst) const;
+
+            void modify(Instruction& inst) const;
+
+            void observe(Instruction const& inst);
+
+            static bool runtimeRequired(ContextPtr const& ctx);
+
+        private:
+            std::weak_ptr<Context>                     m_context;
+            mutable std::optional<LDSModel::LDSModule> m_scheduler;
+        };
+
         static_assert(CObserverConst<VMEMObserver>);
-        static_assert(CObserverConst<DSMEMObserver>);
+        static_assert(CObserverRuntimeWithContext<DSMEMObserver>);
+        static_assert(CObserverRuntimeWithContext<WeightlessDSMemObserver>);
     }
 }
 

@@ -1,5 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file KnobConstraint.hpp
+ * @brief Constraint classes for validating knob values
+ *
+ * This file defines constraint interfaces and implementations used to validate
+ * knob settings. Constraints specify valid ranges or allowed values for knobs.
+ */
 
 #pragma once
 
@@ -12,23 +20,53 @@
 namespace hipdnn_frontend
 {
 
-// Abstract constraint interface
+/**
+ * @class IConstraint
+ * @brief Abstract interface for knob value constraints
+ *
+ * IConstraint defines the interface for validating knob settings. Different
+ * constraint types (integer, float, string) implement this interface.
+ *
+ * @see IntConstraint, FloatConstraint, StringConstraint
+ */
 class IConstraint
 {
 public:
+    /// @brief Virtual destructor
     virtual ~IConstraint() = default;
 
-    // Validate a knob setting against this constraint
+    /**
+     * @brief Validate a knob setting against this constraint
+     * @param setting The KnobSetting to validate
+     * @return Error indicating success or describing the validation failure
+     */
     virtual Error validateKnobSetting(const KnobSetting& setting) const = 0;
 
-    // String representation for logging
+    /**
+     * @brief Get a string representation of this constraint
+     * @return Human-readable string for debugging/logging
+     */
     virtual std::string toString() const = 0;
 };
 
-// Integer constraint implementation
+/**
+ * @class IntConstraint
+ * @brief Constraint for integer-valued knobs
+ *
+ * Validates that integer knob values are within a specified range and/or
+ * match allowed values. Supports min/max bounds, step increments, and
+ * explicit allowed value lists.
+ */
 class IntConstraint : public IConstraint
 {
 public:
+    /**
+     * @brief Construct an IntConstraint
+     * @param minValue Minimum allowed value
+     * @param maxValue Maximum allowed value
+     * @param step Step increment (value must be minValue + n*step)
+     * @param validValues Explicit set of allowed values (if non-empty, overrides range)
+     */
     IntConstraint(int64_t minValue,
                   int64_t maxValue,
                   int64_t step = 1,
@@ -98,34 +136,51 @@ public:
         return oss.str();
     }
 
+    /// @brief Get the minimum allowed value
     int64_t getMinValue() const
     {
         return _minValue;
     }
+
+    /// @brief Get the maximum allowed value
     int64_t getMaxValue() const
     {
         return _maxValue;
     }
+
+    /// @brief Get the step increment
     int64_t getStep() const
     {
         return _step;
     }
+
+    /// @brief Get the set of explicitly allowed values
     const std::unordered_set<int64_t>& getValidValues() const
     {
         return _validValues;
     }
 
 private:
-    int64_t _minValue;
-    int64_t _maxValue;
-    int64_t _step;
-    std::unordered_set<int64_t> _validValues;
+    int64_t _minValue; ///< Minimum allowed value
+    int64_t _maxValue; ///< Maximum allowed value
+    int64_t _step; ///< Step increment
+    std::unordered_set<int64_t> _validValues; ///< Explicit allowed values
 };
 
-// Float constraint implementation
+/**
+ * @class FloatConstraint
+ * @brief Constraint for floating-point valued knobs
+ *
+ * Validates that float knob values are within a specified range.
+ */
 class FloatConstraint : public IConstraint
 {
 public:
+    /**
+     * @brief Construct a FloatConstraint
+     * @param minValue Minimum allowed value
+     * @param maxValue Maximum allowed value
+     */
     FloatConstraint(double minValue, double maxValue)
         : _minValue(minValue)
         , _maxValue(maxValue)
@@ -159,24 +214,38 @@ public:
         return oss.str();
     }
 
+    /// @brief Get the minimum allowed value
     double getMinValue() const
     {
         return _minValue;
     }
+
+    /// @brief Get the maximum allowed value
     double getMaxValue() const
     {
         return _maxValue;
     }
 
 private:
-    double _minValue;
-    double _maxValue;
+    double _minValue; ///< Minimum allowed value
+    double _maxValue; ///< Maximum allowed value
 };
 
-// String constraint implementation
+/**
+ * @class StringConstraint
+ * @brief Constraint for string-valued knobs
+ *
+ * Validates that string knob values have an acceptable length and/or
+ * match allowed values.
+ */
 class StringConstraint : public IConstraint
 {
 public:
+    /**
+     * @brief Construct a StringConstraint
+     * @param maxLength Maximum allowed string length
+     * @param validValues Explicit set of allowed strings (if non-empty, overrides length check)
+     */
     StringConstraint(int32_t maxLength, std::unordered_set<std::string> validValues = {})
         : _maxLength(maxLength)
         , _validValues(std::move(validValues))
@@ -235,18 +304,21 @@ public:
         return oss.str();
     }
 
+    /// @brief Get the maximum allowed string length
     int32_t getMaxLength() const
     {
         return _maxLength;
     }
+
+    /// @brief Get the set of explicitly allowed strings
     const std::unordered_set<std::string>& getValidValues() const
     {
         return _validValues;
     }
 
 private:
-    int32_t _maxLength;
-    std::unordered_set<std::string> _validValues;
+    int32_t _maxLength; ///< Maximum string length
+    std::unordered_set<std::string> _validValues; ///< Explicit allowed values
 };
 
 // Empty constraint implementation - represents an unconstrained knob
