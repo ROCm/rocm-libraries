@@ -1677,6 +1677,73 @@ def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
 
         syncCode = syncTable[1::2]
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    elif isNN(kernel) and not useLDSTr and TLDS==1:
+        snops = []
+        syncs = SyncSchedule()
+        syncs.add(-1, dscnt=4, comment="Wait for prior local read local write")
+        syncs.add(2, dscnt=3, comment="Wait for prior local read local write")
+        syncs.add(8, dscnt=6, comment="Wait for partial LRA0")
+        syncs.add(16, dscnt=0, barrier=True, comment="Wait for LRA0 to complete before starting LRB0+GRA")
+        syncs.add(23, dscnt=0, vlcnt=3, barrier=True, comment="Wait for LRB0+GRA")
+
+        snopIdxs = [1, 25]
+        snops = [[x, SNop(1, comment="")] for x in snopIdxs]
+
+        lra0 = [0,0,1,1,2,2,3,3,4,5,5,6,6,7,7,8,8,9,10,11,12,13,14,15]
+
+        # Issue LRB0+GRA after LRA0 completes.
+        lrb0 = [16, 17, 18, 19, 20, 21, 22, 22]
+        grA =  [18, 18, 20, 20, 21, 21]
+
+        # Issue LRA1+GRB after LRB0+GRA complete.
+        lra1 = [24,24, 25,25, 26,26, 27,27, 28, 29,29, 30,30, 31,31, 32,32, 33,34,35,36,37,38,39]
+        grB  = [24,24,26,26,28,28,30,30,32,32,36,36,38,38,40,40]
+        lrb1 = [39,40,41,42,43,44,45,46]
+
+        packA1 = [
+            -1,-1,-1,-1,-1,-1,
+            0,0,0,0,
+            1,1,
+        ]
+        packA0 = [
+            23,23,23,23,23,23,
+            24,24,24,24,
+            25,25,
+        ]
+
+        # GRIncs should be ordered AFTER LRs.
+        grIncA = [0,1,2,3,4,5,6,7,8]
+        grIncB = [9,10,11,12,13,14,15,16,17]
+
+        lwsa = [46]
+        lwsb = [46]
+        lrsa = [22]
+        lrsb = [22]
+        num_gr = (len(grA) + len(grB)) // 2
+        optSchedule = {
+            'SYNC'   : [syncs.get_indicies()],
+            'LRA0'   : [lra0],
+            'LRA1'   : [lra1],
+            'PackA0' : [packA0],
+            'PackA1' : [packA1],
+            'LRB0'   : [lrb0],
+            'LRB1'   : [lrb1],
+            'GRIncA' : [grIncA],
+            'GRIncB' : [grIncB],
+            'GRA'    : [grA],
+            'GRB'    : [grB],
+            'LRSA'   : [lrsa],
+            'LRSB'   : [lrsb],
+            'LWSA'   : [lwsa],
+            'LWSB'   : [lwsb],
+            'LCC'    : [[47, 47]],
+        }
+        nllshift = nglshift = num_gr
+        if snops:
+            optSchedule['SNOP'] = [[s[0] for s in snops]]
+            snopCode = [s[1] for s in snops]
+
+        opt1 = ScheduleInfo(1, 48, optSchedule=optSchedule, syncCode=syncs.get_code(), nglshift=nglshift, nllshift=nllshift, snopCode=snopCode)
     else:
         return False, None
 
@@ -5491,3 +5558,56 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     return True, opt1
 
+
+@RegisterSchedule(
+    tile_config=TileConfig(224, 320, 64, 2, 1, 1, False, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_224x320x64_16bit(kernel, useLDSTr, TLDS):
+    numMfma = 140
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    kernel["MfmaInitCVgprs"] = True
+    kernel["SwapGlobalReadOrder"] = False
+
+    if isTN(kernel) and useLDSTr and TLDS==1:
+        syncTable = [
+            -1, SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=9 newLW=0 newLR=9 for iteration == 0"),
+            6, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+            25, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LR0 before DTL"),
+            25, SBarrier(comment=""),
+            78, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for prev iter GR before LRA1 and LRB1"),
+            78, SBarrier(comment=""),
+        ]
+        optSchedule = {
+            'SYNC': [syncTable[::2]],
+            'GRIncA': [[0, 1, 2, 3, 4, 5, 6, 7, 8]], # 9
+            'GRIncB': [[9, 10, 11, 12, 13, 14, 15, 16, 17]], # 9
+
+            'LRA0': [[0, 3, 6, 9, 12, 15, 18]], # 7
+            'LRB0': [[1, 2, 4, 5, 7, 8, 10, 11, 13, 17]], # 10
+
+            'GRA': [[25,25, 30,30, 36,36, 42,42, 48,48, 54,54, 60,60]], # 14
+            'GRB': [[62,62, 67,67, 72,72, 77,77, 88,88, 94,94, 100,100, 106,106, 112,112, 118,118]], # 20
+
+            'LRA1': [[79, 81, 82, 83, 84, 85, 86]], # 7
+            'LRB1': [[120, 121, 122, 123, 124, 125, 126, 127, 128, 129]], # 10
+
+            'LRSA': [[66]], # 1
+            'LRSB': [[66]], # 1
+            'LWSA': [[118]], # 1
+            'LWSB': [[118]], # 1
+            'LCC': [[138, 138]], # 2
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 17
+
+    else:
+        return False, None
+
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
