@@ -254,7 +254,6 @@ ADD miopen/script/redis-cli.conf /redis-cli.conf
 ADD miopen/script/sccache_wrapper.sh /sccache_wrapper.sh
 
 ## Sccache binary built from source for ROCm, only install if MIOPEN_SCCACHE is defined
-ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
 ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
 ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
 ARG MIOPEN_SCCACHE=""
