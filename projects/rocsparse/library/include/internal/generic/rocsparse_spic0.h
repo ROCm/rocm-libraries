@@ -20,9 +20,11 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#pragma once
+#ifndef ROCSPARSE_SPIC0_H
+#define ROCSPARSE_SPIC0_H
 
-#include "rocsparse-types.h"
+#include "../../rocsparse-types.h"
+#include "rocsparse/rocsparse-export.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -171,4 +173,5 @@ rocsparse_status rocsparse_spic0(rocsparse_handle            handle,
 
 #ifdef __cplusplus
 }
+#endif
 #endif
