@@ -347,10 +347,10 @@ You must install the `half` header from the [half website](http://half.sourcefor
 
 ## Using Docker
 
-The easiest way to build MIOpen is via Docker. You can build the top-level Docker file using:
+The easiest way to build MIOpen is via Docker. For example, you can build the top-level Docker file for gfx1101 using:
 
 ```shell
-docker build -t miopen-image .
+docker build -t miopen-image:gfx1101 --build-arg PREFIX=/opt/rocm --build-arg THEROCK_ASIC=gfx1101 -f ../../projects/miopen/Dockerfile ../../projects/.
 ```
 
 Then, to enter the development environment, use `docker run`. For example:
@@ -359,8 +359,9 @@ Then, to enter the development environment, use `docker run`. For example:
 docker run -it -v $HOME:/data --privileged --rm --device=/dev/kfd --device /dev/dri:/dev/dri:rw  --volume /dev/dri:/dev/dri:rw -v /var/lib/docker/:/var/lib/docker --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined miopen-image
 ```
 
-You can find prebuilt Docker images on
-[ROCm's public Docker Hub](https://hub.docker.com/r/rocm/miopen/tags).
+You can find prebuilt Docker images on [ROCm's public Docker Hub](https://hub.docker.com/r/rocm/miopen/tags). These images are CI images, with separate Docker tags for each device architecture.
+
+For development workflows requiring multi-arch support, nightly-built dev images are available at [rocm/miopen-dev on Docker Hub](https://hub.docker.com/r/rocm/miopen-dev/tags).
 
 ## Porting from cuDNN to MIOpen
 

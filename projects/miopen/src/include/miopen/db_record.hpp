@@ -211,7 +211,7 @@ private:
     }
 
 public:
-    DbRecord() : key("") {};
+    DbRecord() : key(""){};
     /// T shall provide a db KEY by means of the "void Serialize(std::ostream&) const" member
     /// function.
     template <class T>
