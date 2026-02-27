@@ -91,7 +91,7 @@
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
-#include <hipdnn_frontend/node/LayernormNode.hpp>
+#include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -628,7 +628,7 @@ private:
                         attr.set_name(fbNode->name()->str());
                     }
                     _sub_nodes.emplace_back(
-                        std::make_shared<LayernormNode>(std::move(attr), graph_attributes));
+                        std::make_shared<LayerNormNode>(std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -1634,7 +1634,7 @@ public:
         attributes.set_y(y);
 
         _sub_nodes.emplace_back(
-            std::make_shared<LayernormNode>(std::move(attributes), graph_attributes));
+            std::make_shared<LayerNormNode>(std::move(attributes), graph_attributes));
 
         return {y, mean, invVariance};
     }

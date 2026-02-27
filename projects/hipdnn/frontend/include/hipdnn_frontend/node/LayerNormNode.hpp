@@ -12,12 +12,12 @@
 
 namespace hipdnn_frontend::graph
 {
-class LayernormNode : public BaseNode<LayernormNode>
+class LayerNormNode : public BaseNode<LayerNormNode>
 {
 public:
     LayernormAttributes attributes;
 
-    LayernormNode(LayernormAttributes&& layernormAttrs, const GraphAttributes& graphAttrs)
+    LayerNormNode(LayernormAttributes&& layernormAttrs, const GraphAttributes& graphAttrs)
         : BaseNode(graphAttrs)
         , attributes(std::move(layernormAttrs))
     {
@@ -51,23 +51,23 @@ public:
         // SECTION 2: Validate Required Tensor Pointers
         HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormNode missing x for pre-validation");
+                               "LayerNormNode missing x for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormNode missing y for pre-validation");
+                               "LayerNormNode missing y for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_epsilon(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormNode missing epsilon for pre-validation");
+                               "LayerNormNode missing epsilon for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormNode missing scale for pre-validation");
+                               "LayerNormNode missing scale for pre-validation");
 
         HIPDNN_RETURN_IF_FALSE(attributes.get_bias(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
-                               "LayernormNode missing bias for pre-validation");
+                               "LayerNormNode missing bias for pre-validation");
 
         // Get tensor references
         auto x = attributes.get_x();
@@ -107,12 +107,12 @@ public:
 
         if(!x)
         {
-            return {ErrorCode::ATTRIBUTE_NOT_SET, "LayernormNode missing x for setting properties"};
+            return {ErrorCode::ATTRIBUTE_NOT_SET, "LayerNormNode missing x for setting properties"};
         }
 
         if(!y)
         {
-            return {ErrorCode::ATTRIBUTE_NOT_SET, "LayernormNode missing y for setting properties"};
+            return {ErrorCode::ATTRIBUTE_NOT_SET, "LayerNormNode missing y for setting properties"};
         }
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));

@@ -42,7 +42,7 @@ add_executable(
     TestINode.cpp
     TestKnob.cpp
     TestLayernormAttributes.cpp
-    TestLayernormNode.cpp
+    TestLayerNormNode.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp

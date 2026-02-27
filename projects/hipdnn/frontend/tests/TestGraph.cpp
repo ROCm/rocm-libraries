@@ -1467,13 +1467,13 @@ TEST_F(TestGraph, LayernormNodeCreation)
     epsilon->set_name("Epsilon").set_value(1e-5f);
 
     LayernormAttributes attributes;
-    attributes.set_name("LayernormNode");
+    attributes.set_name("LayerNormNode");
     attributes.set_forward_phase(NormFwdPhase::INFERENCE);
     attributes.set_epsilon(epsilon);
 
     auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
 
-    EXPECT_EQ(y->get_name(), "LayernormNode::Y");
+    EXPECT_EQ(y->get_name(), "LayerNormNode::Y");
     EXPECT_TRUE(y->get_is_virtual());
     // In inference mode, mean and inv_variance are not created
     EXPECT_EQ(mean, nullptr);
@@ -1556,7 +1556,7 @@ TEST_F(TestGraph, BuildAndSerializeLayernormGraph)
     epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5f);
 
     LayernormAttributes layernormAttributes;
-    layernormAttributes.set_name("LayernormNode");
+    layernormAttributes.set_name("LayerNormNode");
     layernormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
     layernormAttributes.set_epsilon(epsilon);
 
@@ -1591,7 +1591,7 @@ TEST_F(TestGraph, BuildAndSerializeLayernormGraph)
     validateTensor(*epsilon, tensorLookup[epsilon->get_uid()]);
     validateTensor(*y, tensorLookup[y->get_uid()]);
 
-    EXPECT_EQ(deserializedGraph->nodes[0]->name, "LayernormNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "LayerNormNode");
     EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
               hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes);
     auto deserializedLayernormAttributes
