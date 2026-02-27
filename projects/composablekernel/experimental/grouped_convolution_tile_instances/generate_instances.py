@@ -294,9 +294,12 @@ def parse_bwd_weight_instances(instances, problem_name):
             vector_read = args[4].split("x")
             a_scalar_per_vector = int(vector_read[0])
             b_scalar_per_vector = int(vector_read[1])
+            c_scalar_per_vector_seq = [int(x) for x in vector_read[2].strip("Seq").strip("(").strip(")").split(",")]
 
-            # TODO: min or max?
-            c_scalar_per_vector = min(a_scalar_per_vector, b_scalar_per_vector)
+            if len(set(c_scalar_per_vector_seq)) != 1:
+                raise RuntimeError(f"c_scalar_per_vector must be the same across all waves for instance {instance_id} with device op {device_op_name}. Found values: {c_scalar_per_vector_seq}")
+            
+            c_scalar_per_vector = c_scalar_per_vector_seq[0]
 
             num_groups_to_merge = 1
 
@@ -306,7 +309,9 @@ def parse_bwd_weight_instances(instances, problem_name):
 
             # TODO: Double buffer pipeline does not currently compile for explicit GEMM.
             if blk_gemm_pipeline_version == "v4" or blk_gemm_pipeline_version == "v5":
-                raise f"Block GEMM pipeline version {blk_gemm_pipeline_version} is not supported for instance {instance_id} with device op {device_op_name}."
+                raise RuntimeError(
+                    f"Block GEMM pipeline version {blk_gemm_pipeline_version} is not supported for instance {instance_id} with device op {device_op_name}."
+                )
         else:
             spec = args[11]
             block_size = int(args[12])
@@ -378,7 +383,7 @@ def parse_bwd_weight_instances(instances, problem_name):
             [m_per_xdl, n_per_xdl, k_per_xdl],
             double_smem_buffer,
             num_wave_groups,
-            pipeline_version,
+            pipeline_version.upper(),
             scheduler,
             [a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector],
             num_groups_to_merge,
