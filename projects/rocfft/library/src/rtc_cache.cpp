@@ -159,7 +159,14 @@ static std::set<std::string> get_visible_gpu_arches()
         hipDeviceProp_t prop;
         if(hipGetDeviceProperties(&prop, device) != hipSuccess)
             throw std::runtime_error("hipGetDeviceProperties failed");
-        arches.insert(prop.gcnArchName);
+
+        std::string arch = prop.gcnArchName;
+        // strip flags, as rocFFT deals with generic code for each
+        // arch
+        auto colonIdx = arch.find(':');
+        if(colonIdx != std::string::npos)
+            arch.resize(colonIdx);
+        arches.insert(arch);
     }
     return arches;
 }
