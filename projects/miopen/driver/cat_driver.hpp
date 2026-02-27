@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #ifndef GUARD_MIOPEN_CAT_DRIVER_HPP
 #define GUARD_MIOPEN_CAT_DRIVER_HPP
 
@@ -55,9 +33,9 @@ int32_t mloCatForwardRunHost(const std::vector<miopenTensorDescriptor_t>& inputD
                              bool multi_threaded)
 {
     const auto& shape            = miopen::deref(outputDesc).GetLengths();
+    const size_t output_dim_size = shape[dim];
     size_t outer_size            = 1;
     size_t inner_size            = 1;
-    const size_t output_dim_size = shape[dim];
 
     for(size_t i = 0; i < dim; ++i)
     {
@@ -69,22 +47,41 @@ int32_t mloCatForwardRunHost(const std::vector<miopenTensorDescriptor_t>& inputD
         inner_size *= shape[i];
     }
 
-    int32_t ret                                = 0;
-    size_t output_start_offset                 = 0;
     const size_t inner_size_by_output_dim_size = inner_size * output_dim_size;
     const size_t n                             = inputs.size();
-    const size_t min_grain                     = multi_threaded ? 8 : n;
+    const size_t min_grain                     = multi_threaded ? 1 : n;
+
+    /////////////////////////////////////////////////////////////////////////////////////////////
+    // 1. Precompute output start offsets to avoid race conditions in the multi-threaded version.
+    // 2. Cache copy_size values, since they are needed by the start offsets computation anyway.
+    std::vector<size_t> copy_sizes;
+    std::vector<size_t> output_start_offsets;
+
+    copy_sizes.reserve(n);
+    output_start_offsets.reserve(n);
+
+    copy_sizes.emplace_back(inner_size * miopen::deref(inputDescs[0]).GetLengths()[dim]);
+    output_start_offsets.emplace_back(0);
+
+    for(size_t i{1}; i < n; ++i)
+    {
+        const size_t dim_size = miopen::deref(inputDescs[i]).GetLengths()[dim];
+
+        output_start_offsets.emplace_back(output_start_offsets.back() + copy_sizes.back());
+        copy_sizes.emplace_back(inner_size * dim_size);
+    }
+    /////////////////////////////////////////////////////////////////////////////////////////////
 
     miopen::par_for(n, min_grain, [&](size_t i) {
         const auto input                = inputs[i];
-        const size_t dim_size           = miopen::deref(inputDescs[i]).GetLengths()[dim];
-        const size_t copy_size          = inner_size * dim_size;
+        const size_t copy_size          = copy_sizes[i];
         const size_t copy_size_in_bytes = copy_size * sizeof(*outputhost);
 
         for(size_t o = 0; o < outer_size; ++o)
         {
-            const size_t input_offset  = copy_size * o;
-            const size_t output_offset = output_start_offset + (o * inner_size_by_output_dim_size);
+            const size_t input_offset = copy_size * o;
+            const size_t output_offset =
+                output_start_offsets[i] + (o * inner_size_by_output_dim_size);
 
             if constexpr(std::is_same_v<Tgpu, Tcheck> && std::is_trivially_copyable_v<Tgpu>)
             {
@@ -98,11 +95,9 @@ int32_t mloCatForwardRunHost(const std::vector<miopenTensorDescriptor_t>& inputD
                 }
             }
         }
-
-        output_start_offset += copy_size;
     });
 
-    return ret;
+    return 0;
 }
 
 #endif
@@ -231,7 +226,7 @@ std::vector<std::vector<int>> CatDriver<Tgpu, Tref>::GetInputTensorLengthsFromCm
     const int max_input_count = 8;
     std::vector<std::vector<int>> ret;
     std::string name = "input";
-    for(int i = 1; i < max_input_count; i++)
+    for(int i = 1; i <= max_input_count; i++)
     {
         auto tensor = inflags.GetValueTensor(name + std::to_string(i));
         if(!tensor.lengths.empty())
