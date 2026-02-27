@@ -1,6 +1,20 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+/**
+ * @file tile_distribution_encoding_register_mapper.hpp
+ * @brief Utility for register / matrix coordinate mapping from TileDistributionEncoding
+ * @details Defines TileDistrEncRegMap, which takes a TileDistributionEncoding and provides
+ * functions for mapping matrix fragment coordinates to register coordinates (lane, vector item) and
+ * vice versa. This is only meant for tile distributions encodings that describe register mappings.
+ *
+ * A repeat dimension is allowed in which case multiple (lane, vector item) pairs are mapped to the
+ * same matrix coordinates. The inverse map takes a "repeat index" to distinguish between them.
+ *
+ * print() functions are included for printing dimensions and formatted forward and backwards
+ * mappings similar to the AMD Matrix Calculator.
+ */
+
 #pragma once
 
 #include <stdio.h>
@@ -38,6 +52,13 @@ struct TileDistrEncRegMap
     static constexpr index_t num_lanes = ps_ys_to_xs_adaptor.get_top_dimension_length(number<0>{});
     static constexpr index_t num_vector_items =
         container_reduce(TileDistrEnc::detail::ys_lengths_, multiplies<>{}, 1);
+
+    // Check for 0 dims (will break things much earlier but let's have an extra check).
+    static_assert(mat_major_size > 0);
+    static_assert(mat_minor_size > 0);
+    static_assert(num_repeat > 0);
+    static_assert(num_lanes > 0);
+    static_assert(num_vector_items > 0);
 
     CK_TILE_HOST_DEVICE static constexpr auto
     calc_matrix_indices_from_lane_vector(index_t lane_inx, index_t vector_inx)
@@ -81,7 +102,7 @@ struct TileDistrEncRegMap
                     auto& lv = im[res[0]][res[1]][r];
                     if(lv.lane < 0)
                     {
-                        lv.lane = l;
+                        lv.lane = l; // TODO: c++20 designated initializers
                         lv.vec  = v;
                     }
                 }
