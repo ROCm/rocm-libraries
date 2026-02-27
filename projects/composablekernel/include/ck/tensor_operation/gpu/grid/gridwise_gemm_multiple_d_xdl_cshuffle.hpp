@@ -419,6 +419,14 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
         static_assert(KPerBlock % AK1Value == 0 && KPerBlock % BK1Value == 0,
                       "KPerBlock must be divisible by AK1Value and BK1Value!");
 
+        if constexpr(KPerBlock < 16)
+        {
+            if(is_gfx12_supported() || is_gfx11_supported())
+            {
+                return false;
+            }
+        }
+
         const auto M  = a_grid_desc_m_k.GetLength(I0);
         const auto N  = b_grid_desc_n_k.GetLength(I0);
         const auto AK = a_grid_desc_m_k.GetLength(I1);
