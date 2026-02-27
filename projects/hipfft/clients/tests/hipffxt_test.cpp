@@ -166,6 +166,7 @@ class hipfftxtunitdesc : public ::testing::TestWithParam<std::tuple<int, bool, h
 
 
 // FIXME: is this just for pre-transform?
+// FIXME: use enums here.
 // real/complex, tx direction (0=forward, 1=backward), copy direction (d2h = 0, h2d=1), subformat
 static std::vector<std::tuple<bool, int, int, hipfftXtSubFormat>> goodlist =
 {
