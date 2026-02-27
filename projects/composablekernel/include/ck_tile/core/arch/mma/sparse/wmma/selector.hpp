@@ -106,13 +106,6 @@ struct MmaDefaultSelector<ADataType,
                                                                 16u,
                                                                 32u,
                                                                 CompilerTarget>::SelectedOp;
-    using CandidateOp32x32 = typename SparseWmmaDefaultSelector<ADataType,
-                                                                BDataType,
-                                                                CDataType,
-                                                                32u,
-                                                                32u,
-                                                                64u,
-                                                                CompilerTarget>::SelectedOp;
 
     // Default operation triggers pass-through
     using DefaultOp = typename SparseWmmaDefaultSelector<ADataType,
@@ -125,7 +118,6 @@ struct MmaDefaultSelector<ADataType,
 
     // Traits for each candidate
     using CandidateTraits16x16 = MmaOpTraits<CandidateOp16x16>;
-    using CandidateTraits32x32 = MmaOpTraits<CandidateOp32x32>;
 
     // Check if each candidate is supported for the given fragment sizes
     // For this case, we require the fragment sizes to be multiples of the WMMA shape
@@ -133,17 +125,10 @@ struct MmaDefaultSelector<ADataType,
                                              (FragM % CandidateTraits16x16::BlockM == 0u) &&
                                              (FragN % CandidateTraits16x16::BlockN == 0u) &&
                                              (FragK % CandidateTraits16x16::BlockK == 0u);
-    static constexpr bool IsSupported32x32 = CandidateTraits32x32::IsSupported &&
-                                             (FragM % CandidateTraits32x32::BlockM == 0u) &&
-                                             (FragN % CandidateTraits32x32::BlockN == 0u) &&
-                                             (FragK % CandidateTraits32x32::BlockK == 0u);
 
     public:
     // Select the largest supported WMMA operation for the given fragment shape
-    using SelectedOp =
-        std::conditional_t<IsSupported32x32,
-                           CandidateOp32x32,
-                           std::conditional_t<IsSupported16x16, CandidateOp16x16, DefaultOp>>;
+    using SelectedOp = std::conditional_t<IsSupported16x16, CandidateOp16x16, DefaultOp>;
 };
 
 } // namespace ck_tile::core::arch::mma
