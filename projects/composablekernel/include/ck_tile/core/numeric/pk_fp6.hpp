@@ -22,7 +22,10 @@ struct pk_fp6_t
     static constexpr index_t vector_size = (packed_size * num_bits_elem) / num_bits_vec_elem;
     element_type data_[vector_size]; // packed data
     using type = pk_fp6_t<packed_size>;
-    CK_TILE_HOST_DEVICE constexpr explicit pk_fp6_t(int value = 0)
+
+    CK_TILE_HOST_DEVICE constexpr pk_fp6_t() : data_{element_type{}} {}
+
+    CK_TILE_HOST_DEVICE constexpr explicit pk_fp6_t(int value)
     {
         for(size_t i = 0; i < vector_size; ++i)
         {
@@ -105,5 +108,7 @@ template <>
 struct numeric_traits<pk_fp6x16_t>
 {
     static constexpr int PackedSize = 16;
+    static constexpr int exp        = 2;
+    static constexpr int mant       = 3;
 };
 } // namespace ck_tile

@@ -837,9 +837,11 @@ struct UniversalGemmBasePolicy
         using BlockGemm = remove_cvref_t<decltype(Derived::template GetBlockGemm<Problem>())>;
 
         constexpr index_t KPack    = static_cast<index_t>(BlockGemm::Traits::KPack);
-        constexpr index_t VecElems = static_cast<index_t>(Problem::VectorLoadSize / sizeof(A));
+        constexpr index_t VecElems =
+            static_cast<index_t>(Problem::VectorLoadSize / sizeof(A)) *
+            numeric_traits<A>::PackedSize;
 
-        return (KPack < VecElems) ? KPack : VecElems;
+        return ck_tile::min(KPack, VecElems);
     }
 
     template <typename Problem>
@@ -849,9 +851,11 @@ struct UniversalGemmBasePolicy
         using BlockGemm = remove_cvref_t<decltype(Derived::template GetBlockGemm<Problem>())>;
 
         constexpr index_t KPack    = static_cast<index_t>(BlockGemm::Traits::KPack);
-        constexpr index_t VecElems = static_cast<index_t>(Problem::VectorLoadSize / sizeof(B));
+        constexpr index_t VecElems =
+            static_cast<index_t>(Problem::VectorLoadSize / sizeof(B)) *
+            numeric_traits<B>::PackedSize;
 
-        return (KPack < VecElems) ? KPack : VecElems;
+        return ck_tile::min(KPack, VecElems);
     }
 
     template <typename Problem>
