@@ -138,8 +138,8 @@ struct device_segmented_reduce_benchmark : public primbench::benchmark_interface
 
         common::device_ptr<value_type> d_aggregates_output(segments_count);
 
-        rocprim::plus<value_type> reduce_op;
-        value_type                init(0);
+        BinaryFunction reduce_op;
+        value_type     init(0);
 
         size_t temporary_storage_bytes = 0;
 

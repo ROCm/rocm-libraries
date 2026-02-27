@@ -30,13 +30,9 @@
 
 #include <hip/hip_runtime.h>
 
-#include <rocprim/device/device_segmented_reduce.hpp>
+#include <rocprim/device/device_segmented_scan.hpp>
 
-#include <iostream>
-#include <limits>
-#include <locale>
 #include <numeric>
-#include <string>
 #include <vector>
 
 constexpr inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm alg)
@@ -90,6 +86,7 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
                      .add("lvl", "device")
                      .add("algo", "device_segmented_scan")
                      .add("key_type", primbench::name<T>())
+                     .add("exclusive", Exclusive)
                      .add("cfg", config_name<Config>());
 
         if(m_desired_segments.size() == 1)
@@ -98,6 +95,47 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
         }
 
         return j;
+    }
+
+    template<class OffsetIterator>
+    inline hipError_t run_device_segmented_scan(void*             temporary_storage,
+                                                size_t&           storage_size,
+                                                T*                input,
+                                                T*                output,
+                                                const size_t      segments,
+                                                OffsetIterator    begin_offsets,
+                                                OffsetIterator    end_offsets,
+                                                const T           initial_value,
+                                                const hipStream_t stream,
+                                                const bool        debug_synchronous = false)
+    {
+        if constexpr(Exclusive)
+        {
+            return rocprim::segmented_exclusive_scan<Config>(temporary_storage,
+                                                             storage_size,
+                                                             input,
+                                                             output,
+                                                             segments,
+                                                             begin_offsets,
+                                                             end_offsets,
+                                                             initial_value,
+                                                             BinaryFunction{},
+                                                             stream,
+                                                             debug_synchronous);
+        }
+        else
+        {
+            return rocprim::segmented_inclusive_scan<Config>(temporary_storage,
+                                                             storage_size,
+                                                             input,
+                                                             output,
+                                                             segments,
+                                                             begin_offsets,
+                                                             end_offsets,
+                                                             BinaryFunction{},
+                                                             stream,
+                                                             debug_synchronous);
+        }
     }
 
     void run_benchmark(primbench::state&& state, size_t desired_segment)
@@ -119,6 +157,7 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
             = std::max(1.0, static_cast<double>(items) / desired_segment);
         std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
 
+        // Create random sizes for segments.
         std::vector<offset_type> offsets;
         unsigned int             segments_count = 0;
         size_t                   offset         = 0;
@@ -138,23 +177,21 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
 
         common::device_ptr<value_type> d_values_input(values_input);
 
-        common::device_ptr<value_type> d_aggregates_output(segments_count);
+        common::device_ptr<value_type> d_values_output(items);
 
-        rocprim::plus<value_type> scan_op;
-        value_type                init(0);
+        value_type init(5);
 
         size_t temporary_storage_bytes = 0;
 
-        HIP_CHECK(rocprim::segmented_reduce<Config>(nullptr,
-                                                    temporary_storage_bytes,
-                                                    d_values_input.get(),
-                                                    d_aggregates_output.get(),
-                                                    segments_count,
-                                                    d_offsets.get(),
-                                                    d_offsets.get() + 1,
-                                                    reduce_op,
-                                                    init,
-                                                    stream));
+        HIP_CHECK(run_device_segmented_scan(nullptr,
+                                            temporary_storage_bytes,
+                                            d_values_input.get(),
+                                            d_values_output.get(),
+                                            segments_count,
+                                            d_offsets.get(),
+                                            d_offsets.get() + 1,
+                                            init,
+                                            stream));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
@@ -164,16 +201,15 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
         state.run(
             [&]
             {
-                HIP_CHECK(rocprim::segmented_reduce<Config>(d_temporary_storage.get(),
-                                                            temporary_storage_bytes,
-                                                            d_values_input.get(),
-                                                            d_aggregates_output.get(),
-                                                            segments_count,
-                                                            d_offsets.get(),
-                                                            d_offsets.get() + 1,
-                                                            reduce_op,
-                                                            init,
-                                                            stream));
+                HIP_CHECK(run_device_segmented_scan(d_temporary_storage.get(),
+                                                    temporary_storage_bytes,
+                                                    d_values_output.get(),
+                                                    d_values_output.get(),
+                                                    segments_count,
+                                                    d_offsets.get(),
+                                                    d_offsets.get() + 1,
+                                                    init,
+                                                    stream));
             });
     }
 
