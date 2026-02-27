@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from copy import deepcopy
 from enum import Enum, auto
-from typing import Optional
+from typing import ClassVar, Optional
 
 from rocisa.instruction import SWaitCnt, SBarrier
 from Tensile.Common.Utilities import printWarning
@@ -142,7 +142,7 @@ class ValidatorInstruction(ABC):
     name: str
     issued_at: SchedulePosition
     # The minimum number of quad-cycles that this instruction takes to issue.
-    min_issue_quad_cycles_base: int = 1
+    min_issue_quad_cycles_base: ClassVar[int] = 1
 
     @abstractmethod
     def validate(self) -> Optional[str]:
@@ -200,7 +200,7 @@ class LocalRead(ValidatorInstruction):
 class MFMA(ValidatorInstruction):
     issued_at: SchedulePosition
     name: str = "MFMA"
-    mfma_finish_cycles = QUAD_CYCLES_STANDARD_MFMA_FINISH
+    mfma_finish_cycles: ClassVar[int] = QUAD_CYCLES_STANDARD_MFMA_FINISH
 
     def done_idx(self) -> SchedulePosition:
         return self.issued_at
@@ -311,7 +311,7 @@ class MFMAPack(TimedPack, MFMA):
     # `name = 'MFMA'` class attribute and re-introduces the default.
 
     # Override MFMA's finish cycles for 4x4 timing
-    mfma_finish_cycles = QUAD_CYCLES_MFMA_4X4_FINISH
+    mfma_finish_cycles: ClassVar[int] = QUAD_CYCLES_MFMA_4X4_FINISH
 
     # NOTE: min_quad_cycles_before_result_used is NOT overridden here.
     # It keeps TimedPack's default (0) and is set by _handle_min_pack_quad_cycles
