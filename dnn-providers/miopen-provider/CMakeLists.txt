@@ -14,6 +14,8 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     set(MIOPEN_PLUGIN_VERSION "0.0.1")
     project(hipDNN VERSION ${MIOPEN_PLUGIN_VERSION} LANGUAGES CXX)
 
+    include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
+
     if(NOT WIN32)
         # Only set if not already specified by user
         if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -47,6 +49,17 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     endif()
     option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
 
+    option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+    option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" OFF) # Disable by default for TheRock
+    if(WIN32)
+	option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF) # Disable by default for TheRock
+        if(ENABLE_CLANG_TIDY)
+            message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
+        endif()
+    else()
+        option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+    endif()
+
     list(
         PREPEND
         HIPDNN_WARNING_COMPILE_OPTIONS
@@ -78,6 +91,11 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
     find_package(hip REQUIRED)
     find_package(hipdnn_data_sdk CONFIG REQUIRED)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+    include(CheckToolVersion)
+    include(ClangCheck)
+    include(ClangTidy)
+    include(Sanitizers)
 
     # Setup testing dependencies & tests for standalone build
     include(Dependencies)
@@ -122,15 +140,13 @@ add_library(
     engines/plans/MiopenConvFwdPlan.cpp
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
-    EngineManager.cpp
+    HipdnnMiopenHandle.cpp
     MiopenActivationDescriptor.cpp
     MiopenContainer.cpp
     MiopenConvDescriptor.cpp
-    MiopenHandleFactory.cpp
-    MiopenPlugin.cpp
-    MiopenPluginPublic.cpp
-    MiopenTensor.cpp
     MiopenUtils.cpp
+    MiopenTensor.cpp
+    MiopenPluginPublic.cpp
 )
 target_include_directories(miopen_plugin_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miopen_plugin_impl PUBLIC MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
@@ -141,9 +157,7 @@ set_target_properties(miopen_plugin_impl PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin_impl)
-endif()
+clang_tidy_check(miopen_plugin_impl)
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(miopen_plugin_private STATIC $<TARGET_OBJECTS:miopen_plugin_impl>)
@@ -156,7 +170,11 @@ add_library(miopen_legacy_plugin_private ALIAS miopen_plugin_private)
 # miopen_legacy_plugin - REAL target for current TheRock compatibility
 add_library(miopen_legacy_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_link_libraries(miopen_legacy_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
-target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+
+if(NOT WIN32)
+    target_link_libraries(miopen_legacy_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
+
 target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     miopen_legacy_plugin
@@ -172,7 +190,11 @@ set_target_properties(
 # miopen_plugin - REAL target for updated TheRock
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
-target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+
+if(NOT WIN32)
+    target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
+
 target_compile_options(miopen_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     miopen_plugin
@@ -220,3 +242,10 @@ install(TARGETS miopen_legacy_plugin EXPORT miopen-legacy-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+
+# TODO: remove alongside symlink (they will always be built separately)
+# Create tidy/tidy-cxx custom targets for standalone builds.
+# In dependency mode, the parent hipdnn project creates these targets.
+if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+    add_clang_tidy_custom_target()
+endif()

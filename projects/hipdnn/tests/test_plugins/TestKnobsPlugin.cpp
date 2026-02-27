@@ -25,6 +25,11 @@ public:
         return "1.0.0";
     }
 
+    const char* getPluginApiVersion() const override
+    {
+        return apiVersionWithoutTweak();
+    }
+
     int64_t getEngineId() const override
     {
         return hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
@@ -246,6 +251,11 @@ hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
 hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
 {
     return TestPluginBase::pluginGetVersion(version);
+}
+
+hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)
+{
+    return TestPluginBase::pluginGetApiVersion(version);
 }
 
 hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)

@@ -66,6 +66,12 @@ except ImportError:
     printWarning("CSafeLoader not installed. Fallback to SafeLoader.")
 
 try:
+    from yaml import CSafeDumper as yamlDumper
+except ImportError:
+    from yaml import SafeDumper as yamlDumper
+    printWarning("CSafeDumper not installed. Fallback to SafeDumper.")
+
+try:
     import msgpack
 except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
@@ -97,7 +103,7 @@ def writeYAML(filename, data, **kwargs):
         kwargs["default_flow_style"] = None
 
     with open(filename, "w") as f:
-        yaml.dump(data, f, **kwargs)
+        yaml.dump(data, f, Dumper=yamlDumper, **kwargs)
 
 def writeJson(filename, data):
     """Writes data to file in json format."""
@@ -148,7 +154,7 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
             f.write("- ActivationArgs:\n")
             for setting in activationArgs.settingList:
                 f.write("  - [Enum: %s]\n"%(setting.activationEnum))
-        yaml.dump(solutionStates, f, default_flow_style=None)
+        yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
 
 
 ###############################

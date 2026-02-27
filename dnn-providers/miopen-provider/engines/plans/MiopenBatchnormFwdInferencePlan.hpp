@@ -5,12 +5,13 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "MiopenActivationDescriptor.hpp"
-#include "MiopenExecutionSettings.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
-#include "PlanBuilderInterface.hpp" //temporary
-#include "PlanInterface.hpp"
 
 namespace miopen_plugin
 {
@@ -57,11 +58,11 @@ private:
     std::optional<MiopenTensor> _activationOut;
 };
 
-class BatchnormFwdInferencePlan : public IPlan
+class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
     BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
-                              const MiopenExecutionSettings& executionSettings);
+                              const HipdnnMiopenSettings& executionSettings);
 
     BatchnormFwdInferencePlan(const BatchnormFwdInferencePlan&) = delete;
     BatchnormFwdInferencePlan& operator=(const BatchnormFwdInferencePlan&) = delete;
@@ -69,16 +70,16 @@ public:
     BatchnormFwdInferencePlan(BatchnormFwdInferencePlan&&) = default;
     BatchnormFwdInferencePlan& operator=(BatchnormFwdInferencePlan&&) = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnMiopenHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormFwdInferenceParams _inferenceParams;
-    MiopenExecutionSettings _executionSettings;
+    HipdnnMiopenSettings _executionSettings;
 };
 
 }

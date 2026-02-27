@@ -203,7 +203,7 @@ __device__ void layernormbwdweightbias(const TI* __restrict__ dy,
                                        TO* __restrict__ dw,
                                        TO* __restrict__ db)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint64_t gid = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
     if(dw || db)
     {
@@ -244,7 +244,7 @@ __device__ void layernormbwdweightbiasparallel(const TI* __restrict__ dy,
                                                const TI* __restrict__ rstd,
                                                TO* __restrict__ workspace)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint64_t gid = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
     if(gid >= INNER_SIZE * PARALLEL_SIZE)
         return;
@@ -281,7 +281,7 @@ template <typename TI, typename TO>
 __device__ void
 layernormbwdreducesum(const TI* __restrict__ workspace, TO* __restrict__ dw, TO* __restrict__ db)
 {
-    const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint64_t gid = threadIdx.x + blockIdx.x * LOCAL_SIZE;
 
     if(gid >= INNER_SIZE)
         return;

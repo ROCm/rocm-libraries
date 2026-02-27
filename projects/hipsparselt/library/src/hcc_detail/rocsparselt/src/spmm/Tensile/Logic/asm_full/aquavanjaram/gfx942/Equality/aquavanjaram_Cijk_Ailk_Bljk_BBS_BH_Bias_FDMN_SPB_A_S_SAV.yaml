@@ -275,7 +275,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -498,7 +498,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -721,7 +721,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -944,7 +944,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1167,7 +1167,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1390,7 +1390,7 @@
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1613,7 +1613,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1836,7 +1836,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -2059,7 +2059,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -2297,7 +2297,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -2544,7 +2544,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -2791,7 +2791,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -3039,7 +3039,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -3285,7 +3285,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -3531,7 +3531,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -3777,7 +3777,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -4023,7 +4023,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -4271,7 +4271,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -4518,7 +4518,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -4765,7 +4765,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -5012,7 +5012,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -5258,7 +5258,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -5505,7 +5505,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -5752,7 +5752,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -5999,7 +5999,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -6246,7 +6246,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -6494,7 +6494,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -6741,7 +6741,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -6988,7 +6988,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -7236,7 +7236,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -7482,7 +7482,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -7729,7 +7729,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -7976,7 +7976,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -8222,7 +8222,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -8468,7 +8468,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -8715,7 +8715,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -8961,7 +8961,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -9209,7 +9209,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -9455,7 +9455,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -9703,7 +9703,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
@@ -9949,7 +9949,7 @@
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: false
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 1
+    UseCustomMainLoopSchedule: 0
     UseDotInstruction: false
     UseF32XEmulation: false
     UseInstOffsetForGRO: 0
