@@ -956,10 +956,11 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
     if isNT(kernel) and useLDSTr and TLDS == 0:
         syncTable = [
             -1, SWaitCnt(dscnt= 4, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one LRB1"),
+            # -1, SBarrier(comment=""),
              7, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="wait the rest of LRB1"),
             23, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="wait for all LR0 before starting 2nd sub-iteration"),
-            31, SWaitCnt(dscnt=-1, vlcnt= 8, vscnt=-1, comment="wait for GRAs before starting LRA1"),
-            31, SBarrier(comment=""),
+            27, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for GRAs before starting LRA1"),
+            27, SBarrier(comment=""),
             41, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for GRBs before starting LRB1"),
             41, SBarrier(comment=""),
         ]
@@ -967,28 +968,33 @@ def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
         optSchedule = {
             'SYNC': [syncTable[::2]],
 
+            'GRIncA': [[0,1,1, 1,2,3, 3,3,4],
+                       [0,0,0, 1,2,2, 2,3,4]],
+            'GRIncB': [                                                   [18,18,18,  21,21,21, 22,22,22]],
+
             'LRA0': [[0,0, 2,2, 4,4, 6,6, 8,8, 10,10, 12,12, 14,14],
                      [  1,1, 3,3, 5,5, 7,7, 9,9, 11,11, 13,13, 15,15]],
             'LRB0': [                        [9,    11,    13,    15,  16,16],
                                              [ 10,    12,    14,    16, 17,17]],
 
-            'GRIncA': [[0,1,1, 1,2,3, 3,3,4],
-                       [0,0,0, 1,2,2, 2,3,4]],
-            'GRIncB': [                                                   [18,18,18,  21,21,21, 22,22,22]],
 
-            'GRA': [             [5,5, 5,6, 7, 9, 11,11, 15,16, 19,20, 24,25, 28,29],
-                                 [5,6, 6,6, 7,10, 11,12, 15,16, 19,20, 24,25, 28,29]],
-            'GRB': [[34,35, 36,37, 38,39]],
+            'GRA': [             [5,5, 5,6, 7, 9, 11,11, 15,16, 19,20, 24,25, 26,27],
+                                 [4,5, 6,6, 7,10, 11,12, 15,16, 19,20, 24,25, 26,  28]],
+            'GRB': [                                                                         [ 31,31,         35,35,               39,39],
+                                                                                             [   32,32,          36,36,               40,40]],
 
-            'LRA1': [[32,32, 33,33, 34,34, 35,35, 36,36, 37,37, 38,38, 39,39]],
-            'LRB1': [[                                                      41,41, 43,43, 45,45],
-                     [                                                         42,42, 44,44, 46,46]],
+            'LRA1': [                                                               [28,28, 30,30, 32,32, 34,34, 36,36, 37,37, 38,38, 40,40],
+                                                                                    [  29,29, 31,31, 33,33, 35,35,      37,37,    39,39, 41,41, 42,42]],
+            'LRB1': [[                                                                                                                          42,42,43,43,      45,45],
+                     [                                                                                                                                43,43, 44,44,   46,46]],
 
-            'LRSA': [[30, 30, 30, 30]],
-            'LRSB': [[30]],
-            'LWSA': [[40, 40, 40]],
+            'LRSA': [[                                                 26,26,26,27]],
+            'LRSB': [[                                                          27]],
+            'LWSA': [                                                                                                                                       [44,44,44],
+                                                                                                                                                            [44,  45,45]],
             'LWSB': [[]],
-            'LCC': [[45, 46]],
+            'LCC': [                                                                                                                                                 [46,46],
+                                                                                                                                                                  [45,46]],
         }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 11
