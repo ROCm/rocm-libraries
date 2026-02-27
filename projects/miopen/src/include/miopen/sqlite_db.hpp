@@ -123,8 +123,7 @@ struct SQLiteSerializable
         for(auto& el : int_fields)
             ss << ",`" << el << "` INT NOT NULL";
         ss << ");";
-        ss << "CREATE UNIQUE INDEX IF NOT EXISTS "
-           << "`idx_" << Derived::table_name() << "` "
+        ss << "CREATE UNIQUE INDEX IF NOT EXISTS " << "`idx_" << Derived::table_name() << "` "
            << "ON " << Derived::table_name() << "( " << miopen::JoinStrings(str_fields, ",") << ", "
            << miopen::JoinStrings(int_fields, ",") << " );";
         return ss.str();
