@@ -94,6 +94,18 @@ def compute_gbs(m, n, k, runtime_ns, element_size):
 def merge_types(data):
     """Merge type information and process kernel execution data."""
     rec = dict(data)
+    if any(key in rec for key in ("problem", "solution", "benchmark")):
+        flattened = {
+            key: value
+            for key, value in rec.items()
+            if key not in ("problem", "solution", "benchmark")
+        }
+        for key in ("problem", "solution", "benchmark"):
+            section = rec.get(key)
+            if isinstance(section, dict):
+                flattened.update(section)
+        rec = flattened
+
     if "types" in rec and isinstance(rec["types"], dict):
         rec.update(rec["types"])
         del rec["types"]
