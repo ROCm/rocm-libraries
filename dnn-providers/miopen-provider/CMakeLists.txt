@@ -39,6 +39,12 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib
      ${HIP_DIR}/cmake
 )
 
+# Migrate HIP_DNN_SKIP_TESTS -> MIOPENPROVIDER_SKIP_TESTS
+if(DEFINED HIP_DNN_SKIP_TESTS)
+    set(MIOPENPROVIDER_SKIP_TESTS ${HIP_DNN_SKIP_TESTS} CACHE BOOL "Skip building tests" FORCE)
+    unset(HIP_DNN_SKIP_TESTS CACHE)
+    message(DEPRECATION "HIP_DNN_SKIP_TESTS has been renamed to MIOPENPROVIDER_SKIP_TESTS. Please update your build scripts to use -DMIOPENPROVIDER_SKIP_TESTS instead.")
+endif()
 option(MIOPENPROVIDER_SKIP_TESTS "Skip building tests" OFF)
 option(MIOPENPROVIDER_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 
