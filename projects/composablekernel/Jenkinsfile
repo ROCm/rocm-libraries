@@ -269,6 +269,39 @@ def shouldRunCICheck() {
     ]
     
     try {
+        // Additional testing
+        def testChangedFiles = sh(
+            returnStdout: true,
+            script: '''
+                echo "Base branch build, checking last commit" >&2
+                git log --name-only --pretty=format: HEAD~1..HEAD -- projects/composablekernel/ | sort -u | grep -v '^$'
+            '''
+        ).trim().split('\n')
+
+        if (testChangedFiles.size() == 1 && testChangedFiles[0] == '') {
+            echo "No changed files detected - this might be a manual trigger or merge commit, running CI for safety"
+            return true
+        }
+        
+        echo "Test Changed files: ${testChangedFiles.join(', ')}"
+        
+        // Separate files into those requiring CI and those that can be skipped
+        def testFilesRequiringCI = []
+        def testSkippedFiles = []
+
+        testChangedFiles.each { file ->
+            def shouldSkip = skipFilePatterns.any { pattern ->
+                file ==~ pattern
+            }
+
+            if (shouldSkip) {
+                testSkippedFiles.add(file)
+            } else {
+                testFilesRequiringCI.add(file)
+            }
+        }
+        /////
+
         // Get the list of changed files (all files touched in any commit, even if reverted)
         def changedFiles = sh(
             returnStdout: true,

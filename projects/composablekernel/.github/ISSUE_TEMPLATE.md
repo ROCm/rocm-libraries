@@ -12,3 +12,5 @@ When creating an issue, please check if a similar issue already exists.
 - [ ] A detailed description of the problem you are trying to solve
 - [ ] An overview of the suggested solution
 - [ ] Explanation why the solution is an improvement
+
+### Test
