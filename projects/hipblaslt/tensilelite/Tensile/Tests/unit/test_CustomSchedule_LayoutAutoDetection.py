@@ -220,7 +220,7 @@ class TestLayoutAutoDetection:
             "_get_schedule_128x64x64_TF32": {"TN"},
             "_get_schedule_160x128x64_TF32": {"NN", "TN"},
             "_get_schedule_128x256x64_16bit": {"NN"},
-            "_get_schedule_224x320x64_16bit": ["TN"]
+            "_get_schedule_224x320x64_16bit": {"TN"}
         }
 
         registered_schedules = {info.name for info in _SCHEDULE_METADATA}
