@@ -421,7 +421,7 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
 
         if constexpr(KPerBlock < 16)
         {
-            if(is_gfx12_supported() || is_gfx11_supported())
+            if(ck::is_gfx12_supported() || ck::is_gfx11_supported())
             {
                 return false;
             }
