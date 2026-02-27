@@ -20,7 +20,7 @@ namespace hipdnn_frontend::detail
 // Assembles a GraphDescriptor from pre-built operation descriptors.
 // Sets the handle, operations, graph-level data types, preferred engine ID,
 // then finalizes and returns the scoped descriptor.
-inline Error assembleGraphDescriptor(std::vector<ScopedHipdnnBackendDescriptor>& operations,
+inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescriptor>& operations,
                                      hipdnnHandle_t handle,
                                      hipdnnDataType_t computeDataType,
                                      hipdnnDataType_t intermediateDataType,
@@ -43,7 +43,7 @@ inline Error assembleGraphDescriptor(std::vector<ScopedHipdnnBackendDescriptor>&
     // Set operations on graph
     std::vector<hipdnnBackendDescriptor_t> opDescPtrs;
     opDescPtrs.reserve(operations.size());
-    for(auto& desc : operations)
+    for(const auto& desc : operations)
     {
         opDescPtrs.push_back(desc.get());
     }
