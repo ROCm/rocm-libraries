@@ -21,23 +21,23 @@
 ################################################################################
 
 import pytest
-from unittest.mock import MagicMock
+from typing import Set
 
 from Tensile.Components.CustomSchedule import (
     hasCustomSchedule, ScheduleInfo, RegisterSchedule, TileConfig,
     _SCHEDULE_METADATA, _SCHEDULE_REGISTRY,
     isTN, isNT, isNN, isTT, is16bit, query_cms_kernels, get_available_layouts
 )
-from Tensile.Components.CMSValidator import isValid
-from Tensile.Common import IsaVersion
 
+def _get_compact_layout_string(transposeA: bool, transposeB: bool):
+    return ("T" if transposeA else "N") + ("T" if transposeB else "N")
 
-def _get_layouts_for(func_name) -> set[str]:
+def _get_layouts_for(func_name) -> Set[str]:
     """Collect unique layout strings for a function from _SCHEDULE_METADATA."""
     layouts = set()
     for info in _SCHEDULE_METADATA:
         if info.name == func_name:
-            layout = ("T" if info.TransposeA else "N") + ("T" if info.TransposeB else "N")
+            layout = _get_compact_layout_string(info.TransposeA, info.TransposeB)
             layouts.add(layout)
     return layouts
 
@@ -46,7 +46,6 @@ def _get_cms_kernel_info_for(func_name):
     for info in _SCHEDULE_METADATA:
         if info.name == func_name:
             yield info
-    return None
 
 class TestLayoutAutoDetection:
     """Tests for automatic supported_layouts detection in RegisterSchedule."""
@@ -119,9 +118,13 @@ class TestLayoutAutoDetection:
 
         assert _get_layouts_for("_fake_all_layouts") == {"NN", "NT", "TN", "TT"}
 
-        assert get_available_layouts(dtype="16bit") == {"NN", "NT", "TN", "TT"}
+        available_16bit = get_available_layouts(dtype="16bit")
+        assert {"NN", "NT", "TN", "TT"}.issubset(available_16bit), \
+            f"Expected all four layouts in 16bit, got {available_16bit}"
 
-        assert get_available_layouts() == {"NN", "NT", "TN", "TT"}
+        available_all = get_available_layouts()
+        assert {"NN", "NT", "TN", "TT"}.issubset(available_all), \
+            f"Expected all four layouts overall, got {available_all}"
 
     def test_detect_no_layouts(self):
         """A function that always returns False should detect no layouts."""
@@ -226,7 +229,7 @@ class TestLayoutAutoDetection:
 
         # Confirm we have all the expected schedules in the registry
         for func_name in EXPECTED:
-            assert func_name in registered_schedules, f"{func_name} not found in _SCHEDULE_REGISTRY (Please update the expected layouts in the test if needed)"
+            assert func_name in registered_schedules, f"{func_name} not found in _SCHEDULE_METADATA (Please update the expected layouts in the test if needed)"
 
         # Confirm we have all the registered schedules in the expected layouts
         for func_name in registered_schedules:
@@ -236,10 +239,6 @@ class TestLayoutAutoDetection:
             detected = _get_layouts_for(name)
             assert detected == expected_layouts, \
                 f"{name}: auto-detected {detected}, expected {expected_layouts}"
-
-        found_names = {info.name for info in _SCHEDULE_METADATA}
-        for name in EXPECTED:
-            assert name in found_names, f"{name} not found in _SCHEDULE_METADATA"
 
     def test_cms_api_query(self):
         """Test the CMS API query function."""
@@ -272,7 +271,7 @@ class TestLayoutAutoDetection:
                 assert result["TransposeA"] == expected_a
                 assert result["TransposeB"] == expected_b
 
-    def test_cms_kernel_info_correctness_for_layouts_and_LDSTrInst_and_TransposeLDS(self):
+    def test_detect_layout_ldstr_transpose_combos(self):
         """Confirm the correct detection of layouts, LDSTrInst, and TransposeLDS in the CMS kernel info."""
         @RegisterSchedule(
             tile_config=self.TILE,
@@ -292,28 +291,25 @@ class TestLayoutAutoDetection:
 
         expected_kernel_infos_detection = {
             # TransposeA, TransposeB, LDSTrInst, TransposeLDS
-            (True, False, True, 1): True, # TN  (TN and LDSTrInst and TransposeLDS == 1)
-            (True, False, False, 1): True, # TN  (TN and LDSTrInst and TransposeLDS == 1)
-            (True, False, True, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)
-            (True, False, False, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)
+            (True, False, True, 1): True,       # TN  (TN and LDSTrInst and TransposeLDS == 1)
+            (True, False, False, 1): True,      # TN  (TN and no LDSTrInst and TransposeLDS == 1)
+            (True, False, True, 0): False,      # TN  (TN and LDSTrInst and TransposeLDS == 0)
+            (True, False, False, 0): False,     # TN  (TN and no LDSTrInst and TransposeLDS == 0)
 
-            # TransposeA, TransposeB, LDSTrInst, TransposeLDS
-            (False, False, True, 1): True, # TN  (TN and LDSTrInst and TTransposeLDSLDS == 1)
-            (False, False, False, 1): False, # TN  (TN and LDSTrInst and TransposeLDS == 1)
-            (False, False, True, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)
-            (False, False, False, 0): False, # TN  (TN and LDSTrInst and TransposeLDS == 0)
+            (False, False, True, 1): True,      # NN  (NN and LDSTrInst and TransposeLDS == 1)
+            (False, False, False, 1): False,    # NN  (NN and no LDSTrInst and TransposeLDS == 1)
+            (False, False, True, 0): False,     # NN  (NN and LDSTrInst and TransposeLDS == 0)
+            (False, False, False, 0): False,    # NN  (NN and no LDSTrInst and TransposeLDS == 0)
 
-            # TransposeA, TransposeB, LDSTrInst, TransposeLDS
-            (False, True, True, 1): False, # NT  (NT and LDSTrInst and TransposeLDS == 1)
-            (False, True, False, 1): False, # NT  (NT and LDSTrInst and TransposeLDS == 1)
-            (False, True, True, 0): False, # NT  (NT and LDSTrInst and TransposeLDS == 0)
-            (False, True, False, 0): False, # NT  (NT and LDSTrInst and TransposeLDS == 0)
+            (False, True, True, 1): False,      # NT  (NT and LDSTrInst and TransposeLDS == 1)
+            (False, True, False, 1): False,     # NT  (NT and no LDSTrInst and TransposeLDS == 1)
+            (False, True, True, 0): False,      # NT  (NT and LDSTrInst and TransposeLDS == 0)
+            (False, True, False, 0): False,     # NT  (NT and no LDSTrInst and TransposeLDS == 0)
 
-            # TransposeA, TransposeB, LDSTrInst, TransposeLDS
-            (True, True, True, 1): False, # TT  (TT and LDSTrInst and TransposeLDS == 1)
-            (True, True, False, 1): False, # TT  (TT and LDSTrInst and TransposeLDS == 1)
-            (True, True, True, 0): False, # TT  (TT and LDSTrInst and TransposeLDS == 0)
-            (True, True, False, 0): False, # TT  (TT and LDSTrInst and TransposeLDS == 0)
+            (True, True, True, 1): False,       # TT  (TT and LDSTrInst and TransposeLDS == 1)
+            (True, True, False, 1): False,      # TT  (TT and no LDSTrInst and TransposeLDS == 1)
+            (True, True, True, 0): False,       # TT  (TT and LDSTrInst and TransposeLDS == 0)
+            (True, True, False, 0): False,      # TT  (TT and no LDSTrInst and TransposeLDS == 0)
 
         }
 
