@@ -1333,7 +1333,7 @@ class Configuration(object):
             self.configure_extra_library_flags()
         elif self.cxx_stdlib_under_test == "libstdc++":
             self.config.available_features.add("c++experimental")
-            self.cxx.link_flags += ["-lstdc++fs", "-lm", "-pthread"]
+            self.cxx.link_flags += ["-lm", "-pthread"]
         elif self.cxx_stdlib_under_test == "msvc":
             # FIXME: Correctly setup debug/release flags here.
             pass
