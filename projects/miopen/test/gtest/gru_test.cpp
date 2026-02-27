@@ -3108,7 +3108,7 @@ auto GenCases(bool gen_dropout)
     single.numLayers     = (gen_dropout ? 3 : 1);
     single.inputMode     = 0;
     single.biasMode      = 0;
-    single.dirMode       = 1;
+    single.dirMode       = 0;
     single.useDropout    = gen_dropout;
     single.nohx          = false;
     single.nodhy         = false;
@@ -3116,9 +3116,6 @@ auto GenCases(bool gen_dropout)
     single.nodhx         = false;
     single.flatBatchFill = false;
     single.batchSeq      = defaultBS;
-    single.inputMode     = 0;
-    single.biasMode      = 0;
-    single.dirMode       = 0;
     cases.push_back(single);
     return cases;
 }
