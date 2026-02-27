@@ -1520,6 +1520,76 @@ TEST_P(TestGraphSerializationRoundTrip, BatchnormInference)
     roundTripAndCompare(graph);
 }
 
+TEST_P(TestGraphSerializationRoundTrip, LayernormNodeInference)
+{
+    Graph graph;
+    graph.set_name("layernorm_inference_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {2, 64, 32, 32}, DataType::FLOAT, 1);
+    auto scale = createTensor("scale", {1, 64, 32, 32}, DataType::FLOAT, 2);
+    auto bias = createTensor("bias", {1, 64, 32, 32}, DataType::FLOAT, 3);
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4);
+
+    LayernormAttributes lnAttrs;
+    lnAttrs.set_epsilon(epsilon);
+    lnAttrs.set_forward_phase(NormFwdPhase::INFERENCE);
+
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, lnAttrs);
+
+    // In inference mode, mean and inv_variance should be nullptr
+    EXPECT_EQ(mean, nullptr);
+    EXPECT_EQ(invVariance, nullptr);
+
+    // Only verify counts for JSON format
+    if(GetParam() == SerializationFormat::JSON)
+    {
+        auto json = graph.toJson();
+        EXPECT_EQ(json["nodes"].size(), 1);
+        EXPECT_EQ(json["tensors"].size(), 5); // x, scale, bias, epsilon, y
+    }
+
+    roundTripAndCompare(graph);
+}
+
+TEST_P(TestGraphSerializationRoundTrip, LayernormNodeTraining)
+{
+    Graph graph;
+    graph.set_name("layernorm_training_test");
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_io_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = createTensor("x", {2, 64, 32, 32}, DataType::FLOAT, 1);
+    auto scale = createTensor("scale", {1, 64, 32, 32}, DataType::FLOAT, 2);
+    auto bias = createTensor("bias", {1, 64, 32, 32}, DataType::FLOAT, 3);
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4);
+
+    LayernormAttributes lnAttrs;
+    lnAttrs.set_epsilon(epsilon);
+    lnAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, lnAttrs);
+
+    // In training mode, mean and inv_variance should be set
+    ASSERT_NE(mean, nullptr);
+    ASSERT_NE(invVariance, nullptr);
+
+    // Only verify counts for JSON format
+    if(GetParam() == SerializationFormat::JSON)
+    {
+        auto json = graph.toJson();
+        EXPECT_EQ(json["nodes"].size(), 1);
+        EXPECT_EQ(json["tensors"].size(), 7); // x, scale, bias, epsilon, y, mean, inv_variance
+    }
+
+    roundTripAndCompare(graph);
+}
+
 //==============================================================================
 // Test Suite Instantiation
 //==============================================================================
