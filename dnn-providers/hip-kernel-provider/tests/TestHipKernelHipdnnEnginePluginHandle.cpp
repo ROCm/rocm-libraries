@@ -5,26 +5,26 @@
 #include <gtest/gtest.h>
 #include <memory>
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnHipKernelHandle.hpp"
 
-class TestHipKernelHipdnnEnginePluginHandle : public ::testing::Test
+class TestHipKernelHipdnnHipKernelHandle : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
-        _handle = std::make_unique<HipdnnEnginePluginHandle>();
+        _handle = std::make_unique<HipdnnHipKernelHandle>();
     }
 
-    std::unique_ptr<HipdnnEnginePluginHandle> _handle;
+    std::unique_ptr<HipdnnHipKernelHandle> _handle;
 };
 
-TEST_F(TestHipKernelHipdnnEnginePluginHandle, DefaultConstruction)
+TEST_F(TestHipKernelHipdnnHipKernelHandle, DefaultConstruction)
 {
-    EXPECT_EQ(_handle->hipKernelContainer, nullptr);
+    EXPECT_EQ(_handle->container, nullptr);
     EXPECT_EQ(_handle->getStream(), nullptr);
 }
 
-TEST_F(TestHipKernelHipdnnEnginePluginHandle, StoreDetachedBuffer)
+TEST_F(TestHipKernelHipdnnHipKernelHandle, StoreDetachedBuffer)
 {
     flatbuffers::FlatBufferBuilder builder;
     auto createdString = builder.CreateString("test");
@@ -38,7 +38,7 @@ TEST_F(TestHipKernelHipdnnEnginePluginHandle, StoreDetachedBuffer)
     _handle->removeEngineDetailsDetachedBuffer(ptr);
 }
 
-TEST_F(TestHipKernelHipdnnEnginePluginHandle, RemoveDetachedBuffer)
+TEST_F(TestHipKernelHipdnnHipKernelHandle, RemoveDetachedBuffer)
 {
     flatbuffers::FlatBufferBuilder builder;
     auto createdString = builder.CreateString("test");
@@ -53,7 +53,7 @@ TEST_F(TestHipKernelHipdnnEnginePluginHandle, RemoveDetachedBuffer)
     _handle->removeEngineDetailsDetachedBuffer(ptr);
 }
 
-TEST_F(TestHipKernelHipdnnEnginePluginHandle, RemoveNonExistentBuffer)
+TEST_F(TestHipKernelHipdnnHipKernelHandle, RemoveNonExistentBuffer)
 {
     const void* fakePtr = reinterpret_cast<const void*>(0x12345678);
 
@@ -61,7 +61,7 @@ TEST_F(TestHipKernelHipdnnEnginePluginHandle, RemoveNonExistentBuffer)
     EXPECT_NO_THROW(_handle->removeEngineDetailsDetachedBuffer(fakePtr));
 }
 
-TEST_F(TestHipKernelHipdnnEnginePluginHandle, MultipleBuffers)
+TEST_F(TestHipKernelHipdnnHipKernelHandle, MultipleBuffers)
 {
     flatbuffers::FlatBufferBuilder builder1;
     auto createdString1 = builder1.CreateString("test");

@@ -4,42 +4,52 @@
 #pragma once
 
 #include <memory>
-#include <set>
 
-#include "EngineInterface.hpp"
-#include "plans/PlanBuilderInterface.hpp"
-#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include "HipdnnHipKernelContext.hpp"
+#include "HipdnnHipKernelHandle.hpp"
+#include "HipdnnHipKernelSettings.hpp"
+#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 namespace hip_kernel_plugin
 {
 
-class HipKernelEngine : public IEngine
+class HipKernelEngine : public hipdnn_plugin_sdk::IEngine<HipdnnHipKernelHandle,
+                                                          HipdnnHipKernelSettings,
+                                                          HipdnnHipKernelContext>
 {
 public:
     HipKernelEngine(int64_t id);
 
     int64_t id() const override;
 
-    bool isApplicable(HipdnnEnginePluginHandle& handle,
+    bool isApplicable(HipdnnHipKernelHandle& handle,
                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
-    void getDetails(HipdnnEnginePluginHandle& handle,
+    void getDetails(HipdnnHipKernelHandle& handle,
                     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
-    size_t getWorkspaceSize(
-        const HipdnnEnginePluginHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+    size_t getMaxWorkspaceSize(
+        const HipdnnHipKernelHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const override;
 
     void initializeExecutionContext(
-        const HipdnnEnginePluginHandle& handle,
+        const HipdnnHipKernelHandle& handle,
         const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        HipdnnEnginePluginExecutionContext& executionContext) const override;
+        HipdnnHipKernelContext& executionContext) const override;
 
-    void addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder);
+    void addPlanBuilder(
+        std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<HipdnnHipKernelHandle,
+                                                        HipdnnHipKernelSettings,
+                                                        HipdnnHipKernelContext>> planBuilder);
 
 private:
     int64_t _id;
-    std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
+    std::vector<std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<HipdnnHipKernelHandle,
+                                                                HipdnnHipKernelSettings,
+                                                                HipdnnHipKernelContext>>>
+        _planBuilders;
 };
 
 }

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipKernelContainer.hpp"
-#include "EngineManager.hpp"
 #include "engines/HipKernelEngine.hpp"
 #include "engines/plans/BatchnormPlanBuilder.hpp"
 
@@ -33,7 +32,9 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
     static const std::vector<EngineDefinition> s_engineDefinitions = {
         // HIP_KERNEL_ENGINE
         {HIP_KERNEL_ENGINE_ID,
-         []() -> std::unique_ptr<IEngine> {
+         []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnHipKernelHandle,
+                                                            HipdnnHipKernelSettings,
+                                                            HipdnnHipKernelContext>> {
              auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<BatchnormPlanBuilder>());
              // add more plan builders here as they are created, for example:
@@ -93,7 +94,9 @@ HipKernelContainer::HipKernelContainer()
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating HipKernelContainer");
 
-    _engineManager = std::make_unique<EngineManager>();
+    _engineManager = std::make_unique<hipdnn_plugin_sdk::EngineManager<HipdnnHipKernelHandle,
+                                                                       HipdnnHipKernelSettings,
+                                                                       HipdnnHipKernelContext>>();
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
@@ -106,7 +109,9 @@ HipKernelContainer::~HipKernelContainer()
     HIPDNN_PLUGIN_LOG_INFO("Destroying HipKernelContainer");
 }
 
-EngineManager& HipKernelContainer::getEngineManager()
+hipdnn_plugin_sdk::
+    EngineManager<HipdnnHipKernelHandle, HipdnnHipKernelSettings, HipdnnHipKernelContext>&
+    HipKernelContainer::getEngineManager()
 {
     return *_engineManager;
 }

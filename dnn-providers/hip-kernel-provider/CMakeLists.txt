@@ -108,8 +108,7 @@ add_subdirectory(kernels)
 # OBJECT library for hip kernel plugin implementation
 add_library(
     hip_kernel_plugin_impl OBJECT
-    EngineManager.cpp
-    HipKernelPlugin.cpp
+    HipdnnHipKernelHandle.cpp
     HipKernelPluginPublic.cpp
     HipKernelContainer.cpp
     HipKernelUtils.cpp

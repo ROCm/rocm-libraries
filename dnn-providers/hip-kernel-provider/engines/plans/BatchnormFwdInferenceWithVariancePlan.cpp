@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferenceWithVariancePlan.hpp"
-#include "HipdnnEnginePluginHandle.hpp"
 #include "hip/HipKernel.hpp"
 #include "hip/HipProgram.hpp"
 #include "hip/HipUtils.hpp"
@@ -10,7 +9,6 @@
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <sstream>
 #include <stdexcept>
 
 namespace hip_kernel_plugin
@@ -109,20 +107,21 @@ const hipdnn_data_sdk::data_objects::TensorAttributes*
 }
 
 BatchnormFwdInferenceWithVariancePlan::BatchnormFwdInferenceWithVariancePlan(
-    BatchnormFwdInferenceWithVarianceParams&& inferenceParams, bool benchmarkingEnabled)
+    BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
+    const HipdnnHipKernelSettings& executionSettings)
     : _inferenceParams(std::move(inferenceParams))
-    , _benchmarkingEnabled(benchmarkingEnabled)
+    , _executionSettings(executionSettings)
 {
 }
 
 size_t BatchnormFwdInferenceWithVariancePlan::getWorkspaceSize(
-    [[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+    [[maybe_unused]] const HipdnnHipKernelHandle& handle) const
 {
     // No workspace needed for batchnorm inference with variance
     return 0;
 }
 
-void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnEnginePluginHandle& handle,
+void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnHipKernelHandle& handle,
                                                     const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                                     uint32_t numDeviceBuffers,
                                                     [[maybe_unused]] void* workspace) const

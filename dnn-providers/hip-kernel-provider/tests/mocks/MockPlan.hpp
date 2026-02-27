@@ -3,23 +3,22 @@
 
 #pragma once
 
-#include "engines/plans/PlanInterface.hpp"
 #include <gmock/gmock.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+
+#include "HipdnnHipKernelHandle.hpp"
 
 namespace hip_kernel_plugin
 {
 
-class MockPlan : public IPlan
+class MockPlan : public hipdnn_plugin_sdk::IPlan<HipdnnHipKernelHandle>
 {
 public:
-    MOCK_METHOD(size_t,
-                getWorkspaceSize,
-                (const HipdnnEnginePluginHandle& handle),
-                (const, override));
+    MOCK_METHOD(size_t, getWorkspaceSize, (const HipdnnHipKernelHandle& handle), (const, override));
     MOCK_METHOD(void,
                 execute,
-                (const HipdnnEnginePluginHandle& handle,
+                (const HipdnnHipKernelHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace),

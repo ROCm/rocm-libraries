@@ -6,37 +6,51 @@
 #include <gmock/gmock.h>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
-#include "engines/plans/PlanBuilderInterface.hpp"
+#include "HipdnnHipKernelContext.hpp"
+#include "HipdnnHipKernelHandle.hpp"
+#include "HipdnnHipKernelSettings.hpp"
 
 namespace hip_kernel_plugin
 {
 
-class MockPlanBuilder : public IPlanBuilder
+class MockPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<HipdnnHipKernelHandle,
+                                                               HipdnnHipKernelSettings,
+                                                               HipdnnHipKernelContext>
 {
 public:
     MOCK_METHOD(bool,
                 isApplicable,
-                (const HipdnnEnginePluginHandle& handle,
+                (const HipdnnHipKernelHandle& handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(size_t,
-                getWorkspaceSize,
-                (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
+                getMaxWorkspaceSize,
+                (const HipdnnHipKernelHandle& handle,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const HipdnnHipKernelSettings& executionSettings),
+                (const, override));
+
+    MOCK_METHOD(void,
+                initializeExecutionSettings,
+                (const HipdnnHipKernelHandle& handle,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+                 HipdnnHipKernelSettings& executionSettings),
                 (const, override));
 
     MOCK_METHOD(void,
                 buildPlan,
-                (const HipdnnEnginePluginHandle& handle,
+                (const HipdnnHipKernelHandle& handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                  const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-                 HipdnnEnginePluginExecutionContext& executionContext),
+                 HipdnnHipKernelContext& executionContext),
                 (const, override));
 
     MOCK_METHOD((std::vector<hipdnn_data_sdk::data_objects::KnobT>),
                 getCustomKnobs,
-                (const HipdnnEnginePluginHandle& handle,
+                (const HipdnnHipKernelHandle& handle,
                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
 };

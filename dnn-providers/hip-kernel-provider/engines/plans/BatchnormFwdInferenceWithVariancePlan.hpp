@@ -6,7 +6,8 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "HipKernelUtils.hpp"
-#include "PlanInterface.hpp"
+#include "HipdnnHipKernelHandle.hpp"
+#include "HipdnnHipKernelSettings.hpp"
 
 namespace hip_kernel_plugin
 {
@@ -60,11 +61,11 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
-class BatchnormFwdInferenceWithVariancePlan : public IPlan
+class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan<HipdnnHipKernelHandle>
 {
 public:
     BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
-                                          bool benchmarkingEnabled = false);
+                                          const HipdnnHipKernelSettings& executionSettings);
 
     BatchnormFwdInferenceWithVariancePlan(const BatchnormFwdInferenceWithVariancePlan&) = delete;
     BatchnormFwdInferenceWithVariancePlan& operator=(const BatchnormFwdInferenceWithVariancePlan&)
@@ -74,16 +75,16 @@ public:
     BatchnormFwdInferenceWithVariancePlan& operator=(BatchnormFwdInferenceWithVariancePlan&&)
         = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnHipKernelHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnHipKernelHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormFwdInferenceWithVarianceParams _inferenceParams;
-    [[maybe_unused]] bool _benchmarkingEnabled;
+    HipdnnHipKernelSettings _executionSettings;
 };
 
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipKernelEngine.hpp"
+#include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -23,8 +24,14 @@ int64_t HipKernelEngine::id() const
     return _id;
 }
 
+void initializeHipKernelSettings(
+    [[maybe_unused]] const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+    [[maybe_unused]] HipdnnHipKernelSettings& executionSettings)
+{
+}
+
 bool HipKernelEngine::isApplicable(
-    HipdnnEnginePluginHandle& handle,
+    HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     // This is wrong if we ever have more than 1 plan builder thats applicable.
@@ -39,7 +46,7 @@ bool HipKernelEngine::isApplicable(
     return false;
 }
 
-void HipKernelEngine::getDetails(HipdnnEnginePluginHandle& handle,
+void HipKernelEngine::getDetails(HipdnnHipKernelHandle& handle,
                                  const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                                  hipdnnPluginConstData_t& detailsOut) const
 {
@@ -83,27 +90,38 @@ void HipKernelEngine::getDetails(HipdnnEnginePluginHandle& handle,
     handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
 }
 
-size_t HipKernelEngine::getWorkspaceSize(
-    const HipdnnEnginePluginHandle& handle,
-    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const
+size_t HipKernelEngine::getMaxWorkspaceSize(
+    const HipdnnHipKernelHandle& handle,
+    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const
 {
+    HipdnnHipKernelSettings baseExecutionSettings;
+    initializeHipKernelSettings(engineConfig, baseExecutionSettings);
     size_t workspaceSize = 0;
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
-            workspaceSize = std::max(workspaceSize, planBuilder->getWorkspaceSize(handle, opGraph));
+            HipdnnHipKernelSettings executionSettings = baseExecutionSettings;
+            planBuilder->initializeExecutionSettings(
+                handle, opGraph, engineConfig, executionSettings);
+            workspaceSize
+                = std::max(workspaceSize,
+                           planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings));
         }
     }
     return workspaceSize;
 }
 
 void HipKernelEngine::initializeExecutionContext(
-    const HipdnnEnginePluginHandle& handle,
+    const HipdnnHipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipdnnEnginePluginExecutionContext& executionContext) const
+    HipdnnHipKernelContext& executionContext) const
 {
+    HipdnnHipKernelSettings executionSettings;
+    initializeHipKernelSettings(engineConfig, executionSettings);
+
     if(engineConfig.isValid())
     {
         if(engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
@@ -113,7 +131,7 @@ void HipKernelEngine::initializeExecutionContext(
             if(knobSetting.valueType() == hipdnn_data_sdk::data_objects::KnobValue::IntValue)
             {
                 auto value = knobSetting.valueAs<hipdnn_data_sdk::data_objects::IntValue>().value();
-                executionContext.setBenchmarkingEnabled(value != 0);
+                executionSettings.setBenchmarkingEnabled(value != 0);
             }
             else
             {
@@ -128,6 +146,8 @@ void HipKernelEngine::initializeExecutionContext(
         HIPDNN_PLUGIN_LOG_WARN("Engine config is invalid");
     }
 
+    executionContext.setExecutionSettings(executionSettings);
+
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
@@ -138,7 +158,10 @@ void HipKernelEngine::initializeExecutionContext(
     }
 }
 
-void HipKernelEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
+void HipKernelEngine::addPlanBuilder(
+    std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<HipdnnHipKernelHandle,
+                                                    HipdnnHipKernelSettings,
+                                                    HipdnnHipKernelContext>> planBuilder)
 {
     _planBuilders.push_back(std::move(planBuilder));
 }

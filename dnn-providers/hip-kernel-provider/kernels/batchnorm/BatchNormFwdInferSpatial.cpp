@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "BatchnormActivation.hpp"
 #include "FloatTypes.h"
+#include "HipKernelActivation.hpp"
 #include "VectorTypes.hpp"
 
 // determine block size using parameters passed from the host
@@ -51,10 +51,9 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
         {
             inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
             inhat[i] = scale[i] * inhat[i] + bias[i];
-            inhat[i] = hip_kernel_plugin::batchnorm::applyActivation<
+            inhat[i] = hip_kernel_plugin::applyActivation<
                 FLOAT_ACCUM,
-                hip_kernel_plugin::batchnorm::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(
-                inhat[i], alpha, beta);
+                hip_kernel_plugin::ActivationMode{HIP_PLUGIN_NRN_OP_ID}>(inhat[i], alpha, beta);
             value[i] = CVT_ACCUM2FLOAT(inhat[i]);
         }
 

@@ -9,16 +9,26 @@
 
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
+#include <hipdnn_plugin_sdk/PluginBaseTypes.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "HipKernelContainer.hpp"
+#include "HipdnnHipKernelContext.hpp"
+#include "HipdnnHipKernelSettings.hpp"
+
+namespace hip_kernel_plugin
+{
+class HipKernelContainer;
+}
 
 // NOLINTBEGIN
-struct HipdnnEnginePluginHandle
+struct HipdnnHipKernelHandle : HipdnnEnginePluginHandle
 {
 public:
-    virtual ~HipdnnEnginePluginHandle() = default;
+    HipdnnHipKernelHandle() = default;
+
+    ~HipdnnHipKernelHandle() override = default;
 
     void setStream(hipStream_t stream)
     {
@@ -30,10 +40,9 @@ public:
         return _stream;
     }
 
-    hip_kernel_plugin::EngineManager& getEngineManager()
-    {
-        return hipKernelContainer->getEngineManager();
-    }
+    hipdnn_plugin_sdk::
+        EngineManager<HipdnnHipKernelHandle, HipdnnHipKernelSettings, HipdnnHipKernelContext>&
+        getEngineManager();
 
     void storeEngineDetailsDetachedBuffer(const void* ptr,
                                           std::unique_ptr<flatbuffers::DetachedBuffer> buffer)
@@ -60,7 +69,7 @@ public:
         }
     }
 
-    std::shared_ptr<hip_kernel_plugin::HipKernelContainer> hipKernelContainer;
+    std::shared_ptr<hip_kernel_plugin::HipKernelContainer> container;
 
 private:
     hipStream_t _stream = nullptr;

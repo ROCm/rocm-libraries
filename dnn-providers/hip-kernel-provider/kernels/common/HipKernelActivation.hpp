@@ -7,8 +7,6 @@
 
 namespace hip_kernel_plugin
 {
-namespace batchnorm
-{
 
 /// Note: Values match hip_kernel_utils::ActivationMode in HipKernelUtils.hpp
 enum class ActivationMode : int
@@ -38,7 +36,7 @@ __forceinline__ __device__ T applyActivation(T const& value, T const& alpha, T c
 {
     static_assert(Mode == ActivationMode::PASTHRU || Mode == ActivationMode::RELU
                       || Mode == ActivationMode::CLIPPED_RELU || Mode == ActivationMode::CLAMP,
-                  "Unsupported activation mode for batchnorm fusion");
+                  "Unsupported activation mode");
 
     if constexpr(Mode == ActivationMode::PASTHRU)
     {
@@ -62,19 +60,17 @@ __forceinline__ __device__ T applyActivation(T const& value, T const& alpha, T c
 /// @tparam T Floating point type (float, _Float16, etc.)
 /// @tparam Mode Activation mode
 /// @param dy Gradient from next layer
-/// @param xnorm Normalized input value
-/// @param scale Scale parameter from batchnorm
-/// @param bias Bias parameter from batchnorm
+/// @param input_value Input value that was passed to the activation function
 /// @param alpha First activation parameter
 /// @param beta Second activation parameter
 /// @return Gradient with respect to input
 template <typename T, ActivationMode Mode>
-__forceinline__ __device__ T applyActivationGradient(
-    T const& dy, T const& xnorm, T const& scale, T const& bias, T const& alpha, T const& beta)
+__forceinline__ __device__ T
+    applyActivationGradient(T const& dy, T const& input_value, T const& alpha, T const& beta)
 {
     static_assert(Mode == ActivationMode::PASTHRU || Mode == ActivationMode::RELU
                       || Mode == ActivationMode::CLIPPED_RELU || Mode == ActivationMode::CLAMP,
-                  "Unsupported activation mode for batchnorm fusion");
+                  "Unsupported activation mode");
 
     if constexpr(Mode == ActivationMode::PASTHRU)
     {
@@ -82,20 +78,16 @@ __forceinline__ __device__ T applyActivationGradient(
     }
     else if constexpr(Mode == ActivationMode::RELU)
     {
-        T activated = scale * xnorm + bias;
-        return (activated > T(0)) ? dy : T(0);
+        return (input_value > T(0)) ? dy : T(0);
     }
     else if constexpr(Mode == ActivationMode::CLIPPED_RELU)
     {
-        T activated = scale * xnorm + bias;
-        return (activated > T(0) && activated <= alpha) ? dy : T(0);
+        return (input_value > T(0) && input_value <= alpha) ? dy : T(0);
     }
     else if constexpr(Mode == ActivationMode::CLAMP)
     {
-        T activated = scale * xnorm + bias;
-        return (activated > alpha && activated <= beta) ? dy : T(0);
+        return (input_value > alpha && input_value <= beta) ? dy : T(0);
     }
 }
 
-} // namespace batchnorm
 } // namespace hip_kernel_plugin
