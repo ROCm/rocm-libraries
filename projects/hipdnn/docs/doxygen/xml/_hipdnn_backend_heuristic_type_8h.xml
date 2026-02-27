@@ -1,0 +1,74 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="_hipdnn_backend_heuristic_type_8h" kind="file" language="C++">
+    <compoundname>HipdnnBackendHeuristicType.h</compoundname>
+    <includedby refid="hipdnn__backend_8h" local="yes">hipdnn_backend.h</includedby>
+    <invincdepgraph>
+      <node id="1">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="_hipdnn_backend_heuristic_type_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+      </node>
+    </invincdepgraph>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="_hipdnn_backend_heuristic_type_8h_1a883b30cf3ad9f52bcadfdeb9cc11b155" prot="public" static="no" strong="no">
+        <type></type>
+        <name>hipdnnBackendHeurMode_t</name>
+        <enumvalue id="_hipdnn_backend_heuristic_type_8h_1a883b30cf3ad9f52bcadfdeb9cc11b155a3a7a02a1aa480651838aaeca130a4511" prot="public">
+          <name>HIPDNN_HEUR_MODE_FALLBACK</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Fallback mode - functional support only. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Returns engines that are functionally correct for the given operation graph. No performance tuning or optimization is performed. This is the most reliable mode for finding a working configuration.</para>
+<para>Use this mode when:<itemizedlist>
+<listitem><para>You need guaranteed functional correctness</para>
+</listitem><listitem><para>Performance is not critical</para>
+</listitem><listitem><para>You want the fastest engine discovery </para>
+</listitem></itemizedlist>
+</para>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Heuristic modes for engine discovery. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>When creating an engine heuristic descriptor, specify a mode to control how engines are discovered and ranked. The mode affects both the search algorithm and the quality of performance estimates.</para>
+<para><simplesect kind="see"><para><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a715d2ddb1270d81b2dc9ea6a372f56b6" kindref="member">HIPDNN_ATTR_ENGINEHEUR_MODE</ref> </para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" kindref="member">hipdnnBackendSetAttribute()</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendHeuristicType.h" line="26" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendHeuristicType.h" bodystart="27" bodyend="43"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Heuristic mode types for engine selection. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the heuristic modes used when querying available engines for an operation graph. Different modes provide different trade-offs between search time and result quality. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight></codeline>
+<codeline lineno="26" refid="_hipdnn_backend_heuristic_type_8h_1a883b30cf3ad9f52bcadfdeb9cc11b155" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">enum</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="27"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="41" refid="_hipdnn_backend_heuristic_type_8h_1a883b30cf3ad9f52bcadfdeb9cc11b155a3a7a02a1aa480651838aaeca130a4511" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_heuristic_type_8h_1a883b30cf3ad9f52bcadfdeb9cc11b155a3a7a02a1aa480651838aaeca130a4511" kindref="member">HIPDNN_HEUR_MODE_FALLBACK</ref><sp/>=<sp/>0,</highlight></codeline>
+<codeline lineno="42"><highlight class="normal"></highlight></codeline>
+<codeline lineno="43"><highlight class="normal">}<sp/><ref refid="_hipdnn_backend_heuristic_type_8h_1a883b30cf3ad9f52bcadfdeb9cc11b155" kindref="member">hipdnnBackendHeurMode_t</ref>;</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendHeuristicType.h"/>
+  </compounddef>
+</doxygen>

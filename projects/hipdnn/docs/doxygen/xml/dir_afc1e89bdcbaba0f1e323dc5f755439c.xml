@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_afc1e89bdcbaba0f1e323dc5f755439c" kind="dir">
+    <compoundname>include</compoundname>
+    <innerfile refid="hipdnn__backend_8h">hipdnn_backend.h</innerfile>
+    <innerfile refid="_hipdnn_backend_attribute_name_8h">HipdnnBackendAttributeName.h</innerfile>
+    <innerfile refid="_hipdnn_backend_attribute_type_8h">HipdnnBackendAttributeType.h</innerfile>
+    <innerfile refid="_hipdnn_backend_callback_types_8h">HipdnnBackendCallbackTypes.h</innerfile>
+    <innerfile refid="_hipdnn_backend_descriptor_type_8h">HipdnnBackendDescriptorType.h</innerfile>
+    <innerfile refid="_hipdnn_backend_flatbuffer_data_8h">HipdnnBackendFlatbufferData.h</innerfile>
+    <innerfile refid="_hipdnn_backend_heuristic_type_8h">HipdnnBackendHeuristicType.h</innerfile>
+    <innerfile refid="_hipdnn_backend_limits_8h">HipdnnBackendLimits.h</innerfile>
+    <innerfile refid="_hipdnn_backend_plugin_loading_mode_8h">HipdnnBackendPluginLoadingMode.h</innerfile>
+    <innerfile refid="_hipdnn_backend_plugin_unloading_mode_8h">HipdnnBackendPluginUnloadingMode.h</innerfile>
+    <innerfile refid="_hipdnn_status_8h">HipdnnStatus.h</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/"/>
+  </compounddef>
+</doxygen>

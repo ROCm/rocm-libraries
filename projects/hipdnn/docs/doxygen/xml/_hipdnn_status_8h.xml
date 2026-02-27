@@ -1,0 +1,236 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="_hipdnn_status_8h" kind="file" language="C++">
+    <compoundname>HipdnnStatus.h</compoundname>
+    <includedby refid="hipdnn__backend_8h" local="yes">hipdnn_backend.h</includedby>
+    <invincdepgraph>
+      <node id="1">
+        <label>HipdnnStatus.h</label>
+        <link refid="_hipdnn_status_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+      </node>
+    </invincdepgraph>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" prot="public" static="no" strong="no">
+        <type></type>
+        <name>hipdnnStatus_t</name>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a449c00a84ecf02107b8d51b0dd900083" prot="public">
+          <name>HIPDNN_STATUS_SUCCESS</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Operation completed successfully. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ac79179c447b6cf5d27efc72112bf2b9d" prot="public">
+          <name>HIPDNN_STATUS_NOT_INITIALIZED</name>
+          <initializer>= 1</initializer>
+          <briefdescription>
+<para>Data or descriptor not properly initialized before use. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345abc473a49f066f64c278395463783e304" prot="public">
+          <name>HIPDNN_STATUS_BAD_PARAM</name>
+          <initializer>= 2</initializer>
+          <briefdescription>
+<para>Invalid parameter error (category) </para>
+          </briefdescription>
+          <detaileddescription>
+<para>An incorrect value or parameter was passed to the function. Check the function documentation for valid parameter ranges. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345af1ef126938fb707ecddff124d0d4d19f" prot="public">
+          <name>HIPDNN_STATUS_BAD_PARAM_NULL_POINTER</name>
+          <initializer>= 3</initializer>
+          <briefdescription>
+<para>Null pointer received where non-null was required. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>The API received a null pointer from the user where a valid pointer was expected. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a18989e8a1b3bb7421116a17b951a17f7" prot="public">
+          <name>HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED</name>
+          <initializer>= 4</initializer>
+          <briefdescription>
+<para>Descriptor not finalized before use. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>The backend descriptor must be finalized by calling <ref refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" kindref="member">hipdnnBackendFinalize()</ref> before it can be used. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345af68566952e945a9ce967eb3775f24911" prot="public">
+          <name>HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND</name>
+          <initializer>= 5</initializer>
+          <briefdescription>
+<para>Array index or count out of valid range. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>An out-of-bound value was passed to the API, such as an invalid array index or element count. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a5999ea909a2cee39b26c37b33925ee54" prot="public">
+          <name>HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT</name>
+          <initializer>= 6</initializer>
+          <briefdescription>
+<para>Buffer too small for requested operation. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>The provided memory buffer has insufficient space for the requested data. Query the required size first. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ac91fe6ef298ec36f99ddf3d5d8643dd9" prot="public">
+          <name>HIPDNN_STATUS_BAD_PARAM_STREAM_MISMATCH</name>
+          <initializer>= 7</initializer>
+          <briefdescription>
+<para>Stream mismatch between handle and execution. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>The HIP stream passed to the API does not match the stream associated with the hipDNN handle. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a8355638de42d1e86e6b65fa60d7b2d59" prot="public">
+          <name>HIPDNN_STATUS_NOT_SUPPORTED</name>
+          <initializer>= 8</initializer>
+          <briefdescription>
+<para>Functionality not supported. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>The requested functionality is not currently supported by hipDNN. This may be due to unsupported data types, tensor layouts, or operation configurations. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a6261b1363916d60a131f8ff7ad58985b" prot="public">
+          <name>HIPDNN_STATUS_INTERNAL_ERROR</name>
+          <initializer>= 9</initializer>
+          <briefdescription>
+<para>Internal library error (category) </para>
+          </briefdescription>
+          <detaileddescription>
+<para>An internal hipDNN operation failed. This typically indicates a bug in the library. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a65aa1ae9d53b914c623725179dfa962a" prot="public">
+          <name>HIPDNN_STATUS_ALLOC_FAILED</name>
+          <initializer>= 10</initializer>
+          <briefdescription>
+<para>Memory allocation failed. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>A memory allocation operation failed. This could be either host or device memory allocation. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345abf684759b27d2da15899b45b27caf1e7" prot="public">
+          <name>HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED</name>
+          <initializer>= 11</initializer>
+          <briefdescription>
+<para>Host memory allocation failed. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>An internal host (CPU) memory allocation failed inside the hipDNN library. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a0f83bb5f28443736387d6ec08996d909" prot="public">
+          <name>HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED</name>
+          <initializer>= 12</initializer>
+          <briefdescription>
+<para>Device memory allocation failed. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>An internal device (GPU) memory allocation failed inside the hipDNN library. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ae0d8a48a5378878dc7f27847422168fd" prot="public">
+          <name>HIPDNN_STATUS_EXECUTION_FAILED</name>
+          <initializer>= 13</initializer>
+          <briefdescription>
+<para>GPU kernel execution failed. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>The GPU program failed to execute. This could indicate invalid tensor data, incorrect dimensions, or a GPU error. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ae99f6e004b5ff402170ed11bb6e17125" prot="public">
+          <name>HIPDNN_STATUS_PLUGIN_ERROR</name>
+          <initializer>= 14</initializer>
+          <briefdescription>
+<para>Plugin error. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>An error occurred in a loaded plugin. Check plugin-specific error messages for details. </para>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Return status codes for hipDNN backend API functions. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Each hipDNN backend function returns a status code indicating the result of the operation. HIPDNN_STATUS_SUCCESS indicates successful completion, while other values indicate specific error conditions.</para>
+<para>Error codes are organized into categories:<itemizedlist>
+<listitem><para><bold>Success</bold> (0): Operation completed successfully</para>
+</listitem><listitem><para><bold>Parameter errors</bold> (1-7): Invalid inputs from the caller</para>
+</listitem><listitem><para><bold>Not supported</bold> (8): Requested functionality unavailable</para>
+</listitem><listitem><para><bold>Internal errors</bold> (9-13): Library internal failures</para>
+</listitem><listitem><para><bold>Plugin errors</bold> (14): Errors from loaded plugins </para>
+</listitem></itemizedlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnStatus.h" line="30" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnStatus.h" bodystart="31" bodyend="142"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Status codes returned by hipDNN backend API functions. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the status codes used throughout the hipDNN backend API. All hipDNN backend functions return a hipdnnStatus_t value to indicate success or the type of error that occurred. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight></codeline>
+<codeline lineno="30" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">enum</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="31"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="33" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a449c00a84ecf02107b8d51b0dd900083" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a449c00a84ecf02107b8d51b0dd900083" kindref="member">HIPDNN_STATUS_SUCCESS</ref><sp/>=<sp/>0,</highlight></codeline>
+<codeline lineno="34"><highlight class="normal"></highlight></codeline>
+<codeline lineno="36" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ac79179c447b6cf5d27efc72112bf2b9d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ac79179c447b6cf5d27efc72112bf2b9d" kindref="member">HIPDNN_STATUS_NOT_INITIALIZED</ref><sp/>=<sp/>1,</highlight></codeline>
+<codeline lineno="37"><highlight class="normal"></highlight></codeline>
+<codeline lineno="44" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345abc473a49f066f64c278395463783e304" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345abc473a49f066f64c278395463783e304" kindref="member">HIPDNN_STATUS_BAD_PARAM</ref><sp/>=<sp/>2,</highlight></codeline>
+<codeline lineno="45"><highlight class="normal"></highlight></codeline>
+<codeline lineno="52" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345af1ef126938fb707ecddff124d0d4d19f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345af1ef126938fb707ecddff124d0d4d19f" kindref="member">HIPDNN_STATUS_BAD_PARAM_NULL_POINTER</ref><sp/>=<sp/>3,</highlight></codeline>
+<codeline lineno="53"><highlight class="normal"></highlight></codeline>
+<codeline lineno="60" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a18989e8a1b3bb7421116a17b951a17f7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a18989e8a1b3bb7421116a17b951a17f7" kindref="member">HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED</ref><sp/>=<sp/>4,</highlight></codeline>
+<codeline lineno="61"><highlight class="normal"></highlight></codeline>
+<codeline lineno="68" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345af68566952e945a9ce967eb3775f24911" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345af68566952e945a9ce967eb3775f24911" kindref="member">HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND</ref><sp/>=<sp/>5,</highlight></codeline>
+<codeline lineno="69"><highlight class="normal"></highlight></codeline>
+<codeline lineno="76" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a5999ea909a2cee39b26c37b33925ee54" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a5999ea909a2cee39b26c37b33925ee54" kindref="member">HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT</ref><sp/>=<sp/>6,</highlight></codeline>
+<codeline lineno="77"><highlight class="normal"></highlight></codeline>
+<codeline lineno="84" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ac91fe6ef298ec36f99ddf3d5d8643dd9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ac91fe6ef298ec36f99ddf3d5d8643dd9" kindref="member">HIPDNN_STATUS_BAD_PARAM_STREAM_MISMATCH</ref><sp/>=<sp/>7,</highlight></codeline>
+<codeline lineno="85"><highlight class="normal"></highlight></codeline>
+<codeline lineno="93" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a8355638de42d1e86e6b65fa60d7b2d59" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a8355638de42d1e86e6b65fa60d7b2d59" kindref="member">HIPDNN_STATUS_NOT_SUPPORTED</ref><sp/>=<sp/>8,</highlight></codeline>
+<codeline lineno="94"><highlight class="normal"></highlight></codeline>
+<codeline lineno="101" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a6261b1363916d60a131f8ff7ad58985b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a6261b1363916d60a131f8ff7ad58985b" kindref="member">HIPDNN_STATUS_INTERNAL_ERROR</ref><sp/>=<sp/>9,</highlight></codeline>
+<codeline lineno="102"><highlight class="normal"></highlight></codeline>
+<codeline lineno="109" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a65aa1ae9d53b914c623725179dfa962a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a65aa1ae9d53b914c623725179dfa962a" kindref="member">HIPDNN_STATUS_ALLOC_FAILED</ref><sp/>=<sp/>10,</highlight></codeline>
+<codeline lineno="110"><highlight class="normal"></highlight></codeline>
+<codeline lineno="117" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345abf684759b27d2da15899b45b27caf1e7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345abf684759b27d2da15899b45b27caf1e7" kindref="member">HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED</ref><sp/>=<sp/>11,</highlight></codeline>
+<codeline lineno="118"><highlight class="normal"></highlight></codeline>
+<codeline lineno="125" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a0f83bb5f28443736387d6ec08996d909" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345a0f83bb5f28443736387d6ec08996d909" kindref="member">HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED</ref><sp/>=<sp/>12,</highlight></codeline>
+<codeline lineno="126"><highlight class="normal"></highlight></codeline>
+<codeline lineno="133" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ae0d8a48a5378878dc7f27847422168fd" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ae0d8a48a5378878dc7f27847422168fd" kindref="member">HIPDNN_STATUS_EXECUTION_FAILED</ref><sp/>=<sp/>13,</highlight></codeline>
+<codeline lineno="134"><highlight class="normal"></highlight></codeline>
+<codeline lineno="141" refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ae99f6e004b5ff402170ed11bb6e17125" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345ae99f6e004b5ff402170ed11bb6e17125" kindref="member">HIPDNN_STATUS_PLUGIN_ERROR</ref><sp/>=<sp/>14,</highlight></codeline>
+<codeline lineno="142"><highlight class="normal">}<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref>;</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnStatus.h"/>
+  </compounddef>
+</doxygen>

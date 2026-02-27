@@ -1,0 +1,49 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="_hipdnn_backend_limits_8h" kind="file" language="C++">
+    <compoundname>HipdnnBackendLimits.h</compoundname>
+    <includedby refid="hipdnn__backend_8h" local="yes">hipdnn_backend.h</includedby>
+    <invincdepgraph>
+      <node id="1">
+        <label>HipdnnBackendLimits.h</label>
+        <link refid="_hipdnn_backend_limits_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+      </node>
+    </invincdepgraph>
+    <sectiondef kind="define">
+      <memberdef kind="define" id="_hipdnn_backend_limits_8h_1ae3dc9f0c5964ccfcbc5e7e157c4d0574" prot="public" static="no">
+        <name>HIPDNN_ERROR_STRING_MAX_LENGTH</name>
+        <initializer>2048</initializer>
+        <briefdescription>
+<para>Maximum error message size (including the null terminator). </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This value is used across the API and backend to size buffers for error strings. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendLimits.h" line="12" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendLimits.h" bodystart="12" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="comment">//<sp/>NOLINTBEGIN</highlight></codeline>
+<codeline lineno="12" refid="_hipdnn_backend_limits_8h_1ae3dc9f0c5964ccfcbc5e7e157c4d0574" refkind="member"><highlight class="preprocessor">#define<sp/>HIPDNN_ERROR_STRING_MAX_LENGTH<sp/>2048</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight><highlight class="comment">//<sp/>NOLINTEND</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendLimits.h"/>
+  </compounddef>
+</doxygen>

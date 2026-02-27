@@ -1,0 +1,28 @@
+var searchData=
+[
+  ['hip_5fcheck_0',['HIP_CHECK',['../Helpers_8hpp.html#aaf41965393ffaedeec1441c5bc1c04e9',1,'Helpers.hpp']]],
+  ['hipdnn_5fcallback_5ftypes_5fdefined_1',['HIPDNN_CALLBACK_TYPES_DEFINED',['../HipdnnBackendCallbackTypes_8h.html#a8c81c1ab25c39989448609bce6731f01',1,'HipdnnBackendCallbackTypes.h']]],
+  ['hipdnn_5fcheck_2',['HIPDNN_CHECK',['../Helpers_8hpp.html#a96acd1b777e4151da28de265f8d22a61',1,'Helpers.hpp']]],
+  ['hipdnn_5fcheck_5ferror_3',['HIPDNN_CHECK_ERROR',['../Error_8hpp.html#a15fe08ef7efe6d0083436866c954f014',1,'Error.hpp']]],
+  ['hipdnn_5ferror_5fstring_5fmax_5flength_4',['HIPDNN_ERROR_STRING_MAX_LENGTH',['../HipdnnBackendLimits_8h.html#ae3dc9f0c5964ccfcbc5e7e157c4d0574',1,'HipdnnBackendLimits.h']]],
+  ['hipdnn_5ffe_5fcheck_5',['HIPDNN_FE_CHECK',['../Helpers_8hpp.html#a0e796d6d03dad288ff04bef60b661df0',1,'Helpers.hpp']]],
+  ['hipdnn_5ffe_5flog_5ferror_6',['HIPDNN_FE_LOG_ERROR',['../Logging_8hpp.html#ab7c059fc019c0b9b7122f4926177e519',1,'Logging.hpp']]],
+  ['hipdnn_5ffe_5flog_5ffatal_7',['HIPDNN_FE_LOG_FATAL',['../Logging_8hpp.html#aba8aedbc84f898049a59c2c4c15a51d2',1,'Logging.hpp']]],
+  ['hipdnn_5ffe_5flog_5finfo_8',['HIPDNN_FE_LOG_INFO',['../Logging_8hpp.html#a126034026e157e44bb9487c63926e850',1,'Logging.hpp']]],
+  ['hipdnn_5ffe_5flog_5fwarn_9',['HIPDNN_FE_LOG_WARN',['../Logging_8hpp.html#a074924720a6831a6b7dcbb84fed6a7bb',1,'Logging.hpp']]],
+  ['hipdnn_5flog_5ferror_10',['HIPDNN_LOG_ERROR',['../Logger_8hpp.html#a5f03fdc057de169df3ba0bc804a39f58',1,'Logger.hpp']]],
+  ['hipdnn_5flog_5ffatal_11',['HIPDNN_LOG_FATAL',['../Logger_8hpp.html#a54bc7dc9f7aab4ec7c348e3793353cf9',1,'Logger.hpp']]],
+  ['hipdnn_5flog_5finfo_12',['HIPDNN_LOG_INFO',['../Logger_8hpp.html#ad7dc88fd5bcf19bf90acd581f894a0f7',1,'Logger.hpp']]],
+  ['hipdnn_5flog_5fwarn_13',['HIPDNN_LOG_WARN',['../Logger_8hpp.html#a00a3c19b914af2d3c72ced93a943ca8a',1,'Logger.hpp']]],
+  ['hipdnn_5fnan_5fbf16_14',['HIPDNN_NAN_BF16',['../UtilsBfp16_8hpp.html#ab2a7a969dfb977ec03b189de68244c80',1,'UtilsBfp16.hpp']]],
+  ['hipdnn_5fnan_5ffp16_15',['HIPDNN_NAN_FP16',['../UtilsFp16_8hpp.html#a2187b48442fed029822c97a4cd9779a0',1,'UtilsFp16.hpp']]],
+  ['hipdnn_5freturn_5fif_5feq_16',['HIPDNN_RETURN_IF_EQ',['../Error_8hpp.html#aa535bc7a837918be9d001893e27a19b6',1,'Error.hpp']]],
+  ['hipdnn_5freturn_5fif_5ffalse_17',['HIPDNN_RETURN_IF_FALSE',['../Error_8hpp.html#afe96535669648492a4d36eaa11ebf1a5',1,'Error.hpp']]],
+  ['hipdnn_5freturn_5fif_5fge_18',['HIPDNN_RETURN_IF_GE',['../Error_8hpp.html#ac54a25d4ab7c2fa2391210b3a5fdeb3f',1,'Error.hpp']]],
+  ['hipdnn_5freturn_5fif_5fle_19',['HIPDNN_RETURN_IF_LE',['../Error_8hpp.html#a196dfd19098ab00086ecc01bd3ba1546',1,'Error.hpp']]],
+  ['hipdnn_5freturn_5fif_5flt_20',['HIPDNN_RETURN_IF_LT',['../Error_8hpp.html#a24e9443b1f26274b85323e1ccdde2a9a',1,'Error.hpp']]],
+  ['hipdnn_5freturn_5fif_5fne_21',['HIPDNN_RETURN_IF_NE',['../Error_8hpp.html#aa162a30c298c90baf5c526ca142e1543',1,'Error.hpp']]],
+  ['hipdnn_5freturn_5fif_5fnull_22',['HIPDNN_RETURN_IF_NULL',['../Error_8hpp.html#a63cc025e370420953c2a577c75be17b0',1,'Error.hpp']]],
+  ['hipdnn_5freturn_5fif_5ftrue_23',['HIPDNN_RETURN_IF_TRUE',['../Error_8hpp.html#aa11c643d2d00727da11c9533db7de255',1,'Error.hpp']]],
+  ['hipdnn_5freturn_5fon_5fbackend_5ffailure_24',['HIPDNN_RETURN_ON_BACKEND_FAILURE',['../Utilities_8hpp.html#a1ca90104fc912edd6a801ea40a9f4333',1,'Utilities.hpp']]]
+];

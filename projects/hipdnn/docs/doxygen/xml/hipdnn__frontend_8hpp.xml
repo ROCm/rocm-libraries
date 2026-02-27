@@ -1,0 +1,89 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="hipdnn__frontend_8hpp" kind="file" language="C++">
+    <compoundname>hipdnn_frontend.hpp</compoundname>
+    <includes local="no">hipdnn_frontend/Error.hpp</includes>
+    <includes local="no">hipdnn_frontend/Graph.hpp</includes>
+    <includes local="no">hipdnn_frontend/Handle.hpp</includes>
+    <includes local="no">hipdnn_frontend/Types.hpp</includes>
+    <incdepgraph>
+      <node id="1">
+        <label>hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend/Error.hpp</label>
+      </node>
+      <node id="3">
+        <label>hipdnn_frontend/Graph.hpp</label>
+      </node>
+      <node id="4">
+        <label>hipdnn_frontend/Handle.hpp</label>
+      </node>
+      <node id="5">
+        <label>hipdnn_frontend/Types.hpp</label>
+      </node>
+    </incdepgraph>
+    <briefdescription>
+<para>This is the primary header file that users should include to access the hipDNN frontend API. It provides a high-level C++ interface for building and executing deep learning computational graphs on AMD GPUs. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>The hipDNN Frontend provides a graph-based API for constructing deep learning operations including:<itemizedlist>
+<listitem><para>Convolution operations (forward, data gradient, weight gradient)</para>
+</listitem><listitem><para>Batch normalization (forward, backward, inference)</para>
+</listitem><listitem><para>Pointwise/element-wise operations</para>
+</listitem><listitem><para>Matrix multiplication</para>
+</listitem></itemizedlist>
+</para>
+<sect1 id="hipdnn__frontend_8hpp_1usage">
+<title>Basic usage</title>
+<para><programlisting filename=".cpp"><codeline><highlight class="preprocessor">#include<sp/>&lt;<ref refid="hipdnn__frontend_8hpp" kindref="compound">hipdnn_frontend.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">using<sp/>namespace<sp/></highlight><highlight class="normal">hipdnn_frontend;</highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">using<sp/>namespace<sp/></highlight><highlight class="normal">hipdnn_frontend::graph;</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="comment">//<sp/>Create<sp/>a<sp/>graph</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal">Graph<sp/>graph;</highlight></codeline>
+<codeline><highlight class="normal">graph.set_io_data_type(DataType::HALF)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>.set_compute_data_type(DataType::FLOAT);</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="comment">//<sp/>Create<sp/>tensors</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>x<sp/>=<sp/>Graph::tensor(TensorAttributes()</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.set_dim({1,<sp/>64,<sp/>28,<sp/>28})</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.set_stride({50176,<sp/>784,<sp/>28,<sp/>1})</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.set_data_type(DataType::HALF));</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="comment">//<sp/>Add<sp/>operations<sp/>and<sp/>build<sp/>the<sp/>graph</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="comment">//<sp/>...</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle;</highlight></codeline>
+<codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" kindref="member">hipdnnCreate</ref>(&amp;handle);</highlight></codeline>
+<codeline><highlight class="normal">graph.build(handle);</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="comment">//<sp/>Execute</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal">graph.execute(handle,<sp/>tensorLookup,<sp/>workspace);</highlight></codeline>
+</programlisting> </para>
+</sect1>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="51"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="52"><highlight class="normal"></highlight></codeline>
+<codeline lineno="53"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_frontend/Error.hpp&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="54"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_frontend/Graph.hpp&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="55"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_frontend/Handle.hpp&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="56"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_frontend/Types.hpp&gt;</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp"/>
+  </compounddef>
+</doxygen>

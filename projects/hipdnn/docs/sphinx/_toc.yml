@@ -9,48 +9,76 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/hipdnn-prerequisites.rst
-    title: Prerequisites
-  - file: install/hipdnn-install.rst
-    title: hipDNN installation (Linux)
-  - file: install/hipdnn-install-windows.rst
-    title: hipDNN installation (Windows)
+  - file: install/users.rst
+    title: For users
+    subtrees:
+    - entries:
+      - file: install/quickstart.rst
+        title: hipDNN quick start
+  - file: install/plugin-developers.rst
+    title: For plugin developers
+    subtrees:
+    - entries:
+      - file: install/hipdnn-prerequisites.rst
+        title: Prerequisites
+      - file: install/hipdnn-install.rst
+        title: hipDNN installation (Linux)
+      - file: install/hipdnn-install-windows.rst
+        title: hipDNN installation (Windows)
 
 - caption: Conceptual
   entries:
   - file: conceptual/architecture.rst
     title: High-level architecture
-  - file: conceptual/miopen-plugin.rst
-    title: MIOpen Provider plugin architecture
+  - file: conceptual/knobs.rst
+    title: Engine configuration knobs
   - file: conceptual/backend-architecture.rst
     title: Backend architecture
 
 - caption: How to
   entries:
-  - file: how-to/build-execute-hipdnn.rst
-    title: Build and execute operation graphs
-  - file: how-to/migrate-cudnn.rst
-    title: Migrate a cuDNN project to hipDNN
-  - file: how-to/get-set-engine-knob.rst
-    title: Get/set engine knob configurations
-  - file: how-to/extend-hipdnn.rst
-    title: Extend hipDNN functionality
-  - file: how-to/develop-plugins.rst
-    title: Develop plugins for hipDNN
+  - file: reference/how-to-users.rst
+    title: For users
+    subtrees:
+    - entries:
+      - file: how-to/build-execute-hipdnn.rst
+        title: Build and execute operation graphs
+  - file: reference/how-to-plugin.rst
+    title: For plugin developers
+    subtrees:
+    - entries:
+      - file: how-to/migrate-cudnn.rst
+        title: Migrate a cuDNN project to hipDNN
+      - file: how-to/get-set-engine-knob.rst
+        title: Get/set engine knob configurations
+      - file: how-to/extend-hipdnn.rst
+        title: Extend hipDNN functionality
+      - file: how-to/develop-plugins.rst
+        title: Develop plugins for hipDNN
 
 - caption: Reference
   entries:
+  - file: reference/plugins.rst
+    title: Plugin-specific operation support
+    subtrees:
+    - entries:
+      - file: reference/miopen-plugin.rst
+        title: MIOpen Provider plugin
+      - file: reference/hipblaslt.rst
+        title: hipBLASLt Provider plugin
   - file: reference/environment-variables.rst
     title: Environment variables
+  - file: reference/frontend-api/frontend-api.rst
+    title: Frontend C API 
+  - file: reference/backend-api/backend-api.rst
+    title: Backend C API
   - file: reference/naming-guidelines.rst
     title: Coding style and naming guidelines
   - file: reference/glossary.rst
     title: Glossary
-    
+
 - caption: About
   entries:
   - file: license.rst
     title: License
-
-
 

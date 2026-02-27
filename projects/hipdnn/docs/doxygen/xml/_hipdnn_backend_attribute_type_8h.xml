@@ -1,0 +1,303 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="_hipdnn_backend_attribute_type_8h" kind="file" language="C++">
+    <compoundname>HipdnnBackendAttributeType.h</compoundname>
+    <includedby refid="hipdnn__backend_8h" local="yes">hipdnn_backend.h</includedby>
+    <invincdepgraph>
+      <node id="1">
+        <label>HipdnnBackendAttributeType.h</label>
+        <link refid="_hipdnn_backend_attribute_type_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+      </node>
+    </invincdepgraph>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" prot="public" static="no" strong="no">
+        <type></type>
+        <name>hipdnnBackendAttributeType_t</name>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ad9304a2c5ed3c20131467c2bf8cee930" prot="public">
+          <name>HIPDNN_TYPE_HANDLE</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>hipDNN handle (hipdnnHandle_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a23deb7962d1e0f53fba0331fc2ed767c" prot="public">
+          <name>HIPDNN_TYPE_DATA_TYPE</name>
+          <briefdescription>
+<para>Data type enumeration (hipdnnDataType_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ac6a95747ceea3ff1dc9743a45f37ab87" prot="public">
+          <name>HIPDNN_TYPE_BOOLEAN</name>
+          <briefdescription>
+<para>Boolean value (bool) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a4aafc072b41b1f727a611e47f777f7e7" prot="public">
+          <name>HIPDNN_TYPE_INT64</name>
+          <briefdescription>
+<para>64-bit signed integer (int64_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab42d49a22ba4b4b56e7e9b0cf7704dcb" prot="public">
+          <name>HIPDNN_TYPE_FLOAT</name>
+          <briefdescription>
+<para>Single precision floating point (float) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a384d0fcf2762fd6acecde88a668d7a6e" prot="public">
+          <name>HIPDNN_TYPE_DOUBLE</name>
+          <briefdescription>
+<para>Double precision floating point (double) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a420c594d40e99868fb50702b7b85708b" prot="public">
+          <name>HIPDNN_TYPE_VOID_PTR</name>
+          <briefdescription>
+<para>Generic pointer (void*) - typically device memory. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab1ccd582eaaf3abae16dca19ee3d7608" prot="public">
+          <name>HIPDNN_TYPE_HEUR_MODE</name>
+          <briefdescription>
+<para>Heuristic mode enumeration (hipdnnBackendHeuristicMode_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a22edc0e8569a4432cf33df7da7e1cc1c" prot="public">
+          <name>HIPDNN_TYPE_KNOB_TYPE</name>
+          <briefdescription>
+<para>Knob type identifier. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a0e64dfa52e05b676dafab8cb58aa3479" prot="public">
+          <name>HIPDNN_TYPE_NAN_PROPOGATION</name>
+          <briefdescription>
+<para>NaN propagation mode. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a91930c63b726a4cd41180e3169e7bf1f" prot="public">
+          <name>HIPDNN_TYPE_NUMERICAL_NOTE</name>
+          <briefdescription>
+<para>Numerical precision/behavior note. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab3303f35d4cee041c27d8a87b8233216" prot="public">
+          <name>HIPDNN_TYPE_LAYOUT_TYPE</name>
+          <briefdescription>
+<para>Tensor layout type. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a68597f0d8ac4fbc9945d2d1848bd1b42" prot="public">
+          <name>HIPDNN_TYPE_ATTRIB_NAME</name>
+          <briefdescription>
+<para>Attribute name enumeration (hipdnnBackendAttributeName_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a4bc6a83bf0c44106378493c49f5663a1" prot="public">
+          <name>HIPDNN_TYPE_BACKEND_DESCRIPTOR</name>
+          <briefdescription>
+<para>Backend descriptor handle (hipdnnBackendDescriptor_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a28a2e41b42a919b83b9baf2883a5add8" prot="public">
+          <name>HIPDNN_TYPE_GENSTATS_MODE</name>
+          <briefdescription>
+<para>Generate statistics mode. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7afc108405a042c29c6940c0d67110ccf9" prot="public">
+          <name>HIPDNN_TYPE_BN_FINALIZE_STATS_MODE</name>
+          <briefdescription>
+<para>Batch normalization finalize statistics mode. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a18db092da4d21ebf3bef21a59411a11d" prot="public">
+          <name>HIPDNN_TYPE_BEHAVIOR_NOTE</name>
+          <briefdescription>
+<para>Engine behavior note. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a226f6997e35907a5727944dd3cd3e669" prot="public">
+          <name>HIPDNN_TYPE_TENSOR_REORDERING_MODE</name>
+          <briefdescription>
+<para>Tensor reordering mode. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ac4ee86688d73a4aaa2bf6fc662053b9b" prot="public">
+          <name>HIPDNN_TYPE_INT32</name>
+          <briefdescription>
+<para>32-bit signed integer (int32_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a258675deb3cc7381d45b61f90c7497b0" prot="public">
+          <name>HIPDNN_TYPE_CHAR</name>
+          <briefdescription>
+<para>Character (char) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a35c6c84d5ab6f4198933831045861aca" prot="public">
+          <name>HIPDNN_TYPE_SIGNAL_MODE</name>
+          <briefdescription>
+<para>Signal mode for synchronization. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a7f4ae942e8d483d587ddc32e6223e3a0" prot="public">
+          <name>HIPDNN_TYPE_FRACTION</name>
+          <briefdescription>
+<para>Fractional value type. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a37203318f9b739ab9e81c6f3f4ec19b3" prot="public">
+          <name>HIPDNN_TYPE_NORM_FWD_PHASE</name>
+          <briefdescription>
+<para>Normalization forward phase. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ad2b30303a6df43880c918dd1ced137d3" prot="public">
+          <name>HIPDNN_TYPE_RNG_DISTRIBUTION</name>
+          <briefdescription>
+<para>Random number generator distribution. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a44d70eccbb2c46c246dcef363030f8df" prot="public">
+          <name>HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT</name>
+          <briefdescription>
+<para>Serialized FlatBuffer data structure (extension) </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Used for passing serialized FlatBuffer data to/from the backend. The value should be a <ref refid="structhipdnn_backend_flatbuffer_data__t" kindref="compound">hipdnnBackendFlatbufferData_t</ref> struct. </para>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Data types for backend descriptor attribute values. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>When setting or getting attributes on backend descriptors, you must specify the data type of the value being passed. These constants identify the expected type for proper marshalling. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendAttributeType.h" line="22" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendAttributeType.h" bodystart="23" bodyend="112"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Data type identifiers for hipDNN backend attribute values. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the types used to specify the data type of attribute values when calling <ref refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" kindref="member">hipdnnBackendSetAttribute()</ref> and <ref refid="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" kindref="member">hipdnnBackendGetAttribute()</ref>. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight></codeline>
+<codeline lineno="22" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">enum</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="23"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="25" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ad9304a2c5ed3c20131467c2bf8cee930" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ad9304a2c5ed3c20131467c2bf8cee930" kindref="member">HIPDNN_TYPE_HANDLE</ref><sp/>=<sp/>0,</highlight></codeline>
+<codeline lineno="26"><highlight class="normal"></highlight></codeline>
+<codeline lineno="28" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a23deb7962d1e0f53fba0331fc2ed767c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a23deb7962d1e0f53fba0331fc2ed767c" kindref="member">HIPDNN_TYPE_DATA_TYPE</ref>,</highlight></codeline>
+<codeline lineno="29"><highlight class="normal"></highlight></codeline>
+<codeline lineno="31" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ac6a95747ceea3ff1dc9743a45f37ab87" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ac6a95747ceea3ff1dc9743a45f37ab87" kindref="member">HIPDNN_TYPE_BOOLEAN</ref>,</highlight></codeline>
+<codeline lineno="32"><highlight class="normal"></highlight></codeline>
+<codeline lineno="34" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a4aafc072b41b1f727a611e47f777f7e7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a4aafc072b41b1f727a611e47f777f7e7" kindref="member">HIPDNN_TYPE_INT64</ref>,</highlight></codeline>
+<codeline lineno="35"><highlight class="normal"></highlight></codeline>
+<codeline lineno="37" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab42d49a22ba4b4b56e7e9b0cf7704dcb" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab42d49a22ba4b4b56e7e9b0cf7704dcb" kindref="member">HIPDNN_TYPE_FLOAT</ref>,</highlight></codeline>
+<codeline lineno="38"><highlight class="normal"></highlight></codeline>
+<codeline lineno="40" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a384d0fcf2762fd6acecde88a668d7a6e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a384d0fcf2762fd6acecde88a668d7a6e" kindref="member">HIPDNN_TYPE_DOUBLE</ref>,</highlight></codeline>
+<codeline lineno="41"><highlight class="normal"></highlight></codeline>
+<codeline lineno="43" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a420c594d40e99868fb50702b7b85708b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a420c594d40e99868fb50702b7b85708b" kindref="member">HIPDNN_TYPE_VOID_PTR</ref>,</highlight></codeline>
+<codeline lineno="44"><highlight class="normal"></highlight></codeline>
+<codeline lineno="46" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab1ccd582eaaf3abae16dca19ee3d7608" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab1ccd582eaaf3abae16dca19ee3d7608" kindref="member">HIPDNN_TYPE_HEUR_MODE</ref>,</highlight></codeline>
+<codeline lineno="47"><highlight class="normal"></highlight></codeline>
+<codeline lineno="49" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a22edc0e8569a4432cf33df7da7e1cc1c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a22edc0e8569a4432cf33df7da7e1cc1c" kindref="member">HIPDNN_TYPE_KNOB_TYPE</ref>,</highlight></codeline>
+<codeline lineno="50"><highlight class="normal"></highlight></codeline>
+<codeline lineno="52" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a0e64dfa52e05b676dafab8cb58aa3479" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a0e64dfa52e05b676dafab8cb58aa3479" kindref="member">HIPDNN_TYPE_NAN_PROPOGATION</ref>,</highlight></codeline>
+<codeline lineno="53"><highlight class="normal"></highlight></codeline>
+<codeline lineno="55" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a91930c63b726a4cd41180e3169e7bf1f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a91930c63b726a4cd41180e3169e7bf1f" kindref="member">HIPDNN_TYPE_NUMERICAL_NOTE</ref>,</highlight></codeline>
+<codeline lineno="56"><highlight class="normal"></highlight></codeline>
+<codeline lineno="58" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab3303f35d4cee041c27d8a87b8233216" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ab3303f35d4cee041c27d8a87b8233216" kindref="member">HIPDNN_TYPE_LAYOUT_TYPE</ref>,</highlight></codeline>
+<codeline lineno="59"><highlight class="normal"></highlight></codeline>
+<codeline lineno="61" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a68597f0d8ac4fbc9945d2d1848bd1b42" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a68597f0d8ac4fbc9945d2d1848bd1b42" kindref="member">HIPDNN_TYPE_ATTRIB_NAME</ref>,</highlight></codeline>
+<codeline lineno="62"><highlight class="normal"></highlight></codeline>
+<codeline lineno="64" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a4bc6a83bf0c44106378493c49f5663a1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a4bc6a83bf0c44106378493c49f5663a1" kindref="member">HIPDNN_TYPE_BACKEND_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="65"><highlight class="normal"></highlight></codeline>
+<codeline lineno="67" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a28a2e41b42a919b83b9baf2883a5add8" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a28a2e41b42a919b83b9baf2883a5add8" kindref="member">HIPDNN_TYPE_GENSTATS_MODE</ref>,</highlight></codeline>
+<codeline lineno="68"><highlight class="normal"></highlight></codeline>
+<codeline lineno="70" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7afc108405a042c29c6940c0d67110ccf9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7afc108405a042c29c6940c0d67110ccf9" kindref="member">HIPDNN_TYPE_BN_FINALIZE_STATS_MODE</ref>,</highlight></codeline>
+<codeline lineno="71"><highlight class="normal"></highlight></codeline>
+<codeline lineno="73" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a18db092da4d21ebf3bef21a59411a11d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a18db092da4d21ebf3bef21a59411a11d" kindref="member">HIPDNN_TYPE_BEHAVIOR_NOTE</ref>,</highlight></codeline>
+<codeline lineno="74"><highlight class="normal"></highlight></codeline>
+<codeline lineno="76" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a226f6997e35907a5727944dd3cd3e669" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a226f6997e35907a5727944dd3cd3e669" kindref="member">HIPDNN_TYPE_TENSOR_REORDERING_MODE</ref>,</highlight></codeline>
+<codeline lineno="77"><highlight class="normal"></highlight></codeline>
+<codeline lineno="79" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ac4ee86688d73a4aaa2bf6fc662053b9b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ac4ee86688d73a4aaa2bf6fc662053b9b" kindref="member">HIPDNN_TYPE_INT32</ref>,</highlight></codeline>
+<codeline lineno="80"><highlight class="normal"></highlight></codeline>
+<codeline lineno="82" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a258675deb3cc7381d45b61f90c7497b0" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a258675deb3cc7381d45b61f90c7497b0" kindref="member">HIPDNN_TYPE_CHAR</ref>,</highlight></codeline>
+<codeline lineno="83"><highlight class="normal"></highlight></codeline>
+<codeline lineno="85" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a35c6c84d5ab6f4198933831045861aca" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a35c6c84d5ab6f4198933831045861aca" kindref="member">HIPDNN_TYPE_SIGNAL_MODE</ref>,</highlight></codeline>
+<codeline lineno="86"><highlight class="normal"></highlight></codeline>
+<codeline lineno="88" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a7f4ae942e8d483d587ddc32e6223e3a0" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a7f4ae942e8d483d587ddc32e6223e3a0" kindref="member">HIPDNN_TYPE_FRACTION</ref>,</highlight></codeline>
+<codeline lineno="89"><highlight class="normal"></highlight></codeline>
+<codeline lineno="91" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a37203318f9b739ab9e81c6f3f4ec19b3" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a37203318f9b739ab9e81c6f3f4ec19b3" kindref="member">HIPDNN_TYPE_NORM_FWD_PHASE</ref>,</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"></highlight></codeline>
+<codeline lineno="94" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ad2b30303a6df43880c918dd1ced137d3" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7ad2b30303a6df43880c918dd1ced137d3" kindref="member">HIPDNN_TYPE_RNG_DISTRIBUTION</ref>,</highlight></codeline>
+<codeline lineno="95"><highlight class="normal"></highlight></codeline>
+<codeline lineno="108"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a44d70eccbb2c46c246dcef363030f8df" kindref="member">HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT</ref></highlight></codeline>
+<codeline lineno="109"><highlight class="normal"></highlight></codeline>
+<codeline lineno="112" refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7a44d70eccbb2c46c246dcef363030f8df" refkind="member"><highlight class="normal">}<sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref>;</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendAttributeType.h"/>
+  </compounddef>
+</doxygen>

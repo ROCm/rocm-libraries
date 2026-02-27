@@ -1,0 +1,1719 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="hipdnn__backend_8h" kind="file" language="C++">
+    <compoundname>hipdnn_backend.h</compoundname>
+    <includes local="no">hip/hip_runtime_api.h</includes>
+    <includes local="yes">hipdnn_backend_export.h</includes>
+    <includes refid="_hipdnn_backend_attribute_name_8h" local="yes">HipdnnBackendAttributeName.h</includes>
+    <includes refid="_hipdnn_backend_attribute_type_8h" local="yes">HipdnnBackendAttributeType.h</includes>
+    <includes refid="_hipdnn_backend_callback_types_8h" local="yes">HipdnnBackendCallbackTypes.h</includes>
+    <includes refid="_hipdnn_backend_descriptor_type_8h" local="yes">HipdnnBackendDescriptorType.h</includes>
+    <includes refid="_hipdnn_backend_heuristic_type_8h" local="yes">HipdnnBackendHeuristicType.h</includes>
+    <includes refid="_hipdnn_backend_limits_8h" local="yes">HipdnnBackendLimits.h</includes>
+    <includes refid="_hipdnn_backend_plugin_loading_mode_8h" local="yes">HipdnnBackendPluginLoadingMode.h</includes>
+    <includes refid="_hipdnn_backend_plugin_unloading_mode_8h" local="yes">HipdnnBackendPluginUnloadingMode.h</includes>
+    <includes refid="_hipdnn_status_8h" local="yes">HipdnnStatus.h</includes>
+    <incdepgraph>
+      <node id="4">
+        <label>HipdnnBackendAttributeName.h</label>
+        <link refid="_hipdnn_backend_attribute_name_8h"/>
+      </node>
+      <node id="5">
+        <label>HipdnnBackendAttributeType.h</label>
+        <link refid="_hipdnn_backend_attribute_type_8h"/>
+      </node>
+      <node id="6">
+        <label>HipdnnBackendCallbackTypes.h</label>
+        <link refid="_hipdnn_backend_callback_types_8h"/>
+      </node>
+      <node id="7">
+        <label>HipdnnBackendDescriptorType.h</label>
+        <link refid="_hipdnn_backend_descriptor_type_8h"/>
+      </node>
+      <node id="8">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="_hipdnn_backend_heuristic_type_8h"/>
+      </node>
+      <node id="9">
+        <label>HipdnnBackendLimits.h</label>
+        <link refid="_hipdnn_backend_limits_8h"/>
+      </node>
+      <node id="10">
+        <label>HipdnnBackendPluginLoadingMode.h</label>
+        <link refid="_hipdnn_backend_plugin_loading_mode_8h"/>
+      </node>
+      <node id="11">
+        <label>HipdnnBackendPluginUnloadingMode.h</label>
+        <link refid="_hipdnn_backend_plugin_unloading_mode_8h"/>
+      </node>
+      <node id="12">
+        <label>HipdnnStatus.h</label>
+        <link refid="_hipdnn_status_8h"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hip/hip_runtime_api.h</label>
+      </node>
+      <node id="3">
+        <label>hipdnn_backend_export.h</label>
+      </node>
+    </incdepgraph>
+    <sectiondef kind="typedef">
+      <memberdef kind="typedef" id="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" prot="public" static="no">
+        <type>struct hipdnnHandle *</type>
+        <definition>typedef struct hipdnnHandle* hipdnnHandle_t</definition>
+        <argsstring></argsstring>
+        <name>hipdnnHandle_t</name>
+        <briefdescription>
+<para>Creates the hipdnnHandle_t type. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="65" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" bodystart="65" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" prot="public" static="no">
+        <type>struct HipdnnBackendDescriptor *</type>
+        <definition>typedef struct HipdnnBackendDescriptor* hipdnnBackendDescriptor_t</definition>
+        <argsstring></argsstring>
+        <name>hipdnnBackendDescriptor_t</name>
+        <briefdescription>
+<para>Creates the hipdnnBackendDescriptor_t type. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="70" column="39" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" bodystart="70" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnCreate</definition>
+        <argsstring>(hipdnnHandle_t *handle)</argsstring>
+        <name>hipdnnCreate</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref> *</type>
+          <declname>handle</declname>
+        </param>
+        <briefdescription>
+<para>Creates a hipdnnHandle_t. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An instance of hipdnnHandle_t</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The creation was successful </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The descriptor is not a valid (NULL) descriptor. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_ALLOC_FAILED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The memory allocation failed when creating handle object. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="81" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="81" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy</definition>
+        <argsstring>(hipdnnHandle_t handle)</argsstring>
+        <name>hipdnnDestroy</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <briefdescription>
+<para>Destroyes hipdnnHandle_t. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An instance of hipdnnHandle_t</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The descriptor is not a valid (NULL) descriptor. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The destruction was successful </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="91" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="91" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a29e2d50c13a76cd2c0ca8f88070e57f7" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetStream</definition>
+        <argsstring>(hipdnnHandle_t handle, hipStream_t streamId)</argsstring>
+        <name>hipdnnSetStream</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>hipStream_t</type>
+          <declname>streamId</declname>
+        </param>
+        <briefdescription>
+<para>Sets the stream for the hipdnnHandle_t. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An instance of hipdnnHandle_t </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">streamId</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The stream to be set</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>invalid (NULL) handle. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The creation was successful </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="102" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="102" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a3899c8c216c8866c9e7b9294433ade73" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetStream</definition>
+        <argsstring>(hipdnnHandle_t handle, hipStream_t *streamId)</argsstring>
+        <name>hipdnnGetStream</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>hipStream_t *</type>
+          <declname>streamId</declname>
+        </param>
+        <briefdescription>
+<para>Retrieves the HIP stream associated with the specified hipDNN handle. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The hipDNN handle whose associated stream is to be retrieved. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">streamId</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to a hipStream_t where the associated stream ID will be stored upon successful execution.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>invalid (NULL) handle. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The creation was successful</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="note"><para><itemizedlist>
+<listitem><para>The handle must be valid and initialized before calling this function.</para>
+</listitem><listitem><para>The streamId pointer must not be null.</para>
+</listitem><listitem><para>This function uses a try-catch mechanism to handle exceptions internally. </para>
+</listitem></itemizedlist>
+</para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="119" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="119" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor</definition>
+        <argsstring>(hipdnnBackendDescriptorType_t descriptorType, hipdnnBackendDescriptor_t *descriptor)</argsstring>
+        <name>hipdnnBackendCreateDescriptor</name>
+        <param>
+          <type><ref refid="_hipdnn_backend_descriptor_type_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref></type>
+          <declname>descriptorType</declname>
+        </param>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref> *</type>
+          <declname>descriptor</declname>
+        </param>
+        <briefdescription>
+<para>Creates a backend descriptor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Allocates memory for a given descriptorType at the location pointed by the descriptor</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">descriptorType</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>One among the enumerated hipdnnBackendDescriptor_t </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">descriptor</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to a descriptor</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The creation was successful </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_NOT_SUPPORTED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Creating a descriptor of a given type is not supported. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_ALLOC_FAILED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The memory allocation failed. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="134" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="134" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a0a378c9807eefb3506edb8084ad9930b" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendDestroyDescriptor</definition>
+        <argsstring>(hipdnnBackendDescriptor_t descriptor)</argsstring>
+        <name>hipdnnBackendDestroyDescriptor</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>descriptor</declname>
+        </param>
+        <briefdescription>
+<para>Destroys an instance of hipdnnBackendDescriptor_t. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Destroys instances of hipdnnBackendDescriptor_t that were previously created using <ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor()</ref>. The value pointed by the descriptor will be undefined after the memory is free and done.</para>
+<para><bold>Undefined Behavior</bold> if the descriptor was altered between the &apos;Create&apos; and &apos;Destroy Descriptor&apos;</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">descriptor</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Instance of hipdnnBackendDescriptor_t previously created by <ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor()</ref></para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The memory was destroyed successfully </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_ALLOC_FAILED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The destruction of memory failed. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="154" column="5" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="154" declcolumn="5"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute</definition>
+        <argsstring>(hipdnnHandle_t handle, hipdnnBackendDescriptor_t executionPlan, hipdnnBackendDescriptor_t variantPack)</argsstring>
+        <name>hipdnnBackendExecute</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>executionPlan</declname>
+        </param>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>variantPack</declname>
+        </param>
+        <briefdescription>
+<para>Executes a graph. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Executes the given engine_configuration_plan on the variantPack and the finalized executionPlan on the data. The data and the working space are encapsulated in the variantPack.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An instance of hipdnnHandle_t </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">executionPlan</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Descriptor of the finalized executionPlan </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">variantPack</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Descriptor of the finalized variantPack consisting of:<itemizedlist>
+<listitem><para>Data pointer for each non-virtual pointer of the operation set in the execution plan.</para>
+</listitem><listitem><para>Pointer to user-allocated workspace in global memory at least as large as the size queried</para>
+</listitem></itemizedlist>
+</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The executionPlan was executed successfully </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An incorrect or inconsistent value is encountered. For example, a required data pointer is invalid. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_INTERNAL_ERROR</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Some internal errors were encountered. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_EXECUTION_FAILED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An error was encountered executing the plan with the variantPack. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="175" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="175" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize</definition>
+        <argsstring>(hipdnnBackendDescriptor_t descriptor)</argsstring>
+        <name>hipdnnBackendFinalize</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>descriptor</declname>
+        </param>
+        <briefdescription>
+<para>Finalizes a backend descriptor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Finalizes the memory pointed to by the descriptor. The type of finalization is done depending on the descriptor_type argument with which the descriptor was created using <ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor()</ref> or initialized using hipdnnBackendInitialize().</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">descriptor</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Instance of hipdnnBackendDescriptor_t to finalize</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The descriptor was finalized successfully </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Invalid descriptor attribute values or combination thereof is encountered. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_NOT_SUPPORTED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Descriptor attribute values or combinations therefore not supported by the current version of hipDNN are encountered. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_INTERNAL_ERROR</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Some internal errors are encountered. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="193" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="193" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetAttribute</definition>
+        <argsstring>(hipdnnBackendDescriptor_t descriptor, hipdnnBackendAttributeName_t attributeName, hipdnnBackendAttributeType_t attributeType, int64_t requestedElementCount, int64_t *elementCount, void *arrayOfElements)</argsstring>
+        <name>hipdnnBackendGetAttribute</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>descriptor</declname>
+        </param>
+        <param>
+          <type><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref></type>
+          <declname>attributeName</declname>
+        </param>
+        <param>
+          <type><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref></type>
+          <declname>attributeType</declname>
+        </param>
+        <param>
+          <type>int64_t</type>
+          <declname>requestedElementCount</declname>
+        </param>
+        <param>
+          <type>int64_t *</type>
+          <declname>elementCount</declname>
+        </param>
+        <param>
+          <type>void *</type>
+          <declname>arrayOfElements</declname>
+        </param>
+        <briefdescription>
+<para>Retrieves backend descriptor&apos;s attribute. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function retrieves the values of an attribute of a descriptor. attributeName is the name of the attribute whose value is requested. attributeType is the type of attribute. requestedElementCount is the number of elements to be potentially retrieved. The number of elements for the requested attribute is stored in elementCount. The retrieved values are stored in arrayOfElements. When the attribute is expected to have a single value, arrayOfElements can be pointer to the output value. This function will return HIPDNN_STATUS_NOT_INTIALIZED if the descriptor has not been successfully finalized using <ref refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" kindref="member">hipdnnBackendFinalize()</ref></para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">descriptor</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Instance of hipdnnBackendDescriptor_t whose attribute to retrieve </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">attributeName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The name of the attribute being get from the descriptor </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">attributeType</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The type of attribute </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">requestedElementCount</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Number of elements to output to arrayOfElements </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">elementCount</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Output pointer for the number of elements the descriptor attribute has. Note that <ref refid="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" kindref="member">hipdnnBackendGetAttribute()</ref> will only write the least of this and requestedElementCount elements to arrayOfElements </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">arrayOfElements</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Array of elements of the datatype of the attributeType. The data type of the attributeType is listed in the mapping table of hipdnnBackendAttributeType_t</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The attributeName was retrieved from the descriptor successfully </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>One or more invalid or inconsistent argument values were encountered. Some examples include: attributeName is not a valid attribute for the descriptor. attributeType is not one of the valid types for the attribute. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_NOT_INITIALIZED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The descriptor has not been successfully finalized using <ref refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" kindref="member">hipdnnBackendFinalize()</ref>. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="226" column="5" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="226" declcolumn="5"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetAttribute</definition>
+        <argsstring>(hipdnnBackendDescriptor_t descriptor, hipdnnBackendAttributeName_t attributeName, hipdnnBackendAttributeType_t attributeType, int64_t elementCount, const void *arrayOfElements)</argsstring>
+        <name>hipdnnBackendSetAttribute</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>descriptor</declname>
+        </param>
+        <param>
+          <type><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref></type>
+          <declname>attributeName</declname>
+        </param>
+        <param>
+          <type><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref></type>
+          <declname>attributeType</declname>
+        </param>
+        <param>
+          <type>int64_t</type>
+          <declname>elementCount</declname>
+        </param>
+        <param>
+          <type>const void *</type>
+          <declname>arrayOfElements</declname>
+        </param>
+        <briefdescription>
+<para>Sets an attribute of a descriptor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function sets an attribute of a descriptor to values provided as a pointer. descriptor is the descriptor to be set. attributeName is the name of the attribute to be set. attributeType is the type of attribute. The value to which the attribute is set, is pointed by the arrayOfElements. The number of elements is given by elementCount. This function will return HIPDNN_STATUS_NOT_INITIALIZED if the descriptor is already successfully finalized using <ref refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" kindref="member">hipdnnBackendFinalize()</ref>.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">descriptor</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Instance of hipdnnBackendDescriptor_t whose attribute is being set </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">attributeName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The name of the attribute being set on the descriptor </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">attributeType</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The type of attribute </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">elementCount</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Number of elements being set </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">arrayOfElements</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The starting location for an array from where to read the values from. The elements of the array are expected to be of the datatype of the attributeType. The datatype of the attributeType is listed in the mapping table of hipdnnBackendAttributeType_t.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The attributeName was set to the descriptor </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_NOT_INITIALIZED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The backend descriptor pointed to by the descriptor is already in the finalized state. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The function is called with arguments that correspond to invalid values. Some examples include: attributeName is not a settable attribute of descriptor. attributeType is incorrect for this attributeName. elementCount value is unexpected. arrayOfElements contains values invalid for the attributeType. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_NOT_SUPPORTED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The values to which the attributes are being set are not supported by the current version of hipDNN. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="260" column="5" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="260" declcolumn="5"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a49844a9cbd47a4337d8d4def63ed5841" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT const char *</type>
+        <definition>HIPDNN_BACKEND_EXPORT const char * hipdnnGetErrorString</definition>
+        <argsstring>(hipdnnStatus_t status)</argsstring>
+        <name>hipdnnGetErrorString</name>
+        <param>
+          <type><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+          <declname>status</declname>
+        </param>
+        <briefdescription>
+<para>Converts the hipDNN status code to a NULL terminated static string. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function takes a hipdnnStatus_t status code and returns a pointer to a static, NULL-terminated string describing the error or status.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>status</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The hipDNN status code to convert. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>A pointer to a static, NULL-terminated string describing the status. </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="275" column="34" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="275" declcolumn="34"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a5ff452bc8cc292866a8a96f43aa0ba28" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT void</type>
+        <definition>HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString</definition>
+        <argsstring>(char *message, size_t maxSize)</argsstring>
+        <name>hipdnnGetLastErrorString</name>
+        <param>
+          <type>char *</type>
+          <declname>message</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>maxSize</declname>
+        </param>
+        <briefdescription>
+<para>Retrieves the last error message for the calling thread. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function copies the last error message associated with the calling thread into the provided message buffer, up to max_size bytes (including the null terminator). Note the max size for an error message is HIPDNN_ERROR_STRING_MAX_LENGTH characters.</para>
+<para>After retrieving the error message, this function clears the internal error state. Use <ref refid="hipdnn__backend_8h_1a6345631d2a28bec73ace21a4877123d3" kindref="member">hipdnnPeekLastErrorString_ext()</ref> if you need to retrieve the error without clearing it.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="out">message</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to a character buffer where the error message will be copied. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">maxSize</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Maximum number of bytes to copy, including the null terminator. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="290" column="28" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="290" declcolumn="28"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a6345631d2a28bec73ace21a4877123d3" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT void</type>
+        <definition>HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext</definition>
+        <argsstring>(char *message, size_t maxSize)</argsstring>
+        <name>hipdnnPeekLastErrorString_ext</name>
+        <param>
+          <type>char *</type>
+          <declname>message</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>maxSize</declname>
+        </param>
+        <briefdescription>
+<para>Retrieves the last error message for the calling thread without clearing it. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function copies the last error message associated with the calling thread into the provided message buffer, up to max_size bytes (including the null terminator). Note the max size for an error message is HIPDNN_ERROR_STRING_MAX_LENGTH characters.</para>
+<para>Unlike <ref refid="hipdnn__backend_8h_1a5ff452bc8cc292866a8a96f43aa0ba28" kindref="member">hipdnnGetLastErrorString()</ref>, this function does NOT clear the internal error state after retrieval. This preserves the pre-existing behavior for cases where the error needs to be queried multiple times.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="out">message</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to a character buffer where the error message will be copied. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">maxSize</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Maximum number of bytes to copy, including the null terminator. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="314" column="28" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="314" declcolumn="28"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext</definition>
+        <argsstring>(hipdnnBackendDescriptor_t *descriptor, const uint8_t *serializedGraph, size_t graphByteSize)</argsstring>
+        <name>hipdnnBackendCreateAndDeserializeGraph_ext</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref> *</type>
+          <declname>descriptor</declname>
+        </param>
+        <param>
+          <type>const uint8_t *</type>
+          <declname>serializedGraph</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>graphByteSize</declname>
+        </param>
+        <briefdescription>
+<para>Creates and deserializes a graph into a backend descriptor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function creates a backend descriptor and deserializes a graph from a serialized byte array into the descriptor. The serialized graph is provided as an input byte array, and the size of the graph in bytes is specified. The created descriptor will encapsulate the deserialized graph.</para>
+<para>IMPORTANT: Hipdnn expects that the serialized graph is sorted in topological order, has no cycles, and is fully connected (no orphan nodes). Additionally, all tensors in the graph must have unique uids.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="out">descriptor</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to a backend descriptor where the deserialized graph will be stored. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">serializedGraph</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to the serialized graph data in a byte array. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">graphByteSize</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Size of the serialized graph in bytes.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The graph was successfully deserialized and stored in the descriptor. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Invalid or inconsistent parameter values were encountered, such as:<itemizedlist>
+<listitem><para>descriptor is null.</para>
+</listitem><listitem><para>serializedGraph is null.</para>
+</listitem><listitem><para>graphByteSize is zero. </para>
+</listitem></itemizedlist>
+</para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_ALLOC_FAILED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Memory allocation for the descriptor or graph failed. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_INTERNAL_ERROR</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An internal error occurred during deserialization. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="339" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="339" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a442118a1f9d3cec7c467671fca0e32bc" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT void</type>
+        <definition>HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext</definition>
+        <argsstring>(hipdnnSeverity_t severity, const char *msg)</argsstring>
+        <name>hipdnnLoggingCallback_ext</name>
+        <param>
+          <type><ref refid="_hipdnn_backend_callback_types_8h_1aa3f15482bbaf7bcbc31a7b5737e6ff07" kindref="member">hipdnnSeverity_t</ref></type>
+          <declname>severity</declname>
+        </param>
+        <param>
+          <type>const char *</type>
+          <declname>msg</declname>
+        </param>
+        <briefdescription>
+<para>Callback function for logging messages. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function is called by the hipDNN library to log messages. The severity level of the message is provided along with the message itself.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">severity</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The severity level of the message. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">msg</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The message to be logged. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="351" column="28" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="351" declcolumn="28"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1ad1bc6574b113dd78ce5ffbfafca66d16" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext</definition>
+        <argsstring>(size_t numPaths, const char *const *pluginPaths, hipdnnPluginLoadingMode_ext_t loadingMode)</argsstring>
+        <name>hipdnnSetEnginePluginPaths_ext</name>
+        <param>
+          <type>size_t</type>
+          <declname>numPaths</declname>
+        </param>
+        <param>
+          <type>const char *const *</type>
+          <declname>pluginPaths</declname>
+        </param>
+        <param>
+          <type><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref></type>
+          <declname>loadingMode</declname>
+        </param>
+        <briefdescription>
+<para>Sets the search paths for hipDNN engine plugins. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function configures the search paths for engine plugins and must be called before creating a hipDNN handle, as plugins are loaded during handle creation.</para>
+<para>Paths can be either directories or specific plugin files. Relative paths are resolved from the location of the libhipdnn_backend.so file. The backend can resolve platform-agnostic names, allowing users to omit prefixes like <computeroutput>lib</computeroutput> and extensions like <computeroutput>.so</computeroutput> or <computeroutput>.dll</computeroutput>.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">numPaths</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The number of paths in the <computeroutput>pluginPaths</computeroutput> array. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">pluginPaths</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An array of relative or absolute path strings. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">loadingMode</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Specifies whether to add paths to or replace the default search paths.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The operation was successful. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM_NULL_POINTER</parametername>
+</parameternamelist>
+<parameterdescription>
+<para><computeroutput>pluginPaths</computeroutput> is nullptr when <computeroutput>numPaths</computeroutput> is greater than 0. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_NOT_SUPPORTED</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Called with active handle. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_INTERNAL_ERROR</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An internal error occurred. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="373" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="373" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a5c3664c522be2d0b343238abff0e3851" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetPluginUnloadMode_ext</definition>
+        <argsstring>(hipdnnPluginUnloadingMode_ext_t unloadingMode)</argsstring>
+        <name>hipdnnSetPluginUnloadMode_ext</name>
+        <param>
+          <type><ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref></type>
+          <declname>unloadingMode</declname>
+        </param>
+        <briefdescription>
+<para>Sets the plugin unloading mode for hipDNN. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function controls when plugins are unloaded from memory. By default, lazy unloading (HIPDNN_PLUGIN_UNLOAD_LAZY) is used, which keeps plugins loaded until the application exits or until hipdnnSetEnginePluginPaths_ext is called. This avoids expensive plugin reloading when handles are frequently created and destroyed.</para>
+<para>This function can be called at any time. When switching from lazy to eager mode (HIPDNN_PLUGIN_UNLOAD_EAGER) while no handles exist, plugins will be unloaded immediately.</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">unloadingMode</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Specifies when plugins should be unloaded from memory.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The operation was successful. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>An invalid unloading mode was specified. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="393" column="5" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="393" declcolumn="5"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a712599886637bd8ee91dfae0f7c97d04" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext</definition>
+        <argsstring>(hipdnnHandle_t handle, size_t *numPluginPaths, char **pluginPaths, size_t *maxStringLen)</argsstring>
+        <name>hipdnnGetLoadedEnginePluginPaths_ext</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>size_t *</type>
+          <declname>numPluginPaths</declname>
+        </param>
+        <param>
+          <type>char **</type>
+          <declname>pluginPaths</declname>
+        </param>
+        <param>
+          <type>size_t *</type>
+          <declname>maxStringLen</declname>
+        </param>
+        <briefdescription>
+<para>Gets file paths of loaded engine plugins for a given handle. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This function must be called twice:<orderedlist>
+<listitem><para>First call: Pass <computeroutput>pluginPaths</computeroutput> as <computeroutput>nullptr</computeroutput> to query the number of plugins and required buffer size.<itemizedlist>
+<listitem><para>Sets <computeroutput>numPluginPaths</computeroutput> to the total number of loaded plugins</para>
+</listitem><listitem><para>Sets <computeroutput>maxStringLen</computeroutput> to the maximum string length needed (including null terminator)</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para>Second call: Pass allocated buffers to retrieve the actual plugin paths.<itemizedlist>
+<listitem><para>Allocate an array of <computeroutput>numPluginPaths</computeroutput> char pointers</para>
+</listitem><listitem><para>Each char pointer should point to a buffer of at least <computeroutput>maxStringLen</computeroutput> characters</para>
+</listitem><listitem><para>The function will populate these buffers with the plugin paths</para>
+</listitem></itemizedlist>
+</para>
+</listitem></orderedlist>
+</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>A valid hipDNN handle </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="inout">numPluginPaths</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to number of plugins; updated with actual count. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">pluginPaths</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Array of character pointers for plugin paths, or <computeroutput>nullptr</computeroutput> to query sizes. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="inout">maxStringLen</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to max string length; updated with required length.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Success. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Invalid handle, null pointers, or insufficient buffer sizes. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_INTERNAL_ERROR</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Internal error. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="417" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="417" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a8eed6a17c31728e5af2b27ab090770ea" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext</definition>
+        <argsstring>(hipdnnHandle_t handle, size_t *numEngines)</argsstring>
+        <name>hipdnnGetEngineCount_ext</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>size_t *</type>
+          <declname>numEngines</declname>
+        </param>
+        <briefdescription>
+<para>Gets the number of loaded engines for a given handle. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>A valid hipDNN handle. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">numEngines</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer where the engine count will be stored.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Success. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Invalid handle or null pointer. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_INTERNAL_ERROR</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Internal error. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="432" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="432" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a1f9525b20ec31d3ba768b4864bc0878e" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext</definition>
+        <argsstring>(hipdnnHandle_t handle, size_t engineIndex, int64_t *engineId, char *engineName, size_t *engineNameLen, char *pluginName, size_t *pluginNameLen, char *version, size_t *versionLen, char *type, size_t *typeLen)</argsstring>
+        <name>hipdnnGetEngineInfo_ext</name>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>engineIndex</declname>
+        </param>
+        <param>
+          <type>int64_t *</type>
+          <declname>engineId</declname>
+        </param>
+        <param>
+          <type>char *</type>
+          <declname>engineName</declname>
+        </param>
+        <param>
+          <type>size_t *</type>
+          <declname>engineNameLen</declname>
+        </param>
+        <param>
+          <type>char *</type>
+          <declname>pluginName</declname>
+        </param>
+        <param>
+          <type>size_t *</type>
+          <declname>pluginNameLen</declname>
+        </param>
+        <param>
+          <type>char *</type>
+          <declname>version</declname>
+        </param>
+        <param>
+          <type>size_t *</type>
+          <declname>versionLen</declname>
+        </param>
+        <param>
+          <type>char *</type>
+          <declname>type</declname>
+        </param>
+        <param>
+          <type>size_t *</type>
+          <declname>typeLen</declname>
+        </param>
+        <briefdescription>
+<para>Gets information about a loaded engine by index. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Retrieves the id, name, version, type, and plugin name of the engine at the given index. Valid indices are 0 to numEngines-1 as returned by hipdnnGetEngineCount_ext. Engines are sorted alphabetically by name.</para>
+<para>This function uses a two-call pattern for string fields:<orderedlist>
+<listitem><para>First call: Pass all string buffers as <computeroutput>nullptr</computeroutput> to query required sizes.<itemizedlist>
+<listitem><para>Sets <computeroutput>nameLen</computeroutput>, <computeroutput>versionLen</computeroutput>, <computeroutput>typeLen</computeroutput>, and <computeroutput>pluginNameLen</computeroutput> to the required buffer sizes (including null terminator). Note: if any string buffer is null, all sizes are updated.</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para>Second call: Pass allocated buffers with sizes set from the first call.</para>
+</listitem></orderedlist>
+</para>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername direction="in">handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>A valid hipDNN handle. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="in">engineIndex</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Zero-based index of the engine to query. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">engineId</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer where the engine ID will be stored, or <computeroutput>nullptr</computeroutput> to skip. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">engineName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Buffer for the engine name, or <computeroutput>nullptr</computeroutput> to query size. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="inout">engineNameLen</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to buffer size; updated with required size. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">pluginName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Buffer for the plugin name, or <computeroutput>nullptr</computeroutput> to query size. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="inout">pluginNameLen</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to buffer size; updated with required size. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">version</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Buffer for the engine version, or <computeroutput>nullptr</computeroutput> to query size. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="inout">versionLen</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to buffer size; updated with required size. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="out">type</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Buffer for the engine type string, or <computeroutput>nullptr</computeroutput> to query size. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername direction="inout">typeLen</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to buffer size; updated with required size.</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="retval"><parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_SUCCESS</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Success. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_BAD_PARAM</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Invalid handle, null pointers, or out-of-range index. </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>HIPDNN_STATUS_INTERNAL_ERROR</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Internal error. </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="465" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="465" declcolumn="38"/>
+      </memberdef>
+      <memberdef kind="function" id="hipdnn__backend_8h_1a8cb8a526e824c31d84875221a2917b0c" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext</definition>
+        <argsstring>(const char **version)</argsstring>
+        <name>hipdnnGetVersion_ext</name>
+        <param>
+          <type>const char **</type>
+          <declname>version</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="477" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="477" declcolumn="38"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>This file defines the public C API for hipDNN backend operations. The backend provides handle management, descriptor operations, and execution of computational graphs. </para>
+    </briefdescription>
+    <detaileddescription>
+<sect1 id="hipdnn__backend_8h_1backend_usage">
+<title>Basic Usage</title>
+<para><orderedlist>
+<listitem><para>Create a handle: <programlisting filename=".c"><codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle;</highlight></codeline>
+<codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" kindref="member">hipdnnCreate</ref>(&amp;handle);</highlight></codeline>
+</programlisting></para>
+</listitem><listitem><para>Create and configure descriptors: <programlisting filename=".c"><codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>graphDesc;</highlight></codeline>
+<codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" kindref="member">hipdnnBackendCreateAndDeserializeGraph_ext</ref>(&amp;graphDesc,<sp/>serializedGraph,<sp/>size);</highlight></codeline>
+</programlisting></para>
+</listitem><listitem><para>Execute operations: <programlisting filename=".c"><codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" kindref="member">hipdnnBackendExecute</ref>(handle,<sp/>executionPlan,<sp/>variantPack);</highlight></codeline>
+</programlisting></para>
+</listitem><listitem><para>Clean up: <programlisting filename=".c"><codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1a0a378c9807eefb3506edb8084ad9930b" kindref="member">hipdnnBackendDestroyDescriptor</ref>(graphDesc);</highlight></codeline>
+<codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" kindref="member">hipdnnDestroy</ref>(handle);</highlight></codeline>
+</programlisting></para>
+</listitem></orderedlist>
+</para>
+<para><simplesect kind="see"><para><ref refid="hipdnn__frontend_8hpp" kindref="compound">hipdnn_frontend.hpp</ref> for the C++ frontend API </para>
+</simplesect>
+</para>
+</sect1>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="40"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="41"><highlight class="normal"></highlight></codeline>
+<codeline lineno="42"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hip/hip_runtime_api.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="43"><highlight class="normal"></highlight></codeline>
+<codeline lineno="44"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Cmake<sp/>Generated<sp/>export<sp/>header.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="45"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;hipdnn_backend_export.h&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="46"><highlight class="normal"></highlight></codeline>
+<codeline lineno="47"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_attribute_name_8h" kindref="compound">HipdnnBackendAttributeName.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="48"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_attribute_type_8h" kindref="compound">HipdnnBackendAttributeType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="49"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_callback_types_8h" kindref="compound">HipdnnBackendCallbackTypes.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="50"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_descriptor_type_8h" kindref="compound">HipdnnBackendDescriptorType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="51"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_heuristic_type_8h" kindref="compound">HipdnnBackendHeuristicType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="52"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_limits_8h" kindref="compound">HipdnnBackendLimits.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="53"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_plugin_loading_mode_8h" kindref="compound">HipdnnBackendPluginLoadingMode.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="54"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_plugin_unloading_mode_8h" kindref="compound">HipdnnBackendPluginUnloadingMode.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="55"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_status_8h" kindref="compound">HipdnnStatus.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="56"><highlight class="normal"></highlight></codeline>
+<codeline lineno="57"><highlight class="normal"></highlight><highlight class="comment">//<sp/>NOLINTBEGIN</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="58"><highlight class="normal"></highlight><highlight class="preprocessor">#ifdef<sp/>__cplusplus</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="59"><highlight class="normal"></highlight><highlight class="keyword">extern</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;C&quot;</highlight><highlight class="normal"><sp/>{</highlight></codeline>
+<codeline lineno="60"><highlight class="normal"></highlight><highlight class="preprocessor">#endif</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="61"><highlight class="normal"></highlight></codeline>
+<codeline lineno="65" refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal">hipdnnHandle*<sp/><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref>;</highlight></codeline>
+<codeline lineno="66"><highlight class="normal"></highlight></codeline>
+<codeline lineno="70" refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal">HipdnnBackendDescriptor*<sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>;</highlight></codeline>
+<codeline lineno="71"><highlight class="normal"></highlight></codeline>
+<codeline lineno="81" refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" kindref="member">hipdnnCreate</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref>*<sp/>handle);</highlight></codeline>
+<codeline lineno="82"><highlight class="normal"></highlight></codeline>
+<codeline lineno="91" refid="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" kindref="member">hipdnnDestroy</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle);</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"></highlight></codeline>
+<codeline lineno="102" refid="hipdnn__backend_8h_1a29e2d50c13a76cd2c0ca8f88070e57f7" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a29e2d50c13a76cd2c0ca8f88070e57f7" kindref="member">hipdnnSetStream</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,<sp/>hipStream_t<sp/>streamId);</highlight></codeline>
+<codeline lineno="103"><highlight class="normal"></highlight></codeline>
+<codeline lineno="119" refid="hipdnn__backend_8h_1a3899c8c216c8866c9e7b9294433ade73" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a3899c8c216c8866c9e7b9294433ade73" kindref="member">hipdnnGetStream</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,<sp/>hipStream_t*<sp/>streamId);</highlight></codeline>
+<codeline lineno="120"><highlight class="normal"></highlight></codeline>
+<codeline lineno="134" refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor</ref>(</highlight></codeline>
+<codeline lineno="135"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_descriptor_type_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref><sp/>descriptorType,<sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>*<sp/>descriptor);</highlight></codeline>
+<codeline lineno="136"><highlight class="normal"></highlight></codeline>
+<codeline lineno="153"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
+<codeline lineno="154" refid="hipdnn__backend_8h_1a0a378c9807eefb3506edb8084ad9930b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1a0a378c9807eefb3506edb8084ad9930b" kindref="member">hipdnnBackendDestroyDescriptor</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor);</highlight></codeline>
+<codeline lineno="155"><highlight class="normal"></highlight></codeline>
+<codeline lineno="175" refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" kindref="member">hipdnnBackendExecute</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="176"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>executionPlan,</highlight></codeline>
+<codeline lineno="177"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>variantPack);</highlight></codeline>
+<codeline lineno="178"><highlight class="normal"></highlight></codeline>
+<codeline lineno="193" refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" kindref="member">hipdnnBackendFinalize</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor);</highlight></codeline>
+<codeline lineno="194"><highlight class="normal"></highlight></codeline>
+<codeline lineno="225"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
+<codeline lineno="226" refid="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" kindref="member">hipdnnBackendGetAttribute</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor,</highlight></codeline>
+<codeline lineno="227"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref><sp/>attributeName,</highlight></codeline>
+<codeline lineno="228"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref><sp/>attributeType,</highlight></codeline>
+<codeline lineno="229"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>int64_t<sp/>requestedElementCount,</highlight></codeline>
+<codeline lineno="230"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>int64_t*<sp/>elementCount,</highlight></codeline>
+<codeline lineno="231"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal">*<sp/>arrayOfElements);</highlight></codeline>
+<codeline lineno="232"><highlight class="normal"></highlight></codeline>
+<codeline lineno="259"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
+<codeline lineno="260" refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" kindref="member">hipdnnBackendSetAttribute</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor,</highlight></codeline>
+<codeline lineno="261"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref><sp/>attributeName,</highlight></codeline>
+<codeline lineno="262"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref><sp/>attributeType,</highlight></codeline>
+<codeline lineno="263"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>int64_t<sp/>elementCount,</highlight></codeline>
+<codeline lineno="264"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal">*<sp/>arrayOfElements);</highlight></codeline>
+<codeline lineno="265"><highlight class="normal"></highlight></codeline>
+<codeline lineno="275" refid="hipdnn__backend_8h_1a49844a9cbd47a4337d8d4def63ed5841" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="hipdnn__backend_8h_1a49844a9cbd47a4337d8d4def63ed5841" kindref="member">hipdnnGetErrorString</ref>(<ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/>status);</highlight></codeline>
+<codeline lineno="276"><highlight class="normal"></highlight></codeline>
+<codeline lineno="290" refid="hipdnn__backend_8h_1a5ff452bc8cc292866a8a96f43aa0ba28" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="hipdnn__backend_8h_1a5ff452bc8cc292866a8a96f43aa0ba28" kindref="member">hipdnnGetLastErrorString</ref>(</highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>message,<sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>maxSize);</highlight></codeline>
+<codeline lineno="291"><highlight class="normal"></highlight></codeline>
+<codeline lineno="292"><highlight class="normal"></highlight><highlight class="comment">/*</highlight></codeline>
+<codeline lineno="293"><highlight class="comment"><sp/>**************************************************************************************************</highlight></codeline>
+<codeline lineno="294"><highlight class="comment"><sp/>*</highlight></codeline>
+<codeline lineno="295"><highlight class="comment"><sp/>*<sp/><sp/>Extension<sp/>API<sp/>Below</highlight></codeline>
+<codeline lineno="296"><highlight class="comment"><sp/>*</highlight></codeline>
+<codeline lineno="297"><highlight class="comment"><sp/>**************************************************************************************************</highlight></codeline>
+<codeline lineno="298"><highlight class="comment"><sp/>*/</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="299"><highlight class="normal"></highlight></codeline>
+<codeline lineno="314" refid="hipdnn__backend_8h_1a6345631d2a28bec73ace21a4877123d3" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="hipdnn__backend_8h_1a6345631d2a28bec73ace21a4877123d3" kindref="member">hipdnnPeekLastErrorString_ext</ref>(</highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>message,<sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>maxSize);</highlight></codeline>
+<codeline lineno="315"><highlight class="normal"></highlight></codeline>
+<codeline lineno="339" refid="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" kindref="member">hipdnnBackendCreateAndDeserializeGraph_ext</ref>(</highlight></codeline>
+<codeline lineno="340"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>*<sp/>descriptor,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>uint8_t*<sp/>serializedGraph,<sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>graphByteSize);</highlight></codeline>
+<codeline lineno="341"><highlight class="normal"></highlight></codeline>
+<codeline lineno="351" refid="hipdnn__backend_8h_1a442118a1f9d3cec7c467671fca0e32bc" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="hipdnn__backend_8h_1a442118a1f9d3cec7c467671fca0e32bc" kindref="member">hipdnnLoggingCallback_ext</ref>(<ref refid="_hipdnn_backend_callback_types_8h_1aa3f15482bbaf7bcbc31a7b5737e6ff07" kindref="member">hipdnnSeverity_t</ref><sp/>severity,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>msg);</highlight></codeline>
+<codeline lineno="352"><highlight class="normal"></highlight></codeline>
+<codeline lineno="373" refid="hipdnn__backend_8h_1ad1bc6574b113dd78ce5ffbfafca66d16" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1ad1bc6574b113dd78ce5ffbfafca66d16" kindref="member">hipdnnSetEnginePluginPaths_ext</ref>(</highlight></codeline>
+<codeline lineno="374"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>numPaths,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal">*<sp/>pluginPaths,<sp/><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref><sp/>loadingMode);</highlight></codeline>
+<codeline lineno="375"><highlight class="normal"></highlight></codeline>
+<codeline lineno="392"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
+<codeline lineno="393" refid="hipdnn__backend_8h_1a5c3664c522be2d0b343238abff0e3851" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1a5c3664c522be2d0b343238abff0e3851" kindref="member">hipdnnSetPluginUnloadMode_ext</ref>(<ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref><sp/>unloadingMode);</highlight></codeline>
+<codeline lineno="394"><highlight class="normal"></highlight></codeline>
+<codeline lineno="417" refid="hipdnn__backend_8h_1a712599886637bd8ee91dfae0f7c97d04" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a712599886637bd8ee91dfae0f7c97d04" kindref="member">hipdnnGetLoadedEnginePluginPaths_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="418"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>numPluginPaths,</highlight></codeline>
+<codeline lineno="419"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">**<sp/>pluginPaths,</highlight></codeline>
+<codeline lineno="420"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>maxStringLen);</highlight></codeline>
+<codeline lineno="421"><highlight class="normal"></highlight></codeline>
+<codeline lineno="432" refid="hipdnn__backend_8h_1a8eed6a17c31728e5af2b27ab090770ea" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a8eed6a17c31728e5af2b27ab090770ea" kindref="member">hipdnnGetEngineCount_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="433"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>numEngines);</highlight></codeline>
+<codeline lineno="434"><highlight class="normal"></highlight></codeline>
+<codeline lineno="465" refid="hipdnn__backend_8h_1a1f9525b20ec31d3ba768b4864bc0878e" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a1f9525b20ec31d3ba768b4864bc0878e" kindref="member">hipdnnGetEngineInfo_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="466"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>engineIndex,</highlight></codeline>
+<codeline lineno="467"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>int64_t*<sp/>engineId,</highlight></codeline>
+<codeline lineno="468"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>engineName,</highlight></codeline>
+<codeline lineno="469"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>engineNameLen,</highlight></codeline>
+<codeline lineno="470"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>pluginName,</highlight></codeline>
+<codeline lineno="471"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>pluginNameLen,</highlight></codeline>
+<codeline lineno="472"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>version,</highlight></codeline>
+<codeline lineno="473"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>versionLen,</highlight></codeline>
+<codeline lineno="474"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>type,</highlight></codeline>
+<codeline lineno="475"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>typeLen);</highlight></codeline>
+<codeline lineno="476"><highlight class="normal"></highlight></codeline>
+<codeline lineno="477" refid="hipdnn__backend_8h_1a8cb8a526e824c31d84875221a2917b0c" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a8cb8a526e824c31d84875221a2917b0c" kindref="member">hipdnnGetVersion_ext</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">**<sp/>version);</highlight></codeline>
+<codeline lineno="478"><highlight class="normal"></highlight></codeline>
+<codeline lineno="479"><highlight class="normal"></highlight><highlight class="preprocessor">#ifdef<sp/>__cplusplus</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="480"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="481"><highlight class="normal"></highlight><highlight class="preprocessor">#endif</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="482"><highlight class="normal"></highlight><highlight class="comment">//<sp/>NOLINTEND</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h"/>
+  </compounddef>
+</doxygen>

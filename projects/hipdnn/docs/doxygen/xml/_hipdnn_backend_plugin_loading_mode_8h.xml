@@ -1,0 +1,97 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="_hipdnn_backend_plugin_loading_mode_8h" kind="file" language="C++">
+    <compoundname>HipdnnBackendPluginLoadingMode.h</compoundname>
+    <includedby refid="hipdnn__backend_8h" local="yes">hipdnn_backend.h</includedby>
+    <invincdepgraph>
+      <node id="1">
+        <label>HipdnnBackendPluginLoadingMode.h</label>
+        <link refid="_hipdnn_backend_plugin_loading_mode_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+      </node>
+    </invincdepgraph>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" prot="public" static="no" strong="no">
+        <type></type>
+        <name>hipdnnPluginLoadingMode_ext_t</name>
+        <enumvalue id="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302aa7f7d0c2ecde2bb9abc14d4a56725d7a2" prot="public">
+          <name>HIPDNN_PLUGIN_LOADING_ADDITIVE</name>
+          <briefdescription>
+<para>Additive loading mode (default) </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Loads all user-specified plugins in addition to the default plugins. This is useful when you want to extend hipDNN with custom plugins while retaining access to the built-in implementations. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302aa9610835db63d2e5a242c13f5f403f7e2" prot="public">
+          <name>HIPDNN_PLUGIN_LOADING_ABSOLUTE</name>
+          <briefdescription>
+<para>Absolute loading mode. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Loads only the user-specified plugin from the most recent registration call, ignoring all default plugins. This is useful when you want complete control over which plugins are active. </para>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Specifies the plugin loading mode for hipDNN (extension API) </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This enumeration defines how plugins are loaded into hipDNN. The loading mode affects which plugins are available for engine discovery and execution.</para>
+<para><simplesect kind="see"><para>hipdnnRegisterEnginePlugin_ext() </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginLoadingMode.h" line="25" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginLoadingMode.h" bodystart="26" bodyend="45"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="var">
+      <memberdef kind="variable" id="_hipdnn_backend_plugin_loading_mode_8h_1a1c0d4cd2fc43b94564e76d782e38def9" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>constexpr <ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref></type>
+        <definition>constexpr hipdnnPluginLoadingMode_ext_t HIPDNN_DEFAULT_PLUGIN_LOADING_MODE</definition>
+        <argsstring></argsstring>
+        <name>HIPDNN_DEFAULT_PLUGIN_LOADING_MODE</name>
+        <initializer>= <ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302aa7f7d0c2ecde2bb9abc14d4a56725d7a2" kindref="member">HIPDNN_PLUGIN_LOADING_ADDITIVE</ref></initializer>
+        <briefdescription>
+<para>Default plugin loading mode. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>The default mode is HIPDNN_PLUGIN_LOADING_ADDITIVE, which loads user plugins alongside the built-in default plugins. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginLoadingMode.h" line="53" column="41" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginLoadingMode.h" bodystart="54" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Plugin loading mode configuration for hipDNN. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the plugin loading modes that control how hipDNN loads and manages execution engine plugins. Plugins provide the actual GPU kernel implementations for deep learning operations. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight></codeline>
+<codeline lineno="25" refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">enum</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="26"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="34" refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302aa7f7d0c2ecde2bb9abc14d4a56725d7a2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302aa7f7d0c2ecde2bb9abc14d4a56725d7a2" kindref="member">HIPDNN_PLUGIN_LOADING_ADDITIVE</ref>,</highlight></codeline>
+<codeline lineno="35"><highlight class="normal"></highlight></codeline>
+<codeline lineno="43" refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302aa9610835db63d2e5a242c13f5f403f7e2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302aa9610835db63d2e5a242c13f5f403f7e2" kindref="member">HIPDNN_PLUGIN_LOADING_ABSOLUTE</ref>,</highlight></codeline>
+<codeline lineno="44"><highlight class="normal"></highlight></codeline>
+<codeline lineno="45"><highlight class="normal">}<sp/><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref>;</highlight></codeline>
+<codeline lineno="46"><highlight class="normal"></highlight></codeline>
+<codeline lineno="53" refid="_hipdnn_backend_plugin_loading_mode_8h_1a1c0d4cd2fc43b94564e76d782e38def9" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">constexpr</highlight><highlight class="normal"><sp/><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref><sp/><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a1c0d4cd2fc43b94564e76d782e38def9" kindref="member">HIPDNN_DEFAULT_PLUGIN_LOADING_MODE</ref></highlight></codeline>
+<codeline lineno="54"><highlight class="normal"><sp/><sp/><sp/><sp/>=<sp/><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302aa7f7d0c2ecde2bb9abc14d4a56725d7a2" kindref="member">HIPDNN_PLUGIN_LOADING_ADDITIVE</ref>;</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginLoadingMode.h"/>
+  </compounddef>
+</doxygen>

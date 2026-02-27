@@ -1,0 +1,4 @@
+var searchData=
+[
+  ['size_5ftype_0',['size_type',['../classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator.html#a9d38c2774ef11eaba54dedcccda5f23b',1,'hipdnn_data_sdk::utilities::IHostAllocator::size_type'],['../classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator.html#a22d10e38441b6956a53e2921b1bfb6f6',1,'hipdnn_data_sdk::utilities::IDeviceAllocator::size_type'],['../classhipdnn__data__sdk_1_1utilities_1_1HostAllocator.html#a29cd81a0588fb1fe8ec501815a135d1b',1,'hipdnn_data_sdk::utilities::HostAllocator::size_type'],['../classhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator.html#a5c033283b0df8750a1cd2d1dc1afd7ef',1,'hipdnn_data_sdk::utilities::PinnedHostAllocator::size_type'],['../classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator.html#a9164e4ca568c971709f82c3d28bff291',1,'hipdnn_data_sdk::utilities::DeviceAllocator::size_type']]]
+];

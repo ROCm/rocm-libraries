@@ -1,0 +1,88 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="_hipdnn_backend_plugin_unloading_mode_8h" kind="file" language="C++">
+    <compoundname>HipdnnBackendPluginUnloadingMode.h</compoundname>
+    <includedby refid="hipdnn__backend_8h" local="yes">hipdnn_backend.h</includedby>
+    <invincdepgraph>
+      <node id="1">
+        <label>HipdnnBackendPluginUnloadingMode.h</label>
+        <link refid="_hipdnn_backend_plugin_unloading_mode_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+      </node>
+    </invincdepgraph>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" prot="public" static="no" strong="no">
+        <type></type>
+        <name>hipdnnPluginUnloadingMode_ext_t</name>
+        <enumvalue id="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1aab43abd141403c793f14670a092f68ceb" prot="public">
+          <name>HIPDNN_PLUGIN_UNLOAD_LAZY</name>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1aa93eba9930c97a03bdaee1716d96267cf" prot="public">
+          <name>HIPDNN_PLUGIN_UNLOAD_EAGER</name>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Specifies the plugin unloading mode for hipDNN. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>This enumeration defines when plugins are unloaded from memory:<itemizedlist>
+<listitem><para>HIPDNN_PLUGIN_UNLOAD_LAZY: Keeps plugins loaded until application exit or when hipdnnSetEnginePluginPaths_ext is called. This avoids expensive plugin reloading when handles are frequently created and destroyed.</para>
+</listitem><listitem><para>HIPDNN_PLUGIN_UNLOAD_EAGER: Unloads plugins immediately when all handles are released. </para>
+</listitem></itemizedlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginUnloadingMode.h" line="16" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginUnloadingMode.h" bodystart="17" bodyend="20"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="var">
+      <memberdef kind="variable" id="_hipdnn_backend_plugin_unloading_mode_8h_1a85a964a78abf65116cfa1ee135a604fe" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>constexpr <ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref></type>
+        <definition>constexpr hipdnnPluginUnloadingMode_ext_t HIPDNN_DEFAULT_PLUGIN_UNLOADING_MODE</definition>
+        <argsstring></argsstring>
+        <name>HIPDNN_DEFAULT_PLUGIN_UNLOADING_MODE</name>
+        <initializer>= <ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1aab43abd141403c793f14670a092f68ceb" kindref="member">HIPDNN_PLUGIN_UNLOAD_LAZY</ref></initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginUnloadingMode.h" line="22" column="43" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginUnloadingMode.h" bodystart="23" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight></codeline>
+<codeline lineno="16" refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">enum</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="17"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="18" refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1aab43abd141403c793f14670a092f68ceb" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1aab43abd141403c793f14670a092f68ceb" kindref="member">HIPDNN_PLUGIN_UNLOAD_LAZY</ref>,</highlight></codeline>
+<codeline lineno="19" refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1aa93eba9930c97a03bdaee1716d96267cf" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1aa93eba9930c97a03bdaee1716d96267cf" kindref="member">HIPDNN_PLUGIN_UNLOAD_EAGER</ref>,</highlight></codeline>
+<codeline lineno="20"><highlight class="normal">}<sp/><ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref>;</highlight></codeline>
+<codeline lineno="21"><highlight class="normal"></highlight></codeline>
+<codeline lineno="22" refid="_hipdnn_backend_plugin_unloading_mode_8h_1a85a964a78abf65116cfa1ee135a604fe" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">constexpr</highlight><highlight class="normal"><sp/><ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref><sp/><ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a85a964a78abf65116cfa1ee135a604fe" kindref="member">HIPDNN_DEFAULT_PLUGIN_UNLOADING_MODE</ref></highlight></codeline>
+<codeline lineno="23"><highlight class="normal"><sp/><sp/><sp/><sp/>=<sp/><ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1aab43abd141403c793f14670a092f68ceb" kindref="member">HIPDNN_PLUGIN_UNLOAD_LAZY</ref>;</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendPluginUnloadingMode.h"/>
+  </compounddef>
+</doxygen>

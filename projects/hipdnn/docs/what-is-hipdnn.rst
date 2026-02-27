@@ -61,4 +61,6 @@ Components
 Plugins
 =======
 
-The MIOpen Provider plugin serves as the kernel provider. It employs a modular C++ architecture, largely decoupled from the API layer. See :ref:`miopen` for more info.
+hipDNN operations are implemented through plugins. Each plugin provides its own set of supported operations. See :ref:`plugin-support` for more information.
+
+
