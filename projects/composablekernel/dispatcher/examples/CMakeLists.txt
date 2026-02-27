@@ -453,13 +453,60 @@ add_declarative_gpu_example(grouped_conv_02_all_dirs      grouped_conv/cpp/02_al
 add_declarative_gpu_example(grouped_conv_03_bench_val     grouped_conv/cpp/03_benchmark_validation.cpp)
 add_declarative_gpu_example(grouped_conv_04_registry_json grouped_conv/cpp/04_registry_json.cpp)
 
+# =============================================================================
+# Grouped Convolution Python Library - Multi-Kernel (fwd/bwdd/bwdw × 2D/3D)
+# =============================================================================
+
+# Kernel output directory for the Python conv library
+set(CONV_FALLBACK_KERNEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/conv_python_fallback")
+set(CONV_DISPATCH_HEADER "${CONV_FALLBACK_KERNEL_DIR}/conv_python_dispatch.hpp")
+
+# Generate ALL conv kernels (fwd/bwdd/bwdw × 2D/3D × multiple tile configs)
+# then create the dispatch header with 2D/3D aliases
+add_custom_command(
+    OUTPUT ${CONV_DISPATCH_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CONV_FALLBACK_KERNEL_DIR}
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../codegen/unified_grouped_conv_codegen.py
+            --variant forward bwd_data bwd_weight --ndim 2 3
+            --datatype fp16 --arch ${GPU_TARGET}
+            --output ${CONV_FALLBACK_KERNEL_DIR}
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate_conv_dispatch_header.py
+            --kernel-dir ${CONV_FALLBACK_KERNEL_DIR}
+            --output ${CONV_DISPATCH_HEADER}
+    COMMENT "Generating conv kernels (fwd/bwdd/bwdw × 2D/3D) for Python library..."
+    VERBATIM
+)
+
+add_custom_target(generate_conv_fallback_kernels DEPENDS ${CONV_DISPATCH_HEADER})
+
+# Conv dynamic library for Python (all 6 kernel variants)
+add_library(dispatcher_conv_lib SHARED ${CMAKE_CURRENT_SOURCE_DIR}/../bindings/ctypes/conv_ctypes_lib.cpp)
+target_link_libraries(dispatcher_conv_lib PRIVATE ck_tile_dispatcher)
+target_include_directories(dispatcher_conv_lib PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CONV_FALLBACK_KERNEL_DIR}
+)
+target_compile_options(dispatcher_conv_lib PRIVATE
+    -include ${CONV_DISPATCH_HEADER}
+    -DGFX_ARCH="${GPU_TARGET}"
+    -mllvm -enable-noalias-to-md-conversion=0
+    -Wno-undefined-func-template
+    -Wno-float-equal
+    --offload-compress
+)
+if(hip_FOUND)
+    target_link_libraries(dispatcher_conv_lib PRIVATE hip::device hip::host)
+endif()
+add_dependencies(dispatcher_conv_lib generate_conv_fallback_kernels)
+
 message(STATUS "GEMM examples configured - kernels will be generated during 'make'")
 message(STATUS "Grouped Conv examples configured - kernels will be generated during 'make'")
 
 # Convenience target to build all Python ctypes libraries
 add_custom_target(python_libs
-    DEPENDS dispatcher_gemm_lib
-    COMMENT "Building Python ctypes libraries (GEMM)"
+    DEPENDS dispatcher_gemm_lib dispatcher_conv_lib
+    COMMENT "Building Python ctypes libraries (GEMM + Conv)"
 )
 
 # =============================================================================

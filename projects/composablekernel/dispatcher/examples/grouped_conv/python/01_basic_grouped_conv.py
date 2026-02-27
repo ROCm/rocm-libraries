@@ -6,233 +6,142 @@
 """
 Example 01: Basic Grouped Convolution
 
-Full workflow: config, validate, autocorrect, codegen, verify output files.
-
-Demonstrates:
-1. Define a grouped conv kernel config (all fields explicit)
-2. Validate against arch filter rules
-3. Auto-correct invalid configurations
-4. Generate kernel headers via codegen
-5. Inspect generated output
+Config, validate, GPU execute, CPU reference verify.
 
 Usage:
     python3 01_basic_grouped_conv.py
-    python3 01_basic_grouped_conv.py --dtype bf16
     python3 01_basic_grouped_conv.py --variant bwd_data
     python3 01_basic_grouped_conv.py --arch gfx942
 """
 
 import sys
 import argparse
+import numpy as np
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python"))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "codegen"))
 
-from ctypes_utils import detect_gpu_arch
 from grouped_conv_utils import (
+    GroupedConvKernelConfig,
+    GroupedConvProblem,
+    GpuGroupedConvRunner,
     validate_grouped_conv_config,
     auto_correct_grouped_conv_config,
-    format_grouped_conv_summary,
+    detect_gpu_arch,
 )
 
 
-def create_grouped_conv_config(
-    variant="forward", ndim_spatial=2, arch="gfx950", dtype="fp16", pipeline="compv4",
-):
-    """Build a grouped conv config with all fields explicit (like GEMM KernelConfig)."""
-    return {
-        "tile_config": {
-            "tile_m": [1],
-            "tile_n": [128],
-            "tile_k": [128],
-            "wave_m": [2],
-            "wave_n": [2],
-            "wave_k": [1],
-            "warp_tile_m": [32],
-            "warp_tile_n": [32],
-            "warp_tile_k": [16],
-        },
-        "trait_config": {
-            "pipeline": [pipeline],
-            "epilogue": ["cshuffle"],
-            "scheduler": ["intrawave"],
-            "pad_m": [True],
-            "pad_n": [True],
-            "pad_k": [True],
-        },
-        "variant": variant,
-        "ndim_spatial": ndim_spatial,
-        "arch": arch,
-        "layout": "nhwgc",
-        "dtype": dtype,
-    }
+def cpu_conv2d_fwd(inp, wei, prob):
+    """Naive CPU reference: 2D forward, NHWGC layout."""
+    N, Hi, Wi, G, Cpg = inp.shape
+    _, Kpg, Y, X, _ = wei.shape
+    Ho, Wo = prob.Ho, prob.Wo
+    out = np.zeros((N, Ho, Wo, G, Kpg), dtype=np.float32)
+    for n in range(N):
+        for g in range(G):
+            for ho in range(Ho):
+                for wo in range(Wo):
+                    for k in range(Kpg):
+                        s = 0.0
+                        for y in range(Y):
+                            for x in range(X):
+                                hi = ho * prob.stride_h - prob.pad_h + y * prob.dilation_h
+                                wi = wo * prob.stride_w - prob.pad_w + x * prob.dilation_w
+                                if 0 <= hi < Hi and 0 <= wi < Wi:
+                                    for c in range(Cpg):
+                                        s += float(inp[n, hi, wi, g, c]) * float(wei[g, k, y, x, c])
+                        out[n, ho, wo, g, k] = s
+    return out
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Basic Grouped Convolution Example",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--dtype", default="fp16", choices=["fp16", "bf16", "fp32"],
-        help="Data type (default: fp16)",
-    )
-    parser.add_argument(
-        "--variant", default="forward", choices=["forward", "bwd_data", "bwd_weight"],
-        help="Convolution direction (default: forward)",
-    )
-    parser.add_argument(
-        "--ndim", type=int, default=2, choices=[1, 2, 3],
-        help="Spatial dimensions (default: 2)",
-    )
-    parser.add_argument(
-        "--arch", default=detect_gpu_arch(),
-        help="Target architecture (auto-detected from rocminfo)",
-    )
-    parser.add_argument(
-        "--pipeline", default="compv4", choices=["compv3", "compv4", "mem"],
-        help="Pipeline version (default: compv4)",
-    )
+    parser = argparse.ArgumentParser(description="Basic Grouped Conv Example")
+    parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
+    parser.add_argument("--variant", default="forward",
+                        choices=["forward", "bwd_data", "bwd_weight"])
+    parser.add_argument("--ndim", type=int, default=2, choices=[2, 3])
+    parser.add_argument("--arch", default=detect_gpu_arch())
     args = parser.parse_args()
 
     print("=" * 70)
     print("Example 01: Basic Grouped Convolution")
     print("=" * 70)
-    print(f"\n  Arch:      {args.arch}")
-    print(f"  Dtype:     {args.dtype}")
-    print(f"  Variant:   {args.variant}")
-    print(f"  Dims:      {args.ndim}D")
-    print(f"  Pipeline:  {args.pipeline}")
 
-    # =========================================================================
-    # Step 1: Create config (all fields explicit)
-    # =========================================================================
-    print("\n" + "-" * 50)
-    print("Step 1: Create Config (all fields explicit)")
-    print("-" * 50)
-
-    config = create_grouped_conv_config(
-        variant=args.variant,
-        ndim_spatial=args.ndim,
-        arch=args.arch,
-        dtype=args.dtype,
-        pipeline=args.pipeline,
+    # Step 1: Kernel config
+    print("\n--- Step 1: Kernel Config ---")
+    config = GroupedConvKernelConfig(
+        variant=args.variant, ndim_spatial=args.ndim,
+        arch=args.arch, dtype=args.dtype,
     )
+    config.print_config()
 
-    tile = config["tile_config"]
-    trait = config["trait_config"]
-    print(f"  variant:   {config['variant']}")
-    print(f"  ndim:      {config['ndim_spatial']}D")
-    print(f"  layout:    {config['layout']}")
-    print(f"  dtype:     {config['dtype']}")
-    print(f"  tile:      M={tile['tile_m'][0]} N={tile['tile_n'][0]} K={tile['tile_k'][0]}")
-    print(f"  wave:      {tile['wave_m'][0]}x{tile['wave_n'][0]}x{tile['wave_k'][0]}")
-    print(f"  warp:      {tile['warp_tile_m'][0]}x{tile['warp_tile_n'][0]}x{tile['warp_tile_k'][0]}")
-    print(f"  pipeline:  {trait['pipeline'][0]}")
-    print(f"  epilogue:  {trait['epilogue'][0]}")
-    print(f"  scheduler: {trait['scheduler'][0]}")
-    print(f"  padding:   M={trait['pad_m'][0]} N={trait['pad_n'][0]} K={trait['pad_k'][0]}")
-
-    # =========================================================================
-    # Step 2: Validate config
-    # =========================================================================
-    print("\n" + "-" * 50)
-    print("Step 2: Validate Config")
-    print("-" * 50)
-
-    result = validate_grouped_conv_config(config)
+    # Step 2: Validate
+    print("\n--- Step 2: Validate ---")
+    result = validate_grouped_conv_config(config.to_dict())
     if result.is_valid:
         print("  Config is VALID")
     else:
-        print("  Config has issues:")
-        for err in result.errors:
-            print(f"    - {err}")
+        print("  Config has issues, auto-correcting...")
+        corrected, result = auto_correct_grouped_conv_config(config.to_dict())
+        print(f"  After correction: valid={result.is_valid}")
 
-    # =========================================================================
-    # Step 3: Auto-correct if needed
-    # =========================================================================
-    if not result.is_valid:
-        print("\n" + "-" * 50)
-        print("Step 3: Auto-Correct")
-        print("-" * 50)
+    # Step 3: Define problem
+    print("\n--- Step 3: Problem ---")
+    prob = GroupedConvProblem(
+        N=1, C=64, K=128, Hi=16, Wi=16, Y=3, X=3,
+        stride_h=1, stride_w=1, pad_h=1, pad_w=1,
+        direction=args.variant,
+    )
+    prob.print_problem()
 
-        corrected, new_result = auto_correct_grouped_conv_config(config)
-        print(f"  Corrected: {new_result.is_valid}")
-        if new_result.is_valid:
-            config = corrected
-            print(format_grouped_conv_summary(config))
+    # Step 4: GPU execution
+    print("\n--- Step 4: GPU Execution ---")
+    runner = GpuGroupedConvRunner()
+    if not runner.is_available():
+        print("  GPU library not available")
+        print("  Build: cd dispatcher/build && cmake .. && make dispatcher_conv_lib")
+        return 1
 
-    # =========================================================================
-    # Step 4: Generate kernel via codegen
-    # =========================================================================
-    print("\n" + "-" * 50)
-    print("Step 4: Generate Kernel")
-    print("-" * 50)
+    print(f"  Library: {runner.library_path}")
+    print(f"  Kernels: {runner.lib.kernel_names()}")
 
-    try:
-        from unified_grouped_conv_codegen import (
-            UnifiedGroupedConvCodegen,
-            GroupedConvKernelConfig,
-            GroupedConvVariant,
-        )
+    inp = np.random.uniform(-0.5, 0.5, prob.input_shape()).astype(np.float16)
+    wei = np.random.uniform(-0.5, 0.5, prob.weight_shape()).astype(np.float16)
 
-        variant_map = {
-            "forward": GroupedConvVariant.FORWARD,
-            "bwd_data": GroupedConvVariant.BACKWARD_DATA,
-            "bwd_weight": GroupedConvVariant.BACKWARD_WEIGHT,
-        }
+    res = runner.run(inp, wei, prob)
+    if not res.success:
+        print(f"  GPU execution failed: {res.error}")
+        runner.cleanup()
+        return 1
 
-        codegen = UnifiedGroupedConvCodegen(
-            output_dir=Path("/tmp/grouped_conv_example_01"),
-            datatype=args.dtype,
-            variant=variant_map[args.variant],
-            ndim_spatial=args.ndim,
-            gpu_target=args.arch,
-        )
+    print(f"  Time:   {res.time_ms:.4f} ms")
+    print(f"  TFLOPS: {res.tflops:.2f}")
+    print(f"  Output: shape={res.output.shape}, range=[{res.output.min():.3f}, {res.output.max():.3f}]")
 
-        kernels = codegen.generate_all()
-        print(f"  Generated {len(kernels)} kernel(s)")
-        for k in kernels[:5]:
-            print(f"    - {k.name if hasattr(k, 'name') else k}")
-        if len(kernels) > 5:
-            print(f"    ... and {len(kernels) - 5} more")
-    except Exception as e:
-        print(f"  Codegen skipped: {e}")
-        print("  (This is normal if running without full build environment)")
+    # Step 5: CPU reference (forward only)
+    verified = False
+    if args.variant == "forward" and args.ndim == 2:
+        print("\n--- Step 5: CPU Reference Verification ---")
+        ref = cpu_conv2d_fwd(inp, wei, prob)
+        gpu_f32 = res.output.astype(np.float32)
+        diff = np.abs(gpu_f32 - ref)
+        max_abs = diff.max()
+        max_rel = (diff / (np.abs(ref) + 1e-6)).max()
+        match = np.allclose(gpu_f32, ref, atol=0.05, rtol=0.05)
+        print(f"  max_abs_diff: {max_abs:.6f}")
+        print(f"  max_rel_diff: {max_rel:.6f}")
+        print(f"  Match: {match}")
+        verified = match
 
-    # =========================================================================
-    # Step 5: Verify generated files
-    # =========================================================================
-    print("\n" + "-" * 50)
-    print("Step 5: Verify Output")
-    print("-" * 50)
+    runner.cleanup()
 
-    output_dir = Path("/tmp/grouped_conv_example_01")
-    if output_dir.exists():
-        hpp_files = list(output_dir.glob("*.hpp"))
-        print(f"  Output dir: {output_dir}")
-        print(f"  Generated headers: {len(hpp_files)}")
-        for f in hpp_files[:5]:
-            print(f"    - {f.name}")
-    else:
-        print("  No output directory (codegen may have been skipped)")
-
-    # =========================================================================
     # Summary
-    # =========================================================================
     print("\n" + "=" * 70)
-    print("SUMMARY")
+    status = "PASS" if res.success and (verified or args.variant != "forward") else "FAIL"
+    print(f"  Status: {status}")
+    print(f"  {config.name} | {prob.gflops:.2f} GFLOPs | {res.tflops:.2f} TFLOPS")
     print("=" * 70)
-    print(f"  Arch:     {args.arch}")
-    print(f"  Config:   {args.variant} {args.ndim}D {args.dtype}")
-    print(f"  Tile:     1x128x128, wave 2x2x1, warp 32x32x16")
-    print(f"  Pipeline: {args.pipeline}, epilogue cshuffle, scheduler intrawave")
-    print(f"  Valid:    {result.is_valid}")
-    print("  Status:   PASS")
-    print("=" * 70)
-
-    return 0
+    return 0 if status == "PASS" else 1
 
 
 if __name__ == "__main__":
