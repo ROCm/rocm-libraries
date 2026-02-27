@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 
 #include "fake_backend/MockHipdnnBackend.hpp"
@@ -1444,6 +1445,163 @@ TEST_F(TestGraph, BuildAndSerializeMatmulGraph)
     EXPECT_EQ(deserializedMatmulAttributes->a_tensor_uid, a->get_uid());
     EXPECT_EQ(deserializedMatmulAttributes->b_tensor_uid, b->get_uid());
     EXPECT_EQ(deserializedMatmulAttributes->c_tensor_uid, c->get_uid());
+}
+
+TEST_F(TestGraph, LayernormNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 6, 4}).set_stride({24, 4, 1}).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_name("Epsilon").set_value(1e-5f);
+
+    LayernormAttributes attributes;
+    attributes.set_name("LayerNormNode");
+    attributes.set_forward_phase(NormFwdPhase::INFERENCE);
+    attributes.set_epsilon(epsilon);
+
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
+
+    EXPECT_EQ(y->get_name(), "LayerNormNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    // In inference mode, mean and inv_variance are not created
+    EXPECT_EQ(mean, nullptr);
+    EXPECT_EQ(invVariance, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 6, 4}).set_stride({24, 4, 1}).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_name("Epsilon").set_value(1e-5f);
+
+    LayernormAttributes attributes;
+    attributes.set_name("LayernormNodeTraining");
+    attributes.set_forward_phase(NormFwdPhase::TRAINING);
+    attributes.set_epsilon(epsilon);
+
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
+
+    EXPECT_EQ(y->get_name(), "LayernormNodeTraining::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    // In training mode, mean and inv_variance should be created
+    ASSERT_NE(mean, nullptr);
+    EXPECT_EQ(mean->get_name(), "LayernormNodeTraining::MEAN");
+    ASSERT_NE(invVariance, nullptr);
+    EXPECT_EQ(invVariance->get_name(), "LayernormNodeTraining::INV_VARIANCE");
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, BuildAndSerializeLayernormGraph)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+
+    graph.set_name("SerializedLayernormGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({2, 6, 4})
+        .set_stride({24, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({6, 4})
+        .set_stride({4, 1});
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({6, 4})
+        .set_stride({4, 1});
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5f);
+
+    LayernormAttributes layernormAttributes;
+    layernormAttributes.set_name("LayerNormNode");
+    layernormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
+    layernormAttributes.set_epsilon(epsilon);
+
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, layernormAttributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedLayernormGraph");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type,
+              hipdnn_data_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 5u);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1u);
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*x, tensorLookup[x->get_uid()]);
+    validateTensor(*scale, tensorLookup[scale->get_uid()]);
+    validateTensor(*bias, tensorLookup[bias->get_uid()]);
+    validateTensor(*epsilon, tensorLookup[epsilon->get_uid()]);
+    validateTensor(*y, tensorLookup[y->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "LayerNormNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes);
+    auto deserializedLayernormAttributes
+        = deserializedGraph->nodes[0]->attributes.AsLayernormAttributes();
+    ASSERT_NE(deserializedLayernormAttributes, nullptr);
+    EXPECT_EQ(deserializedLayernormAttributes->x_tensor_uid, x->get_uid());
+    EXPECT_EQ(deserializedLayernormAttributes->scale_tensor_uid, scale->get_uid());
+    EXPECT_EQ(deserializedLayernormAttributes->bias_tensor_uid, bias->get_uid());
+    EXPECT_EQ(deserializedLayernormAttributes->epsilon_tensor_uid, epsilon->get_uid());
+    EXPECT_EQ(deserializedLayernormAttributes->y_tensor_uid, y->get_uid());
 }
 
 TEST_F(TestGraph, BuildAndSerializeConvolutionDgradGraph)
