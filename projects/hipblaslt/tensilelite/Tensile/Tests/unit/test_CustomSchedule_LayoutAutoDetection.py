@@ -26,7 +26,8 @@ from typing import Set
 from Tensile.Components.CustomSchedule import (
     hasCustomSchedule, ScheduleInfo, RegisterSchedule, TileConfig,
     _SCHEDULE_METADATA, _SCHEDULE_REGISTRY,
-    isTN, isNT, isNN, isTT, is16bit, query_cms_kernels, get_available_layouts
+    isTN, isNT, isNN, isTT, is16bit, query_cms_kernels, get_available_layouts,
+    get_available_dtypes
 )
 
 def _get_compact_layout_string(transposeA: bool, transposeB: bool):
@@ -118,13 +119,9 @@ class TestLayoutAutoDetection:
 
         assert _get_layouts_for("_fake_all_layouts") == {"NN", "NT", "TN", "TT"}
 
-        available_16bit = get_available_layouts(dtype="16bit")
-        assert {"NN", "NT", "TN", "TT"}.issubset(available_16bit), \
-            f"Expected all four layouts in 16bit, got {available_16bit}"
+        assert get_available_layouts(dtype="16bit") == {"NN", "NT", "TN", "TT"}
 
-        available_all = get_available_layouts()
-        assert {"NN", "NT", "TN", "TT"}.issubset(available_all), \
-            f"Expected all four layouts overall, got {available_all}"
+        assert get_available_layouts() == {"NN", "NT", "TN", "TT"}
 
     def test_detect_no_layouts(self):
         """A function that always returns False should detect no layouts."""
@@ -318,3 +315,10 @@ class TestLayoutAutoDetection:
                 assert expected_kernel_info in kernel_infos, f"Kernel support for {expected_kernel_info} (TransposeA, TransposeB, LDSTrInst, TransposeLDS) is not found in kernel_infos"
             else:
                 assert expected_kernel_info not in kernel_infos, f"Kernel support for {expected_kernel_info} (TransposeA, TransposeB, LDSTrInst, TransposeLDS) is unexpectedly found in kernel_infos"
+
+    def test_get_available_dtypes(self):
+        dtypes = get_available_dtypes()
+
+        expected_dtypes = {"16bit", "8bit", "TF32"}
+        assert dtypes == expected_dtypes, \
+            f"Expected {expected_dtypes}, got {dtypes} (Please update the expected dtypes in the test if needed)"

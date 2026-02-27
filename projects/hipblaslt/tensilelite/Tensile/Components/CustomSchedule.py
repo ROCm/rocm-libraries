@@ -548,9 +548,9 @@ def get_cms_kernel_info_objects(dtype: Optional[str] = None, layout: Optional[st
     return [info for info in _SCHEDULE_METADATA if info.matches(dtype=dtype, layout=layout)]
 
 
-def get_available_dtypes() -> list[str]:
-    """Return a sorted list of all data type strings that have at least one CMS kernel."""
-    return sorted({info.dtype for info in _SCHEDULE_METADATA})
+def get_available_dtypes() -> set[str]:
+    """Return set of all data type strings that have at least one CMS kernel."""
+    return {info.dtype for info in _SCHEDULE_METADATA}
 
 
 def get_available_layouts(dtype: Optional[str] = None) -> set[str]:
