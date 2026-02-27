@@ -95,6 +95,46 @@ def invert_mfma_reorder(mfma_reorder: list[int]) -> dict[int, int]:
     return {orig: new_pos for new_pos, orig in enumerate(mfma_reorder)}
 
 
+# --- Loop Names ---
+MAIN_LOOP_PREV = "ML-1"
+MAIN_LOOP = "ML"
+NO_GLOBAL_LOAD_LOOP = "NGL"
+NO_LOCAL_LOAD_LOOP = "NLL"
+
+# --- Pack Group Sizes ---
+PACK_GROUP_SIZE_TF32 = 24        # 4 CVT0 + 16 middle + 4 CVT1
+PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
+
+# --- TF32 Pack Index Ranges (within a group) ---
+# Regular TF32 (groups of 24)
+TF32_CVT0_END = 4                # Indices 0..3 are CVT0
+TF32_MIDDLE_16_START = 4         # Indices 4..19 are middle-16
+TF32_MIDDLE_16_END = 20          # (exclusive)
+# TF32_CVT1 occupies indices 20..23
+
+# 4x4 MFMA TF32 (groups of 10)
+TF32_4X4_MFMA_START = 4          # Indices 4..5 are 4x4 MFMAs
+TF32_4X4_MFMA_END = 6            # (exclusive)
+# CVT0: 0..3, CVT1: 6..9
+
+# --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
+QUAD_CYCLES_CVT_BEFORE_MFMA = 2          # CVT packs need 2 quad-cycles before MFMA can use result
+QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = 5     # 4x4 MFMA needs 5 quad-cycles before CVT1 can use result
+QUAD_CYCLES_STANDARD_MFMA_FINISH = 3      # Standard MFMA takes 3 quad-cycles to finish after issue
+QUAD_CYCLES_MFMA_4X4_FINISH = 1           # 4x4 MFMA takes 1 quad-cycle to finish after issue
+
+# --- MFMA Type-Switch Thresholds ---
+MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5  # Min gap before type switch from standard MFMA
+MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3       # Min gap before type switch from 4x4 MFMA
+
+# --- TF32 Emulation ---
+MFMAS_PER_TILE_TF32 = 3   # 3 MFMAs per tile pair in TF32 emulation
+MFMAS_PER_TILE_BF16 = 1   # 1 MFMA per tile pair in BF16
+
+# --- VGPRs ---
+VGPRS_PER_CONVERSION_GROUP = 8   # 8 VGPRs per conversion group in TF32 emulation
+
+
 class ValidatorInstruction(ABC):
     """
     Abstract class with no method just for type hinting purposes.
@@ -160,6 +200,7 @@ class LocalRead(ValidatorInstruction):
 class MFMA(ValidatorInstruction):
     issued_at: SchedulePosition
     name: str = "MFMA"
+    __mfma_finish_cycles__ = QUAD_CYCLES_STANDARD_MFMA_FINISH
 
     def done_idx(self) -> SchedulePosition:
         return self.issued_at
@@ -235,6 +276,35 @@ class Pack(ValidatorInstruction):
             return f"{self.name} @ idx={issued_at} has too little gap between it and {self.needed_by.name} @ idx={needed_by_at}. Expected at least {self.min_quad_cycles_before_result_used} quad-cycles but only {self.estimated_quad_cycles_before_result_used} passed."
 
         return f"{self.name} at index {issued_at} is not valid."
+
+@dataclass
+class MFMAPack(Pack, MFMA):
+    """A v_mfma_f32_4x4x4_16b_bf16 instruction used in TF32 4x4 emulation pack groups.
+
+    These appear at indices TF32_4X4_MFMA_START..TF32_4X4_MFMA_END within each group
+    of PACK_GROUP_SIZE_TF32_4X4. They are real MFMA instructions but participate in
+    the pack dependency chain (CVT0 -> MFMAPack -> CVT1).
+
+    Inherits from both Pack and MFMA:
+    - isinstance(x, Pack) is True — works with pack gathering, filtering, type hints
+    - isinstance(x, MFMA) is True — captures "this IS an MFMA" semantics
+    """
+    # NOTE: Do NOT re-declare `name: str` here. Although the MRO field merge
+    # correctly resolves Pack's no-default `name` over MFMA's default,
+    # Python's _get_field uses getattr() which picks up MFMA's inherited
+    # `name = 'MFMA'` class attribute and re-introduces the default.
+
+    # Override MFMA's finish cycles for 4x4 timing
+    __mfma_finish_cycles__ = QUAD_CYCLES_MFMA_4X4_FINISH
+
+    # NOTE: min_quad_cycles_before_result_used is NOT overridden here.
+    # It keeps Pack's default (0) and is set by _handle_min_pack_quad_cycles
+    # only when the constraint is active (when local reads exist).
+    #
+    # NOTE: validate() is NOT overridden here. Pack.validate() already handles
+    # MFMAPack correctly: pair_consumer and next_scheduled_middle_16 are both
+    # None, so the pair interleaving check is naturally skipped (None is None
+    # in the happy path, and `if self.pair_consumer:` is False in the error path).
 
 
 @dataclass
@@ -399,44 +469,6 @@ class SNop(ValidatorInstruction):
     def validate(self) -> Optional[str]:
         return None
 
-MAIN_LOOP_PREV = "ML-1"
-MAIN_LOOP = "ML"
-NO_GLOBAL_LOAD_LOOP = "NGL"
-NO_LOCAL_LOAD_LOOP = "NLL"
-
-# --- Pack Group Sizes ---
-PACK_GROUP_SIZE_TF32 = 24        # 4 CVT0 + 16 middle + 4 CVT1
-PACK_GROUP_SIZE_TF32_4X4 = 10    # 4 CVT0 + 2 MFMA + 4 CVT1
-
-# --- TF32 Pack Index Ranges (within a group) ---
-# Regular TF32 (groups of 24)
-TF32_CVT0_END = 4                # Indices 0..3 are CVT0
-TF32_MIDDLE_16_START = 4         # Indices 4..19 are middle-16
-TF32_MIDDLE_16_END = 20          # (exclusive)
-# TF32_CVT1 occupies indices 20..23
-
-# 4x4 MFMA TF32 (groups of 10)
-TF32_4X4_MFMA_START = 4          # Indices 4..5 are 4x4 MFMAs
-TF32_4X4_MFMA_END = 6            # (exclusive)
-# CVT0: 0..3, CVT1: 6..9
-
-# --- Quad-Cycle Timing (CDNA 4 ISA section 7.6) ---
-QUAD_CYCLES_CVT_BEFORE_MFMA = 2          # CVT packs need 2 quad-cycles before MFMA can use result
-QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1 = 5     # 4x4 MFMA needs 5 quad-cycles before CVT1 can use result
-QUAD_CYCLES_STANDARD_MFMA_FINISH = 3      # Standard MFMA takes 3 quad-cycles to finish after issue
-QUAD_CYCLES_MFMA_4X4_FINISH = 1           # 4x4 MFMA takes 1 quad-cycle to finish after issue
-
-# --- MFMA Type-Switch Thresholds ---
-MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD = 5  # Min gap before type switch from standard MFMA
-MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 = 3       # Min gap before type switch from 4x4 MFMA
-
-# --- TF32 Emulation ---
-MFMAS_PER_TILE_TF32 = 3   # 3 MFMAs per tile pair in TF32 emulation
-MFMAS_PER_TILE_BF16 = 1   # 1 MFMA per tile pair in BF16
-
-# --- VGPRs ---
-VGPRS_PER_CONVERSION_GROUP = 8   # 8 VGPRs per conversion group in TF32 emulation
-
 ALL_INSTRUCTION_NAMES = [
     "LRA0", "LRB0", "LRA1", "LRB1", "LRA3", "LRB3",
     "GRA", "GRB",
@@ -527,6 +559,7 @@ class Timeline:
         assert kernel["DirectToLds"], "Only DirectToLds cases are supported by validator."
 
         swap_global_read_order = kernel["SwapGlobalReadOrder"]
+        is_4x4mfma_tf32 = kernel.get("UseMFMAF32XEmulation", False)
 
         # Explicitly add MFMAs to timeline.
         # Do at the top here so they are the first ones scheduled at each vmfma index.
@@ -587,7 +620,10 @@ class Timeline:
 
                 for idx_pack, idx_vmfma in enumerate(packs):
                     assert idx_vmfma >= -1, f"Code path {code_path}: Pack {name} at index {idx_pack} is not valid. Must be >= -1."
-                    pack = Pack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack)
+                    if is_4x4mfma_tf32 and idx_pack % PACK_GROUP_SIZE_TF32_4X4 in range(TF32_4X4_MFMA_START, TF32_4X4_MFMA_END):
+                        pack = MFMAPack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack)
+                    else:
+                        pack = Pack(name=name, issued_at=POSITION_NEG_INF, issue_index=idx_pack)
                     self._insert(idx_vmfma, pack, kernel)
             else:
                 raise NotImplementedError(f"Instruction {name} not implemented")
@@ -1092,13 +1128,11 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
                 pack.needed_by = packs[i_pack + (4 - idx_in_group)]
             elif idx_in_group in [2, 3]:
                 pack.needed_by = packs[i_pack + (5 - idx_in_group)]
-            elif idx_in_group == 4:
-                # Pack 4's result is first used by pack 8.
-                pack.needed_by = packs[i_pack + 4]
-                continue
-            elif idx_in_group == 5:
-                # Pack 5's result is first used by pack 6.
-                pack.needed_by = packs[i_pack + 1]
+            elif isinstance(pack, MFMAPack):
+                if idx_in_group == TF32_4X4_MFMA_START:        # index 4
+                    pack.needed_by = packs[i_pack + 4]
+                elif idx_in_group == TF32_4X4_MFMA_START + 1:   # index 5
+                    pack.needed_by = packs[i_pack + 1]
                 continue
             
             # Calculate pack_offset within the tile (which MFMA within the 3-MFMA group uses this pack)
@@ -1178,11 +1212,10 @@ def _handle_min_pack_quad_cycles(packs: list[Pack], is_4x4mfma: bool) -> None:
     if is_4x4mfma:
         # For TF32 4x4 MFMA: packs come in groups of 10
         # - First 4 packs (CVT0): need 2 quad-cycles before first 4x4 MFMA
-        # - Middle 2 packs: are 4x4 MFMAs themselves, no constraint
+        # - Middle 2 packs (MFMAPack): need 5 quad-cycles before CVT1 can use result
         # - Last 4 packs (CVT1): need 2 quad-cycles before "real" MFMAs that use the result
         for pack in packs:
-            idx_in_group = pack.issue_index % PACK_GROUP_SIZE_TF32_4X4
-            if TF32_4X4_MFMA_START <= idx_in_group < TF32_4X4_MFMA_END:
+            if isinstance(pack, MFMAPack):
                 # Middle 2 packs are 4x4 MFMAs, need 5 quad-cycles before the CVT1 instructions
                 pack.min_quad_cycles_before_result_used = QUAD_CYCLES_MFMA_4X4_BEFORE_CVT1
             else:
@@ -1502,64 +1535,40 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
             
             _set_pack_needed_by(packs, pack_name, i_loop, mfma_reorder, mfma_for_linear_index, timeline.num_vmfma, kernel)
 
-def precompute_issue_times(instructions: list[ValidatorInstruction], is_4x4mfma_tf32_packs: bool) -> list[int]:
+def precompute_issue_times(instructions: list[ValidatorInstruction]) -> list[int]:
     """
     Returns a list where issue_times[i] represents the quad-cycle when instruction i starts issuing.
-    
+
     Args:
         instructions: List of ValidatorInstruction objects in execution order.
-        is_4x4mfma_tf32_packs: True if using TF32 4x4 MFMA mode (affects Pack timing).
     """
-    class MFMAType(Enum):
-        """Used for tracking type switching penalties in quad-cycle estimation."""
-        NONE = 0      # Not an MFMA instruction
-        STANDARD = 1  # Standard MFMA instruction
-        MFMA_4X4 = 2  # 4x4 MFMA Pack instruction (indices 4-5 in groups of 10)
-
-    def get_mfma_info(instruction: ValidatorInstruction) -> tuple[MFMAType, Optional[int]]:
-        """
-        Get MFMA information for an instruction.
-        
-        Returns:
-            Tuple of (mfma_type, finish_cycles):
-            - mfma_type: The type of MFMA instruction
-            - finish_cycles: Number of quad-cycles the MFMA takes to finish, or None if not an MFMA
-        """
-        if isinstance(instruction, MFMA):
-            return (MFMAType.STANDARD, QUAD_CYCLES_STANDARD_MFMA_FINISH)
-        if isinstance(instruction, Pack) and is_4x4mfma_tf32_packs:
-            idx_in_group = instruction.issue_index % PACK_GROUP_SIZE_TF32_4X4
-            if idx_in_group in range(TF32_4X4_MFMA_START, TF32_4X4_MFMA_END):
-                return (MFMAType.MFMA_4X4, QUAD_CYCLES_MFMA_4X4_FINISH)
-        return (MFMAType.NONE, None)
-        
     mfma_free_at = 0
     current_issue = 0
-    last_mfma_type = MFMAType.NONE
+    last_mfma_class: Optional[type] = None
     last_mfma_issue = -1
-    
+
     issue_times = []
     for instruction in instructions:
-        mfma_type, finish_cycles = get_mfma_info(instruction)
-        if mfma_type != MFMAType.NONE:
+        if isinstance(instruction, MFMA):
             # MFMAs must wait for previous MFMA to finish
             current_issue = max(current_issue, mfma_free_at)
-            
+
             # MFMA type switch penalty
-            if last_mfma_type != MFMAType.NONE and last_mfma_type != mfma_type:
+            current_mfma_class = type(instruction)
+            if last_mfma_class and current_mfma_class != last_mfma_class:
                 gap = current_issue - last_mfma_issue
-                threshold = MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD if last_mfma_type == MFMAType.STANDARD else MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4
+                threshold = MFMA_TYPE_SWITCH_THRESHOLD_FROM_4X4 if last_mfma_class is MFMAPack else MFMA_TYPE_SWITCH_THRESHOLD_FROM_STANDARD
                 if gap < threshold:
                     current_issue += 1
-            
-            mfma_free_at = current_issue + 1 + finish_cycles  # 1 to issue + finish_cycles to complete
+
+            mfma_free_at = current_issue + 1 + instruction.__mfma_finish_cycles__  # 1 to issue + finish_cycles to complete
 
             last_mfma_issue = current_issue
-            last_mfma_type = mfma_type
-        
+            last_mfma_class = current_mfma_class
+
         issue_times.append(current_issue)
         current_issue = current_issue + instruction.min_issue_quad_cycles()
-    
+
     return issue_times
 
 def estimate_quad_cycles_precomputed(i_start: int, i_end: int, issue_times: list[int]) -> int:
@@ -1622,7 +1631,7 @@ def estimate_quad_cycles(timeline: Timeline, kernel: 'Solution') -> int:
     index_for_inst_id = {id(inst): i for i, inst in enumerate(timeline.combined_timeline)}
 
     # Precompute issue times
-    issue_times = precompute_issue_times(timeline.combined_timeline, kernel.get("UseMFMAF32XEmulation", False))
+    issue_times = precompute_issue_times(timeline.combined_timeline)
         
     # Estimate number of quad-cycles between being issued and result being used
     for i_instruction, instruction in enumerate(timeline.combined_timeline):
