@@ -367,42 +367,6 @@ typedef enum
     /** @} */
 
     /**
-     * @name Batchnorm Inference Operation Attributes (1600-1699)
-     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR
-     * @{
-     */
-
-    /** @brief Input tensor (X) for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X = 1600,
-
-    /** @brief Mean tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN = 1601,
-
-    /** @brief Inverse variance tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE = 1602,
-
-    /** @brief Scale tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE = 1603,
-
-    /** @brief Bias tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS = 1604,
-
-    /** @brief Output tensor (Y) for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y = 1605,
-
-    /** @} */
-
-    /**
-     * @name Shared Batchnorm Inference Attributes (1700-1799)
-     * @{
-     */
-
-    /** @brief Compute data type for batchnorm inference */
-    HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE = 1700,
-
-    /** @} */
-
-    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{

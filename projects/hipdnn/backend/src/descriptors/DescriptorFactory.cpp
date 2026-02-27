@@ -3,7 +3,6 @@
 
 #include "DescriptorFactory.hpp"
 #include "BackendEnumStringUtils.hpp"
-#include "BatchnormInferenceOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "EngineConfigDescriptor.hpp"
 #include "EngineDescriptor.hpp"
@@ -53,9 +52,6 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionFwdOperationDescriptor>();
-        break;
-    case HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR:
-        privateDesc = std::make_shared<BatchnormInferenceOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

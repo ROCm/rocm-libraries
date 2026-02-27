@@ -151,12 +151,4 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
 
-    /**
-     * @brief Batchnorm inference operation descriptor
-     *
-     * Represents a batchnorm inference operation with input (X),
-     * mean, inverse variance, scale, bias, and output (Y) tensors.
-     */
-    HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR,
-
 } hipdnnBackendDescriptorType_t;
