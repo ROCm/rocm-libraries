@@ -698,6 +698,37 @@ class GroupedConvRegistry:
             ))
         return reg
 
+    def build(
+        self, verbose: bool = False, max_workers: Optional[int] = None,
+    ) -> Dict[Tuple[str, int], "GpuGroupedConvRunner"]:
+        """Parallel JIT compile all kernels in this registry.
+
+        Args:
+            verbose:     Print progress during build.
+            max_workers: Max parallel codegen/compile processes (default: cpu_count capped at 8).
+
+        Returns a dict mapping (variant, ndim_spatial) to a ready-to-use
+        GpuGroupedConvRunner.
+        """
+        if not self._kernels:
+            return {}
+
+        libs = setup_multiple_grouped_conv_dispatchers(
+            self._kernels, verbose=verbose, max_workers=max_workers,
+        )
+
+        runners: Dict[Tuple[str, int], GpuGroupedConvRunner] = {}
+        for cfg, lib in zip(self._kernels, libs):
+            if lib is None:
+                continue
+            key = (cfg.variant, cfg.ndim_spatial)
+            if key in runners:
+                continue
+            runner = GpuGroupedConvRunner(lib_path=str(lib.path))
+            if runner.is_available():
+                runners[key] = runner
+        return runners
+
     def print_registry(self, indent: str = "  "):
         print(f"{indent}Registry '{self.name}': {len(self)} kernels")
         for i, k in enumerate(self._kernels):
@@ -1419,6 +1450,7 @@ def format_grouped_conv_summary(config) -> str:
 def setup_multiple_grouped_conv_dispatchers(
     configs: List[GroupedConvKernelConfig],
     verbose: bool = True,
+    max_workers: Optional[int] = None,
 ) -> List[Optional[GroupedConvDispatcherLib]]:
     """
     Setup multiple grouped-conv dispatchers in parallel.
@@ -1510,7 +1542,7 @@ def setup_multiple_grouped_conv_dispatchers(
             unique_configs.append(cfg)
         input_to_unique.append(unique_index_by_key[key])
 
-    runner = GroupedConvCodegenRunner()
+    runner = GroupedConvCodegenRunner(max_workers=max_workers)
     unique_lib_paths = runner.generate_and_compile_parallel(unique_configs, verbose=verbose)
 
     libs: List[Optional[GroupedConvDispatcherLib]] = []

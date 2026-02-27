@@ -23,8 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python"))
 from grouped_conv_utils import (
     GroupedConvKernelConfig,
     GroupedConvProblem,
-    GpuGroupedConvRunner,
-    setup_multiple_grouped_conv_dispatchers,
+    GroupedConvRegistry,
     validate_grouped_conv_config,
     detect_gpu_arch,
 )
@@ -109,6 +108,7 @@ def main():
     parser = argparse.ArgumentParser(description="All grouped-conv directions (2D/3D) with verification")
     parser.add_argument("--arch", default=detect_gpu_arch())
     parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
+    parser.add_argument("--workers", type=int, default=0, help="Max parallel JIT workers (0 = auto)")
     args = parser.parse_args()
 
     arch = args.arch
@@ -134,32 +134,20 @@ def main():
         ("bwd_weight", 3),
     ]
 
-    runner_by_key = {}
-    jit_build_s = 0.0
-    print("\n--- Python JIT Build ---")
-    configs = [
-        GroupedConvKernelConfig(
-            variant=variant,
-            ndim_spatial=ndim,
-            arch=arch,
-            dtype=args.dtype,
-        )
-        for variant, ndim in key_order
-    ]
+    print("\n--- Python JIT Build (via registry.build()) ---")
+    reg = GroupedConvRegistry("all_directions")
+    for variant, ndim in key_order:
+        reg.add(GroupedConvKernelConfig(variant=variant, ndim_spatial=ndim,
+                                         arch=arch, dtype=args.dtype))
+
+    workers = args.workers if args.workers > 0 else None
     t0 = time.perf_counter()
-    jit_libs = setup_multiple_grouped_conv_dispatchers(configs, verbose=False)
+    runner_by_key = reg.build(verbose=False, max_workers=workers)
     jit_build_s = time.perf_counter() - t0
-    for i, key in enumerate(key_order):
-        lib = jit_libs[i]
-        if lib is None:
-            print(f"  JIT {key[0]} {key[1]}D: FAILED")
-            continue
-        custom_runner = GpuGroupedConvRunner(lib_path=str(lib.path))
-        if custom_runner.is_available():
-            runner_by_key[key] = custom_runner
-            print(f"  JIT {key[0]} {key[1]}D: {lib.path}")
-        else:
-            print(f"  JIT {key[0]} {key[1]}D: load failed")
+
+    for key in key_order:
+        tag = "OK" if key in runner_by_key else "FAILED"
+        print(f"  JIT {key[0]:12s} {key[1]}D: {tag}")
     print(f"  JIT build time: {jit_build_s:.3f} s")
 
     missing = [key for key in key_order if key not in runner_by_key]

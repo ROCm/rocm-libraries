@@ -2247,6 +2247,24 @@ class Registry:
         """Bind to a loaded dispatcher library."""
         self._lib = lib
 
+    def build(
+        self, verbose: bool = False, max_workers: Optional[int] = None,
+    ) -> List["GemmSetupResult"]:
+        """Parallel JIT compile all kernels in this registry.
+
+        Args:
+            verbose:     Print progress during build.
+            max_workers: Max parallel codegen/compile processes (default: cpu_count capped at 8).
+
+        Returns a GemmSetupResult per registered kernel (same order as get_kernels()).
+        """
+        if not self._kernels:
+            return []
+        return setup_multiple_gemm_dispatchers(
+            self._kernels, registry_name=self._name, verbose=verbose,
+            max_workers=max_workers,
+        )
+
     def __repr__(self) -> str:
         return f"Registry(name='{self._name}', kernels={self.kernel_count})"
 
@@ -2527,6 +2545,7 @@ def setup_multiple_gemm_dispatchers(
     configs: List[KernelConfig],
     registry_name: str = "gemm_registry",
     verbose: bool = True,
+    max_workers: Optional[int] = None,
 ) -> List[GemmSetupResult]:
     """
     Setup multiple GEMM dispatchers in parallel.
@@ -2538,11 +2557,14 @@ def setup_multiple_gemm_dispatchers(
       4. Load + wire up each .so into a GemmSetupResult
 
     Each config gets its own .so, so different tile sizes can coexist.
+
+    Args:
+        max_workers: Max parallel processes for codegen/compile (default: cpu_count capped at 8).
     """
     import sys
 
     results = [GemmSetupResult(success=False, config=c) for c in configs]
-    max_workers = min(multiprocessing.cpu_count(), 8)
+    max_workers = max_workers or min(multiprocessing.cpu_count(), 8)
 
     # -- Step 1: Validate & correct ---------------------------------------
     valid_configs = []

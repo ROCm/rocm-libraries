@@ -7,8 +7,8 @@
 Example 01: Basic GEMM with Multiple Kernels
 
 Demonstrates:
-1. Declaring multiple kernel configurations
-2. Parallel JIT compilation of all kernels
+1. Building a Registry with multiple kernel configurations
+2. Parallel JIT compilation via registry.build()
 3. Running each kernel and validating output against NumPy reference
 4. Comparing performance across kernels
 
@@ -17,6 +17,7 @@ Usage:
     python3 01_basic_gemm.py --dtype bf16
     python3 01_basic_gemm.py --size 2048
     python3 01_basic_gemm.py --num-kernels 4
+    python3 01_basic_gemm.py --workers 4
 """
 
 import sys
@@ -31,7 +32,7 @@ import numpy as np
 
 from ctypes_utils import (
     KernelConfig,
-    setup_multiple_gemm_dispatchers,
+    Registry,
     detect_gpu_arch,
 )
 
@@ -94,6 +95,8 @@ def main():
     parser.add_argument("--arch", default=detect_gpu_arch())
     parser.add_argument("--size", type=int, default=512, help="Problem size MxNxK")
     parser.add_argument("--num-kernels", type=int, default=0, help="0 = all")
+    parser.add_argument("--workers", type=int, default=0,
+                        help="Max parallel JIT workers (0 = auto)")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -102,19 +105,23 @@ def main():
 
     specs = KERNEL_SPECS[:args.num_kernels] if args.num_kernels > 0 else KERNEL_SPECS
 
-    # Step 1: Print kernel table
+    # Step 1: Build registry
     print(f"\n  {len(specs)} kernel configurations, dtype={args.dtype}, arch={args.arch}")
     print(f"\n  {'#':<3} {'Name':<22} {'Tile':<14} {'Pipeline':<10} {'Scheduler':<12}")
     print("  " + "-" * 64)
     for i, s in enumerate(specs, 1):
         print(f"  {i:<3} {s.name:<22} {s.tile_m}x{s.tile_n}x{s.tile_k:<6} {s.pipeline:<10} {s.scheduler:<12}")
 
-    # Step 2: Parallel JIT build of all kernels
-    print(f"\n--- Parallel JIT Build ({len(specs)} kernels) ---")
-    configs = [spec_to_config(s, args.dtype, args.arch) for s in specs]
+    reg = Registry(name="basic_gemm")
+    for s in specs:
+        reg.register_kernel(spec_to_config(s, args.dtype, args.arch))
+
+    # Step 2: Parallel JIT build via registry.build()
+    workers = args.workers if args.workers > 0 else None
+    print(f"\n--- Parallel JIT Build ({len(specs)} kernels{f', workers={workers}' if workers else ''}) ---")
 
     t0 = time.perf_counter()
-    setups = setup_multiple_gemm_dispatchers(configs, verbose=False)
+    setups = reg.build(verbose=False, max_workers=workers)
     jit_build_s = time.perf_counter() - t0
 
     built = sum(1 for s in setups if s.success)
