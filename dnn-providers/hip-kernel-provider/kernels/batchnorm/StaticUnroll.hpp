@@ -4,7 +4,6 @@
 #pragma once
 
 #include <hip/hip_fp16.h>
-#include <hip/hip_runtime.h>
 
 namespace hip_kernel_plugin
 {
