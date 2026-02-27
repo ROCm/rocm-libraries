@@ -18,6 +18,10 @@ TEST(TestTypes, ToSdkTypeDataTypes)
     EXPECT_EQ(toSdkType(DataType::INT8), hipdnn_data_sdk::data_objects::DataType::INT8);
     EXPECT_EQ(toSdkType(DataType::FP8_E4M3), hipdnn_data_sdk::data_objects::DataType::FP8_E4M3);
     EXPECT_EQ(toSdkType(DataType::FP8_E5M2), hipdnn_data_sdk::data_objects::DataType::FP8_E5M2);
+    EXPECT_EQ(toSdkType(DataType::MXFP8), hipdnn_data_sdk::data_objects::DataType::MXFP8);
+    EXPECT_EQ(toSdkType(DataType::MXBFP8), hipdnn_data_sdk::data_objects::DataType::MXBFP8);
+    EXPECT_EQ(toSdkType(DataType::MXFP6), hipdnn_data_sdk::data_objects::DataType::MXFP6);
+    EXPECT_EQ(toSdkType(DataType::MXFP4), hipdnn_data_sdk::data_objects::DataType::MXFP4);
     EXPECT_EQ(toSdkType(DataType::NOT_SET), hipdnn_data_sdk::data_objects::DataType::UNSET);
 }
 
@@ -34,6 +38,10 @@ TEST(TestTypes, FromSdkTypeDataTypes)
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::INT8), DataType::INT8);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E4M3), DataType::FP8_E4M3);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::FP8_E5M2), DataType::FP8_E5M2);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::MXFP8), DataType::MXFP8);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::MXBFP8), DataType::MXBFP8);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::MXFP6), DataType::MXFP6);
+    EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::MXFP4), DataType::MXFP4);
     EXPECT_EQ(fromSdkType(hipdnn_data_sdk::data_objects::DataType::UNSET), DataType::NOT_SET);
 }
 
@@ -97,6 +105,10 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::INT8), "int8");
     EXPECT_STREQ(to_string(DataType::FP8_E4M3), "fp8_e4m3");
     EXPECT_STREQ(to_string(DataType::FP8_E5M2), "fp8_e5m2");
+    EXPECT_STREQ(to_string(DataType::MXFP8), "mxfp8");
+    EXPECT_STREQ(to_string(DataType::MXBFP8), "mxbfp8");
+    EXPECT_STREQ(to_string(DataType::MXFP6), "mxfp6");
+    EXPECT_STREQ(to_string(DataType::MXFP4), "mxfp4");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
 }
 
@@ -140,6 +152,22 @@ TEST(TestTypes, DataTypeStreamOperator)
 
     oss << DataType::FP8_E5M2;
     EXPECT_EQ(oss.str(), "fp8_e5m2");
+    oss.str("");
+
+    oss << DataType::MXFP8;
+    EXPECT_EQ(oss.str(), "mxfp8");
+    oss.str("");
+
+    oss << DataType::MXBFP8;
+    EXPECT_EQ(oss.str(), "mxbfp8");
+    oss.str("");
+
+    oss << DataType::MXFP6;
+    EXPECT_EQ(oss.str(), "mxfp6");
+    oss.str("");
+
+    oss << DataType::MXFP4;
+    EXPECT_EQ(oss.str(), "mxfp4");
     oss.str("");
 
     oss << DataType::NOT_SET;

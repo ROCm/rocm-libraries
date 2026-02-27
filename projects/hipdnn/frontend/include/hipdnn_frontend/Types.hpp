@@ -128,6 +128,10 @@ enum class DataType
     INT8 = 7, ///< 8-bit signed integer
     FP8_E4M3 = 8, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
     FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
+    MXFP8 = 10, ///< Microscaling FP8 (block-scaled E4M3/E5M2)
+    MXBFP8 = 11, ///< Microscaling BFP8 (block-scaled 8-bit)
+    MXFP6 = 12, ///< Microscaling FP6 (block-scaled 6-bit)
+    MXFP4 = 13, ///< Microscaling FP4 (block-scaled E2M1)
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -277,6 +281,14 @@ inline hipdnn_data_sdk::data_objects::DataType toSdkType(const DataType& type)
         return hipdnn_data_sdk::data_objects::DataType::FP8_E4M3;
     case DataType::FP8_E5M2:
         return hipdnn_data_sdk::data_objects::DataType::FP8_E5M2;
+    case DataType::MXFP8:
+        return hipdnn_data_sdk::data_objects::DataType::MXFP8;
+    case DataType::MXBFP8:
+        return hipdnn_data_sdk::data_objects::DataType::MXBFP8;
+    case DataType::MXFP6:
+        return hipdnn_data_sdk::data_objects::DataType::MXFP6;
+    case DataType::MXFP4:
+        return hipdnn_data_sdk::data_objects::DataType::MXFP4;
     default:
         return hipdnn_data_sdk::data_objects::DataType::UNSET;
     }
@@ -304,6 +316,14 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP8_E4M3;
     case hipdnn_data_sdk::data_objects::DataType::FP8_E5M2:
         return hipdnn_frontend::DataType::FP8_E5M2;
+    case hipdnn_data_sdk::data_objects::DataType::MXFP8:
+        return hipdnn_frontend::DataType::MXFP8;
+    case hipdnn_data_sdk::data_objects::DataType::MXBFP8:
+        return hipdnn_frontend::DataType::MXBFP8;
+    case hipdnn_data_sdk::data_objects::DataType::MXFP6:
+        return hipdnn_frontend::DataType::MXFP6;
+    case hipdnn_data_sdk::data_objects::DataType::MXFP4:
+        return hipdnn_frontend::DataType::MXFP4;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
     }
@@ -550,6 +570,14 @@ inline const char* to_string(const DataType& type)
         return "fp8_e4m3";
     case DataType::FP8_E5M2:
         return "fp8_e5m2";
+    case DataType::MXFP8:
+        return "mxfp8";
+    case DataType::MXBFP8:
+        return "mxbfp8";
+    case DataType::MXFP6:
+        return "mxfp6";
+    case DataType::MXFP4:
+        return "mxfp4";
     default:
         return "unknown";
     }

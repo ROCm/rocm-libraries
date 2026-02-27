@@ -14,4 +14,8 @@ enum DataType : byte {
     INT8 = 7,
     FP8_E4M3 = 8,
     FP8_E5M2 = 9,
+    MXFP8 = 10,
+    MXBFP8 = 11,
+    MXFP6 = 12,
+    MXFP4 = 13,
 }
