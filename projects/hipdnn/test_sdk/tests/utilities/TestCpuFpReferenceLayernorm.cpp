@@ -464,7 +464,8 @@ TEST(TestCpuFpReferenceLayernormFp64, FpropLargeValueNumericalStability)
     scale.fillWithValue(1.0);
     bias.fillWithValue(0.0);
 
-    CpuFpReferenceLayernorm::fprop(x, &scale, &bias, y, 1e-5, 1, &mean, &rstd);
+    CpuFpReferenceLayernorm::fprop<double, double, double, double, double>(
+        x, &scale, &bias, y, 1e-5, 1, &mean, &rstd);
 
     auto tolerance = 1e-6;
 
