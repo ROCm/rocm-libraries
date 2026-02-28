@@ -593,10 +593,10 @@ hipdnnStatus_t setGlobalLogLevel(hipdnnSeverity_t level)
     return HIPDNN_STATUS_SUCCESS;
 }
 
-hipdnnStatus_t getGlobalLogLevel(hipdnnSeverity_t* level)
+hipdnnStatus_t getGlobalLogLevel(hipdnnSeverity_t& level)
 {
     // Get global log level from data_sdk cache (backend's copy)
-    *level = hipdnn_data_sdk::logging::getLogLevel();
+    level = hipdnn_data_sdk::logging::getLogLevel();
 
     return HIPDNN_STATUS_SUCCESS;
 }

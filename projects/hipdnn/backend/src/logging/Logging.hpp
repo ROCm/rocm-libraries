@@ -69,7 +69,7 @@ hipdnnStatus_t setUserLogCallback(hipdnnUserLogCallback_t callback,
 
 hipdnnStatus_t setGlobalLogLevel(hipdnnSeverity_t level);
 
-hipdnnStatus_t getGlobalLogLevel(hipdnnSeverity_t* level);
+hipdnnStatus_t getGlobalLogLevel(hipdnnSeverity_t& level);
 
 namespace detail
 {

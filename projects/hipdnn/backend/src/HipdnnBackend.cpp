@@ -398,7 +398,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSe
         return HIPDNN_STATUS_BAD_PARAM;
     }
 
-    return hipdnn_backend::logging::getGlobalLogLevel(level);
+    return hipdnn_backend::logging::getGlobalLogLevel(*level);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t handle,
