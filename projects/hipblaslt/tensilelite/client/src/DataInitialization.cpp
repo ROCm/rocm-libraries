@@ -887,6 +887,7 @@ namespace TensileLite
             , m_keepPristineCopyOnGPU(args["pristine-on-gpu"].as<bool>())
             , m_workspaceSize(problemFactory.workspaceSize())
             , m_pruneMode(args["prune-mode"].as<PruneSparseMode>())
+            , m_enableMXPreSwizzle(args["enable-mx-preswizzle"].as<bool>())
 
         {
             m_rotatingBuffer
@@ -1774,7 +1775,7 @@ namespace TensileLite
             // the scale tensor into the GPU kernel's expected memory layout
             std::vector<size_t> preSwizzleA, preTileA, preSwizzleB, preTileB;
 
-            if(m_currentSolution != nullptr
+            if(m_enableMXPreSwizzle && m_currentSolution != nullptr
                && !m_currentSolution->problemType.useScaleAB.empty())
             {
                 auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;

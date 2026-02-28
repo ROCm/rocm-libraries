@@ -235,6 +235,7 @@ namespace TensileLite
                 ("init-scaleAlphaVec",       po::value<InitMode>()->default_value(InitMode::One), "Initialization for scaleAlphaVec")
                 ("init-mxScaleA",            po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for A")
                 ("init-mxScaleB",            po::value<InitMode>()->default_value(InitMode::One), "Initialization for MX Scale for B")
+                ("enable-mx-preswizzle",     po::value<bool>()->default_value(false), "Enable MX FP4 scale pre-swizzle for GPU kernel layout optimization")
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("offset-a",                 po::value<size_t>()->default_value(0), "buffer a start offset")

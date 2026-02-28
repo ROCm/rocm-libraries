@@ -1082,6 +1082,9 @@ namespace TensileLite
 
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
+
+            /// Enable MX FP4 scale pre-swizzle (default false, --enable-mx-preswizzle flag)
+            bool m_enableMXPreSwizzle = false;
         };
 
         template <>
