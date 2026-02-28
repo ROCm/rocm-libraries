@@ -9,21 +9,32 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
+#include "fake_backend/BackendTestMatchers.hpp"
 #include "fake_backend/MockHipdnnBackend.hpp"
+
+#include <algorithm>
+#include <cstring>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_frontend::test;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 using namespace ::testing;
 
 namespace hipdnn_frontend
 {
 
-// Utility class to access private members of Graph for testing purposes
+// Utility class to access private/protected members of Graph for testing purposes
 class GraphTestUtils : public Graph
 {
 public:
     GraphTestUtils() = default;
+
+    using Graph::build_operation_graph_via_descriptors;
 
     std::vector<std::shared_ptr<INode>>& getPrivateGraphSubnodes()
     {
@@ -1994,6 +2005,110 @@ TEST_F(TestGraph, WillCorrectlyBuildOperationGraphDescriptor)
 
     auto result = graph.build_operation_graph(_handle);
     EXPECT_TRUE(result.is_good());
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenNodeFails)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.set_name("FailTest").set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_TENSOR_X_UID)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_X_DIMS))
+        .set_stride(toVec(K_TENSOR_X_STRIDES));
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(K_TENSOR_W_UID)
+        .set_name("W")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_W_DIMS))
+        .set_stride(toVec(K_TENSOR_W_STRIDES));
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_x(x);
+    convAttrs.set_w(w);
+    convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+
+    graph.conv_fprop(x, w, convAttrs);
+
+    // All descriptor creation fails
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenGraphCreateFails)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.set_name("GraphCreateFail")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_TENSOR_X_UID)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_X_DIMS))
+        .set_stride(toVec(K_TENSOR_X_STRIDES));
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(K_TENSOR_W_UID)
+        .set_name("W")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_W_DIMS))
+        .set_stride(toVec(K_TENSOR_W_STRIDES));
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_x(x);
+    convAttrs.set_w(w);
+    convAttrs.set_compute_data_type(DataType::FLOAT);
+    convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+
+    graph.conv_fprop(x, w, convAttrs);
+
+    // Validate graph to propagate graph-level attributes (e.g. io_data_type)
+    // to node/tensor attributes, matching the real build() flow
+    ASSERT_TRUE(graph.validate().is_good());
+
+    // Tensor/operation descriptors succeed, but graph descriptor creation fails
+    EXPECT_CALL(*_mockBackend,
+                backendCreateDescriptor(Ne(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR), _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsOnEmptyGraph)
+{
+    GraphTestUtils graph;
+    graph.set_name("EmptyGraph").set_compute_data_type(DataType::FLOAT);
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST_F(TestGraph, CreatingExecutionPlansFailsWithNoGraph)
