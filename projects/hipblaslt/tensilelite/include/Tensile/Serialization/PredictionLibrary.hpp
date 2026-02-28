@@ -105,7 +105,7 @@ namespace TensileLite
                                        solution->sizeMapping.macroTile.y,
                                        solution->sizeMapping.depthU},
                                 .mi = origami_mi,
-                                .custom_mainloop_scheduling = solution->sizeMapping.customMainLoopScheduling,
+                                .custom_mainloop_scheduling = (solution->sizeMapping.customMainLoopScheduling > 0) ? true : false,
                                 .occupancy
                                 = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
                                 .workgroup_mapping          = solution->sizeMapping.workGroupMapping,

@@ -9,7 +9,7 @@ if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
 endif()
 
 add_executable(
-    miopen_plugin_integration_test
+    miopen_plugin_integration_tests
     main.cpp
     IntegrationGpuBatchnormBackward.cpp
     IntegrationGpuBatchnormBackwardActivation.cpp
@@ -25,25 +25,25 @@ add_executable(
     IntegrationGpuConvBackwardWeights.cpp
 )
 
-target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(miopen_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 # To use the build tree plugin, we use the path relative to the test binary instead of the installed
 # libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
 target_compile_definitions(
-    miopen_plugin_integration_test
+    miopen_plugin_integration_tests
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
+        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_plugin"
 )
 
 target_link_libraries(
-    miopen_plugin_integration_test PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
+    miopen_plugin_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk hipdnn_plugin_sdk Threads::Threads
 )
 
-# Ensure that the miopen_legacy_plugin is built before the miopen_plugin_integration_test, as the
-# integration tests depend on the MIOpen Provider Plugin
-add_dependencies(miopen_plugin_integration_test miopen_legacy_plugin)
+# Ensure that the miopen_plugin is built before the integration tests
+add_dependencies(miopen_plugin_integration_tests miopen_plugin)
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin_integration_test)
+    clang_tidy_check(miopen_plugin_integration_tests)
 endif()
-add_integration_test_target(miopen_plugin_integration_test ${CMAKE_CURRENT_BINARY_DIR})
+
+add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})

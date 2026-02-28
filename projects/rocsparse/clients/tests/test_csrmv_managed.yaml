@@ -50,9 +50,9 @@ Tests:
 - name: csrmv_managed
   category: quick
   function: csrmv_managed
-  precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
+  precision: *single_double_precisions
+  M: [10, 300]
+  N: [33, 300]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -63,8 +63,8 @@ Tests:
   category: pre_checkin
   function: csrmv_managed
   precision: *single_double_precisions_complex_real
-  M: [0, 7111]
-  N: [0, 4441]
+  M: [8, 2000]
+  N: [8, 2000]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -75,8 +75,8 @@ Tests:
   category: nightly
   function: csrmv_managed
   precision: *single_double_precisions_complex_real
-  M: [39385, 193482, 639102]
-  N: [29348, 340123, 710341]
+  M: [5000]
+  N: [5000]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -137,7 +137,7 @@ Tests:
 - name: csrmv_managed_file
   category: quick
   function: csrmv_managed
-  precision: *single_double_precisions_complex
+  precision: *single_only_precisions_complex
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick

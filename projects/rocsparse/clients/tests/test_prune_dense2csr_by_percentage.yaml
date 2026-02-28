@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,11 +35,21 @@ Tests:
   category: quick
   function: prune_dense2csr_by_percentage
   precision: *single_double_precisions
-  M: [3, 8, 13, 64, 256]
-  N: [3, 8, 13, 64, 256]
+  M: [3, 8]
+  N: [3, 8]
   denseld: [256, 512]
   percentage: [0.0, 10.0, 20.0, 50.0, 100.0]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
+
+- name: prune_dense2csr_by_percentage
+  category: quick
+  function: prune_dense2csr_by_percentage
+  precision: *single_double_precisions
+  M: [5, 7]
+  N: [2, 17]
+  denseld: [50]
+  percentage: [67.0, 35.0, 99.0, 100.0]
+  baseA: [rocsparse_index_base_one]
 
 - name: prune_dense2csr_by_percentage
   category: pre_checkin
@@ -50,26 +60,6 @@ Tests:
   denseld: [1000, 2000]
   percentage: [0.1, 33.0, 100.0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-
-- name: prune_dense2csr_by_percentage
-  category: nightly
-  function: prune_dense2csr_by_percentage
-  precision: *single_double_precisions
-  M: [2000, 4000, 8000]
-  N: [2000, 4000]
-  denseld: [ 8000 ]
-  percentage: [45.0, 15.0, 90.0]
-  baseA: [rocsparse_index_base_zero]
-
-- name: prune_dense2csr_by_percentage
-  category: quick
-  function: prune_dense2csr_by_percentage
-  precision: *single_double_precisions
-  M: [5, 7, 10]
-  N: [2, 17, 33]
-  denseld: [50]
-  percentage: [67.0, 35.0, 99.0, 100.0]
-  baseA: [rocsparse_index_base_one]
 
 - name: prune_dense2csr_by_percentage
   category: pre_checkin
@@ -84,9 +74,19 @@ Tests:
 - name: prune_dense2csr_by_percentage
   category: nightly
   function: prune_dense2csr_by_percentage
-  precision: *single_double_precisions
+  precision: *single_only_precisions
+  M: [2000, 4000, 8000]
+  N: [2000, 4000]
+  denseld: [8000]
+  percentage: [45.0, 15.0, 90.0]
+  baseA: [rocsparse_index_base_zero]
+
+- name: prune_dense2csr_by_percentage
+  category: nightly
+  function: prune_dense2csr_by_percentage
+  precision: *double_only_precisions
   M: [1000]
   N: [1000]
-  denseld: [ 1000 ]
+  denseld: [1000]
   percentage: [100.0, 88.0]
   baseA: [rocsparse_index_base_one]

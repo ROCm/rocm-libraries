@@ -3,7 +3,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2024-2026 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -163,7 +163,7 @@ namespace FastDivisionTest
         auto expr_fast = fastDivision(expr, context.get());
 
         {
-            auto [mul, shift, sign] = getMagicMultipleShiftAndSign(b_signed, context.get());
+            auto [mul, shift, sign, _] = getMagicDivisionParams(b_signed, context.get());
 
             auto mulPlusA = a + multiplyHigh(a, mul);
 
@@ -183,13 +183,15 @@ namespace FastDivisionTest
         expr_fast = fastDivision(expr, context.get());
 
         {
-            auto [mul, shift, sign] = getMagicMultipleShiftAndSign(b_unsigned, context.get());
+            auto [mul, shift, sign, shiftMSB] = getMagicDivisionParams(b_unsigned, context.get());
 
             auto mulHigh = multiplyHigh(a_unsigned, mul);
 
-            CHECK_THAT(
-                expr_fast,
-                EquivalentTo((((a_unsigned - mulHigh) >> Ex::literal(1u)) + mulHigh) >> shift));
+            auto t = ((a_unsigned - mulHigh >> Ex::literal(1u)) + mulHigh) >> shift;
+
+            auto result = Ex::conditional(shiftMSB == Ex::literal(0u), t, a_unsigned);
+
+            CHECK_THAT(expr_fast, EquivalentTo(result));
         }
     }
 

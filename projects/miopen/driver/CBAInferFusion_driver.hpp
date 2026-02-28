@@ -249,12 +249,11 @@ private:
     std::vector<Tref> conv_res_host;
     std::vector<Tref> bn_res_host;
     std::vector<Tref> out_host;
-    std::vector<Tgpu> scale;
-    std::vector<Tgpu> bias;
+    std::vector<float> scale;
+    std::vector<float> bias;
     std::vector<Tref> bias_host;
-    std::vector<Tgpu> runningMean;
-    std::vector<Tgpu> runningVariance;
-
+    std::vector<float> runningMean;
+    std::vector<float> runningVariance;
     int createSaveBuffers();
     int createRunningBuffers();
 
@@ -720,12 +719,12 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
         size_t sb_sz = GetTensorSize(biasScaleTensor);
 
         // GPU allocation
-        runningMean_dev     = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
-        runningVariance_dev = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
+        runningMean_dev     = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
+        runningVariance_dev = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
 
         // GPU host allocation
-        runningMean     = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
-        runningVariance = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
+        runningMean     = std::vector<float>(sb_sz, 0.0f);
+        runningVariance = std::vector<float>(sb_sz, 0.0f);
 
         // Populate
         for(int i = 0; i < sb_sz; i++)
@@ -734,8 +733,8 @@ int CBAInferFusionDriver<Tgpu, Tref>::createRunningBuffers()
             runningMean[i]     = 0.;
             runningVariance[i] = 1.;
 #else
-            runningMean[i]     = prng::gen_canonical<Tgpu>();
-            runningVariance[i] = prng::gen_canonical<Tgpu>();
+            runningMean[i]     = prng::gen_canonical<float>();
+            runningVariance[i] = prng::gen_canonical<float>();
 #endif
         }
 
@@ -810,23 +809,23 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     if(useBatchNorm)
     {
-        scale       = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
-        bias        = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
+        scale       = std::vector<float>(sb_sz, 0.0f);
+        bias        = std::vector<float>(sb_sz, 0.0f);
         bn_res      = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
         bn_res_host = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
         bn_res_dev = std::make_unique<GPUMem>(ctx, out_sz, sizeof(Tgpu));
-        scale_dev  = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
-        bias_dev   = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
+        scale_dev  = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
+        bias_dev   = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(float));
         // Using random beta and gamma
         for(int i = 0; i < sb_sz; i++)
         {
 #if(CBA_DEBUG_VALUES == 1)
-            scale[i] = 1.; // prng::gen_canonical<Tgpu>(); // 1.0;
+            scale[i] = 1.; // prng::gen_canonical<float>(); // 1.0;
             bias[i]  = 10.;
 #else
-            scale[i]           = prng::gen_canonical<Tgpu>();
-            bias[i]            = prng::gen_canonical<Tgpu>();
+            scale[i]           = prng::gen_canonical<float>();
+            bias[i]            = prng::gen_canonical<float>();
 #endif
         }
         status |= scale_dev->ToGPU(q, scale.data());

@@ -264,6 +264,8 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "schedulerCost", params.schedulerCost);
             iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
 
+            iot::mapRequired(io, "tailLoops", params.tailLoops);
+
             iot::mapRequired(io, "types", params.types);
 
             iot::mapRequired(io, "loadScale_A", params.loadPathAScale);

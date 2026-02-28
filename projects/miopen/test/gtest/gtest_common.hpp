@@ -189,7 +189,8 @@ struct disabled
 struct DevDescription
 {
     std::string_view name;
-    unsigned cu_cnt; // CU for gfx9, WGP for gfx10, 11, ...
+    unsigned cu_cnt;         // CU for gfx9, WGP for gfx10, 11, ...
+    unsigned wavefront_size; // Default wavefront size
 
     friend std::ostream& operator<<(std::ostream& os, const DevDescription& dd);
 };
@@ -218,7 +219,9 @@ public:
     // Add additional methods here if needed
     const miopen::TargetProperties& GetTargetProperties() const override;
     std::size_t GetMaxComputeUnits() const override;
+    std::size_t GetWavefrontWidth() const override;
     std::size_t GetMaxMemoryAllocSize() const override;
+
     bool CooperativeLaunchSupported() const override;
 
 private:

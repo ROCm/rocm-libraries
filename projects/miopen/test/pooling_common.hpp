@@ -597,8 +597,8 @@ struct pooling_driver : test_driver
     void run_impl()
     {
         std::vector<Index> indices{};
-        auto input = tensor<T>{in_shape}.generate(
-            tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
+        auto input = tensor<T>{in_shape}.generate(tensor_elem_gen_integer{
+            (miopen_type<T>{} == miopenHalf || miopen_type<T>{} == miopenBFloat16) ? 5 : 17});
         if(in_layout != "NCHW" && in_layout != "NCDHW")
         {
             const std::vector<std::size_t> dim_lens = input.desc.GetLengths();
