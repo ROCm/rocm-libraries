@@ -5,9 +5,17 @@
  * @file Types.hpp
  * @brief Core type definitions and enumerations for the hipDNN Frontend API
  *
- * This file contains all the fundamental types used throughout the hipDNN Frontend,
- * including data types, convolution modes, pointwise operation modes, and utility
- * functions for type conversion between frontend and SDK types.
+ * Defines the fundamental enums that configure hipDNN operations:
+ *
+ * | hipDNN enum | Concept | Purpose |
+ * |-------------|---------|---------|
+ * | DataType | Numeric precision | fp32, fp16, bf16, fp8, etc. |
+ * | PointwiseMode | Activation / element-wise op | relu, gelu, add, mul, etc. |
+ * | ConvolutionMode | Filter application method | Cross-correlation vs mathematical convolution |
+ * | NormFwdPhase | Training vs inference | Whether to save stats for backward pass |
+ *
+ * This file also contains conversion utilities between frontend types and
+ * the internal SDK/backend types.
  */
 
 #pragma once

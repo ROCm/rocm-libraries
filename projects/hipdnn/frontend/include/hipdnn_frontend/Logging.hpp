@@ -5,9 +5,14 @@
  * @file Logging.hpp
  * @brief Frontend logging initialization and convenience macros
  *
- * Provides auto-initializing logging macros (HIPDNN_FE_LOG_INFO, etc.) that
- * route messages through the Data SDK logging infrastructure with
- * "hipdnn_frontend" as the component name.
+ * hipDNN uses a callback-based logging system (similar to Python's
+ * `logging` module). The macros in this file — HIPDNN_FE_LOG_INFO,
+ * HIPDNN_FE_LOG_WARN, etc. — auto-initialize on first use and tag every
+ * message with "hipdnn_frontend" so you can filter frontend output from
+ * backend or plugin messages.
+ *
+ * Log verbosity is controlled by the `HIPDNN_LOG_LEVEL` environment
+ * variable (e.g. `HIPDNN_LOG_LEVEL=info`).
  */
 
 #pragma once

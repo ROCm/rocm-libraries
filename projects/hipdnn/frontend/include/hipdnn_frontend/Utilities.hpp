@@ -3,11 +3,16 @@
 
 /**
  * @file Utilities.hpp
- * @brief Frontend utility functions and macros
+ * @brief Helpers for creating tensor descriptors and handling backend errors
  *
- * Provides helper functions for creating TensorAttributes from Data SDK
- * tensor objects, and the HIPDNN_RETURN_ON_BACKEND_FAILURE error-handling
- * macro used throughout the frontend.
+ * In hipDNN, tensors passed to graph operations are described by
+ * TensorAttributes — lightweight metadata objects that hold shape (dims),
+ * memory layout (strides), and data type, but **not** the actual data.
+ * Think of them as tensor metadata (dtype, shape, stride) without the
+ * underlying storage — a descriptor, not the data itself.
+ *
+ * The `makeTensorAttributes()` helpers create these descriptors from
+ * shapes you provide or from existing Data SDK Tensor objects.
  */
 
 #pragma once
@@ -48,12 +53,16 @@ namespace graph
 {
 
 /**
- * @brief Create TensorAttributes from a Data SDK Tensor object
- * @tparam T Element type of the source tensor
- * @param name Name to assign to the tensor
- * @param dataType Frontend data type for the tensor
+ * @brief Create TensorAttributes by copying shape and layout from an existing Tensor
+ *
+ * Extracts dims and strides from a Data SDK Tensor object. Useful when
+ * you already have allocated test tensors and want matching descriptors.
+ *
+ * @tparam T Element type of the source tensor (e.g. float, half)
+ * @param name Human-readable name for debugging and serialization
+ * @param dataType The numeric precision (e.g. DataType::HALF)
  * @param tensor Source tensor whose dims and strides are copied
- * @return Configured TensorAttributes
+ * @return Configured TensorAttributes ready to pass to Graph operations
  */
 template <class T,
           class HostAlloc = hipdnn_data_sdk::utilities::HostAllocator<T>,
@@ -72,11 +81,15 @@ inline TensorAttributes makeTensorAttributes(
 
 /**
  * @brief Create TensorAttributes from explicit dimensions, strides, and data type
- * @param name Name to assign to the tensor
- * @param dataType Frontend data type for the tensor
- * @param dims Tensor dimensions
- * @param strides Tensor strides
- * @return Configured TensorAttributes
+ *
+ * This is the most common way to describe a tensor when you know the
+ * shape and precision up front.
+ *
+ * @param name Human-readable name for debugging and serialization
+ * @param dataType The numeric precision (e.g. DataType::FLOAT)
+ * @param dims Tensor dimensions, e.g. {N, C, H, W}
+ * @param strides Memory strides for each dimension
+ * @return Configured TensorAttributes ready to pass to Graph operations
  */
 inline TensorAttributes makeTensorAttributes(const std::string& name,
                                              DataType dataType,
@@ -88,11 +101,16 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
 }
 
 /**
- * @brief Create TensorAttributes from explicit dimensions and strides (data type from graph context)
- * @param name Name to assign to the tensor
- * @param dims Tensor dimensions
- * @param strides Tensor strides
- * @return Configured TensorAttributes (data type will be filled from graph context)
+ * @brief Create TensorAttributes without specifying a data type
+ *
+ * The data type is left unset and will be inferred from the Graph's
+ * `io_data_type` at build time. Handy when all tensors in your graph
+ * share the same precision.
+ *
+ * @param name Human-readable name for debugging and serialization
+ * @param dims Tensor dimensions, e.g. {N, C, H, W}
+ * @param strides Memory strides for each dimension
+ * @return TensorAttributes whose data type will be filled at build time
  */
 inline TensorAttributes makeTensorAttributes(const std::string& name,
                                              const std::vector<int64_t>& dims,
@@ -102,8 +120,14 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
 }
 
 /**
- * @brief Create a Data SDK ITensor from TensorAttributes
- * @param attribute The tensor attributes describing type, dims, and strides
+ * @brief Allocate a Data SDK ITensor that matches the given attributes
+ *
+ * Creates an actual tensor object (with host/device storage) from a
+ * descriptor. Primarily used in tests and utilities — in production
+ * code you typically manage your own device memory and just pass
+ * pointers via the variant pack.
+ *
+ * @param attribute The tensor descriptor (type, dims, strides)
  * @return Owning pointer to the created ITensor
  */
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>

@@ -5,8 +5,23 @@
  * @file Handle.hpp
  * @brief RAII handle management for hipDNN backend
  *
- * Provides smart-pointer wrappers and factory functions for creating and
- * managing hipDNN backend handles with automatic resource cleanup.
+ * A hipDNN handle is a GPU context that holds the state needed to run
+ * operations on a particular device.
+ * Every Graph::build() and Graph::execute() call requires a handle.
+ *
+ * This file provides RAII wrappers so the handle is automatically destroyed
+ * when it goes out of scope (no manual cleanup needed).
+ *
+ * @code{.cpp}
+ * // Minimal usage
+ * auto [handle, err] = hipdnn_frontend::createHipdnnHandle();
+ * graph.build(*handle);
+ * graph.execute(*handle, variantPack, workspace);
+ * // handle is destroyed automatically at end of scope
+ * @endcode
+ *
+ * If you need to target a specific HIP stream, pass it at creation
+ * time or call setHipdnnHandleStream().
  */
 
 #pragma once
@@ -51,21 +66,25 @@ struct HipdnnHandleDeleter
     }
 };
 
-/// @brief RAII smart pointer to a hipDNN handle with automatic cleanup
+/// @brief RAII smart pointer to a hipDNN handle; automatically calls destroy on scope exit
 using HipdnnHandlePtr = std::unique_ptr<hipdnnHandle_t, HipdnnHandleDeleter>;
 
 /**
- * @brief Create a hipDNN handle via output parameter
+ * @brief Create a hipDNN handle (output-parameter style)
+ *
+ * Initializes the backend and returns a handle that must be passed to
+ * Graph::build() and Graph::execute(). Optionally binds the handle to a
+ * HIP stream so all work is enqueued there.
+ *
  * @param handle Output smart pointer that will own the created handle
- * @param stream Optional HIP stream to associate with the handle
+ * @param stream HIP stream to bind (nullptr = default stream)
  * @return Error indicating success or failure
  *
  * @code{.cpp}
  * HipdnnHandlePtr handle;
  * auto err = createHipdnnHandle(handle);
- * @endcode
- */
-inline Error createHipdnnHandle(HipdnnHandlePtr& handle, hipStream_t stream = nullptr)
+ * if (err.is_bad()) { /* handle error */ }
+*@endcode* / inline Error createHipdnnHandle(HipdnnHandlePtr& handle, hipStream_t stream = nullptr)
 {
     auto* handlePtr = new hipdnnHandle_t{nullptr};
     auto status = detail::hipdnnBackend()->create(handlePtr);
@@ -89,15 +108,18 @@ inline Error createHipdnnHandle(HipdnnHandlePtr& handle, hipStream_t stream = nu
 }
 
 /**
- * @brief Create a hipDNN handle, returning a (handle, error) pair
- * @param stream Optional HIP stream to associate with the handle
+ * @brief Create a hipDNN handle (structured-binding style)
+ *
+ * Same as the output-parameter overload, but returns a pair so you can
+ * use C++17 structured bindings.
+ *
+ * @param stream HIP stream to bind (nullptr = default stream)
  * @return Pair of (handle, error); handle is null on failure
  *
  * @code{.cpp}
  * auto [handle, err] = createHipdnnHandle();
- * @endcode
- */
-inline std::pair<HipdnnHandlePtr, Error> createHipdnnHandle(hipStream_t stream = nullptr)
+ * if (err.is_bad()) { /* handle error */ }
+*@endcode* / inline std::pair<HipdnnHandlePtr, Error> createHipdnnHandle(hipStream_t stream = nullptr)
 {
     HipdnnHandlePtr handle;
     auto error = createHipdnnHandle(handle, stream);
@@ -105,9 +127,13 @@ inline std::pair<HipdnnHandlePtr, Error> createHipdnnHandle(hipStream_t stream =
 }
 
 /**
- * @brief Set the HIP stream on a hipDNN handle
- * @param handle The handle to configure
- * @param stream The HIP stream to associate
+ * @brief Bind a different HIP stream to an existing handle
+ *
+ * All subsequent operations using this handle will be enqueued on
+ * the given stream.
+ *
+ * @param handle The handle to reconfigure
+ * @param stream The HIP stream to bind
  * @return Error indicating success or failure
  */
 inline Error setHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t stream)
@@ -122,9 +148,9 @@ inline Error setHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t st
 }
 
 /**
- * @brief Get the HIP stream associated with a hipDNN handle
+ * @brief Query which HIP stream a handle is currently bound to
  * @param handle The handle to query
- * @param stream Output pointer to receive the associated stream
+ * @param stream Output pointer that receives the bound stream
  * @return Error indicating success or failure
  */
 inline Error getHipdnnHandleStream(const HipdnnHandlePtr& handle, hipStream_t* stream)

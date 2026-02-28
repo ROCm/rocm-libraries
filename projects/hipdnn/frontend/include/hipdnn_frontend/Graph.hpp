@@ -5,16 +5,17 @@
  * @file Graph.hpp
  * @brief Main Graph class for building and executing deep learning operations
  *
- * This file contains the Graph class, which is the primary interface for users
- * to construct computational graphs of deep learning operations and execute them
- * on AMD GPUs via the hipDNN backend.
+ * This is the primary header most users will include. It contains the Graph
+ * class — hipDNN's top-level API for describing, compiling, and running DNN
+ * operations on AMD GPUs.
  *
  * @section graph_overview Overview
  *
  * The Graph class provides a fluent API for:
- * - Creating tensors with specified dimensions and data types
- * - Adding operations (convolution, batch normalization, pointwise, matmul)
- * - Building and executing plans on GPU
+ * - Creating tensor descriptors (shape + dtype, no data yet)
+ * - Adding operations (conv, batchnorm, layernorm, rmsnorm, pointwise, matmul)
+ * - Building (compiling) an execution plan for the GPU
+ * - Executing the plan with real device pointers
  *
  * @section graph_workflow Typical Workflow
  *
@@ -110,14 +111,25 @@ namespace hipdnn_frontend::graph
  * @class Graph
  * @brief The main class for building and executing hipDNN computational graphs
  *
- * Graph is the central class in hipDNN Frontend. It allows users to:
- * - Define tensors and their properties
- * - Add operation nodes (convolution, batchnorm, pointwise, matmul)
- * - Build execution plans
- * - Execute the graph on AMD GPUs
+ * You describe **what** operations to run (convolution, batchnorm,
+ * pointwise, matmul, layernorm, rmsnorm) and the library figures out
+ * **how** to execute them efficiently on AMD GPUs.
  *
- * The Graph class uses a fluent interface pattern, where setter methods return
- * a reference to the graph for method chaining.
+ * **Typical workflow:**
+ * | Step | What you do | hipDNN call |
+ * |------|-------------|-------------|
+ * | 1. Describe tensor shapes | Define dims, strides, dtype | `Graph::tensor(attrs)` |
+ * | 2. Add operations | Wire inputs to outputs | `graph.conv_fprop(x, w, ...)` |
+ * | 3. Compile for GPU | Select engine, build plan | `graph.build(handle)` |
+ * | 4. Execute | Pass device pointers | `graph.execute(handle, ptrs, ws)` |
+ *
+ * The Graph uses a **fluent API** — setter methods return `*this` so
+ * you can chain calls:
+ * @code{.cpp}
+ * graph.set_io_data_type(DataType::HALF)
+ *      .set_compute_data_type(DataType::FLOAT)
+ *      .set_name("my_graph");
+ * @endcode
  *
  * @see TensorAttributes, ConvFpropAttributes, BatchnormAttributes, PointwiseAttributes
  */
@@ -1469,17 +1481,17 @@ public:
         return graph_attributes.get_name();
     }
 
-    /// @brief Get the compute data type used for intermediate calculations
+    /// @brief Get the compute data type (precision used inside operations, e.g. accumulation)
     DataType get_compute_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_compute_data_type();
     }
-    /// @brief Get the intermediate data type for virtual tensors between operations
+    /// @brief Get the intermediate data type (precision of virtual tensors between fused ops)
     DataType get_intermediate_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_intermediate_data_type();
     }
-    /// @brief Get the I/O data type for input and output tensors
+    /// @brief Get the I/O data type (precision of graph input and output tensors)
     DataType get_io_data_type() const // NOLINT(readability-identifier-naming)
     {
         return graph_attributes.get_io_data_type();
@@ -1499,20 +1511,39 @@ public:
         graph_attributes.set_name(name);
         return *this;
     }
-    /// @brief Set the compute data type used for intermediate calculations
+    /**
+     * @brief Set the compute data type (precision for internal math)
+     *
+     * Controls the accumulation precision inside operations — the dtype
+     * used for arithmetic during execution. For mixed-precision training
+     * you might store tensors in fp16 (`io_data_type = HALF`) but
+     * accumulate in fp32 (`compute_data_type = FLOAT`) for numerical
+     * stability.
+     */
     Graph& set_compute_data_type(DataType computeType) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_compute_data_type(computeType);
         return *this;
     }
-    /// @brief Set the intermediate data type for virtual tensors between operations
+    /**
+     * @brief Set the intermediate data type for virtual tensors between fused ops
+     *
+     * When the backend fuses multiple operations, intermediate results
+     * are stored in this precision. Usually matches compute_data_type.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Graph& set_intermediate_data_type(DataType intermediateType)
     {
         graph_attributes.set_intermediate_data_type(intermediateType);
         return *this;
     }
-    /// @brief Set the I/O data type for input and output tensors
+    /**
+     * @brief Set the I/O data type — the default precision for graph inputs/outputs
+     *
+     * This is the dtype of the tensors you feed in and read out.
+     * Individual tensors can override this by calling
+     * TensorAttributes::set_data_type().
+     */
     Graph& set_io_data_type(DataType ioType) // NOLINT(readability-identifier-naming)
     {
         graph_attributes.set_io_data_type(ioType);
