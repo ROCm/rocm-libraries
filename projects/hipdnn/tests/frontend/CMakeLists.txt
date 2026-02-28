@@ -16,6 +16,7 @@ add_executable(
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationConvFpropDescriptorLowering.cpp
 )
 
 target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
