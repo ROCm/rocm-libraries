@@ -97,6 +97,10 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/origami/**/*'
 
+"shared: primbench":
+- changed-files:
+  - any-glob-to-any-file: 'shared/primbench/**/*'
+
 "shared: rocroller":
 - changed-files:
   - any-glob-to-any-file: 'shared/rocroller/**/*'

@@ -7,6 +7,7 @@
 #include "EngineManager.hpp"
 #include "HipblasltContainer.hpp"
 #include "engines/HipblasltEngine.hpp"
+#include "engines/plans/HipblasltMatmulPlanBuilder.hpp"
 
 namespace hipblaslt_plugin
 {
@@ -17,6 +18,9 @@ HipblasltContainer::HipblasltContainer()
 
     auto hipblasltEngine
         = std::make_unique<HipblasltEngine>(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+
+    auto matmulPlanBuilder = std::make_unique<HipblasltMatmulPlanBuilder>();
+    hipblasltEngine->addPlanBuilder(std::move(matmulPlanBuilder));
 
     _engineManager = std::make_unique<EngineManager>();
     _engineManager->addEngine(std::move(hipblasltEngine));

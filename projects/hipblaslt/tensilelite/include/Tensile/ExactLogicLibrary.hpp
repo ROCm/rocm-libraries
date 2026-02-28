@@ -30,6 +30,7 @@
 
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/Debug.hpp>
+#include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <type_traits>
@@ -107,6 +108,9 @@ namespace TensileLite
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
+                // Set library context for debug output
+                row.first.setLibrary(row.second);
+
                 if(row.first(problem, hardware))
                 {
                     rv = row.second->findBestSolution(problem, hardware, fitness);
@@ -117,7 +121,14 @@ namespace TensileLite
                         rv->tag = MySolution::MatchingTag::Equal;
 
                     if(rv)
+                    {
+                        if(Debug::Instance().printDeviceSelection())
+                        {
+                            std::cout << "  Solution found: " << rv->name()
+                                      << " [MatchingTag: " << rv->matchingTag() << "]" << std::endl;
+                        }
                         return rv;
+                    }
                 }
             }
 
@@ -142,6 +153,9 @@ namespace TensileLite
 
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
+
+                // Set library context for debug output
+                row.first.setLibrary(row.second);
 
                 if(row.first.value->type() == "AMDGPU" && !row.first(problem, hardware))
                     continue;
@@ -227,6 +241,9 @@ namespace TensileLite
                                      || (row.first.value->type() == "RangeMatching")))
                     continue;
 
+                // Set library context for debug output
+                row.first.setLibrary(row.second);
+
                 if(row.first(problem, hardware))
                 {
                     solutions
@@ -301,6 +318,7 @@ namespace TensileLite
     struct HardwarePredicate
     {
         std::shared_ptr<Predicates::Predicate<Hardware>> value;
+        mutable std::string libraryFileName;
 
         HardwarePredicate() = default;
         HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init)
@@ -308,18 +326,33 @@ namespace TensileLite
         {
         }
 
+        template <typename MyProblem, typename MySolution>
+        void setLibrary(std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> lib) const
+        {
+            if(lib)
+                libraryFileName = lib->getLibraryFileName();
+        }
+
         template <typename Any>
         bool operator()(Any const& problem, Hardware const& hardware) const
         {
-            bool debug = Debug::Instance().printDeviceSelection();
+            bool debug  = Debug::Instance().printDeviceSelection();
+            bool rv = (*value)(hardware);
 
             if(debug)
             {
+                // Print library filename if available
+                if(!libraryFileName.empty())
+                {
+                    PredicateDebugger::printLibraryFileBanner(std::cout, libraryFileName);
+                }
+
+                PredicateDebugger::printHeader(std::cout, "ExactLogic: Hardware");
                 value->debugEval(hardware, std::cout);
-                std::cout << std::endl;
+                PredicateDebugger::printFooter(std::cout, rv);
             }
 
-            return (*value)(hardware);
+            return rv;
         }
     };
 
@@ -354,6 +387,7 @@ namespace TensileLite
     struct ProblemPredicate
     {
         std::shared_ptr<Predicates::Predicate<MyProblem>> value;
+        mutable std::string libraryFileName;
 
         ProblemPredicate() = default;
         ProblemPredicate(std::shared_ptr<Predicates::Predicate<MyProblem>> init)
@@ -361,17 +395,32 @@ namespace TensileLite
         {
         }
 
+        template <typename MySolution>
+        void setLibrary(std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> lib) const
+        {
+            if(lib)
+                libraryFileName = lib->getLibraryFileName();
+        }
+
         bool operator()(MyProblem const& problem, Hardware const& hardware) const
         {
-            bool debug = Debug::Instance().printPredicateEvaluation();
+            bool debug  = Debug::Instance().printPredicateEvaluation();
+            bool rv = (*value)(problem);
 
             if(debug)
             {
+                // Print library filename if available
+                if(!libraryFileName.empty())
+                {
+                    PredicateDebugger::printLibraryFileBanner(std::cout, libraryFileName);
+                }
+
+                PredicateDebugger::printHeader(std::cout, "ExactLogic: Problem");
                 value->debugEval(problem, std::cout);
-                std::cout << std::endl;
+                PredicateDebugger::printFooter(std::cout, rv);
             }
 
-            return (*value)(problem);
+            return rv;
         }
     };
 

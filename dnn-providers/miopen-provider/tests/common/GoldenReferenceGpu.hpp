@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <MiopenLegacyPlugin.hpp>
+#include <MiopenPlugin.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 

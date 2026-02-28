@@ -362,23 +362,25 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         WmmaSelector<ComputeTypeA, ComputeTypeB, AccDataType, MPerWmma, NPerWmma>::selected_wmma
             .wave_size;
 
-    // Limitations of the current implementation:
-    //  - no multiAB
-    //  - GemmSpecialization Default with transpose
-#ifdef __gfx12__
-    static constexpr bool IsAWaveTransferApplicable =
-        !ForceThreadTileTransfer && NumATensor == 1 && APackedSize == 1 &&
-        ((GemmSpec == tensor_operation::device::GemmSpecialization::Default &&
-          !is_same_v<ALayout, tensor_layout::gemm::RowMajor>) ||
-         is_same_v<ALayout, tensor_layout::gemm::RowMajor>) &&
-        BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && AK1Value == 8 && !IsBPreShuffled;
+    __host__ __device__ static constexpr bool AWaveTransferApplicable()
+    {
+        return !ForceThreadTileTransfer && APackedSize == 1 &&
+               ABlockTransferSrcScalarPerVector == 8 && ABlockTransferDstScalarPerVector_AK1 == 8 &&
+               BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && AK1Value == 8 &&
+               !IsBPreShuffled;
+    }
 
-    static constexpr bool IsBWaveTransferApplicable =
-        !ForceThreadTileTransfer && NumBTensor == 1 && BPackedSize == 1 &&
-        ((GemmSpec == tensor_operation::device::GemmSpecialization::Default &&
-          !is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>) ||
-         is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>) &&
-        BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && BK1Value == 8;
+    __host__ __device__ static constexpr bool BWaveTransferApplicable()
+    {
+        return !ForceThreadTileTransfer && BPackedSize == 1 &&
+               BBlockTransferSrcScalarPerVector == 8 && BBlockTransferDstScalarPerVector_BK1 == 8 &&
+               BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 && BK1Value == 8;
+    }
+
+#ifdef __gfx12__
+    static constexpr bool IsAWaveTransferApplicable = AWaveTransferApplicable();
+
+    static constexpr bool IsBWaveTransferApplicable = BWaveTransferApplicable();
 
     static constexpr bool IsWaveTileInterleavedFitting =
         (NPerBlock / NPerWmma / NRepeat) * (KPerBlock / KPack) >= (BlockSize / WaveSize);
@@ -982,6 +984,55 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         return de_grid_desc_mblock_mperblock_nblock_nperblock;
     }
 
+    // Conditions for Wave Transfer with transpose:
+    // - 16 bit type: K % 8 == 0 (4 subtiles of 8x8)
+    // - 8 bit type: K % 8 == 0 and M % 16 == 0 (2 subtiles of 8x16)
+    __host__ static constexpr bool CheckValidityAWaveTransfer(const index_t& M, const index_t& K)
+    {
+        if constexpr(AWaveTransferApplicable() &&
+                     !(is_same<tensor_layout::gemm::RowMajor, ALayout>::value))
+        {
+            if(!(K % ABlockTransferDstScalarPerVector_AK1 == 0))
+            {
+                return false;
+            }
+            bool pass = true;
+            static_for<0, NumATensor, 1>{}([&](auto i) {
+                using ADataType_ = remove_cvref_t<tuple_element_t<i.value, AsDataType>>;
+                pass &= !(sizeof(ADataType_) == 1 &&
+                          !(M % (2 * ABlockTransferSrcScalarPerVector) == 0));
+            });
+            return pass;
+        }
+        else
+        {
+            return true;
+        }
+    }
+
+    __host__ static constexpr bool CheckValidityBWaveTransfer(const index_t& N, const index_t& K)
+    {
+        if constexpr(BWaveTransferApplicable() &&
+                     !(is_same<tensor_layout::gemm::ColumnMajor, BLayout>::value))
+        {
+            if(!(K % BBlockTransferDstScalarPerVector_BK1 == 0))
+            {
+                return false;
+            }
+            bool pass = true;
+            static_for<0, NumBTensor, 1>{}([&](auto i) {
+                using BDataType_ = remove_cvref_t<tuple_element_t<i.value, BsDataType>>;
+                pass &= !(sizeof(BDataType_) == 1 &&
+                          !(N % (2 * BBlockTransferSrcScalarPerVector) == 0));
+            });
+            return pass;
+        }
+        else
+        {
+            return true;
+        }
+    }
+
     // block_id to matrix tile idx (m0, n0) mapping are controlled by {M01, N01}
     template <typename Argument>
     __host__ static constexpr bool CheckValidity(const Argument& karg,
@@ -1266,19 +1317,6 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
         }
     }
 
-    template <index_t numElements, typename Type>
-    __device__ __forceinline__ static auto get_first_element_workaround(Type& array)
-    {
-        if constexpr(numElements > 1)
-        {
-            return array;
-        }
-        else
-        {
-            return array[I0];
-        }
-    }
-
     // Note: arguments k_batch and k_id should be set if splitk is used
     // with implicit gemm (no pointer shift but shift using tensor descriptors)
     template <typename AGridDesc_AK0_M_K1,
@@ -1382,16 +1420,16 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
             ATransfer::GetKDimension(as_grid_desc_ak0_m_ak1[I0]) / (KPerBlock * k_batch));
 
         blockwise_gemm_pipeline.template Run<HasMainKBlockLoop, TailNum>(
-            get_first_element_workaround<NumATensor>(as_grid_desc_ak0_m_ak1),
+            ATransfer::template get_first_element_workaround<NumATensor>(as_grid_desc_ak0_m_ak1),
             a_block_desc_ak0_m_ak1,
             a_blockwise_copy,
-            get_first_element_workaround<NumATensor>(as_grid_buf),
+            ATransfer::template get_first_element_workaround<NumATensor>(as_grid_buf),
             a_block_buf,
             a_block_slice_copy_step,
-            get_first_element_workaround<NumBTensor>(bs_grid_desc_bk0_n_bk1),
+            BTransfer::template get_first_element_workaround<NumBTensor>(bs_grid_desc_bk0_n_bk1),
             b_block_desc_bk0_n_bk1,
             b_blockwise_copy,
-            get_first_element_workaround<NumBTensor>(bs_grid_buf),
+            BTransfer::template get_first_element_workaround<NumBTensor>(bs_grid_buf),
             b_block_buf,
             b_block_slice_copy_step,
             c_thread_buf,

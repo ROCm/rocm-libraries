@@ -80,8 +80,8 @@ TEST(TestMatmulSignatureKey, CreateFromNodeAndTensorMap)
     auto& graph = std::get<0>(graphTuple);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-    auto graphWrap
-        = hipdnn_plugin_sdk::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
+                                                                         flatbufferGraph.size());
 
     MatmulSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap(), DataType::FLOAT);
 

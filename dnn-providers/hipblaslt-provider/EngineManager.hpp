@@ -27,22 +27,24 @@ public:
 
     void addEngine(std::unique_ptr<IEngine> engine);
 
-    std::vector<int64_t> getApplicableEngineIds(HipdnnEnginePluginHandle& handle,
-                                                const hipdnn_plugin_sdk::IGraph& opGraph);
+    std::vector<int64_t>
+        getApplicableEngineIds(HipdnnEnginePluginHandle& handle,
+                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph);
 
     void getEngineDetails(HipdnnEnginePluginHandle& handle,
-                          const hipdnn_plugin_sdk::IGraph& opGraph,
+                          const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
                           int64_t engineId,
                           hipdnnPluginConstData_t& engineDetailsOut);
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle,
                             int64_t engineId,
-                            const hipdnn_plugin_sdk::IGraph& opGraph) const;
+                            const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const;
 
-    void initializeExecutionContext(const HipdnnEnginePluginHandle& handle,
-                                    const hipdnn_plugin_sdk::IGraph& opGraph,
-                                    const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-                                    HipdnnEnginePluginExecutionContext& executionContext) const;
+    void initializeExecutionContext(
+        const HipdnnEnginePluginHandle& handle,
+        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        HipdnnEnginePluginExecutionContext& executionContext) const;
 
 private:
     IEngine& getEngine(int64_t engineId) const;

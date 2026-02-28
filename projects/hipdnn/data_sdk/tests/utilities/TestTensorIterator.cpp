@@ -391,7 +391,38 @@ TEST(TestTypeErasedIterator, HelperFunction)
 // Indices Access Tests
 // ============================================================================
 
-TEST(TestTypeErasedIterator, IndicesAccess)
+TEST(TestTypeErasedIterator, StridedIndicesAccess)
+{
+    Tensor<float> tensor({2, 3}, {6, 2});
+
+    ITensor* iTensor = &tensor;
+
+    auto it = iTensor->begin();
+
+    // Check initial indices
+    auto indices = std::get<ITensorIterator<false>::CompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices.size(), 2);
+    EXPECT_EQ(indices[0], 0);
+    EXPECT_EQ(indices[1], 0);
+
+    // Advance and check indices
+    ++it;
+    indices = std::get<ITensorIterator<false>::CompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices[0], 0);
+    EXPECT_EQ(indices[1], 1);
+
+    ++it;
+    indices = std::get<ITensorIterator<false>::CompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices[0], 0);
+    EXPECT_EQ(indices[1], 2);
+
+    ++it;
+    indices = std::get<ITensorIterator<false>::CompositeIndex>(it.index()).indices;
+    EXPECT_EQ(indices[0], 1);
+    EXPECT_EQ(indices[1], 0);
+}
+
+TEST(TestTypeErasedIteratorPacked, LinearIndexAccess)
 {
     Tensor<float> tensor({2, 3});
 
@@ -399,27 +430,22 @@ TEST(TestTypeErasedIterator, IndicesAccess)
 
     auto it = iTensor->begin();
 
-    // Check initial indices
-    auto indices = it.indices();
-    EXPECT_EQ(indices.size(), 2);
-    EXPECT_EQ(indices[0], 0);
-    EXPECT_EQ(indices[1], 0);
+    // Check initial index
+    auto index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
+    EXPECT_EQ(index, 0);
 
-    // Advance and check indices
+    // Advance and check index
     ++it;
-    indices = it.indices();
-    EXPECT_EQ(indices[0], 0);
-    EXPECT_EQ(indices[1], 1);
+    index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
+    EXPECT_EQ(index, 1);
 
     ++it;
-    indices = it.indices();
-    EXPECT_EQ(indices[0], 0);
-    EXPECT_EQ(indices[1], 2);
+    index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
+    EXPECT_EQ(index, 2);
 
     ++it;
-    indices = it.indices();
-    EXPECT_EQ(indices[0], 1);
-    EXPECT_EQ(indices[1], 0);
+    index = std::get<ITensorIterator<false>::LinearIndex>(it.index()).getValue();
+    EXPECT_EQ(index, 3);
 }
 
 // ============================================================================

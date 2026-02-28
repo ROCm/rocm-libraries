@@ -553,6 +553,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     params->unrollY       = gemm->unrollY;
     params->swizzleScale  = gemm->swizzleScale;
     params->prefetchScale = gemm->prefetchScale;
+    params->tailLoops     = gemm->tailLoops;
 
     if(gemm->prefetch)
     {

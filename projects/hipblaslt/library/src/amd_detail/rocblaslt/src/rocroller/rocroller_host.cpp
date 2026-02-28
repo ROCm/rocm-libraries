@@ -446,9 +446,11 @@ rocblaslt_status
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Error building the following kernel:" << std::endl;
-        std::cerr << params->toString() << std::endl;
-        std::cerr << e.what() << std::endl;
+        std::stringstream msg;
+        msg << "Error building the following kernel:" << std::endl;
+        msg << params->toString() << std::endl;
+        msg << e.what() << std::endl;
+        log_info(__func__, msg.str());
         return rocblaslt_status_not_implemented;
     }
 
@@ -501,8 +503,8 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    if(auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
-       scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
+    auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
+    if(scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
     {
         std::cerr << "rocRoller only supports F32 as scale type not " << scale_type << std::endl;
         return rocblaslt_status_invalid_value;

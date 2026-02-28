@@ -1021,19 +1021,30 @@ std::vector<miopenConvSolution_t> GetSolutions(const FusionContext& ctx,
 
 } // namespace
 
-miopenStatus_t FusionPlanDescriptor::GetWorkspaceSizeImmed(const Handle& /*handle*/,
+miopenStatus_t FusionPlanDescriptor::GetWorkspaceSizeImmed(const Handle& handle,
                                                            size_t& workSpaceSize,
                                                            miopenConvFwdAlgorithm_t /*algo*/)
 {
 
     if(!compiled_invoker)
     {
-        MIOPEN_THROW(
-            miopenStatusBadParm,
-            "GetWorkspaceSizeImmed was called, but The Fusion Plan was not compiled successfully");
+        workSpaceSize       = 0;
+        const auto& finders = GetFusionSolverFinders();
+        for(const auto& finder : finders)
+        {
+            if(const auto* fusion_finder =
+                   dynamic_cast<const FusionSolverFinderBase*>(finder.get()))
+            {
+                workSpaceSize = std::max(workSpaceSize,
+                                         fusion_finder->GetWorkspaceSize(FusionContext{handle},
+                                                                         FusionDescription{this}));
+            }
+        }
     }
-
-    workSpaceSize = compiled_invoker->first;
+    else
+    {
+        workSpaceSize = compiled_invoker->first;
+    }
 
     return miopenStatusSuccess;
 }

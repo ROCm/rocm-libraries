@@ -1,0 +1,47 @@
+# rocRoller Test profiles
+profiles:
+  precheckin:
+    description: "Test suite for pre-commit validation"
+    gtest:
+      include: []
+      exclude: []
+    catch2:
+      include: []
+      exclude: []
+    ctest:
+      include: []
+      exclude: []
+  
+  # Codecov profile - excludes slow/exhaustive tests
+  codecov:
+    description: "Reduced test suite for code coverage analysis"
+    gtest:
+      include: []
+      exclude:
+        - "GEMMTest/StreamKWGMTestGPU.*"
+        - "GEMMTest/StreamKMultipleFixupsTestGPU.*"
+        - "GEMMTest/StreamKTestGPU.*"
+        - "GEMMF16Test/GEMMF16TestGPU.*"
+        - "GEMMF16Test/GEMMF16NTTestGPU.*"
+        - "GEMMF8F6F4Test/GEMMF8F6F4TestGPU.*"
+        - "MixedGEMMTest/MixedGEMMF8F6F4TestGPU.*"
+        - "ScaledMixedGEMMTest/ScaledMixedGEMMF8F6F4TestGPU.*"
+        - "GEMMTest/SwizzleScaledTestGPU.*"
+        - "GEMMTest/SwizzleScaledUnrollTestGPU.*"
+        - "GEMMTest/UnrollKTestGPU.*"
+        - "GEMMJammedTest/GEMMJammedTestGPU.*"
+        - "*WMMA*TestGPU*"
+        - "GEMMTest/GEMMLargeMacroTileTestGPU.*"
+        - "GEMMDirectLDSTestBasic/GEMMDirectLDSTestBasicGPU.*"
+        - "GEMMDirectLDSTest/GEMMDirectLDSTestGPU.*"
+        - "GEMMDirectLDSTest/GEMMDirectLDSF8F6F4TestGPU.*"
+        - "GEMMDirectLDSTestPrefetch/GEMMDirectLDSTestPrefetchGPU.*"
+        - "GEMMMXFP4TNSwizzleScaledUnrollTest/*"
+        - "ScaledMMCPU/*"
+        - "GEMMTest/SwizzleScaledF4TNTestGPU.*"
+    catch2:
+      include: []
+      exclude: []
+    ctest:
+      include: []
+      exclude: []
