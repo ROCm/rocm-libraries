@@ -113,3 +113,11 @@ experimental/grouped_convolution_tile_instances/instances/*
 !experimental/grouped_convolution_tile_instances/instances/*.in
 !experimental/grouped_convolution_tile_instances/instances/*.inc
 experimental/grouped_convolution_tile_instances/*.inc
+# Heuristics data and model artifacts (large, generated)
+dispatcher/heuristics/data/
+dispatcher/heuristics/models/
+dispatcher/heuristics/*.log
+dispatcher/heuristics/__pycache__/
+dispatcher/heuristics/tests/__pycache__/
+dispatcher/heuristics/.pytest_cache/
+
