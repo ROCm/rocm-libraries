@@ -82,11 +82,11 @@ The reflection system operates at two levels:
 
 2. **`ConvTraits`** (runtime): A unified, type-erased data structure representing kernel configuration in convolution-specific terms. Populated by `instance_to_conv_traits<Instance>()` specializations.
 
-`ConvTraits` captures the common ground shared by both backends: spatial dimensions, tensor layouts, data types, elementwise operations, tile dimensions, pipeline version/scheduler, and memory access patterns.
+`ConvTraits` captures the common ground shared by both backends: spatial dimensions, tensor layouts, data types, elementwise operations, tile dimensions, pipeline version/scheduler, and memory access patterns. Within old CK, `ConvTraits` already unifies across the MFMA/WMMA instruction set boundary — XDL and WMMA forward instances both produce the same `ConvTraits` representation, demonstrating that instruction-set differences can be abstracted at this level.
 
 Currently, `instance_to_conv_traits()` specializations exist only for old CK instances (forward XDL, XDL V3, WMMA, large tensor, and 8 backward weight variants). CK Tile instances have `InstanceTraits` but lack `instance_to_conv_traits()` specializations — there is no bridge from CK Tile's `InstanceTraits` to the unified `ConvTraits` representation.
 
-This is the critical gap in the reflection system. Closing it means writing `instance_to_conv_traits()` specializations for the CK Tile kernel types that map their `InstanceTraits` fields to the `ConvTraits` struct. Once this bridge exists, both backends produce the same `ConvTraits` output, enabling unified algorithm descriptors and backend-transparent queries.
+This is the critical gap in the reflection system. Today the builder has 16+ per-variant factories, each with its own algorithm descriptor shape. `ConvTraits` is the mechanism for discovering which parameters are genuinely variant-specific versus which can be expressed in a single unified algorithm descriptor. Closing the CK Tile bridge means writing `instance_to_conv_traits()` specializations for the CK Tile kernel types that map their `InstanceTraits` fields to the `ConvTraits` struct. Once this bridge exists, both backends produce the same `ConvTraits` output — making it possible to define a single algorithm descriptor format that the dispatcher decomposes into variant-specific parameters internally.
 
 ### Future Work
 

@@ -14,9 +14,11 @@ This project is a prototype for a more general builder pattern for all of compos
 
 The builder's primary goal is transparent dispatch across two backend implementations: old CK (template-heavy device operations) and CK Tile (modern tile-based API). MIOpen, the consumer library, should construct kernels through the builder without needing to know which backend provides the implementation.
 
-Three principles guide the design:
+**Current state:** The builder dispatches correctly, but each kernel variant (forward XDL, forward WMMA, backward weight XDL V3, etc.) has its own factory and its own algorithm descriptor shape. The result is 16+ per-variant facades rather than one unified facade. Unification across three axes — CK vs CK Tile backend, MFMA vs WMMA instruction set, and forward vs backward direction — is the central design challenge.
 
-1. **Unified vocabulary through reflection.** The reflection system (`reflect/`) extracts kernel traits from both backends into a common `ConvTraits` representation. This shared vocabulary is the foundation for unifying algorithm descriptors across backends.
+Three principles guide the design toward that unification:
+
+1. **Unified vocabulary through reflection.** The reflection system (`reflect/`) extracts kernel traits from both backends into a common `ConvTraits` representation. This shared vocabulary is the mechanism for discovering what algorithm parameters are truly variant-specific versus what can be expressed once and mapped to multiple backends.
 
 2. **Expert overrides.** Power users can pin to a specific backend or device operation when needed, bypassing automatic dispatch.
 

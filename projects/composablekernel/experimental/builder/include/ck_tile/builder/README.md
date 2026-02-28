@@ -248,13 +248,19 @@ An algorithm descriptor is any struct satisfying the `ConvAlgorithmDescriptor` c
 
 The `ConvAlgorithmSpecialization` enum provides broad algorithm classes (`REFERENCE`, `LARGE_TENSOR`, `TWO_STAGE`, `MULTIPLE_D`) for requesting a category of algorithm without specifying the full descriptor.
 
-### CK vs CK Tile Algorithm Divergence
+### Algorithm Descriptor Fragmentation
 
-The old CK backend requires algorithm descriptors with approximately 49 template parameters flattened into a single device operation type. These include explicit thread block dimensions, block transfer descriptors with LDS configurations, thread cluster arrangements, and per-tensor access orders.
+The builder currently requires a different algorithm descriptor shape for each kernel variant. This fragmentation exists along three axes:
 
-The CK Tile backend composes higher-level objects — tile partitioner, GEMM pipeline, epilogue pipeline — with approximately 31 parameters. Transfer configuration is simplified to scalar-per-vector values rather than explicit block transfer descriptors.
+1. **Backend** (CK vs CK Tile): The old CK backend flattens ~49 template parameters into a single device operation type (explicit thread block dimensions, block transfer descriptors with LDS configurations, thread cluster arrangements, per-tensor access orders). The CK Tile backend composes higher-level objects — tile partitioner, GEMM pipeline, epilogue pipeline — with ~31 parameters distributed across four composed types.
 
-Today, these two backends use different algorithm descriptor structs. The path toward unification runs through the reflection system: by extracting `ConvTraits` from instances produced by both backends, we establish a common vocabulary for describing algorithm properties. This shared representation can inform a single algorithm descriptor format that the dispatcher maps to either backend. See the [reflection documentation](reflect/README.md) for the current state of this bridge.
+2. **Instruction set** (MFMA vs WMMA): Within the old CK backend, XDL (MFMA) and WMMA variants require different algorithm descriptor fields. The dispatcher uses separate predicate concepts (`FwdXdlAlgorithm` vs `FwdWmmaAlgorithm`) to classify them, and separate factories to instantiate them.
+
+3. **Direction** (forward vs backward weight vs backward data): Each direction has its own set of factories. Backward weight alone has 9 old CK factory variants (XDL, XDL V3, two-stage XDL, DL, multi-D XDL, WMMA V3, two-stage WMMA V3, WMMA, multi-D WMMA V3).
+
+The result is 16+ per-variant factories, each accepting a different algorithm descriptor shape. MIOpen must currently know which variant it wants and construct the matching descriptor — the builder dispatches but does not unify.
+
+The path toward a single algorithm descriptor runs through the reflection system. `ConvTraits` already provides a common representation for old CK instances across both MFMA and WMMA. Extending this to CK Tile instances will reveal which parameters are genuinely variant-specific versus which can be expressed in a single descriptor and mapped to multiple backends by the dispatcher. See the [reflection documentation](reflect/README.md) for the current state of this bridge.
 
 ## Convolution Factory
 

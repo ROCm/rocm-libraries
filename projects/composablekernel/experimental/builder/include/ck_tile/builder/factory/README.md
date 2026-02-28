@@ -57,10 +57,12 @@ auto kernel_v0 = make_conv_instance<SIGNATURE, ALGORITHM, "0.0.0">();
 
 The dispatcher automatically selects the appropriate factory at compile time.
 
-## CK vs CK Tile Factory Architecture
+## Factory Architecture and the Unification Gap
 
-The old CK factories (e.g., `ConvFwdXdlV3Factory`) flatten all algorithm parameters into a single device operation template instantiation with approximately 49 template arguments. The factory's primary job is mapping builder enum values (layouts, data types, elementwise ops) to CK's internal types.
+Each factory is a self-contained facade: it accepts builder descriptors and produces a kernel instance, but it does so with its own algorithm descriptor shape and its own parameter mapping logic. The 16+ factories share no common infrastructure for parameter transformation.
 
-The CK Tile factory (`ConvTileFactory`) composes modern objects — a traits type, a tile partitioner, a GEMM pipeline, and an epilogue pipeline — each with its own configuration. This results in approximately 31 parameters distributed across four composed types rather than one flat template.
+**Old CK factories** (e.g., `ConvFwdXdlV3Factory`) flatten all algorithm parameters into a single device operation template instantiation with approximately 49 template arguments. The factory's primary job is mapping builder enum values (layouts, data types, elementwise ops) to CK's internal types. Within old CK, the XDL and WMMA factories duplicate much of this mapping logic despite sharing the same underlying parameter concepts.
 
-Both factory paths produce a kernel `Instance` type that satisfies the same usage interface (construction, argument setup, invocation). The dispatcher abstracts this difference from the caller.
+**The CK Tile factory** (`ConvTileFactory`) composes modern objects — a traits type, a tile partitioner, a GEMM pipeline, and an epilogue pipeline — each with its own configuration. This results in approximately 31 parameters distributed across four composed types rather than one flat template.
+
+Both factory paths produce a kernel `Instance` type that satisfies the same usage interface (construction, argument setup, invocation). The dispatcher abstracts this difference from the caller. However, the algorithm descriptor accepted by each factory is different — the unification burden currently falls on the caller (MIOpen), not the dispatcher. Collapsing these per-variant descriptors into a single algorithm format that the dispatcher decomposes internally is the key step toward making the builder a true unified facade.
