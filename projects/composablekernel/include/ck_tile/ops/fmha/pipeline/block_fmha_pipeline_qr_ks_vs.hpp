@@ -338,7 +338,6 @@ struct BlockFmhaPipelineQRKSVS
         // Use compile-time conditional for group barrier sequence
         // (No runtime lambda selection)
         auto schedule_gemm0 = [] {
-#if !defined(__gfx950__)
             using BlockGemm0 = remove_cvref_t<decltype(gemm_0)>;
             constexpr auto WarpGemmConfig =
                 BlockGemm0::Policy::template GetWarpGemmMWarpNWarp<Problem>();
@@ -362,7 +361,6 @@ struct BlockFmhaPipelineQRKSVS
                     __builtin_amdgcn_sched_group_barrier(MFMA, 4, 0);    // MFMA
                 });
             }
-#endif
         };
 
         static_assert(2 <= k0_loops);
