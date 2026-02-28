@@ -221,20 +221,19 @@ class SignatureDefault(Signature):
         if kernel["ProblemType"]["UseScaleAB"]:
             signature.addArg("AddressScaleA", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressScaleB", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
-        userArgumentsInfo.scaleASize += 8
-        userArgumentsInfo.scaleBSize += 8
+            userArgumentsInfo.scaleASize += 8
+            userArgumentsInfo.scaleBSize += 8
         if kernel["ProblemType"]["UseScaleCD"]:
             signature.addArg("AddressScaleC", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressScaleD", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
-        userArgumentsInfo.scaleCSize += 8
-        userArgumentsInfo.scaleDSize += 8
+            userArgumentsInfo.scaleCSize += 8
+            userArgumentsInfo.scaleDSize += 8
 
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
             signature.addArg("AddressScaleAlphaVec", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             if kernel["ProblemType"]["UseScaleAlphaVec"] == 3:
                 userArgumentsInfo.factorDimSize =4
-
-        userArgumentsInfo.scaleAlphaVecSize += 8
+                userArgumentsInfo.scaleAlphaVecSize += 8
 
         if writer.states.useBias != DataDirection.NONE:
             signature.addArg("bias", SVK.SIG_GLOBALBUFFER, biasValueType, "generic")  # Note: We append the data in ws_d
@@ -243,7 +242,7 @@ class SignatureDefault(Signature):
                 signature.addArg("StrideBias",      SVK.SIG_VALUE,        "u32")
                 if kernel["ProblemType"]["UseBias"] == 3:
                     userArgumentsInfo.factorDimSize = 4
-        userArgumentsInfo.biasSize += (8 + 4 + 4)
+            userArgumentsInfo.biasSize += (8 + 4 + 4)
 
         if userArgumentsInfo.factorDimSize == 4:
             signature.addArg("factorDim", SVK.SIG_VALUE, "u32")
@@ -252,9 +251,9 @@ class SignatureDefault(Signature):
             signature.addArg(      "E", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             for i in range(0, writer.states.e.numSgprStrides):
                 signature.addArg("StrideE%u"%i,        SVK.SIG_VALUE,        "u32")
-        userArgumentsInfo.eSize += 8
-        for i in range(0, writer.states.e.numSgprStrides):
-            userArgumentsInfo.eSize += 4
+            userArgumentsInfo.eSize += 8
+            for i in range(0, writer.states.e.numSgprStrides):
+                userArgumentsInfo.eSize += 4
 
         if ((kernel["ProblemType"]["ActivationType"] != 'none') and kernel["ActivationFused"]):
             if kernel["ProblemType"]["ActivationComputeDataType"].isHalf():

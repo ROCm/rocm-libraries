@@ -3620,7 +3620,7 @@ class KernelWriterAssembly(KernelWriter):
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
 
         skComponent = Component.StreamK.find(self)
-        module.add(skComponent.computeLoadSrd(self, kernel, tc, stmp))
+        module.add(skComponent.computeLoadSrd(self, kernel, tP, stmp))
 
         gsuComponent = Component.GSU.find(self)
         module.add(gsuComponent.computeLoadSrd(self, kernel, tP, stmp, tileStart))
@@ -5282,7 +5282,7 @@ class KernelWriterAssembly(KernelWriter):
                          comment="Calculate the remaining dimension along I/J direction."))
         imod.add(SSubU32(dst=sgpr(sTmp0), src0=sgpr(strSize), src1=sgpr(sTmp0), \
                          comment="Calculate the remaining dimension along I/J direction."))
-        imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(sTmp0), src1=tP["bpeGR"], \
+        imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(sTmp0), src1=int(tP["bpeGR"]), \
                          comment="In bytes"))
         imod.add(SAndB32(dst=sgpr(sTmp1), src0=sgpr("SizeL"), src1=(kernel["DepthU"] - 1), \
                          comment="Calculate the remaining dimension along L direction."))
@@ -6611,6 +6611,8 @@ class KernelWriterAssembly(KernelWriter):
     iui_new_offset = iui%numReadsIterCoalesced*vgprPerInput
     ab_new = idxAB*vgprPerInput*numReadsIterCoalesced
     abStr = "Valu%s_X%u_I%u+%u+%u+%u" % (tc, vgprBuffer_new, iui_new, ab_new, vgprBuffer_new_offset, iui_new_offset)
+    if kernel["UseDirect32XEmulation"] and bk != None and (int(bk) % 8) < 4:
+      abStr = "Valu%c_T%u_I%u+%u+%u+%u" % (tc, vgprBuffer_new, iui_new, ab_new // 2, vgprBuffer_new_offset, iui_new_offset)
     if kernel["DirectToVgpr%s"%tc] and not (packDTV or convDTV):
       # overwrite aStr/bStr for DirectToVgpr (except for pack DTV case)
       numVgprPerBlock = statesTc.numVgprG2LAllocated
