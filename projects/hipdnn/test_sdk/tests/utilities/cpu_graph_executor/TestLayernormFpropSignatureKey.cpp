@@ -106,11 +106,11 @@ TEST(TestLayernormFpropSignatureKey, CreateFromNodeAndTensorMap)
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           dims,
-                                           TensorLayout::NHWC);
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
                                                                          flatbufferGraph.size());

@@ -32,11 +32,11 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
     std::vector<int64_t> dims = {6, 3, 32, 32};
     unsigned int seed = getGlobalTestSeed();
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           dims,
-                                           TensorLayout::NHWC);
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
@@ -78,20 +78,20 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
     fpropPlan.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(
-        directTensorBundle.getTensor(attributes.y_tensor_uid()),
-        planTensorBundle.getTensor(attributes.y_tensor_uid())));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.y_tensor_uid()),
+                                        planTensorBundle.getTensor(attributes.y_tensor_uid())));
 }
 
 TEST(TestLayernormFpropPlanBuilder, PlanConstruction)
 {
     std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           dims,
-                                           TensorLayout::NHWC);
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
@@ -114,11 +114,11 @@ TEST(TestLayernormFpropPlanBuilder, IsApplicable)
 {
     std::vector<int64_t> dims = {1, 1, 1, 1};
     auto graph = buildLayernormFpropGraph(DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           DataType::FLOAT,
-                                           dims,
-                                           TensorLayout::NHWC);
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 

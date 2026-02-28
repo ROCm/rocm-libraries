@@ -134,11 +134,10 @@ protected:
         return handle;
     }
 
-    static std::pair<std::shared_ptr<Graph>, LayernormTestTensors>
-        createLayernormTestGraphWithUids(
-            const std::string& graphName,
-            const SimpleLayernormTensorBundle<float, float>& tensorBundle,
-            bool useManualUids)
+    static std::pair<std::shared_ptr<Graph>, LayernormTestTensors> createLayernormTestGraphWithUids(
+        const std::string& graphName,
+        const SimpleLayernormTensorBundle<float, float>& tensorBundle,
+        bool useManualUids)
     {
         auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
         graph->set_name(graphName)

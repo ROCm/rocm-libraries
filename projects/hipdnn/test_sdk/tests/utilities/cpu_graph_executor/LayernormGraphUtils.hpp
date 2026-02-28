@@ -45,10 +45,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(scaleAttr));
 
     auto biasAttr = hipdnn_frontend::graph::makeTensorAttributes(
-        "bias",
-        hipdnn_frontend::fromSdkType(scaleBiasDataType),
-        normalizedDims,
-        normalizedStrides);
+        "bias", hipdnn_frontend::fromSdkType(scaleBiasDataType), normalizedDims, normalizedStrides);
     biasAttr.set_uid(uid++);
     auto biasTensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(biasAttr));
@@ -75,7 +72,8 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         lnAttrs.set_forward_phase(hipdnn_frontend::NormFwdPhase::INFERENCE);
     }
 
-    auto outputTensorsAttr = graph->layernorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, lnAttrs);
+    auto outputTensorsAttr
+        = graph->layernorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, lnAttrs);
 
     auto& yTensorAttr = outputTensorsAttr[0];
     if(!yTensorAttr->has_uid())
@@ -102,8 +100,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
         }
         if(meanTensorAttr)
         {
-            meanTensorAttr->set_data_type(
-                hipdnn_frontend::fromSdkType(meanInvVarianceDataType));
+            meanTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(meanInvVarianceDataType));
             meanTensorAttr->set_dim(statsDims);
             meanTensorAttr->set_stride(statsStrides);
             meanTensorAttr->set_is_virtual(false);
