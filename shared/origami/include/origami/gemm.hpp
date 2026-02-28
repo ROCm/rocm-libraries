@@ -48,6 +48,10 @@ struct context_t {
   /// Workgroup mapping parameters.
   workgroup_mapping_t wgm{0, 8, 1};
 
+  /// Occupancy-derived decay factor.
+  size_t real_occupancy    = 0;
+  double occupancy_factor  = 1.0;
+
   /// Debug flag (cached from runtime_options to avoid repeated singleton lookups).
   bool debug = false;
 
