@@ -101,7 +101,7 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
     case HIP_R_8F_E4M3_FNUZ:
         return HIPBLASLT_ORDER_COL16_4R16;
     case HIP_R_4F_E2M1_EXT:
-        return HIPBLASLT_ORDER_COL16_4R16;
+        return HIPBLASLT_ORDER_COL16_4R32;
     default:
         throw std::runtime_error("unsupported datatype in orderForDatatype");
     }
