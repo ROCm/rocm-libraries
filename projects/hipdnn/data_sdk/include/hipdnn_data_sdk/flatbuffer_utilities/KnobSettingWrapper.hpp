@@ -20,7 +20,7 @@ public:
 
     virtual const hipdnn_data_sdk::data_objects::KnobSetting& getKnobSetting() const = 0;
     virtual bool isValid() const = 0;
-    virtual int64_t knobId() const = 0;
+    virtual std::string knobId() const = 0;
     virtual hipdnn_data_sdk::data_objects::KnobValue valueType() const = 0;
     virtual const std::type_info& valueClassType() const = 0;
 
@@ -79,10 +79,11 @@ public:
         return _shallowKnobSetting != nullptr;
     }
 
-    int64_t knobId() const override
+    std::string knobId() const override
     {
         throwIfNotValid();
-        return _shallowKnobSetting->knob_id();
+        auto knobIdPtr = _shallowKnobSetting->knob_id();
+        return knobIdPtr != nullptr ? knobIdPtr->str() : "";
     }
 
     hipdnn_data_sdk::data_objects::KnobValue valueType() const override
@@ -113,7 +114,8 @@ public:
         throwIfNotValid();
 
         auto knobSettingT = std::make_unique<hipdnn_data_sdk::data_objects::KnobSettingT>();
-        knobSettingT->knob_id = _shallowKnobSetting->knob_id();
+        auto knobIdPtr = _shallowKnobSetting->knob_id();
+        knobSettingT->knob_id = knobIdPtr != nullptr ? knobIdPtr->str() : "";
 
         auto knobValueType = _shallowKnobSetting->value_type();
         auto knobValuePtr = _shallowKnobSetting->value();

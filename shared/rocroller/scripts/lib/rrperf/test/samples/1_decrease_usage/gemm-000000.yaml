@@ -1,105 +1,104 @@
 ---
 resultType: GEMM
-device: 0
-M: 4096
-N: 4096
-K: 32768
-alpha: 2
-beta: 0
-types:
-  type_A: fp4
-  type_B: fp4
-  type_C: half
-  type_D: half
-  type_acc: float
-  trans_A: T
-  trans_B: N
-  scale_A: Separate
-  scaleType_A: E8M0
-  scale_B: Separate
-  scaleType_B: E8M0
-  scaleBlockSize: 32
-  scaleSkipPermlane: false
-  scaleShuffleTileA:
-    []
-  scaleShuffleTileB:
-    []
-scaleValue_A: 1
-scaleValue_B: 1
-workgroupMappingDim: 0
-architecture:
-  ArchString: gfx950
-  Xnack: false
-  Sramecc: true
-mac_m: 256
-mac_n: 256
-mac_k: 128
-wave_m: 16
-wave_n: 16
-wave_k: 128
-wave_b: 1
-workgroup_size_x: 128
-workgroup_size_y: 2
-workgroupMappingDim: 0
-workgroupRemapXCC: false
-workgroupRemapXCCValue: -1
-unroll_x: 0
-unroll_y: 0
-load_A: BufferToLDS
-load_B: BufferToLDS
-storeLDS_D: false
-prefetch: true
-prefetchInFlight: 4
-prefetchLDSFactor: 1
-prefetchMixMemOps: true
-betaInFma: true
-scheduler: Priority
-schedulerCost: LinearWeightedSimple
-matchMemoryAccess: true
-types:
-  type_A: fp4
-  type_B: fp4
-  type_C: half
-  type_D: half
-  type_acc: float
-  trans_A: T
-  trans_B: N
-  scale_A: Separate
-  scaleType_A: E8M0
-  scale_B: Separate
-  scaleType_B: E8M0
-  scaleBlockSize: 32
-  scaleSkipPermlane: false
-  scaleShuffleTileA:
-    []
-  scaleShuffleTileB:
-    []
-loadScale_A: BufferToVGPR
-loadScale_B: BufferToVGPR
-swizzleScale: true
-swizzleTileSize:
-  m: 64
-  k: 16
-  n: 64
-  l: 16
-prefetchScale: true
-streamK: false
-streamKTwoTile: false
-streamKTwoTileDPFirst: false
-version: ""
-numWGs: 0
-numWarmUp: 1000
-numOuter: 1
-numInner: 1000
-kernelGenerate: 0
-kernelAssemble: 0
-kernelExecute:
-- 123456
-checked: true
-correct: true
-rnorm: 9.0751436555681984e-06
-sgprCount: 102
-vgprCount: 199
-agprCount: 256
-ldsBytes: 131070
+problem:
+  M: 4096
+  N: 4096
+  K: 32768
+  alpha: 2
+  beta: 0
+  types:
+    type_A: fp4
+    type_B: fp4
+    type_C: half
+    type_D: half
+    type_acc: float
+    trans_A: T
+    trans_B: N
+    scale_A: Separate
+    scaleType_A: E8M0
+    scale_B: Separate
+    scaleType_B: E8M0
+    scaleBlockSize: 32
+    scaleSkipPermlane: None
+    scaleShuffleTileA:
+      []
+    scaleShuffleTileB:
+      []
+  scaleValue_A: 1
+  scaleValue_B: 1
+  workgroupMappingDim: 0
+solution:
+  architecture:
+    ArchString: gfx950
+    Xnack: false
+    Sramecc: true
+  mac_m: 256
+  mac_n: 256
+  mac_k: 128
+  wave_m: 16
+  wave_n: 16
+  wave_k: 128
+  wave_b: 1
+  workgroup_size_x: 128
+  workgroup_size_y: 2
+  workgroupMappingDim: 0
+  workgroupRemapXCC: false
+  workgroupRemapXCCValue: -1
+  load_A: BufferToLDS
+  load_B: BufferToLDS
+  store: VGPRToGlobalMemoryWithBuffer
+  prefetch: true
+  prefetchInFlight: 4
+  prefetchLDSFactor: 1
+  prefetchMixMemOps: true
+  betaInFma: true
+  scheduler: Priority
+  schedulerCost: LinearWeightedSimple
+  types:
+    type_A: fp4
+    type_B: fp4
+    type_C: half
+    type_D: half
+    type_acc: float
+    trans_A: T
+    trans_B: N
+    scale_A: Separate
+    scaleType_A: E8M0
+    scale_B: Separate
+    scaleType_B: E8M0
+    scaleBlockSize: 32
+    scaleSkipPermlane: None
+    scaleShuffleTileA:
+      []
+    scaleShuffleTileB:
+      []
+  loadScale_A: BufferToVGPR
+  loadScale_B: BufferToVGPR
+  swizzleScale: true
+  swizzleTileSize:
+    m: 64
+    k: 16
+    n: 64
+    l: 16
+  prefetchScale: true
+  streamK: None
+  version: ""
+benchmark:
+  device: 0
+  workgroupMappingValue: -1
+  numWGs: 0
+  numWarmUp: 1000
+  numOuter: 1
+  numInner: 1000
+  kernelGenerate: 0
+  kernelAssemble: 0
+  kernelExecute:
+  - 123456
+  checked: true
+  correct: true
+  rnorm: 9.0751436555681984e-06
+  sgprCount: 102
+  vgprCount: 199
+  agprCount: 256
+  ldsBytes: 131070
 ...

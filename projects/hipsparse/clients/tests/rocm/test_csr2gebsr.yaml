@@ -75,3 +75,16 @@ Tests:
              mac_econ_fwd500,
              scircuit,
              bmwcra_1]
+
+- name: csr2gebsr_graph_test
+  category: pre_checkin
+  function: csr2gebsr
+  precision: *single_double_precisions_complex_real
+  M: [1309]
+  N: [1276]
+  row_block_dimA: [3]
+  col_block_dimA: [3]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  dirA: [HIPSPARSE_DIRECTION_ROW]
+  graph_test: true

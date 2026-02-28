@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -53,8 +54,7 @@ void testing_csrmv_bad_arg(const Arguments& argus)
     T                    beta      = make_DataType<T>(0.2);
     hipsparseOperation_t transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -141,8 +141,7 @@ void testing_csrmv(Arguments argus)
     hipsparseIndexBase_t idx_base = argus.baseA;
     std::string          filename = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -212,12 +211,12 @@ void testing_csrmv(Arguments argus)
 
         // HIPSPARSE pointer mode host
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(hipsparseXcsrmv(
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrmv<T>(
             handle, transA, nrow, ncol, nnz, &h_alpha, descr, dval, dptr, dcol, dx, &h_beta, dy_1));
 
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(hipsparseXcsrmv(
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrmv<T>(
             handle, transA, nrow, ncol, nnz, d_alpha, descr, dval, dptr, dcol, dx, d_beta, dy_2));
 
         // copy output from device to CPU
@@ -251,19 +250,19 @@ void testing_csrmv(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXcsrmv(handle,
-                                                  transA,
-                                                  nrow,
-                                                  ncol,
-                                                  nnz,
-                                                  &h_alpha,
-                                                  descr,
-                                                  dval,
-                                                  dptr,
-                                                  dcol,
-                                                  dx,
-                                                  &h_beta,
-                                                  dy_1));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrmv<T>(handle,
+                                                              transA,
+                                                              nrow,
+                                                              ncol,
+                                                              nnz,
+                                                              &h_alpha,
+                                                              descr,
+                                                              dval,
+                                                              dptr,
+                                                              dcol,
+                                                              dx,
+                                                              &h_beta,
+                                                              dy_1));
         }
 
         double gpu_time_used = get_time_us();
@@ -271,19 +270,19 @@ void testing_csrmv(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseXcsrmv(handle,
-                                                  transA,
-                                                  nrow,
-                                                  ncol,
-                                                  nnz,
-                                                  &h_alpha,
-                                                  descr,
-                                                  dval,
-                                                  dptr,
-                                                  dcol,
-                                                  dx,
-                                                  &h_beta,
-                                                  dy_1));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseXcsrmv<T>(handle,
+                                                              transA,
+                                                              nrow,
+                                                              ncol,
+                                                              nnz,
+                                                              &h_alpha,
+                                                              descr,
+                                                              dval,
+                                                              dptr,
+                                                              dcol,
+                                                              dx,
+                                                              &h_beta,
+                                                              dy_1));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;

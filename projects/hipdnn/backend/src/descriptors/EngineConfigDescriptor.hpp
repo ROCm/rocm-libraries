@@ -35,6 +35,10 @@ private:
                              int64_t* elementCount,
                              void* arrayOfElements) const;
 
+    void setKnobChoice(hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements);
+
 public:
     EngineConfigDescriptor();
     static constexpr int64_t INVALID_WORKSPACE_SIZE = -1;

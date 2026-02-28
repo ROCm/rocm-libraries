@@ -34,7 +34,7 @@ Tests:
 - name: csru2csr
   category: quick
   function: csru2csr
-  precision: *single_precision
+  precision: *single_double_precisions_complex_real
   M: [51314, 74835]
   N: [12963, 83756]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
@@ -42,7 +42,7 @@ Tests:
 - name: csru2csr_file
   category: pre_checkin
   function: csru2csr
-  precision: *single_precision
+  precision: *single_double_precisions
   M: 1
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos1,
@@ -52,3 +52,11 @@ Tests:
              nos5,
              nos6,
              nos7]
+
+- name: csru2csr_file
+  category: pre_checkin
+  function: csru2csr
+  precision: *single_double_precisions_complex
+  M: 1
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [Chebyshev4]

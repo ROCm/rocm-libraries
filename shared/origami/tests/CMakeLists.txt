@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 find_package(Catch2 3 QUIET CONFIG)
 if(NOT Catch2_FOUND)
@@ -41,6 +19,7 @@ add_executable(origami-tests)
 target_sources(
     origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/test_gemm.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_origami.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -49,4 +28,44 @@ target_link_libraries(origami-tests PRIVATE roc::origami Catch2::Catch2WithMain)
 
 include(CTest)
 include(Catch)
-catch_discover_tests(origami-tests)
+catch_discover_tests(origami-tests
+    DISCOVERY_MODE PRE_TEST
+)
+
+# Install CTestTestfile.cmake for installed Origami tests
+set(_ctest_content [=[
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# C++ tests
+add_test(origami-tests "../origami-tests")
+set_tests_properties(origami-tests PROPERTIES LABELS "cpp")
+
+]=])
+
+if(ORIGAMI_ENABLE_PYTHON)
+    find_package(Python COMPONENTS Interpreter REQUIRED)
+    
+    set(ORIGAMI_INSTALL_LIBDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+    set(ORIGAMI_INSTALL_PYTHON_BINDIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/python${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}/site-packages")
+    
+    string(APPEND _ctest_content [=[
+# Python tests (using pytest)
+add_test(origami_python_tests python -m pytest tests/ -v)
+
+set_tests_properties(origami_python_tests PROPERTIES
+    LABELS "python"
+    ENVIRONMENT "LD_LIBRARY_PATH=@ORIGAMI_INSTALL_LIBDIR@:$ENV{LD_LIBRARY_PATH};PYTHONPATH=@ORIGAMI_INSTALL_PYTHON_BINDIR@:$ENV{PYTHONPATH}"
+)
+]=])
+endif()
+
+string(CONFIGURE "${_ctest_content}" _ctest_content @ONLY)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install" "${_ctest_content}")
+
+rocm_install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake.install"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
+    COMPONENT tests
+    RENAME CTestTestfile.cmake
+)

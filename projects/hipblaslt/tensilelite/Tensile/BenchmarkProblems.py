@@ -22,12 +22,16 @@
 #
 ################################################################################
 
+import logging
 import os
 import shutil
 import sys
 import time
+import itertools
+from contextlib import contextmanager
 
 from copy import deepcopy
+from joblib import Parallel, delayed
 from pathlib import Path
 from typing import Dict
 
@@ -51,29 +55,43 @@ from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
 from Tensile.Common import HR, print1, print2, IsaInfo, IsaVersion, \
         printExit, printWarning, ensurePath, tqdm, state, \
-        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR
+        BENCHMARK_PROBLEMS_DIR, BENCHMARK_DATA_DIR, ParallelMap2
 from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 
+_timing_logger = logging.getLogger("tensile.timing")
+if not _timing_logger.handlers:
+    _h = logging.StreamHandler(sys.stderr)
+    _h.setFormatter(logging.Formatter("%(message)s"))
+    _timing_logger.addHandler(_h)
+    _timing_logger.setLevel(logging.INFO)
+    _timing_logger.propagate = False
 
-def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler, \
-                            debugConfig: DebugConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
-    """Creates a list with a Solution object for each parameter combination in forkPermutations"""
-    print1("# Enumerating Solutions")
 
-    solutions = []
-    solutionSet = set()
-    for perm in forkPermutations:
-        # Expect only a single ISA in the map for the Tensile context
-        # because the GPU has to be physically present for benchmarking
+@contextmanager
+def timing_context(category_name):
+    """Context manager for timing instrumentation."""
+    if globalParameters.get("TimingInstrumentation", False):
+        # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
+        start = time.time_ns()
+        try:
+            yield
+        finally:
+            elapsed_ms = (time.time_ns() - start) / 1_000_000
+            _timing_logger.info(f"TIMING:{category_name}:{elapsed_ms:.3f}")
+    else:
+        yield
 
+
+def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
+    """Helper function to generate a single solution from a permutation."""
+    try:
         solution = {
             "ProblemType": deepcopy(problemType.state),
             "ISA": next(iter(isaInfoMap.keys()))
         }
         solution.update(constantParams)
         solution.update(perm)
-
 
         mi = solution["MatrixInstruction"]
         wavefrontSize = solution["WavefrontSize"]
@@ -97,11 +115,37 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
                 isaInfoMap
             )
             if solutionObject["Valid"]:
-                if solutionObject not in solutionSet:
-                    solutionSet.add(solutionObject)
-                    solutions.append(solutionObject)
+                return solutionObject
+            elif debugConfig.printSolutionRejectionReason:
+                print1("rejecting solution " + str(solution))
         elif debugConfig.printSolutionRejectionReason:
             print1("rejecting solution " + str(solution))
+    except Exception as e:
+        print(f"Error processing permutation {perm}: {e}")
+    return None
+
+def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler,
+                             debugConfig: DebugConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
+    """Creates a list with a Solution object for each parameter combination in forkPermutations using parallel processing"""
+    print1("# Enumerating Solutions (Parallel)")
+
+    forkIters = zip(
+        forkPermutations,
+        itertools.repeat(problemType),
+        itertools.repeat(constantParams),
+        itertools.repeat(assembler),
+        itertools.repeat(debugConfig),
+        itertools.repeat(isaInfoMap)
+    )
+    raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
+
+    # Filter out None and duplicates
+    solutionSet = set()
+    solutions = []
+    for sol in tqdm(raw_solutions, "Remove duplicate solutions"):
+        if sol is not None and sol not in solutionSet:
+            solutionSet.add(sol)
+            solutions.append(sol)
 
     return solutions
 
@@ -315,9 +359,14 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
                          debugConfig: DebugConfig, deviceId: int,
-                         gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict
+                         gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict,
+                         buildOnly: bool = False,
     ):
-    """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config"""
+    """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config
+
+    Args:
+        buildOnly: If True, generate and build kernels but skip benchmarking.
+    """
     benchmarkTestFails = 0
 
     print1("")
@@ -391,20 +440,21 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
         if not cacheValid:
             # enumerate benchmark permutations and create resulting solution objects
-            forkPermutations = constructForkPermutations(benchmarkStep.forkParams, \
-                    benchmarkStep.paramGroups) if problemSizeGroupConfig["ForkParameters"] else []
-            maxPossibleSolutions = len(forkPermutations)
+            with timing_context("python_solution_generation"):
+                forkPermutations = constructForkPermutations(benchmarkStep.forkParams, \
+                        benchmarkStep.paramGroups) if problemSizeGroupConfig["ForkParameters"] else []
+                maxPossibleSolutions = len(forkPermutations)
 
-            regSolutions = _generateForkedSolutions(benchmarkProcess.problemType, \
-                    benchmarkStep.constantParams, forkPermutations, asmToolchain.assembler, \
-                        debugConfig, isaInfoMap)
-            kcSolutions = _generateCustomKernelSolutions(benchmarkProcess.problemType, \
-                    benchmarkStep.customKernels, benchmarkStep.internalSupportParams, \
-                    not benchmarkStep.customKernelWildcard, asmToolchain.assembler, debugConfig, \
-                        isaInfoMap)
+                regSolutions = _generateForkedSolutions(benchmarkProcess.problemType, \
+                        benchmarkStep.constantParams, forkPermutations, asmToolchain.assembler, \
+                            debugConfig, isaInfoMap)
+                kcSolutions = _generateCustomKernelSolutions(benchmarkProcess.problemType, \
+                        benchmarkStep.customKernels, benchmarkStep.internalSupportParams, \
+                        not benchmarkStep.customKernelWildcard, asmToolchain.assembler, debugConfig, \
+                            isaInfoMap)
 
-            maxPossibleSolutions += len(kcSolutions)
-            solutions = regSolutions + kcSolutions
+                maxPossibleSolutions += len(kcSolutions)
+                solutions = regSolutions + kcSolutions
 
             print1("# Actual Solutions: {} / {} after SolutionStructs\n" \
                 .format(len(solutions), maxPossibleSolutions))
@@ -424,13 +474,14 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 print2("#    ({}:{}) {}".format(0, 0, getSolutionNameMin(solution, debugConfig.splitGSU)))
             print2(HR)
 
-            # write benchmarkFiles
+            # write benchmarkFiles (kernel generation and compilation)
             prevCount = len(solutions)
-            codeObjectFiles = writeBenchmarkFiles(stepBaseDir, solutions, \
-                    benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
-                    benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
-                    benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
+            with timing_context("python_kernel_compilation"):
+                codeObjectFiles = writeBenchmarkFiles(stepBaseDir, solutions, \
+                        benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
+                        benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
+                        benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
+                        sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
             # ^ this mutates solutions
 
             # write cache data
@@ -440,6 +491,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                 "ForkParams": benchmarkStep.forkParams,
                 "ParamGroups": benchmarkStep.paramGroups,
                 "CustomKernels": benchmarkStep.customKernels,
+                "InternalSupportParams": benchmarkStep.internalSupportParams,
                 "CustomKernelWildcard": benchmarkStep.customKernelWildcard
             }
             LibraryIO.writeYAML(cachePath, cacheData)
@@ -464,8 +516,8 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             writeClientConfigIni(True, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
-                                 stepBaseDir, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId, probSolMap=probSolMap)
+                                 sourcePath, codeObjectFiles, resultsFileName,
+                                 outFile, deviceId, gfxName, probSolMap=probSolMap)
 
         # I think the size portion of this yaml could be removed,
         # but for now it's needed, so we update it even in the cache case
@@ -473,7 +525,9 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             benchmarkStep.activationArgs, solutions, cacheValid)
 
         # run benchmarking client
-        if not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
+        if buildOnly:
+            print1("# Build-only mode: skipping benchmark.")
+        elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
             libraryLogicPath = None
             forBenchmark = True
             returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath)
@@ -506,9 +560,14 @@ def main(
     deviceId: int,
     gfxName: str,
     isaInfoMap: Dict[str, IsaInfo],
-    probSolMap: dict
+    probSolMap: dict,
+    buildOnly: bool = False,
 ):
-    """Entry point for the "BenchmarkProblems" section of a Tensile config yaml"""
+    """Entry point for the "BenchmarkProblems" section of a Tensile config yaml
+
+    Args:
+        buildOnly: If True, generate and build kernels but skip benchmarking.
+    """
     getClientExecutablePath()
 
     if config is None:
@@ -560,23 +619,27 @@ def main(
                             deviceId,
                             gfxName,
                             isaInfoMap,
-                            probSolMap
+                            probSolMap,
+                            buildOnly,
                         )
                 totalTestFails += benchmarkErrors
 
-                print("clientExit={} {} for {}" \
-                        .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
-                        globalParameters["ConfigPath"]) )
+                if buildOnly:
+                    print1("# Build-only mode: skipping result collection.")
+                else:
+                    print("clientExit={} {} for {}" \
+                            .format(totalTestFails, "(ERROR)" if totalTestFails else "(PASS)", \
+                            globalParameters["ConfigPath"]) )
 
-                # copy data
-                resultsFileBase = resultsFileBaseFinal
-                resultsFileName = resultsFileBase + ".csv"
-                solutionsFileName = resultsFileBase + ".yaml"
-                granularityFileName = resultsFileBase + "_Granularity.csv"
-                shutil.copy(resultsFileName, newResultsFileName)
-                shutil.copy(solutionsFileName, newSolutionsFileName)
-                if os.path.isfile(granularityFileName):
-                    shutil.copy(granularityFileName, newGranularityFileName)
+                    # copy data
+                    resultsFileBase = resultsFileBaseFinal
+                    resultsFileName = resultsFileBase + ".csv"
+                    solutionsFileName = resultsFileBase + ".yaml"
+                    granularityFileName = resultsFileBase + "_Granularity.csv"
+                    shutil.copy(resultsFileName, newResultsFileName)
+                    shutil.copy(solutionsFileName, newSolutionsFileName)
+                    if os.path.isfile(granularityFileName):
+                        shutil.copy(granularityFileName, newGranularityFileName)
             else:
                 print1("# {}_{:02d} already benchmarked; skipping." \
                         .format(str(problemTypeObj), idx) )

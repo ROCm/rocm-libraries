@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/Utils.hpp>
 
@@ -1459,9 +1436,73 @@ namespace rocRoller
             return getUnsignedInt(evaluate(getSize(unrollDim)));
         }
 
+        int GetNumLDSElements(KernelGraph const& graph, int ldsTag)
+        {
+            auto maybeParentLDS
+                = only(graph.coordinates.getOutputNodeIndices(ldsTag, CT::isEdge<CT::Duplicate>));
+            if(maybeParentLDS)
+                ldsTag = *maybeParentLDS;
+
+            int rv = 0;
+
+            auto flattenedSizes = [&](std::vector<int> const& tags) -> std::vector<uint> {
+                std::vector<uint> sizes;
+                sizes.reserve(tags.size());
+                for(auto tag : tags)
+                {
+                    auto node = graph.coordinates.getNode(tag);
+                    sizes.push_back(getUnsignedInt(evaluate(getSize(node))));
+                }
+                return sizes;
+            };
+
+            auto joinedSizes = [&](std::vector<int> const& tags) -> std::vector<uint> {
+                std::vector<uint> sizes;
+                sizes.reserve(tags.size());
+                for(auto tag : tags)
+                {
+                    auto node   = graph.coordinates.getNode(tag);
+                    auto size   = getUnsignedInt(evaluate(getSize(node)));
+                    auto stride = getUnsignedInt(evaluate(getStride(node)));
+                    sizes.push_back(size * stride);
+                }
+                return sizes;
+            };
+
+            // If LDS is Flattened
+            auto incoming = graph.coordinates.getInputNodeIndices(ldsTag, CT::isEdge<CT::Flatten>)
+                                .to<std::vector>();
+
+            if(not incoming.empty())
+            {
+                rv = product(flattenedSizes(incoming));
+                Log::debug("KernelGraph::getNumLDSElements(ldsTag: {}): "
+                           "Flattened LDS with size: {}",
+                           ldsTag,
+                           rv);
+            }
+
+            // If LDS is Joined
+            incoming = graph.coordinates.getInputNodeIndices(ldsTag, CT::isEdge<CT::Join>)
+                           .to<std::vector>();
+
+            if(not incoming.empty())
+            {
+                auto sizes = joinedSizes(incoming);
+                rv         = *std::max_element(sizes.cbegin(), sizes.cend());
+                Log::debug("KernelGraph::getNumLDSElements(ldsTag: {}): "
+                           "Joined LDS with size: {}",
+                           ldsTag,
+                           rv);
+            }
+
+            AssertFatal(rv > 0, "Unable to determine LDS size");
+            return rv;
+        }
+
         /**
-        * @brief Get coordinates required by the code-generator.
-        */
+         * @brief Get coordinates required by the code-generator.
+         */
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
                                                      bool               isStorePartOfGlobalToLDSOp)

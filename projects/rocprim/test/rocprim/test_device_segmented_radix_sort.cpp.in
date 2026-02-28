@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -61,20 +61,22 @@
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairsUnspecifiedRanges);
 #endif
 
-#if   ROCPRIM_TEST_TYPE_SLICE == 0
+#if ROCPRIM_TEST_TYPE_SLICE == 0
     INSTANTIATE(params<signed char,         double,                             true,   0, 8,   0,      1000,  config_default>)
     INSTANTIATE(params<int,                 short,                              false,  0, 32,  0,      100,   config_semi_custom>)
     INSTANTIATE(params<short,               int,                                true,   0, 16,  0,      10000, config_semi_custom_warp_config>)
     INSTANTIATE(params<long long,           common::custom_type<char, char, true>, false,  0, 64,  4000,   8000,  config_custom>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 1
     INSTANTIATE(params<double,              unsigned int,                       false,  0, 64,  2,      10>)
     INSTANTIATE(params<int8_t,              int8_t,                             true,   0, 8,   2000,   10000>)
     INSTANTIATE(params<int8_t,              int8_t,                             false,  0, 8,   0,      1000>)
     INSTANTIATE(params<uint8_t,             uint8_t,                            true,   0, 8,   2000,   10000>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 2
     INSTANTIATE(params<uint8_t,             uint8_t,                            false,  0, 8,   0,      1000>)
     INSTANTIATE(params<rocprim::half,       rocprim::half,                      true,   0, 16,  2000,   10000>)
     INSTANTIATE(params<rocprim::half,       rocprim::half,                      false,  0, 16,  0,      1000>)
     INSTANTIATE(params<rocprim::bfloat16,   rocprim::bfloat16,                  true,   0, 16,  2000,   10000>)
-#elif ROCPRIM_TEST_TYPE_SLICE == 1
+#elif ROCPRIM_TEST_TYPE_SLICE == 3
     INSTANTIATE(params<rocprim::bfloat16,   rocprim::bfloat16,                  false, 0, 16, 0, 1000>)
     INSTANTIATE(params<float,               int,                                false, 0, 32, 0, 1000>)
     INSTANTIATE(params<test_utils::custom_float_type, int,                      true,  0, 32, 0, 8192>)
@@ -82,14 +84,17 @@
     // start_bit and end_bit
 
     INSTANTIATE(params<uint8_t,             uint8_t,                                true,   2, 5,   0,      10000>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 4
     INSTANTIATE(params<uint8_t,             uint8_t,                                false,  2, 6,   1000,   10000>)
     INSTANTIATE(params<unsigned short,      rocprim::half,                          true,   4, 10,  0,      10000>)
     INSTANTIATE(params<unsigned short,      rocprim::bfloat16,                      true,   4, 10,  0,      10000>)
     INSTANTIATE(params<unsigned char,       int,                                    true,   2, 5,   0,      100>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 5
     INSTANTIATE(params<unsigned short,      int,                                    true,   4, 10,  0,      10000>)
     INSTANTIATE(params<unsigned int,        short,                                  false,  3, 22,  1000,   10000>)
     INSTANTIATE(params<unsigned int,        double,                                 true,   4, 21,  100,    100000>)
     INSTANTIATE(params<unsigned int,        short,                                  true,   0, 15,  100000, 200000>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 6
     INSTANTIATE(params<unsigned long long,  char,                                   false,  8, 20,  0,      1000>)
     INSTANTIATE(params<unsigned short,      common::custom_type<double, double, true>,   false,  8, 11,  50,     200>)
 #endif

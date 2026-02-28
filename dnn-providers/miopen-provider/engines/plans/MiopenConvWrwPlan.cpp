@@ -1,24 +1,22 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <array>
-
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvWrwPlan.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 ConvWrwParams::ConvWrwParams(
     const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
+        tensorMap,
+    bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
     , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
@@ -35,7 +33,8 @@ ConvWrwParams::ConvWrwParams(
         = hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
     const auto groupCount = hipdnn_data_sdk::utilities::calculateGroupCount(inputDims, weightDims);
 
-    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
+    _conv = MiopenConvDescriptor(
+        _spatialDimCount, attributes, static_cast<int>(groupCount), deterministicEnabled);
 
     _tensorsValid = (!attrX.virtual_() && !attrDW.virtual_() && !attrDY.virtual_());
 }
@@ -65,72 +64,62 @@ bool ConvWrwParams::validTensors() const
     return _tensorsValid;
 }
 
-ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&& params)
+ConvWrwPlan::ConvWrwPlan(const HipdnnMiopenHandle& handle,
+                         ConvWrwParams&& params,
+                         const HipdnnMiopenSettings& executionSettings)
     : _params(std::move(params))
+    , _executionSettings(executionSettings)
 {
-    // MIOpen Find 2.0 API
-    miopenProblem_t problem;
-    THROW_ON_MIOPEN_FAILURE(miopenCreateConvProblem(
-        &problem, _params.conv().convDescriptor(), miopenProblemDirectionBackwardWeights));
-    hipdnn_data_sdk::utilities::ScopedResource problemRes(
-        problem, [](miopenProblem_t p) { std::ignore = miopenDestroyProblem(p); });
-
-    THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
-        problem, miopenTensorConvolutionX, _params.x().tensorDescriptor()));
-    THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
-        problem, miopenTensorConvolutionW, _params.dw().tensorDescriptor()));
-    THROW_ON_MIOPEN_FAILURE(miopenSetProblemTensorDescriptor(
-        problem, miopenTensorConvolutionY, _params.dy().tensorDescriptor()));
-
-    size_t numSolutions;
-    miopenSolution_t solution = nullptr;
-    // Requesting only the best solution
+    // Validate that there are solutions available for this configuration.
+    size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
-        miopenFindSolutions(handle.miopenHandle, problem, nullptr, &solution, &numSolutions, 1));
+        miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+                                                         _params.dy().tensorDescriptor(),
+                                                         _params.x().tensorDescriptor(),
+                                                         _params.conv().convDescriptor(),
+                                                         _params.dw().tensorDescriptor(),
+                                                         &solutionCount));
 
-    if(solution == nullptr || numSolutions != 1)
+    if(solutionCount == 0)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       "miopenFindSolutions returned no solutions");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "miopenConvolutionBackwardWeightsGetSolutionCount returned no solutions");
     }
 
-    _solution = hipdnn_data_sdk::utilities::ScopedResource<miopenSolution_t>(
-        solution, [](miopenSolution_t s) {
-            auto status = miopenDestroySolution(s);
-            if(status != miopenStatusSuccess)
-            {
-                HIPDNN_LOG_ERROR("miopenDestroySolution failed in ConvWrwPlan destructor");
-            }
-        });
-
-    THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &_workspaceSize));
+    // Determine initial workspace size
+    if(_executionSettings.workspaceSizeLimit().has_value())
+    {
+        _workspaceSize = _executionSettings.workspaceSizeLimit().value();
+    }
+    else
+    {
+        THROW_ON_MIOPEN_FAILURE(
+            miopenConvolutionBackwardWeightsGetWorkSpaceSize(handle.miopenHandle,
+                                                             _params.dy().tensorDescriptor(),
+                                                             _params.x().tensorDescriptor(),
+                                                             _params.conv().convDescriptor(),
+                                                             _params.dw().tensorDescriptor(),
+                                                             &_workspaceSize));
+    }
 }
 
-size_t ConvWrwPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const
+size_t ConvWrwPlan::getWorkspaceSize([[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     return _workspaceSize;
 }
 
-void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
+void ConvWrwPlan::execute(const HipdnnMiopenHandle& handle,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           uint32_t numDeviceBuffers,
                           void* workspace) const
 {
-    auto xDesc = _params.x().tensorDescriptor();
-    auto dwDesc = _params.dw().tensorDescriptor();
-    auto dyDesc = _params.dy().tensorDescriptor();
-
     auto xBuffer
         = miopen_utils::findDeviceBuffer(_params.x().uid(), deviceBuffers, numDeviceBuffers);
     auto wBuffer
         = miopen_utils::findDeviceBuffer(_params.dw().uid(), deviceBuffers, numDeviceBuffers);
     auto yBuffer
         = miopen_utils::findDeviceBuffer(_params.dy().uid(), deviceBuffers, numDeviceBuffers);
-
-    std::array<miopenTensorArgument_t, 3> tensors
-        = {miopenTensorArgument_t{miopenTensorConvolutionX, &xDesc, xBuffer.ptr},
-           miopenTensorArgument_t{miopenTensorConvolutionW, &dwDesc, wBuffer.ptr},
-           miopenTensorArgument_t{miopenTensorConvolutionY, &dyDesc, yBuffer.ptr}};
 
     size_t workspaceSize = 0;
     if(workspace != nullptr)
@@ -139,12 +128,91 @@ void ConvWrwPlan::execute(const HipdnnEnginePluginHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    THROW_ON_MIOPEN_FAILURE(miopenRunSolution(handle.miopenHandle,
-                                              _solution.get(),
-                                              tensors.size(),
-                                              tensors.data(),
-                                              workspace,
-                                              workspaceSize));
+    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+
+    // Algorithm selection is performed on first execute() call rather than in constructor
+    // because miopenFindConvolutionBackwardWeightsAlgorithm requires device memory buffers.
+    // These buffers are only available during execute(), not during plan construction.
+    // The selected algorithm is cached to avoid redundant find calls on subsequent executions.
+    {
+        std::lock_guard<std::mutex> lock(_algorithmMutex);
+
+        if(!_algorithm.has_value())
+        {
+            HIPDNN_PLUGIN_LOG_INFO(
+                "Convolution Wrw: Performing algorithm selection (first execution)");
+
+            bool traceEnabled = HIPDNN_PLUGIN_LOG_IS_TRACE_ENABLED();
+            int requestCount = traceEnabled ? 10 : 1;
+
+            std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
+            int returnedAlgoCount;
+
+            THROW_ON_MIOPEN_FAILURE(
+                miopenFindConvolutionBackwardWeightsAlgorithm(handle.miopenHandle,
+                                                              _params.dy().tensorDescriptor(),
+                                                              yBuffer.ptr,
+                                                              _params.x().tensorDescriptor(),
+                                                              xBuffer.ptr,
+                                                              _params.conv().convDescriptor(),
+                                                              _params.dw().tensorDescriptor(),
+                                                              wBuffer.ptr,
+                                                              requestCount,
+                                                              &returnedAlgoCount,
+                                                              perfResults.data(),
+                                                              workspace,
+                                                              workspaceSize,
+                                                              false));
+
+            if(returnedAlgoCount <= 0)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                    "miopenFindConvolutionBackwardWeightsAlgorithm returned no algorithms");
+            }
+
+            if(traceEnabled)
+            {
+                HIPDNN_PLUGIN_LOG_TRACE("Convolution Wrw: Found " << returnedAlgoCount
+                                                                  << " algorithms");
+                for(size_t i = 0; i < static_cast<size_t>(returnedAlgoCount); ++i)
+                {
+                    HIPDNN_PLUGIN_LOG_TRACE("  Algorithm "
+                                            << i << ": algorithm="
+                                            << static_cast<int>(perfResults[i].bwd_weights_algo)
+                                            << ", time=" << perfResults[i].time
+                                            << ", workspace_size=" << perfResults[i].memory);
+                }
+            }
+
+            HIPDNN_PLUGIN_LOG_INFO("Convolution Wrw: Selected algorithm="
+                                   << static_cast<int>(perfResults[0].bwd_weights_algo)
+                                   << ", time=" << perfResults[0].time
+                                   << ", workspace_size=" << perfResults[0].memory);
+
+            _algorithm = perfResults[0].bwd_weights_algo;
+            // Update workspace size with the actual requirement from the selected algorithm.
+            // This may differ from the initial estimate.
+            _workspaceSize = perfResults[0].memory;
+        }
+    }
+
+    float alpha = 1.0f;
+    float beta = 0.0f;
+
+    THROW_ON_MIOPEN_FAILURE(miopenConvolutionBackwardWeights(handle.miopenHandle,
+                                                             &alpha,
+                                                             _params.dy().tensorDescriptor(),
+                                                             yBuffer.ptr,
+                                                             _params.x().tensorDescriptor(),
+                                                             xBuffer.ptr,
+                                                             _params.conv().convDescriptor(),
+                                                             _algorithm.value(),
+                                                             &beta,
+                                                             _params.dw().tensorDescriptor(),
+                                                             wBuffer.ptr,
+                                                             workspace,
+                                                             workspaceSize));
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

@@ -10,6 +10,8 @@
 #include <stdint.h>
 #include <utility>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 namespace ck_tile {
 
 namespace detail {
@@ -114,6 +116,18 @@ struct identity
 {
     template <typename T>
     CK_TILE_HOST_DEVICE constexpr T&& operator()(T&& arg) const noexcept
+    {
+        return std::forward<T>(arg);
+    }
+};
+
+// Similar to identity, but takes an additional index parameter as the first argument.
+// The index is ignored and only the second argument (value) is forwarded.
+// Useful for indexed element-wise operations where the functor signature requires an index.
+struct idx_identity
+{
+    template <typename I, typename T>
+    CK_TILE_HOST_DEVICE constexpr T&& operator()(I&& /*idx*/, T&& arg) const noexcept
     {
         return std::forward<T>(arg);
     }
@@ -258,3 +272,4 @@ constexpr auto conditional_expr(X&& x, Y&& y)
 }
 
 } // namespace ck_tile
+#pragma clang diagnostic pop

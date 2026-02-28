@@ -11,7 +11,7 @@
 #include <hipdnn_data_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
-namespace hipdnn_plugin_sdk
+namespace hipdnn_data_sdk::flatbuffer_utilities
 {
 
 class IEngineConfig
@@ -28,11 +28,10 @@ public:
         knobSettingWrappers() const
         = 0;
     virtual const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&
-        getKnobSettingById(int64_t knobId) const
-        = 0;
-    virtual const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&
         getKnobSettingByName(const std::string& knobName) const
         = 0;
+
+    virtual bool hasKnobSetting(const std::string& knobName) const = 0;
 };
 
 class EngineConfigWrapper : public IEngineConfig
@@ -91,25 +90,25 @@ public:
     }
 
     const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&
-        getKnobSettingById(int64_t knobId) const override
+        getKnobSettingByName(const std::string& knobName) const override
     {
         throwIfNotValid();
         populateKnobSettingWrappers();
 
-        auto it = _knobSettingIdToIndex.find(knobId);
-        if(it == _knobSettingIdToIndex.end())
+        auto it = _knobSettingNameToIndex.find(knobName);
+        if(it == _knobSettingNameToIndex.end())
         {
-            throw std::out_of_range("KnobSetting with id " + std::to_string(knobId) + " not found");
+            throw std::out_of_range("KnobSetting with name '" + knobName + "' not found");
         }
 
         return *_knobSettingWrappers[it->second];
     }
 
-    const hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting&
-        getKnobSettingByName(const std::string& knobName) const override
+    bool hasKnobSetting(const std::string& knobName) const override
     {
-        auto knobId = static_cast<int64_t>(hipdnn_data_sdk::utilities::fnv1aHash(knobName));
-        return getKnobSettingById(knobId);
+        throwIfNotValid();
+        populateKnobSettingWrappers();
+        return _knobSettingNameToIndex.find(knobName) != _knobSettingNameToIndex.end();
     }
 
 private:
@@ -138,8 +137,8 @@ private:
                 auto wrapper
                     = std::make_unique<hipdnn_data_sdk::flatbuffer_utilities::KnobSettingWrapper>(
                         knob);
-                auto knobId = wrapper->knobId();
-                _knobSettingIdToIndex[knobId] = i;
+                auto knobName = wrapper->knobId();
+                _knobSettingNameToIndex[knobName] = i;
                 _knobSettingWrappers.push_back(std::move(wrapper));
             }
         }
@@ -153,8 +152,17 @@ private:
     // Lazily populated cache of knob setting wrappers
     mutable std::vector<std::unique_ptr<hipdnn_data_sdk::flatbuffer_utilities::IKnobSetting>>
         _knobSettingWrappers;
-    mutable std::unordered_map<int64_t, size_t> _knobSettingIdToIndex;
+    mutable std::unordered_map<std::string, size_t> _knobSettingNameToIndex;
     mutable bool _knobSettingsPopulated = false;
 };
 
-}
+} // namespace hipdnn_data_sdk::flatbuffer_utilities
+
+// Backward compatibility aliases - DEPRECATED
+// These aliases are deprecated and will be removed in a future release.
+// Use hipdnn_data_sdk::flatbuffer_utilities::<TypeName> instead.
+namespace hipdnn_plugin_sdk
+{
+using IEngineConfig = hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig;
+using EngineConfigWrapper = hipdnn_data_sdk::flatbuffer_utilities::EngineConfigWrapper;
+} // namespace hipdnn_plugin_sdk

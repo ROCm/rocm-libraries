@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <memory>
 
@@ -366,10 +343,10 @@ namespace rocRoller
             else
                 AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4, ShowValue(numBytes));
             auto m0 = m_context->getM0();
-            AssertFatal(info.ldsWriteStride == m_workgroupSizeTotal * numBytes,
-                        ShowValue(info.ldsWriteStride),
-                        ShowValue(m_workgroupSizeTotal),
-                        ShowValue(numBytes));
+
+            // When padding, the ldsWriteStride might be larger than m_workgroupSizeTotal * numBytes
+            AssertFatal(info.ldsWriteStride >= m_workgroupSizeTotal * numBytes,
+                        ShowValue(info.ldsWriteStride));
 
             if(setM0)
             {
@@ -1020,6 +997,8 @@ namespace rocRoller
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
             auto varType         = load.varType;
 
+            auto packing = DataTypeInfo::Get(varType).packing;
+
             rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::"
                                                "loadMacroTileDirect2LDS: OP {} LDS {} MacroTile {}",
                                                tag,
@@ -1028,13 +1007,13 @@ namespace rocRoller
             co_yield Instruction::Comment(concatenate(
                 "GEN: loadMacroTileDirect2LDS OP ", tag, " LDS ", ldsTag, " MacroTile ", tileTag));
 
-            auto numElements = product(tile.subTileSizes) * m_workgroupSizeTotal;
-
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
+                auto numElements = GetNumLDSElements(*m_graph, ldsTag) / packing;
+
                 ldsAllocation = Register::Value::AllocateLDS(m_context, varType, numElements);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
@@ -1052,7 +1031,6 @@ namespace rocRoller
             auto const m           = getUnsignedInt(evaluate(elemX.size));
             auto       n           = getUnsignedInt(evaluate(elemY.size));
 
-            auto packing = DataTypeInfo::Get(load.varType).packing;
             AssertFatal(n % packing == 0,
                         ShowValue(m),
                         ShowValue(n),
@@ -1239,12 +1217,14 @@ namespace rocRoller
                     co_yield loadMacroTileWAVECIACCUM(tag, load, coords);
                     break;
                 default:
-                    Throw<FatalError>("Layout type not supported yet for LoadTiled.");
+                    Throw<FatalError>(ShowValue(macTile.layoutType),
+                                      " Layout type not supported yet for LoadTiled.");
                 }
             }
             break;
             default:
-                Throw<FatalError>("Tile affinity type not supported yet for LoadTiled.");
+                Throw<FatalError>(ShowValue(macTile.memoryType),
+                                  " Tile affinity type not supported yet for LoadTiled.");
             }
         }
 
@@ -1313,14 +1293,14 @@ namespace rocRoller
             auto vgpr    = m_context->registerTagManager()->getRegister(tileTag);
             auto varType = store.varType;
 
-            auto numElements  = product(tile.subTileSizes) * m_workgroupSizeTotal;
             auto paddingBytes = tile.paddingBytes();
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation = Register::Value::AllocateLDS(
+                auto numElements = GetNumLDSElements(*m_graph, ldsTag);
+                ldsAllocation    = Register::Value::AllocateLDS(
                     m_context, varType, numElements / packing, /*alignment*/ 4, paddingBytes);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
@@ -1397,7 +1377,6 @@ namespace rocRoller
         {
             auto [ldsTag, lds]           = m_graph->getDimension<LDS>(tag);
             auto [macTileTag, macTile]   = m_graph->getDimension<MacroTile>(tag);
-            auto macrotileNumElements    = product(macTile.sizes);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
             uint waveTileNumElements     = waveTile.sizes[0] * waveTile.sizes[1];
             auto varType                 = store.varType;
@@ -1425,8 +1404,10 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation = Register::Value::AllocateLDS(
-                    m_context, varType, macrotileNumElements / packing);
+                auto numElements = GetNumLDSElements(*m_graph, ldsTag);
+
+                ldsAllocation
+                    = Register::Value::AllocateLDS(m_context, varType, numElements / packing);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
             else
