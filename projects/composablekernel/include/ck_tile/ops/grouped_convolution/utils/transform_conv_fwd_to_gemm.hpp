@@ -907,8 +907,7 @@ struct TransformConvFwdToGemm
                 // IsSupported ensures C == 1 to allow reading on G dimension
                 const auto in_n_hi_wi_groups_c_desc = make_naive_tensor_descriptor(
                     make_tuple(N_, Hi_, Wi_, NumGroupsToMerge),
-                    make_tuple(
-                        NStrideTensorA_, HiStride_, WiStride_, GStrideTensorA_),
+                    make_tuple(NStrideTensorA_, HiStride_, WiStride_, GStrideTensorA_),
                     number<VectorSizeA>{},
                     I1);
 
@@ -918,10 +917,8 @@ struct TransformConvFwdToGemm
                                make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
                                make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
                                make_pass_through_transform(NumGroupsToMerge)),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}));
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}));
 
                 const auto in_n_y_ho_x_wo_groups_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_groups_c_desc,
@@ -931,12 +928,8 @@ struct TransformConvFwdToGemm
                                make_embed_transform(make_tuple(X_, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
                                make_pass_through_transform(NumGroupsToMerge)),
-                    make_tuple(
-                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
-                    make_tuple(sequence<0>{},
-                               sequence<1, 2>{},
-                               sequence<3, 4>{},
-                               sequence<5>{}));
+                    make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}),
+                    make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3, 4>{}, sequence<5>{}));
 
                 return transform_tensor_descriptor(
                     in_n_y_ho_x_wo_groups_c_desc,
@@ -1212,11 +1205,7 @@ struct TransformConvFwdToGemm
                 // IsSupported ensures C == 1 to allow reading on G dimension
                 const auto in_n_di_hi_wi_c_desc = make_naive_tensor_descriptor(
                     make_tuple(N_, Di_, Hi_, Wi_, NumGroupsToMerge),
-                    make_tuple(NStrideTensorA_,
-                               DiStride_,
-                               HiStride_,
-                               WiStride_,
-                               GStrideTensorA_),
+                    make_tuple(NStrideTensorA_, DiStride_, HiStride_, WiStride_, GStrideTensorA_),
                     number<VectorSizeA>{},
                     I1);
 
@@ -1227,16 +1216,10 @@ struct TransformConvFwdToGemm
                                make_pad_transform(Hi_, InLeftPadH_, InRightPadH_),
                                make_pad_transform(Wi_, InLeftPadW_, InRightPadW_),
                                make_pass_through_transform(NumGroupsToMerge)),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{}),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{}));
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}));
 
                 const auto in_n_z_do_y_ho_x_wo_c_desc = transform_tensor_descriptor(
                     in_n_hip_wip_c_desc,
@@ -1248,11 +1231,8 @@ struct TransformConvFwdToGemm
                                make_embed_transform(make_tuple(X_, Wo_),
                                                     make_tuple(ConvDilationW_, ConvStrideW_)),
                                make_pass_through_transform(NumGroupsToMerge)),
-                    make_tuple(sequence<0>{},
-                               sequence<1>{},
-                               sequence<2>{},
-                               sequence<3>{},
-                               sequence<4>{}),
+                    make_tuple(
+                        sequence<0>{}, sequence<1>{}, sequence<2>{}, sequence<3>{}, sequence<4>{}),
                     make_tuple(sequence<0>{},
                                sequence<1, 2>{},
                                sequence<3, 4>{},

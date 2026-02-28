@@ -746,20 +746,23 @@ struct GroupedConvolutionForwardKernel
                      std::is_same_v<InLayout, ctc::NDHWGC>)
         {
             // Check access for A tensor
-            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 && GroupedConvTraitsType_::NumGroupsToMerge == 1)
+            if(ConvC % GroupedConvTraitsType_::VectorSizeA != 0 &&
+               GroupedConvTraitsType_::NumGroupsToMerge == 1)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
                     CK_TILE_ERROR("Conv C is not a multiple of vector load size for input image!");
                 }
                 return false;
-            } 
-            else if(GroupedConvTraitsType_::NumGroupsToMerge > 1) {
-                if(ConvC != 1) 
+            }
+            else if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
+            {
+                if(ConvC != 1)
                 {
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
-                        CK_TILE_ERROR("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow vector reads on group dimension!");
+                        CK_TILE_ERROR("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
+                                      "vector reads on group dimension!");
                     }
                     return false;
                 }
@@ -819,16 +822,19 @@ struct GroupedConvolutionForwardKernel
                 if(GroupedConvTraitsType_::NumGroupsToMerge > 1)
                 {
                     const index_t ConvG = kargs.wei_g_k_c_xs_lengths[number<0>{}];
-                    if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0 || ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
+                    if(ConvG % GroupedConvTraitsType_::NumGroupsToMerge != 0 ||
+                       ConvG % GroupedConvTraitsType_::VectorSizeC != 0)
                     {
                         if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                         {
-                            CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge to allow writing over G dimension");
+                            CK_TILE_ERROR("ConvG must be a multiple of NumGroupsToMerge to allow "
+                                          "writing over G dimension");
                         }
                         return false;
                     }
                 }
-                else {
+                else
+                {
                     if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                     {
                         CK_TILE_ERROR(
@@ -849,12 +855,14 @@ struct GroupedConvolutionForwardKernel
 
         if constexpr(GroupedConvTraitsType_::NumGroupsToMerge > 1)
         {
-            // currently group merging works only for C == 1 due to tensor transformation limitations
-            if(ConvC != 1) 
+            // currently group merging works only for C == 1 due to tensor transformation
+            // limitations
+            if(ConvC != 1)
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow vector reads on group dimension!");
+                    CK_TILE_ERROR("ConvC must be equal to 1 for NumGroupsToMerge > 1 to allow "
+                                  "vector reads on group dimension!");
                 }
                 return false;
             }
