@@ -56,6 +56,79 @@ ninja
 | **Device Memory Utility** | Surface<type> | MigratableMemory<type> |
 | **Device Memory Access** | Surface<type>::devPtr | MigratableMemory<type>::deviceData() |
 
+### Tensor Dimensions and Layouts
+
+Tensor dimension ordering in hipDNN is **operation-specific**, following the same conventions as
+PyTorch and cuDNN. The **memory layout** (channel-first vs channel-last) is always controlled by
+strides, not by the order of the dimension vector. Use the `TensorLayout` constants and
+`generateStrides()` utility to compute strides for common layouts.
+
+#### Convolution
+
+| Tensor | Shape (4D) | Shape (5D) | Description |
+|--------|-----------|------------|-------------|
+| Input (x) | `(N, C, H, W)` | `(N, C, D, H, W)` | Batch, channels, spatial dims |
+| Weights (w) | `(K, C/groups, R, S)` | `(K, C/groups, T, R, S)` | Output channels, input channels per group, kernel spatial dims |
+| Output (y) | `(N, K, H_out, W_out)` | `(N, K, D_out, H_out, W_out)` | Batch, output channels, output spatial dims |
+
+```cpp
+// Convolution example: dims always follow (N, C, spatial...) ordering
+auto x = graph.tensor(TensorAttributes()
+             .set_dim({1, 64, 28, 28})   // N=1, C=64, H=28, W=28
+             .set_stride(generateStrides({1, 64, 28, 28}, TensorLayout::NHWC.strideOrder)));
+
+auto w = graph.tensor(TensorAttributes()
+             .set_dim({128, 64, 3, 3})   // K=128, C=64, R=3, S=3
+             .set_stride(generateStrides({128, 64, 3, 3}, TensorLayout::NHWC.strideOrder)));
+```
+
+#### Batch Normalization
+
+| Tensor | Shape | Description |
+|--------|-------|-------------|
+| Input (x) | `(N, C, H, W)` or `(N, C, D, H, W)` | Same ordering as convolution |
+| Scale, Bias, Mean, Variance | `(1, C, 1, 1)` or `(1, C, 1, 1, 1)` | Per-channel parameters |
+| Output (y) | Same as input | Shape preserved |
+
+Statistics are computed per-channel over the batch and spatial dimensions.
+
+#### Layer Normalization
+
+| Tensor | Shape | Description |
+|--------|-------|-------------|
+| Input (x) | `(N, ...)` | Batch first, then feature dims |
+| Scale, Bias | `(1, C, H, W)` | Batch dim = 1, feature dims match input |
+| Mean, Inv Variance | Stats dims | Batch dims from input, normalized dims = 1 |
+
+Normalization is performed over the feature dimensions (all dims where scale > 1).
+
+#### Matrix Multiplication
+
+| Tensor | Shape | Description |
+|--------|-------|-------------|
+| A | `(...batch, M, K)` | Leading batch dims, last two are matrix dims |
+| B | `(...batch, K, N)` | K must match A's last dim |
+| C (output) | `(...batch, M, N)` | Batch dims are broadcast |
+
+Batch dimensions support broadcasting (dims must be equal or divisible).
+
+```cpp
+// Matmul example: A(batch, M, K) @ B(batch, K, N) -> C(batch, M, N)
+auto a = graph.tensor(TensorAttributes()
+             .set_dim({4, 128, 64})    // batch=4, M=128, K=64
+             .set_stride({128*64, 64, 1}));
+
+auto b = graph.tensor(TensorAttributes()
+             .set_dim({4, 64, 256})    // batch=4, K=64, N=256
+             .set_stride({64*256, 256, 1}));
+```
+
+#### Pointwise Operations
+
+Pointwise operations (ReLU, Sigmoid, Add, Mul, etc.) are **dimension-agnostic** — they accept
+tensors of any shape. For binary and ternary operations, inputs are broadcast using NumPy-style
+broadcasting rules (dimensions compared right-to-left; compatible if equal or 1).
+
 ## Common Pitfalls
 
 ### 1. CMAKE_POSITION_INDEPENDENT_CODE
