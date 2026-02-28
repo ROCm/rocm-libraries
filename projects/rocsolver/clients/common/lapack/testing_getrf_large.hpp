@@ -269,9 +269,9 @@ void getrf_large_getError(const rocblas_handle handle,
 
     // Compute Ax
     T alpha = T(1), beta = T(0);
-    CHECK_ROCBLAS_ALLOCATION(rocblas_gemm(STRIDED, handle, rocblas_operation_none,
-                                          rocblas_operation_none, n, nrhs, n, &alpha, dA, lda, stA,
-                                          dX, ldb, stB, &beta, dB, ldb, stB, bc));
+    CHECK_ROCBLAS_ALLOCATION(rocsolver_gemm(STRIDED, handle, rocblas_operation_none,
+                                            rocblas_operation_none, n, nrhs, n, &alpha, dA, lda,
+                                            stA, dX, ldb, stB, &beta, dB, ldb, stB, bc));
     CHECK_HIP_ERROR(hBRes.transfer_from(dB));
 
     double err;

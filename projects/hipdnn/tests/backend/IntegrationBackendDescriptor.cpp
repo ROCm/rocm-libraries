@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "hipdnn_backend.h"
+#include <array>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>

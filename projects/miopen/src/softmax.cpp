@@ -75,9 +75,8 @@ extern "C" miopenStatus_t miopenGetSoftmaxDescriptor(const miopenSoftmaxDescript
 
 std::ostream& operator<<(std::ostream& stream, const SoftmaxDescriptor& x)
 {
-    stream << "softmax,"
-           << "alpha" << x.GetAlpha() << ",beta" << x.GetBeta() << ",algorithm" << x.GetAlgorithm()
-           << ",mode" << x.GetMode() << ",";
+    stream << "softmax," << "alpha" << x.GetAlpha() << ",beta" << x.GetBeta() << ",algorithm"
+           << x.GetAlgorithm() << ",mode" << x.GetMode() << ",";
 
     return stream;
 }
