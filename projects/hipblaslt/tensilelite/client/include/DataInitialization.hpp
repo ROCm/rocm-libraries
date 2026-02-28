@@ -847,10 +847,7 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-initialize MX FP4 scale data with preSwizzle now that the solution is known
-                // (earlier prepareGPUInputs() skipped it since m_currentSolution was null).
-                // Only applies when the kernel has scaling enabled (useScaleAB non-empty);
-                // if scaling is disabled in Tensile, skip to avoid unnecessary re-upload.
+                // Re-init MX scale with preSwizzle now that solution (useScaleAB) is available
                 if(m_currentSolution != nullptr
                    && !m_currentSolution->problemType.useScaleAB.empty()
                    && m_currentGemmProblem != nullptr
@@ -1083,7 +1080,6 @@ namespace TensileLite
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
-            /// Enable MX FP4 scale pre-swizzle (default false, --enable-mx-preswizzle flag)
             bool m_enableMXPreSwizzle = false;
         };
 

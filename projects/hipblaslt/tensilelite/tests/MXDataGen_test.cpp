@@ -114,10 +114,6 @@ INSTANTIATE_TEST_SUITE_P(
 //   preSwizzle = {swizzleTileMN=32, tileK=8, subTileK=MiK/mxBlock}
 //   preTile    = {tileK=8, swizzleTileMN=32}
 // swizzleTileMN=32 is fixed (2 SIMDs * 16 lanes); subTileK=4 for MiK=128, mxBlock=32.
-//
-// Test size constraints for preSwizzle {32,8,4} + preTile {8,32}:
-//   rows % 256 == 0  (scaleRows = rows/mxBlock must be divisible by tileK=8)
-//   cols % 32  == 0  (scaleCols must be divisible by swizzleTileMN=32)
 // ============================================================================
 
 // Params: {rows, cols, mxBlock, isTranspose, isMatrixA}
@@ -126,10 +122,7 @@ class MXPreSwizzleTest
 {
 };
 
-/**
- * @brief Verify generateMXInput with preSwizzle produces scale data that is a
- * non-trivial permutation of the unswizzled output (same bytes, different order).
- */
+/** @brief Verify preSwizzle produces a non-trivial permutation of scale data. */
 TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
 {
     auto [rows, cols, mxBlock, isTranspose, isMatrixA] = GetParam();
@@ -191,8 +184,9 @@ INSTANTIATE_TEST_SUITE_P(
     MXPreSwizzleTest,
     ::testing::Values(
         // rows, cols, mxBlock, isTranspose, isMatrixA
-        // rows % 256 == 0, cols % 32 == 0 required for preSwizzle {32,8,4}+preTile{8,32}
-        std::make_tuple(256u,  256u,  32, true,  true),   // scale A transposed
+        // Test size constraints for preSwizzle {32,8,4} + preTile {8,32}:
+        //   rows % 256 == 0  (scaleRows = rows/mxBlock must be divisible by tileK=8)
+        //   cols % 32  == 0  (scaleCols must be divisible by swizzleTileMN=32)        std::make_tuple(256u,  256u,  32, true,  true),   // scale A transposed
         std::make_tuple(256u,  256u,  32, false, false),  // scale B non-transposed
         std::make_tuple(512u,  256u,  32, true,  true),   // larger scale A
         std::make_tuple(256u,  512u,  32, false, false),  // larger scale B
