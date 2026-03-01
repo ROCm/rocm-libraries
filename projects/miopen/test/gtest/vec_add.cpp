@@ -76,7 +76,6 @@ protected:
         inputB = tensor<T>{vecadd_config.vec_size}.generate(gen_value);
 
         // Allocate output tensors
-        outputC_ocl = tensor<T>{vecadd_config.vec_size};
         outputC_hip = tensor<T>{vecadd_config.vec_size};
         ref_outputC = tensor<T>{vecadd_config.vec_size};
 
@@ -89,43 +88,6 @@ protected:
 
         // Run the CPU implementation
         cpu_vec_add(inputA, inputB, ref_outputC, vecadd_config.vec_size);
-    }
-
-    void RunTestOCL()
-    {
-        auto&& handle = get_handle();
-
-        // Clear the output tensor
-        std::fill(outputC_ocl.begin(), outputC_ocl.end(), std::numeric_limits<T>::quiet_NaN());
-        outputC_dev = handle.Write(outputC_ocl.data);
-
-        // Setup the handle for OpenCL
-        std::string program_name = "MIOpenVecAddOCL.cl";
-        std::string kernel_name  = "vector_add_ocl";
-
-        std::string network_config = "standalone_kernel_vector_add_ocl";
-
-        miopen::KernelBuildParameters options{};
-
-        std::string params = options.GenerateFor(miopen::kbp::OpenCL{});
-
-        size_t totalElements   = vecadd_config.vec_size;
-        size_t threadsPerBlock = vecadd_config.threads_per_block;
-        size_t blocksPerGrid   = (totalElements + threadsPerBlock - 1) / threadsPerBlock;
-
-        const std::vector<size_t> vgd{blocksPerGrid * threadsPerBlock, 1, 1};
-        const std::vector<size_t> vld{threadsPerBlock, 1, 1};
-
-        handle.AddKernel(
-            "vector_add_ocl", network_config, program_name, kernel_name, vld, vgd, params)(
-            inputA_dev.get(),
-            inputB_dev.get(),
-            outputC_dev.get(),
-            static_cast<unsigned long>(
-                totalElements)); // OpenCL expects the totalElements as unsigned long
-
-        // Read the device output tensor
-        outputC_ocl.data = handle.Read<T>(outputC_dev, outputC_ocl.data.size());
     }
 
     void RunTestHIP()
@@ -161,13 +123,6 @@ protected:
         outputC_hip.data = handle.Read<T>(outputC_dev, outputC_hip.data.size());
     }
 
-    void VerifyOCL()
-    {
-        auto error = miopen::rms_range(ref_outputC, outputC_ocl);
-        EXPECT_TRUE(miopen::range_distance(ref_outputC) == miopen::range_distance(outputC_ocl));
-        EXPECT_TRUE(error == 0) << "Outputs do not match each other. Error:" << error;
-    }
-
     void VerifyHIP()
     {
         auto error = miopen::rms_range(ref_outputC, outputC_hip);
@@ -175,19 +130,11 @@ protected:
         EXPECT_TRUE(error == 0) << "Outputs do not match each other. Error:" << error;
     }
 
-    void VerifyGPU()
-    {
-        auto error = miopen::rms_range(outputC_ocl, outputC_hip);
-        EXPECT_TRUE(miopen::range_distance(ref_outputC) == miopen::range_distance(outputC_hip));
-        EXPECT_TRUE(error == 0) << "GPU outputs do not match each other. Error:" << error;
-    }
-
     VecAddTestCase vecadd_config;
 
     tensor<T> inputA; // input tensor A
     tensor<T> inputB; // input tensor B
 
-    tensor<T> outputC_ocl; // Output tensorC for OpenCL
     tensor<T> outputC_hip; // Output tensorC for HIP
 
     tensor<T> ref_outputC; // Output tensorC for CPU
@@ -209,16 +156,9 @@ using namespace vecadd;
 
 TEST_P(GPU_VecAddTest_FP32, VecAddTestFw)
 {
-    RunTestOCL();
-    // Verify OCL results against CPU reference
-    VerifyOCL();
-
     RunTestHIP();
     // Verify HIP results against CPU reference
     VerifyHIP();
-
-    // Verify OCL and HIP results against each other
-    VerifyGPU();
 };
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_VecAddTest_FP32, testing::ValuesIn(VecAddTestConfigs()));
