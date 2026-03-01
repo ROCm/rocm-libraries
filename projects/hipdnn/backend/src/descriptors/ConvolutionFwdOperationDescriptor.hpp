@@ -4,6 +4,7 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
+#include "HipdnnConvolutionMode.h"
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
