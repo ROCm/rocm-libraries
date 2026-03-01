@@ -83,22 +83,20 @@ namespace rocRoller
          */
         NodeOrdering opposite(NodeOrdering order);
 
-
-	struct PerNodeOrder
-	{
-	    std::vector<int> after;
-	    std::vector<int> before;
-	    std::vector<int> inBody;
-	    std::vector<int> containing;
-	    void clear()
-	    {
-		after.clear();
-		before.clear();
-		inBody.clear();
-		containing.clear();
-	    }
-	};
-
+        struct NodeOrders
+        {
+            std::vector<int> after;
+            std::vector<int> before;
+            std::vector<int> inBody;
+            std::vector<int> containing;
+            void             clear()
+            {
+                after.clear();
+                before.clear();
+                inBody.clear();
+                containing.clear();
+            }
+        };
 
         /**
          * Control flow graph.
@@ -191,9 +189,7 @@ namespace rocRoller
              */
             //std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
             //    nodeOrderTable() const;
-	    std::unordered_map<int, std::unordered_map<int, NodeOrdering>>
-		nodeOrderTable() const;
-
+            std::unordered_map<int, std::unordered_map<int, NodeOrdering>> nodeOrderTable() const;
 
             template <typename T>
             requires(std::constructible_from<Operation, T>)
@@ -253,29 +249,29 @@ namespace rocRoller
             }
 
         private:
+            virtual void clearCache(Graph::GraphModification modification) override;
+            void         populateOrderCache() const;
+            void         sortOrderCache() const;
 
-	    virtual void clearCache(Graph::GraphModification modification) override;
-	    void         populateOrderCache() const;
-	    void         finalizeOrderCache() const;
-	    template <CForwardRangeOf<int> Range>
-		std::vector<int> populateOrderCacheImpl(Range const& startingNodes) const;
-	    std::vector<int> populateOrderCacheImpl(int startingNode) const;
-	    NodeOrdering lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const;
-	    NodeOrdering lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const;
-	    void writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const;
-	    template <CForwardRangeOf<int> ARange = std::initializer_list<int>,
-		     CForwardRangeOf<int> BRange = std::initializer_list<int>>
-			 void writeOrderCache(ARange const& nodesA,
-				 BRange const& nodesB,
-				 NodeOrdering  order) const;
-	    mutable std::unordered_map<int, PerNodeOrder> m_orderCache;
-	    mutable std::unordered_map<int, std::vector<int>> m_descendentCache;
-	    mutable CacheStatus m_cacheStatus = CacheStatus::Invalid;
-	    mutable bool m_changesRestricted = false;
+            template <CForwardRangeOf<int> Range>
+            std::vector<int> populateOrderCacheImpl(Range const& startingNodes) const;
+            std::vector<int> populateOrderCacheImpl(int startingNode) const;
 
+            NodeOrdering lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const;
+            NodeOrdering lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const;
+            template <CForwardRangeOf<int> ARange = std::initializer_list<int>,
+                      CForwardRangeOf<int> BRange = std::initializer_list<int>>
+            void writeOrderCache(ARange const& nodesA,
+                                 BRange const& nodesB,
+                                 NodeOrdering  order) const;
+            void writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const;
+            mutable std::unordered_map<int, NodeOrders>       m_orderCache;
+            mutable std::unordered_map<int, std::vector<int>> m_descendentCache;
+            mutable CacheStatus                               m_cacheStatus = CacheStatus::Invalid;
+            mutable bool                                      m_changesRestricted = false;
 
             //virtual void clearCache(Graph::GraphModification modification) override;
-            void         checkOrderCache() const;
+            void checkOrderCache() const;
             //void         populateOrderCache() const;
 
             /**

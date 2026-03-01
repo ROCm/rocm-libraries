@@ -8,6 +8,8 @@
 #include <cmath>
 #include <iomanip>
 
+#include <bitset>
+
 namespace rocRoller::KernelGraph::ControlGraph
 {
     //std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
@@ -21,15 +23,16 @@ namespace rocRoller::KernelGraph::ControlGraph
         ControlGraph::nodeOrderTable() const
     {
         populateOrderCache();
+
         std::unordered_map<int, std::unordered_map<int, NodeOrdering>> table;
-        for(auto const& [node, rel] : m_orderCache)
+        for(auto const& [node, orders] : m_orderCache)
         {
-            for(int other : rel.after)
+            for(int other : orders.after)
             {
                 if(node < other)
                     table[node][other] = NodeOrdering::LeftFirst;
             }
-            for(int other : rel.inBody)
+            for(int other : orders.inBody)
             {
                 if(node < other)
                     table[node][other] = NodeOrdering::RightInBodyOfLeft;
@@ -91,32 +94,6 @@ namespace rocRoller::KernelGraph::ControlGraph
     //    return msg.str();
     //}
 
-
-    std::string ControlGraph::nodeOrderTableString() const
-    {
-        populateOrderCache();
-        TIMER(t, "nodeOrderTable");
-        std::set<int> nodes;
-        for(auto const& [node, rel] : m_orderCache)
-        {
-            if(!rel.after.empty() || !rel.before.empty() || !rel.inBody.empty()
-               || !rel.containing.empty())
-            {
-                nodes.insert(node);
-            }
-            for(int n : rel.after)
-                nodes.insert(n);
-            for(int n : rel.before)
-                nodes.insert(n);
-            for(int n : rel.inBody)
-                nodes.insert(n);
-            for(int n : rel.containing)
-                nodes.insert(n);
-        }
-        return nodeOrderTableString(nodes);
-    }
-
-
     std::string ControlGraph::nodeOrderTableString(std::set<int> const& nodes) const
     {
         populateOrderCache();
@@ -124,13 +101,18 @@ namespace rocRoller::KernelGraph::ControlGraph
         {
             return "Empty order cache.\n";
         }
+
         std::ostringstream msg;
+
         int width = std::ceil(std::log10(static_cast<float>(*nodes.rbegin())));
         width     = std::max(width, 3);
+
         msg << std::setw(width) << " "
             << "\\";
+
         for(int n : nodes)
             msg << " " << std::setw(width) << n;
+
         for(int i : nodes)
         {
             msg << std::endl << std::setw(width) << i << "|";
@@ -159,7 +141,31 @@ namespace rocRoller::KernelGraph::ControlGraph
         return msg.str();
     }
 
+    std::string ControlGraph::nodeOrderTableString() const
+    {
+        populateOrderCache();
 
+        TIMER(t, "nodeOrderTable");
+
+        std::set<int> nodes;
+        for(auto const& [node, orders] : m_orderCache)
+        {
+            if(!orders.after.empty() or !orders.before.empty() or !orders.inBody.empty()
+               or !orders.containing.empty())
+            {
+                nodes.insert(node);
+            }
+            for(int n : orders.after)
+                nodes.insert(n);
+            for(int n : orders.before)
+                nodes.insert(n);
+            for(int n : orders.inBody)
+                nodes.insert(n);
+            for(int n : orders.containing)
+                nodes.insert(n);
+        }
+        return nodeOrderTableString(nodes);
+    }
 
     //std::string ControlGraph::nodeOrderTableString() const
     //{
@@ -231,29 +237,86 @@ namespace rocRoller::KernelGraph::ControlGraph
         }
     }
 
-    void ControlGraph::finalizeOrderCache() const
+    //void ControlGraph::sortOrderCache() const
+    //{
+    //    std::unordered_set<int> seen;
+    //    seen.reserve(m_orderCache.size());
+    //    auto check = [&](std::vector<int> const& vec)
+    //    {
+    //       for(auto v: vec)
+    //       {
+    //           auto [_, inserted] = seen.insert(v);
+    //           AssertFatal(inserted, "A duplicate element");
+    //       }
+    //    };
+    //    for(auto& [node, orders] : m_orderCache)
+    //    {
+    //        std::ranges::sort(orders.after);
+    //        std::ranges::sort(orders.before);
+    //        std::ranges::sort(orders.inBody);
+    //        std::ranges::sort(orders.containing);
+    //        //check(orders.after);
+    //        //check(orders.before);
+    //        //check(orders.inBody);
+    //        //check(orders.containing);
+    //        seen.clear();
+    //    }
+    //}
+
+    void ControlGraph::sortOrderCache() const
     {
-        for(auto& [node, rel] : m_orderCache)
+        int const                    maxId = std::ranges::max(m_orderCache | std::views::keys);
+        std::vector<std::bitset<64>> bits((maxId + 64) / 64);
+
+        auto check = [&](const auto&... vec) {
+            (
+                [&]() {
+                    for(auto v : vec)
+                    {
+                        int const id     = v / 64;
+                        int const remain = v & 63;
+                        AssertFatal(!bits[id][remain],
+                                    "A node has two orders",
+                                    ShowValue(id),
+                                    ShowValue(remain),
+                                    ShowValue(v));
+                        bits[id].set(remain);
+                    }
+                }(),
+                ...);
+
+            for(auto& bit : bits)
+                bit.reset();
+        };
+
+        for(auto& [node, orders] : m_orderCache)
         {
-            std::sort(rel.after.begin(), rel.after.end());
-            std::sort(rel.before.begin(), rel.before.end());
-            std::sort(rel.inBody.begin(), rel.inBody.end());
-            std::sort(rel.containing.begin(), rel.containing.end());
+            std::ranges::sort(orders.after);
+            std::ranges::sort(orders.before);
+            std::ranges::sort(orders.inBody);
+            std::ranges::sort(orders.containing);
+            check(orders.after, orders.before, orders.inBody, orders.containing);
         }
     }
 
     void ControlGraph::populateOrderCache() const
     {
         TIMER(t, "populateOrderCache");
+
         if(m_cacheStatus == CacheStatus::Valid)
             return;
+
         m_orderCache.clear();
+
         auto rootNodes = roots().to<std::vector>();
+
         populateOrderCacheImpl(rootNodes);
-        finalizeOrderCache();
+        sortOrderCache();
+
         m_cacheStatus = CacheStatus::Valid;
         m_descendentCache.clear();
     }
+
     template <CForwardRangeOf<int> Range>
     std::vector<int> ControlGraph::populateOrderCacheImpl(Range const& startingNodes) const
     {
@@ -265,15 +328,21 @@ namespace rocRoller::KernelGraph::ControlGraph
         }
         return rv;
     }
+
     std::vector<int> ControlGraph::populateOrderCacheImpl(int startingNode) const
     {
         auto ccEntry = m_descendentCache.find(startingNode);
         if(ccEntry != m_descendentCache.end())
             return ccEntry->second;
+
+        static_assert(std::variant_size_v<ControlEdge> == 5,
+                      "Currently the available edge types are Sequence(0), Initialize(1), "
+                      "ForLoopIncrement(2), Body(3) and Else(4)."
+                      "If more edge types are added, this function has to be updated.");
+
         using GD = Graph::Direction;
-        // Collect all children bucketed by edge type in a single pass
         // Edge variant indices: Sequence(0), Initialize(1), ForLoopIncrement(2), Body(3), Else(4)
-        std::array<std::vector<int>, 5> directChildren;
+        std::array<std::vector<int>, std::variant_size_v<ControlEdge>> directChildren;
         for(auto edge : getNeighbours<GD::Downstream>(startingNode))
         {
             auto edgeTypeIndex = getEdge(edge).index();
@@ -282,16 +351,16 @@ namespace rocRoller::KernelGraph::ControlGraph
         }
 
         auto addDescendents = [this](std::vector<int> const& children) -> std::vector<int> {
-            auto descendents = populateOrderCacheImpl(children);
+            auto             descendents = populateOrderCacheImpl(children);
             std::vector<int> result;
             result.reserve(children.size() + descendents.size());
             result.insert(result.end(), children.begin(), children.end());
             result.insert(result.end(), descendents.begin(), descendents.end());
-            std::sort(result.begin(), result.end());
+
+            std::ranges::sort(result);
             result.erase(std::unique(result.begin(), result.end()), result.end());
             return result;
         };
-
 
         // Index: Initialize(1), Body(3), Else(4), ForLoopIncrement(2), Sequence(0)
         auto initNodes = addDescendents(directChildren[1]);
@@ -299,46 +368,50 @@ namespace rocRoller::KernelGraph::ControlGraph
         auto elseNodes = addDescendents(directChildren[4]);
         auto incNodes  = addDescendents(directChildren[2]);
         auto seqNodes  = addDescendents(directChildren[0]);
+
         // {init, body, else, inc} nodes are in the body of the current node
         writeOrderCache({startingNode}, initNodes, NodeOrdering::RightInBodyOfLeft);
         writeOrderCache({startingNode}, bodyNodes, NodeOrdering::RightInBodyOfLeft);
         writeOrderCache({startingNode}, elseNodes, NodeOrdering::RightInBodyOfLeft);
         writeOrderCache({startingNode}, incNodes, NodeOrdering::RightInBodyOfLeft);
+
         // Sequence connected nodes are after the current node
         writeOrderCache({startingNode}, seqNodes, NodeOrdering::LeftFirst);
+
         // {body, else, inc, sequence} are after init nodes
         writeOrderCache(initNodes, bodyNodes, NodeOrdering::LeftFirst);
         writeOrderCache(initNodes, elseNodes, NodeOrdering::LeftFirst);
         writeOrderCache(initNodes, incNodes, NodeOrdering::LeftFirst);
         writeOrderCache(initNodes, seqNodes, NodeOrdering::LeftFirst);
+
         // {else, inc, sequence} are after body nodes
         writeOrderCache(bodyNodes, elseNodes, NodeOrdering::LeftFirst);
         writeOrderCache(bodyNodes, incNodes, NodeOrdering::LeftFirst);
         writeOrderCache(bodyNodes, seqNodes, NodeOrdering::LeftFirst);
+
         // {inc, sequence} are after else nodes
         writeOrderCache(elseNodes, incNodes, NodeOrdering::LeftFirst);
         writeOrderCache(elseNodes, seqNodes, NodeOrdering::LeftFirst);
+
         // sequence are after inc nodes
         writeOrderCache(incNodes, seqNodes, NodeOrdering::LeftFirst);
+
         std::vector<int> allNodes;
         allNodes.reserve(initNodes.size() + bodyNodes.size() + elseNodes.size() + incNodes.size()
                          + seqNodes.size());
-
 
         allNodes.insert(allNodes.end(), initNodes.begin(), initNodes.end());
         allNodes.insert(allNodes.end(), bodyNodes.begin(), bodyNodes.end());
         allNodes.insert(allNodes.end(), elseNodes.begin(), elseNodes.end());
         allNodes.insert(allNodes.end(), incNodes.begin(), incNodes.end());
         allNodes.insert(allNodes.end(), seqNodes.begin(), seqNodes.end());
-        std::sort(allNodes.begin(), allNodes.end());
+
+        std::ranges::sort(allNodes);
         allNodes.erase(std::unique(allNodes.begin(), allNodes.end()), allNodes.end());
         m_descendentCache[startingNode] = allNodes;
 
         return allNodes;
     }
-
-
-
 
     //void ControlGraph::populateOrderCache() const
     //{
@@ -439,7 +512,6 @@ namespace rocRoller::KernelGraph::ControlGraph
     //    return allNodes;
     //}
 
-
     //template <CForwardRangeOf<int> ARange, CForwardRangeOf<int> BRange>
     //void ControlGraph::writeOrderCache(ARange const& nodesA,
     //                                   BRange const& nodesB,
@@ -450,28 +522,27 @@ namespace rocRoller::KernelGraph::ControlGraph
     //            writeOrderCache(nodeA, nodeB, order);
     //}
 
-
     template <CForwardRangeOf<int> ARange, CForwardRangeOf<int> BRange>
     void ControlGraph::writeOrderCache(ARange const& nodesA,
                                        BRange const& nodesB,
                                        NodeOrdering  order) const
     {
-        if(nodesA.size() == 0 || nodesB.size() == 0)
+        if(nodesA.size() == 0 or nodesB.size() == 0)
             return;
-        auto oppositeOrder = opposite(order);
-        auto selectVec = [](PerNodeOrder& rel, NodeOrdering ord) -> std::vector<int>& {
-            switch(ord)
+
+        auto selectVec = [](NodeOrders& orders, NodeOrdering order) -> std::vector<int>& {
+            switch(order)
             {
             case NodeOrdering::LeftFirst:
-                return rel.after;
+                return orders.after;
             case NodeOrdering::RightFirst:
-                return rel.before;
+                return orders.before;
             case NodeOrdering::RightInBodyOfLeft:
-                return rel.inBody;
+                return orders.inBody;
             case NodeOrdering::LeftInBodyOfRight:
-                return rel.containing;
+                return orders.containing;
             default:
-                __builtin_unreachable();
+                AssertFatal(false, "Invalid order: ", ShowValue(order));
             }
         };
         for(int a : nodesA)
@@ -479,6 +550,8 @@ namespace rocRoller::KernelGraph::ControlGraph
             auto& vec = selectVec(m_orderCache[a], order);
             vec.insert(vec.end(), nodesB.begin(), nodesB.end());
         }
+
+        auto oppositeOrder = opposite(order);
         for(int b : nodesB)
         {
             auto& vec = selectVec(m_orderCache[b], oppositeOrder);
@@ -510,8 +583,6 @@ namespace rocRoller::KernelGraph::ControlGraph
             break;
         }
     }
-
-
 
     //template <CForwardRangeOf<int> ARange, CForwardRangeOf<int> BRange>
     //void ControlGraph::writeOrderCache(ARange const& nodesA,
