@@ -41,6 +41,9 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(
         hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR),
         "HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR");
+    EXPECT_STREQ(
+        hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR),
+        "HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -209,6 +212,13 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS),
                  "HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS");
+
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_X),
+                 "HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_X");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DY),
+                 "HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DY");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DW),
+                 "HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DW");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)
