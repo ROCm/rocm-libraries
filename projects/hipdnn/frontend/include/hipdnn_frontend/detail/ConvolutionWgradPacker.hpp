@@ -64,12 +64,15 @@ inline Error createConvWgradOperation(
                                             "convolutionwrw dilation"));
 
     // Set convolutionwrw mode and compute data type
-    auto convMode
-        = static_cast<int64_t>(hipdnn_frontend::toSdkType(attributes.get_convolution_mode()));
+    auto convMode = hipdnn_frontend::toBackendConvMode(attributes.get_convolution_mode());
+    if(!convMode.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported convolution mode"};
+    }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                               HIPDNN_TYPE_INT64,
-                                               convMode,
+                                               HIPDNN_TYPE_CONVOLUTION_MODE,
+                                               *convMode,
                                                "convolutionwrw mode"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
