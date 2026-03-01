@@ -154,19 +154,22 @@ void geqrf_checkBadArgs(const hipsolverHandle_t handle,
 {
     // handle
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_geqrf(nullptr, m, n, dA, lda, dTau, strideTau, dWork, lwork, dInfo, bc),
+        hipsolver_geqrfBatched(nullptr, m, n, dA, lda, dTau, strideTau, dWork, lwork, dInfo, bc),
         HIPSOLVER_STATUS_NOT_INITIALIZED);
 
 #if defined(__HIP_PLATFORM_HCC__) || defined(__HIP_PLATFORM_AMD__)
     // pointers
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_geqrf(handle, m, n, (T**)nullptr, lda, dTau, strideTau, dWork, lwork, dInfo, bc),
+        hipsolver_geqrfBatched(
+            handle, m, n, (T**)nullptr, lda, dTau, strideTau, dWork, lwork, dInfo, bc),
         HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_geqrf(handle, m, n, dA, lda, (T*)nullptr, strideTau, dWork, lwork, dInfo, bc),
+        hipsolver_geqrfBatched(
+            handle, m, n, dA, lda, (T*)nullptr, strideTau, dWork, lwork, dInfo, bc),
         HIPSOLVER_STATUS_INVALID_VALUE);
     EXPECT_ROCBLAS_STATUS(
-        hipsolver_geqrf(handle, m, n, dA, lda, dTau, strideTau, dWork, lwork, (int*)nullptr, bc),
+        hipsolver_geqrfBatched(
+            handle, m, n, dA, lda, dTau, strideTau, dWork, lwork, (int*)nullptr, bc),
         HIPSOLVER_STATUS_INVALID_VALUE);
 #endif
 }
@@ -195,7 +198,7 @@ void testing_geqrf_bad_arg()
         CHECK_HIP_ERROR(dInfo.memcheck());
 
         int size_W;
-        hipsolver_geqrf_bufferSize(handle, m, n, dA.data(), lda, &size_W, bc);
+        hipsolver_geqrfBatched_bufferSize(handle, m, n, dA.data(), lda, &size_W, bc);
         device_strided_batch_vector<T> dWork(size_W, 1, size_W, 1);
         if(size_W)
             CHECK_HIP_ERROR(dWork.memcheck());
@@ -560,17 +563,17 @@ void geqrfBatched_getError(const hipsolverHandle_t handle,
 
     // execute computations
     // GPU lapack
-    CHECK_ROCBLAS_ERROR(hipsolver_geqrf(handle,
-                                        m,
-                                        n,
-                                        dA.data(),
-                                        lda,
-                                        dTau.data(),
-                                        strideTau,
-                                        dWork.data(),
-                                        lwork,
-                                        dInfo.data(),
-                                        bc));
+    CHECK_ROCBLAS_ERROR(hipsolver_geqrfBatched(handle,
+                                               m,
+                                               n,
+                                               dA.data(),
+                                               lda,
+                                               dTau.data(),
+                                               strideTau,
+                                               dWork.data(),
+                                               lwork,
+                                               dInfo.data(),
+                                               bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hTauRes.transfer_from(dTau));
     CHECK_HIP_ERROR(hInfoRes.transfer_from(dInfo));
@@ -650,17 +653,17 @@ void geqrfBatched_getPerfData(const hipsolverHandle_t handle,
         geqrfBatched_initData<false, true, T>(
             handle, m, n, dA, lda, dTau, strideTau, dInfo, bc, hA, hTau, hInfo);
 
-        CHECK_ROCBLAS_ERROR(hipsolver_geqrf(handle,
-                                            m,
-                                            n,
-                                            dA.data(),
-                                            lda,
-                                            dTau.data(),
-                                            strideTau,
-                                            dWork.data(),
-                                            lwork,
-                                            dInfo.data(),
-                                            bc));
+        CHECK_ROCBLAS_ERROR(hipsolver_geqrfBatched(handle,
+                                                   m,
+                                                   n,
+                                                   dA.data(),
+                                                   lda,
+                                                   dTau.data(),
+                                                   strideTau,
+                                                   dWork.data(),
+                                                   lwork,
+                                                   dInfo.data(),
+                                                   bc));
     }
 
     // gpu-lapack performance
@@ -674,17 +677,17 @@ void geqrfBatched_getPerfData(const hipsolverHandle_t handle,
             handle, m, n, dA, lda, dTau, strideTau, dInfo, bc, hA, hTau, hInfo);
 
         start = get_time_us_sync(stream);
-        hipsolver_geqrf(handle,
-                        m,
-                        n,
-                        dA.data(),
-                        lda,
-                        dTau.data(),
-                        strideTau,
-                        dWork.data(),
-                        lwork,
-                        dInfo.data(),
-                        bc);
+        hipsolver_geqrfBatched(handle,
+                               m,
+                               n,
+                               dA.data(),
+                               lda,
+                               dTau.data(),
+                               strideTau,
+                               dWork.data(),
+                               lwork,
+                               dInfo.data(),
+                               bc);
         *gpu_time_used += get_time_us_sync(stream) - start;
     }
     *gpu_time_used /= hot_calls;
@@ -723,17 +726,17 @@ void testing_geqrf(Arguments& argus)
     {
         if constexpr(BATCHED)
         {
-            EXPECT_ROCBLAS_STATUS(hipsolver_geqrf(handle,
-                                                  m,
-                                                  n,
-                                                  (T**)nullptr,
-                                                  lda,
-                                                  (T*)nullptr,
-                                                  stP,
-                                                  (T*)nullptr,
-                                                  0,
-                                                  (int*)nullptr,
-                                                  bc),
+            EXPECT_ROCBLAS_STATUS(hipsolver_geqrfBatched(handle,
+                                                         m,
+                                                         n,
+                                                         (T**)nullptr,
+                                                         lda,
+                                                         (T*)nullptr,
+                                                         stP,
+                                                         (T*)nullptr,
+                                                         0,
+                                                         (int*)nullptr,
+                                                         bc),
                                   HIPSOLVER_STATUS_INVALID_VALUE);
         }
         else
@@ -767,7 +770,7 @@ void testing_geqrf(Arguments& argus)
     int  size_dW_batched;
     SIZE size_dW, size_hW;
     if constexpr(BATCHED)
-        hipsolver_geqrf_bufferSize(handle, m, n, (T**)nullptr, lda, &size_dW_batched, bc);
+        hipsolver_geqrfBatched_bufferSize(handle, m, n, (T**)nullptr, lda, &size_dW_batched, bc);
     else
         hipsolver_geqrf_bufferSize(
             API, handle, params, m, n, (T*)nullptr, lda, (T*)nullptr, &size_dW, &size_hW);

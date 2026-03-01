@@ -3446,71 +3446,71 @@ inline hipsolverStatus_t hipsolver_geqrf(testAPI_t               API,
 }
 
 // batched
-inline hipsolverStatus_t hipsolver_geqrf_bufferSize(
+inline hipsolverStatus_t hipsolver_geqrfBatched_bufferSize(
     hipsolverHandle_t handle, int m, int n, float** A, int lda, int* lwork, int bc)
 {
     return hipsolverSgeqrfBatched_bufferSize(handle, m, n, A, lda, lwork, bc);
 }
 
-inline hipsolverStatus_t hipsolver_geqrf_bufferSize(
+inline hipsolverStatus_t hipsolver_geqrfBatched_bufferSize(
     hipsolverHandle_t handle, int m, int n, double** A, int lda, int* lwork, int bc)
 {
     return hipsolverDgeqrfBatched_bufferSize(handle, m, n, A, lda, lwork, bc);
 }
 
-inline hipsolverStatus_t hipsolver_geqrf_bufferSize(
+inline hipsolverStatus_t hipsolver_geqrfBatched_bufferSize(
     hipsolverHandle_t handle, int m, int n, hipsolverComplex** A, int lda, int* lwork, int bc)
 {
     return hipsolverCgeqrfBatched_bufferSize(handle, m, n, (hipFloatComplex**)A, lda, lwork, bc);
 }
 
-inline hipsolverStatus_t hipsolver_geqrf_bufferSize(
+inline hipsolverStatus_t hipsolver_geqrfBatched_bufferSize(
     hipsolverHandle_t handle, int m, int n, hipsolverDoubleComplex** A, int lda, int* lwork, int bc)
 {
     return hipsolverZgeqrfBatched_bufferSize(handle, m, n, (hipDoubleComplex**)A, lda, lwork, bc);
 }
 
-inline hipsolverStatus_t hipsolver_geqrf(hipsolverHandle_t handle,
-                                         int               m,
-                                         int               n,
-                                         float**           A,
-                                         int               lda,
-                                         float*            tau,
-                                         int               strideTau,
-                                         float*            work,
-                                         int               lwork,
-                                         int*              devInfo,
-                                         int               bc)
+inline hipsolverStatus_t hipsolver_geqrfBatched(hipsolverHandle_t handle,
+                                                int               m,
+                                                int               n,
+                                                float**           A,
+                                                int               lda,
+                                                float*            tau,
+                                                int               strideTau,
+                                                float*            work,
+                                                int               lwork,
+                                                int*              devInfo,
+                                                int               bc)
 {
     return hipsolverSgeqrfBatched(handle, m, n, A, lda, tau, strideTau, work, lwork, devInfo, bc);
 }
 
-inline hipsolverStatus_t hipsolver_geqrf(hipsolverHandle_t handle,
-                                         int               m,
-                                         int               n,
-                                         double**          A,
-                                         int               lda,
-                                         double*           tau,
-                                         int               strideTau,
-                                         double*           work,
-                                         int               lwork,
-                                         int*              devInfo,
-                                         int               bc)
+inline hipsolverStatus_t hipsolver_geqrfBatched(hipsolverHandle_t handle,
+                                                int               m,
+                                                int               n,
+                                                double**          A,
+                                                int               lda,
+                                                double*           tau,
+                                                int               strideTau,
+                                                double*           work,
+                                                int               lwork,
+                                                int*              devInfo,
+                                                int               bc)
 {
     return hipsolverDgeqrfBatched(handle, m, n, A, lda, tau, strideTau, work, lwork, devInfo, bc);
 }
 
-inline hipsolverStatus_t hipsolver_geqrf(hipsolverHandle_t  handle,
-                                         int                m,
-                                         int                n,
-                                         hipsolverComplex** A,
-                                         int                lda,
-                                         hipsolverComplex*  tau,
-                                         int                strideTau,
-                                         hipsolverComplex*  work,
-                                         int                lwork,
-                                         int*               devInfo,
-                                         int                bc)
+inline hipsolverStatus_t hipsolver_geqrfBatched(hipsolverHandle_t  handle,
+                                                int                m,
+                                                int                n,
+                                                hipsolverComplex** A,
+                                                int                lda,
+                                                hipsolverComplex*  tau,
+                                                int                strideTau,
+                                                hipsolverComplex*  work,
+                                                int                lwork,
+                                                int*               devInfo,
+                                                int                bc)
 {
     return hipsolverCgeqrfBatched(handle,
                                   m,
@@ -3525,17 +3525,17 @@ inline hipsolverStatus_t hipsolver_geqrf(hipsolverHandle_t  handle,
                                   bc);
 }
 
-inline hipsolverStatus_t hipsolver_geqrf(hipsolverHandle_t        handle,
-                                         int                      m,
-                                         int                      n,
-                                         hipsolverDoubleComplex** A,
-                                         int                      lda,
-                                         hipsolverDoubleComplex*  tau,
-                                         int                      strideTau,
-                                         hipsolverDoubleComplex*  work,
-                                         int                      lwork,
-                                         int*                     devInfo,
-                                         int                      bc)
+inline hipsolverStatus_t hipsolver_geqrfBatched(hipsolverHandle_t        handle,
+                                                int                      m,
+                                                int                      n,
+                                                hipsolverDoubleComplex** A,
+                                                int                      lda,
+                                                hipsolverDoubleComplex*  tau,
+                                                int                      strideTau,
+                                                hipsolverDoubleComplex*  work,
+                                                int                      lwork,
+                                                int*                     devInfo,
+                                                int                      bc)
 {
     return hipsolverZgeqrfBatched(handle,
                                   m,
