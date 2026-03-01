@@ -15,6 +15,7 @@ add_executable(
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
+    IntegrationConvFpropDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationRMSNormForward.cpp
 )
