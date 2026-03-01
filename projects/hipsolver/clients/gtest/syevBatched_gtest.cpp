@@ -50,6 +50,13 @@ const vector<vector<int>> size_range = {
     {35, 35},
     {50, 60}};
 
+// for daily_lapack tests
+// const vector<vector<int>> large_size_range = {
+//     {192, 192},
+//     {500, 600},
+//     {640, 640},
+//     {1000, 1024}};
+
 template <typename T>
 Arguments syevBatched_setup_arguments(syevBatched_tuple tup)
 {
@@ -121,3 +128,7 @@ TEST_P(SYEVBATCHED_COMPAT_64, __double_complex)
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SYEVBATCHED_COMPAT_64,
                          Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          SYEVBATCHED_COMPAT_64,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
