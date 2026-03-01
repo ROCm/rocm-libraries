@@ -1126,7 +1126,7 @@ try
 
     size_t rocsolver_workspace = lwork_device - e_workspace_size;
 
-    // Allocate or use provided workspace
+    // Allocate or use provided workspace only if there is already enough allocated
     void* workspace_ptr = workOnDevice;
     if(!workOnDevice || lworkOnDevice < lwork_device)
     {
