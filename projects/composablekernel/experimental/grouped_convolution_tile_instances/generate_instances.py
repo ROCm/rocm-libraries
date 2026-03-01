@@ -333,9 +333,6 @@ def parse_bwd_weight_instances(instances, problem_name):
             # Block GEMM pipeline parameters
             blk_gemm_pipeline_schduler = args[6]
             blk_gemm_pipeline_version = args[7]
-            if blk_gemm_pipeline_version == "v2": 
-                print(f"Skipping instance {instance_id} with device op {device_op_name} for v2 since it's not supported yet.")
-                continue
         else:
             spec = args[11]
             block_size = int(args[12])

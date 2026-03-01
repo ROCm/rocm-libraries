@@ -204,7 +204,7 @@ run_grouped_conv_backward_weight_tile_algs(const ckt::Args<SIGNATURE>& args,
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_BWD_WEIGHT)
     {
-#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_ndhwgc_fp32_calls.inc"
+#include "../../experimental/grouped_convolution_tile_instances/instances/backward_weight/grouped_convolution_backward_weight_tile_nhwgc_fp32_calls.inc"
     }
     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP16_BWD_WEIGHT)
     {
