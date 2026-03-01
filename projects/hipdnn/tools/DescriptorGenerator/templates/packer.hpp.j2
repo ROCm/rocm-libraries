@@ -41,6 +41,16 @@ inline Error {{ op.frontend.packer_function }}(
                                             HIPDNN_TYPE_INT64,
                                             attributes.{{ df.frontend_getter }},
                                             "{{ op.effective_error_label }} {{ df.name }}"));
+{% elif df.is_mode %}
+
+    // Set {{ op.effective_error_label }} mode
+    auto {{ df.camel_name }} = hipdnn_frontend::{{ df.backend_converter }}(attributes.{{ df.frontend_getter }});
+    if(!{{ df.camel_name }}.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported {{ df.name | replace('_', ' ') }}"};
+    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
+        opDesc.get(), {{ df.attr_name }}, {{ df.backend_type }}, *{{ df.camel_name }}, "{{ op.effective_error_label }} mode"));
 {% elif df.is_enum %}
 
     // Set {{ op.effective_error_label }} mode and compute data type

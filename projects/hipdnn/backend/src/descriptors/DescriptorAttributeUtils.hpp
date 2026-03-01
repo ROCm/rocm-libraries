@@ -6,8 +6,10 @@
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnDataType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnPointwiseMode.h"
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <vector>
 
 namespace hipdnn_backend
@@ -93,5 +95,18 @@ void getDataType(hipdnn_data_sdk::data_objects::DataType source,
                  int64_t* elementCount,
                  void* arrayOfElements,
                  const char* errorPrefix);
+
+void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix);
+
+void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix);
 
 } // namespace hipdnn_backend

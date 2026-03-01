@@ -5,7 +5,9 @@
 
 #include "HipdnnDataType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnPointwiseMode.h"
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 
 namespace hipdnn_backend
 {
@@ -16,5 +18,9 @@ hipdnnDataType_t fromSdkDataType(hipdnn_data_sdk::data_objects::DataType type);
 
 // Returns the byte size for a given data type. Throws for unsupported types.
 int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type);
+
+// Converts between C-API hipdnnPointwiseMode_t and SDK PointwiseMode enum values.
+hipdnn_data_sdk::data_objects::PointwiseMode toSdkPointwiseMode(hipdnnPointwiseMode_t mode);
+hipdnnPointwiseMode_t fromSdkPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode mode);
 
 } // namespace hipdnn_backend

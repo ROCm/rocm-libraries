@@ -86,6 +86,13 @@ def load_config(path: Path) -> OperationConfig:
                 shared=df.get("shared", False),
                 test_enum_value=df.get("test_enum_value", ""),
                 test_constant_name=df.get("test_constant_name", ""),
+                test_backend_value=df.get("test_backend_value", ""),
+                backend_setter=df.get("backend_setter", ""),
+                backend_getter=df.get("backend_getter", ""),
+                backend_converter=df.get("backend_converter", ""),
+                backend_type_name=df.get("backend_type_name", ""),
+                test_c_type=df.get("test_c_type", ""),
+                test_default_value=df.get("test_default_value", ""),
             )
         )
 
@@ -165,6 +172,28 @@ def _validate_config(config: OperationConfig) -> None:
                 f"enum fields must have 'test_enum_value' set "
                 f"(e.g., 'CROSS_CORRELATION' for ConvMode, 'ADD' for PointwiseMode)."
             )
+
+    # Validate mode fields have required config
+    for df in config.data_fields:
+        if df.type == "mode":
+            if not df.test_backend_value:
+                raise ConfigError(
+                    f"Operation '{config.name}', data field '{df.name}': "
+                    f"mode fields must have 'test_backend_value' set "
+                    f"(e.g., 'HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION')."
+                )
+            if not df.backend_setter or not df.backend_getter:
+                raise ConfigError(
+                    f"Operation '{config.name}', data field '{df.name}': "
+                    f"mode fields must have 'backend_setter' and 'backend_getter' set "
+                    f"(e.g., 'setConvMode', 'getConvMode')."
+                )
+            if not df.backend_type_name:
+                raise ConfigError(
+                    f"Operation '{config.name}', data field '{df.name}': "
+                    f"mode fields must have 'backend_type_name' set "
+                    f"(e.g., 'HIPDNN_TYPE_CONVOLUTION_MODE')."
+                )
 
     # Warn if required tensor fields are missing from test_data.tensor_uids
     for tf in config.tensor_fields:

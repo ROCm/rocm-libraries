@@ -84,12 +84,18 @@ operation:
     - name: "conv_mode"
       fbs_field: "conv_mode"
       attr_name: "HIPDNN_ATTR_CONVOLUTION_CONV_MODE"
-      type: "enum"
+      type: "mode"
       cpp_enum: "hipdnn_data_sdk::data_objects::ConvMode"
       required: false
       frontend_getter: "get_convolution_mode()"
-      frontend_converter: "toSdkType"
+      backend_setter: "setConvMode"
+      backend_getter: "getConvMode"
+      backend_converter: "toBackendConvMode"
+      backend_type_name: "HIPDNN_TYPE_CONVOLUTION_MODE"
       test_enum_value: "CROSS_CORRELATION"
+      test_backend_value: "HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION"
+      test_c_type: "hipdnnConvolutionMode_t"
+      test_default_value: "HIPDNN_CONVOLUTION_MODE_CONVOLUTION"
 
   tensor_array_fields: []
 

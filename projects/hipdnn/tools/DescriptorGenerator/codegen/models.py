@@ -64,7 +64,7 @@ class DataField:
     name: str
     fbs_field: str
     attr_name: str
-    type: str  # vector_int64, enum, scalar_float, scalar_int64, bool
+    type: str  # vector_int64, enum, mode, scalar_float, scalar_int64, bool
     required: bool = True
     frontend_getter: str = ""
     frontend_converter: str = ""
@@ -76,6 +76,15 @@ class DataField:
     shared: bool = False
     test_enum_value: str = ""
     test_constant_name: str = ""
+    test_backend_value: str = ""
+
+    # Mode-specific config (for conv_mode, pointwise_mode, etc.)
+    backend_setter: str = ""
+    backend_getter: str = ""
+    backend_converter: str = ""
+    backend_type_name: str = ""
+    test_c_type: str = ""
+    test_default_value: str = ""
 
     @property
     def camel_name(self) -> str:
@@ -91,6 +100,10 @@ class DataField:
         return self.type == "enum"
 
     @property
+    def is_mode(self) -> bool:
+        return self.type == "mode"
+
+    @property
     def is_scalar(self) -> bool:
         return self.type in ("scalar_float", "scalar_int64", "bool")
 
@@ -100,6 +113,8 @@ class DataField:
 
     @property
     def backend_type(self) -> str:
+        if self.type == "mode" and self.backend_type_name:
+            return self.backend_type_name
         type_map = {
             "vector_int64": "HIPDNN_TYPE_INT64",
             "enum": "HIPDNN_TYPE_INT64",
@@ -339,6 +354,14 @@ class OperationConfig:
     @property
     def enum_fields(self) -> list[DataField]:
         return [f for f in self.data_fields if f.is_enum]
+
+    @property
+    def mode_fields(self) -> list[DataField]:
+        return [f for f in self.data_fields if f.is_mode]
+
+    @property
+    def has_mode_fields(self) -> bool:
+        return any(df.is_mode for df in self.data_fields)
 
     @property
     def vector_fields(self) -> list[DataField]:

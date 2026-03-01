@@ -65,6 +65,10 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     std::vector<int64_t> {{ df.camel_name }} = {{ '{' }}{{ op.test_data.field_values.get(df.name, [1, 1]) | join(', ') }}{{ '}' }};
     desc->setAttribute({{ df.attr_name }}, HIPDNN_TYPE_INT64, {{ op.test_data.field_values.get(df.name, [1, 1]) | length }}, {{ df.camel_name }}.data());
 {% endif %}
+{% elif df.is_mode %}
+
+    auto {{ df.camel_name }} = {{ df.test_backend_value }};
+    desc->setAttribute({{ df.attr_name }}, {{ df.backend_type }}, 1, &{{ df.camel_name }});
 {% elif df.is_enum %}
 
     auto {{ df.camel_name }} = static_cast<int64_t>({{ df.enum_short_type }}::{{ df.test_enum_value }});

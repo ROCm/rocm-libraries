@@ -120,4 +120,45 @@ void getDataType(hipdnn_data_sdk::data_objects::DataType source,
     }
 }
 
+void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_POINTWISE_MODE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    target = toSdkPointwiseMode(*static_cast<const hipdnnPointwiseMode_t*>(arrayOfElements));
+}
+
+void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_POINTWISE_MODE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    *static_cast<hipdnnPointwiseMode_t*>(arrayOfElements) = fromSdkPointwiseMode(source);
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
 } // namespace hipdnn_backend
