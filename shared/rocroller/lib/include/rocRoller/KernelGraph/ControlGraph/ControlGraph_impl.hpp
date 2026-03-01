@@ -112,18 +112,17 @@ namespace rocRoller::KernelGraph::ControlGraph
         auto it = m_orderCache.find(nodeA);
         if(it == m_orderCache.end())
             return NodeOrdering::Undefined;
-        auto const& rel = it->second;
-        if(std::binary_search(rel.after.begin(), rel.after.end(), nodeB))
+        auto const& orders = it->second;
+        if(std::binary_search(orders.after.begin(), orders.after.end(), nodeB))
             return NodeOrdering::LeftFirst;
-        if(std::binary_search(rel.before.begin(), rel.before.end(), nodeB))
+        if(std::binary_search(orders.before.begin(), orders.before.end(), nodeB))
             return NodeOrdering::RightFirst;
-        if(std::binary_search(rel.inBody.begin(), rel.inBody.end(), nodeB))
+        if(std::binary_search(orders.inBody.begin(), orders.inBody.end(), nodeB))
             return NodeOrdering::RightInBodyOfLeft;
-        if(std::binary_search(rel.containing.begin(), rel.containing.end(), nodeB))
+        if(std::binary_search(orders.containing.begin(), orders.containing.end(), nodeB))
             return NodeOrdering::LeftInBodyOfRight;
         return NodeOrdering::Undefined;
     }
-
 
     //inline NodeOrdering ControlGraph::lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const
     //{
@@ -169,8 +168,6 @@ namespace rocRoller::KernelGraph::ControlGraph
             for(int n : it->second.containing)
                 co_yield n;
     }
-
-
 
     //inline Generator<int> ControlGraph::nodesAfter(int node) const
     //{

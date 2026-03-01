@@ -542,8 +542,10 @@ namespace rocRoller::KernelGraph::ControlGraph
             case NodeOrdering::LeftInBodyOfRight:
                 return orders.containing;
             default:
-                AssertFatal(false, "Invalid order: ", ShowValue(order));
+                break;
             }
+            AssertFatal(false, "Invalid order: ", ShowValue(order));
+            return orders.after; // this statement should never be reached
         };
         for(int a : nodesA)
         {
