@@ -1,11 +1,15 @@
-name: hipDNN Clang Tidy
+name: clang-tidy
 
 on:
   pull_request:
     paths:
       - 'projects/hipdnn/**/*.[ch]p?p?'
       - 'projects/hipdnn/cmake/ClangTidy.cmake'
-      - '.github/workflows/hipdnn-clang-tidy.yml'
+      - 'projects/hipdnn/.clang-tidy'
+      - 'dnn-providers/miopen-provider/**/*.[ch]p?p?'
+      - 'dnn-providers/miopen-provider/cmake/ClangTidy.cmake'
+      - 'dnn-providers/miopen-provider/.clang-tidy'
+      - '.github/workflows/clang-tidy.yml'
   workflow_dispatch:
 
 jobs:
@@ -14,6 +18,16 @@ jobs:
     steps:
       - name: Checkout rocm-libraries
         uses: actions/checkout@v4
+
+      - name: Detect changed projects
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: changes
+        with:
+          filters: |
+            hipdnn:
+              - 'projects/hipdnn/**'
+            miopen-provider:
+              - 'dnn-providers/miopen-provider/**'
 
       - name: Checkout TheRock
         uses: actions/checkout@v4
@@ -50,15 +64,30 @@ jobs:
             --output-dir /opt/rocm \
             --base-only
 
-      - name: Run clang-tidy
+      - name: Run clang-tidy (hipDNN)
+        if: steps.changes.outputs.hipdnn == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           . .venv/bin/activate
           export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
           export CXX=/opt/rocm/llvm/bin/clang++
-          cmake -S projects/hipdnn -B build -G Ninja \
+          cmake -S projects/hipdnn -B build-hipdnn -G Ninja \
             -DENABLE_CLANG_TIDY=ON \
             -DROCM_PATH=/opt/rocm \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIP_PLATFORM=amd
-          ninja -C build tidy
+          ninja -C build-hipdnn tidy
+
+      - name: Run clang-tidy (miopen-provider)
+        if: steps.changes.outputs.miopen-provider == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          . .venv/bin/activate
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -S dnn-providers/miopen-provider -B build-miopen-provider -G Ninja \
+            -DENABLE_CLANG_TIDY=ON \
+            -DROCM_PATH=/opt/rocm \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DENABLE_CLANG_FORMAT=OFF \
+            -DHIP_PLATFORM=amd
+          ninja -C build-miopen-provider tidy

@@ -110,6 +110,15 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED),
                  "HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT),
+                 "HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT");
+    EXPECT_STREQ(
+        hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT),
+        "HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT),
+                 "HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT),
+                 "HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS),
                  "HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS");
@@ -267,6 +276,8 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
                  "HIPDNN_TYPE_NORM_FWD_PHASE");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_RNG_DISTRIBUTION),
                  "HIPDNN_TYPE_RNG_DISTRIBUTION");
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_CONVOLUTION_MODE),
+                 "HIPDNN_TYPE_CONVOLUTION_MODE");
 
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT),
                  "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT");
@@ -311,4 +322,15 @@ TEST(TestBackendEnumStringUtils, GetPluginUnloadingModeString)
     EXPECT_STREQ(
         hipdnnGetPluginUnloadingModeString(static_cast<hipdnnPluginUnloadingMode_ext_t>(-1)),
         "HIPDNN_PLUGIN_UNLOAD_UNKNOWN");
+}
+
+TEST(TestBackendEnumStringUtils, GetConvolutionModeString)
+{
+    EXPECT_STREQ(hipdnnGetConvolutionModeString(HIPDNN_CONVOLUTION_MODE_CONVOLUTION),
+                 "HIPDNN_CONVOLUTION_MODE_CONVOLUTION");
+    EXPECT_STREQ(hipdnnGetConvolutionModeString(HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION),
+                 "HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION");
+
+    EXPECT_STREQ(hipdnnGetConvolutionModeString(static_cast<hipdnnConvolutionMode_t>(-1)),
+                 "HIPDNN_CONVOLUTION_MODE_UNKNOWN");
 }

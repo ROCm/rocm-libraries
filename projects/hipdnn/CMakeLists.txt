@@ -126,14 +126,6 @@ if(DEFINED HIP_DNN_BUILD_FRONTEND)
 endif()
 option(HIPDNN_BUILD_FRONTEND "Build the frontend code" ON)
 
-# Migrate HIP_DNN_BUILD_PLUGINS -> HIPDNN_BUILD_PLUGINS
-if(DEFINED HIP_DNN_BUILD_PLUGINS)
-    set(HIPDNN_BUILD_PLUGINS ${HIP_DNN_BUILD_PLUGINS} CACHE BOOL "Builds the plugins as part of the main cmake" FORCE)
-    unset(HIP_DNN_BUILD_PLUGINS CACHE)
-    message(DEPRECATION "HIP_DNN_BUILD_PLUGINS has been renamed to HIPDNN_BUILD_PLUGINS. Please update your build scripts to use -DHIPDNN_BUILD_PLUGINS instead.")
-endif()
-option(HIPDNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
-
 # Migrate HIP_DNN_GENERATE_SDK_HEADERS -> HIPDNN_GENERATE_SDK_HEADERS
 if(DEFINED HIP_DNN_GENERATE_SDK_HEADERS)
     set(HIPDNN_GENERATE_SDK_HEADERS ${HIP_DNN_GENERATE_SDK_HEADERS} CACHE BOOL "Automatically generates sdk headers from schema during build" FORCE)
@@ -227,11 +219,6 @@ add_subdirectory(plugin_sdk)
 add_subdirectory(tests)
 add_subdirectory(tools)
 
-if(HIPDNN_BUILD_PLUGINS)
-    file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
-    add_subdirectory(plugins)
-endif()
-
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
@@ -243,13 +230,6 @@ add_clang_tidy_custom_target()
 
 if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
-
-    if(HIPDNN_BUILD_PLUGINS)
-        set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT
-            -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_plugin.so -object
-            ./${CMAKE_INSTALL_BINDIR}/miopen_plugin_tests
-        )
-    endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
         ".*deps.*|.*tests.*|.*data_sdk.*data_objects.*|.*HipErrorHandler.*"
@@ -269,7 +249,6 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_plugin_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_test_sdk_tests
-        ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT}
     )
 
     # Helper function to create a code coverage target
