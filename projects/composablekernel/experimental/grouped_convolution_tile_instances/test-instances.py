@@ -163,11 +163,19 @@ def main():
     # Find all instance files
     files_by_subdir = find_instance_files(instances_dir, args.direction)
     
+    # If sub directory is defined, check only that sub directory
+    if args.subdir:
+        if args.subdir not in files_by_subdir:
+            print(f"Error: Subdirectory '{args.subdir}' not found")
+            print(f"Available: {list(files_by_subdir.keys())}")
+            sys.exit(1)
+        files_by_subdir = {args.subdir: files_by_subdir[args.subdir]}
+
     if args.instance is not None:
         # If instance index is specified, find the corresponding file for each subdir
         instance_files = {}
         for subdir, files in files_by_subdir.items():
-            if args.instance < len(files) and args.instance >= 0:
+            if args.instance >= 0:
                 target_suffix = f"_{args.instance}.cpp"
                 matched_files = [f for f in files if f.name.endswith(target_suffix)]
                 if matched_files:
@@ -177,7 +185,6 @@ def main():
                 if args.subdir is None:
                     print(f"Warning: Subdirectory '{subdir}' does not have instance index {args.instance}")
         files_by_subdir = instance_files
-        
 
     if args.subdir:
         if args.instance is not None and args.subdir not in files_by_subdir:
