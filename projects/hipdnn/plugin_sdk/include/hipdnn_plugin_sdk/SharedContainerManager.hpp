@@ -61,18 +61,9 @@ public:
      */
     std::shared_ptr<ContainerType> getOrCreate()
     {
-        auto containerPtr = _weakContainer.lock();
-        if(containerPtr != nullptr)
-        {
-            return containerPtr;
-        }
-
         std::lock_guard<std::mutex> lock(_mutex);
 
-        // if we do have a race condition that results in threads getting locked, we want to
-        // ensure that we only create one instance.  Therefore, the second thread to get
-        // through will just read from the weak pointer rather than create a new instance.
-        containerPtr = _weakContainer.lock();
+        auto containerPtr = _weakContainer.lock();
         if(containerPtr != nullptr)
         {
             return containerPtr;
