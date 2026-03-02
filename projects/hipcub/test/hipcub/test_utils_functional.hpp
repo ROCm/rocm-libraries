@@ -94,9 +94,9 @@ struct not_equal
 
 struct plus
 {
-    template<class T>
+    template<class T, class U>
     HIPCUB_HOST_DEVICE
-    inline constexpr T operator()(const T& a, const T& b) const
+    inline constexpr auto operator()(const T& a, const U& b) const -> decltype(a + b)
     {
         return a + b;
     }
@@ -104,9 +104,9 @@ struct plus
 
 struct minus
 {
-    template<class T>
+    template<class T, class U>
     HIPCUB_HOST_DEVICE
-    inline constexpr T operator()(const T& a, const T& b) const
+    inline constexpr auto operator()(const T& a, const U& b) const -> decltype(a - b)
     {
         return a - b;
     }
@@ -114,9 +114,9 @@ struct minus
 
 struct multiplies
 {
-    template<class T>
+    template<class T, class U>
     HIPCUB_HOST_DEVICE
-    inline constexpr T operator()(const T& a, const T& b) const
+    inline constexpr auto operator()(const T& a, const U& b) const -> decltype(a * b)
     {
         return a * b;
     }

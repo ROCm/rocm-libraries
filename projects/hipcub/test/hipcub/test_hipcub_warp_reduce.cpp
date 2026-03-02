@@ -123,7 +123,9 @@ auto warp_reduce_kernel(T* device_input, T* device_output) ->
 
     using wreduce_t = hipcub::WarpReduce<T, LogicalWarpSize>;
     __shared__ typename wreduce_t::TempStorage storage[warps_no];
-    auto reduce_op = hipcub::Sum();
+
+    auto reduce_op = test_utils::plus{};
+
     value = wreduce_t(storage[warp_id]).Reduce(value, reduce_op);
 
     if (hipThreadIdx_x % LogicalWarpSize == 0)
@@ -281,7 +283,9 @@ auto warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid
 
     using wreduce_t = hipcub::WarpReduce<T, LogicalWarpSize>;
     __shared__ typename wreduce_t::TempStorage storage[warps_no];
-    auto reduce_op = hipcub::Sum();
+
+    auto reduce_op = test_utils::plus{};
+
     value = wreduce_t(storage[warp_id]).Reduce(value, reduce_op, valid);
 
     if (hipThreadIdx_x % LogicalWarpSize == 0)
@@ -650,7 +654,9 @@ auto tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output) ->
 
     using wreduce_t = hipcub::WarpReduce<T, LogicalWarpSize>;
     __shared__ typename wreduce_t::TempStorage storage[warps_no];
-    auto reduce_op = hipcub::Sum();
+
+    auto reduce_op = test_utils::plus{};
+
     value = wreduce_t(storage[warp_id]).TailSegmentedReduce(value, flag, reduce_op);
 
     output[index] = value;

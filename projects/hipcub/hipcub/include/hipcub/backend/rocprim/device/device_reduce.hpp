@@ -240,7 +240,7 @@ public:
                       d_in,
                       d_out,
                       num_items,
-                      ::hipcub::Sum(),
+                      _HIPCUB_STD::plus<>{},
                       InitT(0),
                       stream);
     }

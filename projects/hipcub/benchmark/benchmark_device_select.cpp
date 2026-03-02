@@ -321,7 +321,7 @@ void run_unique_benchmark(benchmark::State& state,
                           const hipStream_t stream,
                           float             discontinuity_probability)
 {
-    hipcub::Sum op;
+    benchmark_utils::plus op{};
 
     std::vector<T> input(size);
     {
@@ -410,7 +410,7 @@ void run_unique_by_key_benchmark(benchmark::State& state,
                                  const hipStream_t stream,
                                  float             discontinuity_probability)
 {
-    hipcub::Sum op;
+    benchmark_utils::plus op{};
 
     std::vector<KeyT> input_keys(size);
     {

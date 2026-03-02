@@ -57,7 +57,7 @@ struct inclusive_scan
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = hipcub::Sum();
+        auto                                     scan_op = benchmark_utils::plus{};
         _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
@@ -86,7 +86,7 @@ struct exclusive_scan
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = hipcub::Sum();
+        auto                                     scan_op = benchmark_utils::plus{};
         _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {

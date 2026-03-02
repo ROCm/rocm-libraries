@@ -72,25 +72,25 @@ struct custom_op2
 };
 
 using ParamsSubtract
-    = ::testing::Types<params_subtract<unsigned int, int, hipcub::Sum, 64U, 1>,
+    = ::testing::Types<params_subtract<unsigned int, int, test_utils::plus, 64U, 1>,
                        params_subtract<int, bool, custom_op1, 128U, 1>,
                        params_subtract<float, int, custom_op2, 256U, 1>,
                        params_subtract<test_utils::half, int, custom_op1, 256U, 1>,
                        params_subtract<test_utils::bfloat16, int, custom_op2, 256U, 1>,
                        params_subtract<int, bool, custom_op1, 256U, 1>,
 
-                       params_subtract<float, int, hipcub::Sum, 37U, 1>,
+                       params_subtract<float, int, test_utils::plus, 37U, 1>,
                        params_subtract<long long, char, custom_op1, 510U, 1>,
                        params_subtract<unsigned int, long long, custom_op2, 162U, 1>,
-                       params_subtract<unsigned char, bool, hipcub::Sum, 255U, 1>,
+                       params_subtract<unsigned char, bool, test_utils::plus, 255U, 1>,
 
                        params_subtract<int, char, custom_op1, 64U, 2>,
                        params_subtract<int, short, custom_op2, 128U, 4>,
-                       params_subtract<unsigned short, unsigned char, hipcub::Sum, 256U, 7>,
+                       params_subtract<unsigned short, unsigned char, test_utils::plus, 256U, 7>,
                        params_subtract<short, short, custom_op1, 512U, 8>,
 
                        params_subtract<double, int, custom_op2, 33U, 5>,
-                       params_subtract<double, unsigned int, hipcub::Sum, 464U, 2>,
+                       params_subtract<double, unsigned int, test_utils::plus, 464U, 2>,
                        params_subtract<unsigned short, int, custom_op1, 100U, 3>,
                        params_subtract<short, bool, custom_op2, 234U, 9>>;
 

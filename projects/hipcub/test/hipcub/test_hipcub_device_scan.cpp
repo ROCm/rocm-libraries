@@ -33,7 +33,7 @@
 // Params for tests
 template<class InputType,
          class OutputType = InputType,
-         class ScanOp     = hipcub::Sum,
+         class ScanOp     = test_utils::plus,
          class KeyType    = int,
          bool UseGraphs   = false>
 struct DeviceScanParams
@@ -70,7 +70,7 @@ using HipcubDeviceScanTestsParams = ::testing::Types<
     DeviceScanParams<int, double>,
     DeviceScanParams<test_utils::bfloat16, test_utils::bfloat16, test_utils::maximum>,
     DeviceScanParams<test_utils::half, test_utils::half, test_utils::maximum>,
-    DeviceScanParams<int, long, hipcub::Sum, int, true>>;
+    DeviceScanParams<int, long, test_utils::plus, int, true>>;
 
 // use float for accumulation of bfloat16 and half inputs if operator is plus
 template<typename input_type, typename input_op_type>
@@ -208,7 +208,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if constexpr(std::is_same_v<scan_op_type, hipcub::Sum>)
+                if constexpr(std::is_same_v<scan_op_type, test_utils::plus>)
                 {
                     if constexpr(inplace)
                     {
@@ -592,7 +592,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
             size_t temp_storage_size_bytes{};
             void*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            if(std::is_same_v<scan_op_type, hipcub::Sum>)
+            if(std::is_same_v<scan_op_type, test_utils::plus>)
             {
                 HIP_CHECK(hipcub::DeviceScan::InclusiveSumByKey(d_temp_storage,
                                                                 temp_storage_size_bytes,
@@ -628,7 +628,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                 gHelper.startStreamCapture(stream);
 
             // Run
-            if(std::is_same_v<scan_op_type, hipcub::Sum>)
+            if(std::is_same_v<scan_op_type, test_utils::plus>)
             {
                 HIP_CHECK(hipcub::DeviceScan::InclusiveSumByKey(d_temp_storage,
                                                                 temp_storage_size_bytes,
@@ -760,7 +760,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             // Calculate expected results on host
             std::vector<U> expected(input.size());
             const T        initial_value
-                = std::is_same_v<scan_op_type, hipcub::Sum>
+                = std::is_same_v<scan_op_type, test_utils::plus>
                       ? test_utils::convert_to_device<T>(0)
                       : test_utils::get_random_value<T>(test_utils::convert_to_device<T>(1),
                                                         test_utils::convert_to_device<T>(100),
@@ -779,7 +779,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if constexpr(std::is_same_v<scan_op_type, hipcub::Sum>)
+                if constexpr(std::is_same_v<scan_op_type, test_utils::plus>)
                 {
                     if constexpr(inplace)
                     {
@@ -954,7 +954,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                  test_utils::convert_to_device<T>(10),
                                                  seed_value);
             T initial_value = initial_value_vector.front();
-            if(std::is_same_v<scan_op_type, hipcub::Sum>)
+            if(std::is_same_v<scan_op_type, test_utils::plus>)
             {
                 initial_value = test_utils::convert_to_device<T>(0);
             }
@@ -994,7 +994,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
             size_t temp_storage_size_bytes;
             void*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            if(std::is_same_v<scan_op_type, hipcub::Sum>)
+            if(std::is_same_v<scan_op_type, test_utils::plus>)
             {
                 HIP_CHECK(hipcub::DeviceScan::ExclusiveSumByKey(d_temp_storage,
                                                                 temp_storage_size_bytes,
@@ -1031,7 +1031,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                 gHelper.startStreamCapture(stream);
 
             // Run
-            if(std::is_same_v<scan_op_type, hipcub::Sum>)
+            if(std::is_same_v<scan_op_type, test_utils::plus>)
             {
                 HIP_CHECK(hipcub::DeviceScan::ExclusiveSumByKey(d_temp_storage,
                                                                 temp_storage_size_bytes,
@@ -1117,7 +1117,7 @@ TEST(HipcubDeviceScanTests, LargeIndicesInclusiveScan)
                                                 temp_storage_size_bytes,
                                                 input_begin,
                                                 output_it,
-                                                ::hipcub::Sum(),
+                                                test_utils::plus{},
                                                 size,
                                                 stream));
 
@@ -1133,7 +1133,7 @@ TEST(HipcubDeviceScanTests, LargeIndicesInclusiveScan)
                                                 temp_storage_size_bytes,
                                                 input_begin,
                                                 output_it,
-                                                ::hipcub::Sum(),
+                                                test_utils::plus{},
                                                 size,
                                                 stream));
     HIP_CHECK(hipGetLastError());
@@ -1188,7 +1188,7 @@ TEST(HipcubDeviceScanTests, LargeIndicesExclusiveScan)
                                                 temp_storage_size_bytes,
                                                 input_begin,
                                                 output_it,
-                                                ::hipcub::Sum(),
+                                                test_utils::plus{},
                                                 initial_value,
                                                 size,
                                                 stream));
@@ -1205,7 +1205,7 @@ TEST(HipcubDeviceScanTests, LargeIndicesExclusiveScan)
                                                 temp_storage_size_bytes,
                                                 input_begin,
                                                 output_it,
-                                                ::hipcub::Sum(),
+                                                test_utils::plus{},
                                                 initial_value,
                                                 size,
                                                 stream));

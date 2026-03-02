@@ -58,7 +58,7 @@ __global__ void KernelGridEvenShare(
 
     T value = device_output[index];
 
-    value = breduce_t(temp_storage).Reduce(value, hipcub::Sum());
+    value = breduce_t(temp_storage).Reduce(value, test_utils::plus{});
     if(hipThreadIdx_x == 0)
     {
         device_output_reductions[hipBlockIdx_x] = value;
@@ -179,7 +179,8 @@ __global__ void KernelGridQueue(
 
     int32_t index = block_tile_index * BlockSize + hipThreadIdx_x;
     T value = device_output[index];
-    value = breduce_t(temp_storage).Reduce(value, hipcub::Sum());
+
+    value = breduce_t(temp_storage).Reduce(value, test_utils::plus{});
 
     if(hipThreadIdx_x == 0)
     {

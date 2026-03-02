@@ -690,7 +690,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                     test_utils::host_inclusive_scan(input01.begin(),
                                                     input01.end(),
                                                     input.begin(),
-                                                    hipcub::Sum());
+                                                    test_utils::plus{});
                 }
 
                 // Allocate and copy to device
@@ -1069,7 +1069,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                     test_utils::host_inclusive_scan(input01.begin(),
                                                     input01.end(),
                                                     input_keys.begin(),
-                                                    hipcub::Sum());
+                                                    test_utils::plus{});
                 }
 
                 const auto input_values
