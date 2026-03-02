@@ -322,37 +322,6 @@ struct fp8_e4m3
     fp8_e4m3& operator*=(fp8_e4m3) = delete;
     fp8_e4m3& operator/=(fp8_e4m3) = delete;
 
-    // Comparison operators (compare via float conversion)
-    friend bool operator==(fp8_e4m3 a, fp8_e4m3 b) noexcept
-    {
-        return static_cast<float>(a) == static_cast<float>(b);
-    }
-
-    friend bool operator!=(fp8_e4m3 a, fp8_e4m3 b) noexcept
-    {
-        return static_cast<float>(a) != static_cast<float>(b);
-    }
-
-    friend bool operator<(fp8_e4m3 a, fp8_e4m3 b) noexcept
-    {
-        return static_cast<float>(a) < static_cast<float>(b);
-    }
-
-    friend bool operator>(fp8_e4m3 a, fp8_e4m3 b) noexcept
-    {
-        return static_cast<float>(a) > static_cast<float>(b);
-    }
-
-    friend bool operator<=(fp8_e4m3 a, fp8_e4m3 b) noexcept
-    {
-        return static_cast<float>(a) <= static_cast<float>(b);
-    }
-
-    friend bool operator>=(fp8_e4m3 a, fp8_e4m3 b) noexcept
-    {
-        return static_cast<float>(a) >= static_cast<float>(b);
-    }
-
     // Stream output
     friend std::ostream& operator<<(std::ostream& os, fp8_e4m3 val)
     {

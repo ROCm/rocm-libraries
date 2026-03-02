@@ -335,37 +335,6 @@ struct fp8_e5m2
     fp8_e5m2& operator*=(fp8_e5m2) = delete;
     fp8_e5m2& operator/=(fp8_e5m2) = delete;
 
-    // Comparison operators (compare via float conversion)
-    friend bool operator==(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) == static_cast<float>(b);
-    }
-
-    friend bool operator!=(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) != static_cast<float>(b);
-    }
-
-    friend bool operator<(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) < static_cast<float>(b);
-    }
-
-    friend bool operator>(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) > static_cast<float>(b);
-    }
-
-    friend bool operator<=(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) <= static_cast<float>(b);
-    }
-
-    friend bool operator>=(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) >= static_cast<float>(b);
-    }
-
     // Stream output
     friend std::ostream& operator<<(std::ostream& os, fp8_e5m2 val)
     {

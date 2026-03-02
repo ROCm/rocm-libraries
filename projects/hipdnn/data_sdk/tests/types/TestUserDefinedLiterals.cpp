@@ -225,8 +225,6 @@ TEST_F(TestUserDefinedLiterals, LiteralInComparison)
 {
     EXPECT_TRUE(1.0_bf < 2.0_bf);
     EXPECT_TRUE(2.0_h > 1.0_h);
-    EXPECT_TRUE(1.0_e4m3 == 1.0_e4m3);
-    EXPECT_TRUE(1.0_e5m2 != 2.0_e5m2);
 }
 
 // ============================================================================
