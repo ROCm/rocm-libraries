@@ -947,7 +947,7 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
     matrix_inst=[16, 16, 32, 1],
     mfma_wave_group=[2, 2]
 )
-def _get_schedule_256x96x64_16bit_useDtlPlusLdsBuf(kernel, useLDSTr, TLDS):
+def _get_schedule_256x96x64_16bit_DPLB(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll

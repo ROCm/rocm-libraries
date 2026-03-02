@@ -184,7 +184,7 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
-    def test_schedule_256x96x64_16bit_NT_useDtlPlusLdsBuf(self):
+    def test_schedule_256x96x64_16bit_NT_DPLB(self):
         """Tests the 256x96x64 16-bit NT schedule with DtlPlusLdsBuf."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
