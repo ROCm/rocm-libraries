@@ -267,11 +267,13 @@ void heuristics_database_t::initialize_defaults() {
       double eff;
     };
     std::vector<cms_config> bf16_nt_configs = {
+        {128, 224, 64, 1.0 / 1.10},
         {160, 256, 64, 1.0 / 1.20},
         {192, 256, 64, 1.0 / 1.10},
         {208, 256, 64, 1.0 / 1.20},
         {256, 160, 64, 1.0 / 1.20},
         {256, 192, 64, 1.0 / 1.20},
+        {256, 224, 64, 1.0 / 1.00},
         {256, 256, 64, 1.0 / 1.15},
     };
 
@@ -290,7 +292,9 @@ void heuristics_database_t::initialize_defaults() {
 
     // BF16 NN configurations
     std::vector<cms_config> bf16_nn_configs = {
+        {128, 256, 64, 1.0 / 1.10},
         {160, 256, 64, 1.0 / 1.10},
+        {192, 256, 64, 1.0 / 1.05},
         {208, 256, 64, 1.0 / 1.10},
         {256, 192, 64, 1.0 / 1.00},
         {256, 256, 64, 1.0 / 1.05},
@@ -312,12 +316,16 @@ void heuristics_database_t::initialize_defaults() {
     // BF16 TN configurations
     std::vector<cms_config> bf16_tn_configs = {
         {160, 256, 64, 1.0 / 1.10},
-        {192, 256, 64, 1.0 / 1.05},
+        {192, 256, 64, 1.0 / 1.10},
+        {192, 320, 64, 1.0 / 1.10},
+        {224, 256, 64, 1.0 / 1.05},
         {256, 96, 64, 1.0 / 1.10},
+        {256, 160, 64, 1.0 / 1.10},
         {256, 192, 64, 1.0 / 1.10},
         {256, 224, 64, 1.0 / 1.05},
-        {256, 256, 64, 1.0 / 1.05},
-    };
+        {256, 256, 64, 1.0 / 1.05}, 
+      };
+    
 
     for (const auto& cfg : bf16_tn_configs) {
       auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
