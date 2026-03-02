@@ -113,6 +113,19 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
     add_subdirectory(tests)
+
+    # Library YAML consistency test in hipblaslt-test (named *quick* for quick filter).
+    target_include_directories(hipblaslt-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include"
+    )
+    get_filename_component(HIPBLASLT_LIBRARY_LOGIC_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full"
+        ABSOLUTE
+    )
+    target_compile_definitions(hipblaslt-test PRIVATE
+        "HIPBLASLT_LIBRARY_LOGIC_ROOT=\"${HIPBLASLT_LIBRARY_LOGIC_ROOT}\""
+    )
+    target_compile_features(hipblaslt-test PRIVATE cxx_std_17)
 endif()
 
 if(HIPBLASLT_ENABLE_SAMPLES)
