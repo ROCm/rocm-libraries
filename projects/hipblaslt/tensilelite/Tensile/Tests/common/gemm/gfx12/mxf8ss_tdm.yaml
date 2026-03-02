@@ -62,7 +62,7 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  4, 4,  2, 2]
           - [16, 16, 128, 1,  1,  8, 4,  2, 2]
           # - [16, 16, 128, 1,  1,  8, 8,  2, 2] # too much sgpr
-        - DepthU: [128, 256]
+        - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
