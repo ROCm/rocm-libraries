@@ -52,44 +52,43 @@ static void print_helper_msg()
     // clang-format on
 }
 
-void print_available_instances(auto num_dim_spatial_tmp,
-                               auto in_layout,
-                               auto wei_layout,
-                               auto out_layout,
-                               auto in_type,
-                               auto wei_type,
-                               auto out_type,
-                               auto compute_type)
-{
-    constexpr ck::index_t NDimSpatial = num_dim_spatial_tmp.value;
-
-    using InLayout  = decltype(in_layout);
-    using WeiLayout = decltype(wei_layout);
-    using OutLayout = decltype(out_layout);
-
-    using InDataType  = decltype(in_type);
-    using WeiDataType = decltype(wei_type);
-    using OutDataType = decltype(out_type);
-
-    using ComputeType = decltype(compute_type);
-
-    using PassThrough = ck::tensor_operation::element_wise::PassThrough;
-
-    ck::profiler::bwd_data::print_instances<NDimSpatial,
-                                            InLayout,
-                                            WeiLayout,
-                                            OutLayout,
-                                            InDataType,
-                                            WeiDataType,
-                                            OutDataType,
-                                            PassThrough,
-                                            PassThrough,
-                                            PassThrough,
-                                            ComputeType>();
-}
-
 void print_bwd_data_instances(auto data_type, auto layout, auto num_dim_spatial)
 {
+    auto print_available_instances = [&](auto num_dim_spatial_tmp,
+                                         auto in_layout,
+                                         auto wei_layout,
+                                         auto out_layout,
+                                         auto in_type,
+                                         auto wei_type,
+                                         auto out_type,
+                                         auto compute_type) {
+        constexpr ck::index_t NDimSpatial = num_dim_spatial_tmp.value;
+
+        using InLayout  = decltype(in_layout);
+        using WeiLayout = decltype(wei_layout);
+        using OutLayout = decltype(out_layout);
+
+        using InDataType  = decltype(in_type);
+        using WeiDataType = decltype(wei_type);
+        using OutDataType = decltype(out_type);
+
+        using ComputeType = decltype(compute_type);
+
+        using PassThrough = ck::tensor_operation::element_wise::PassThrough;
+
+        ck::profiler::bwd_data::print_instances<NDimSpatial,
+                                                InLayout,
+                                                WeiLayout,
+                                                OutLayout,
+                                                InDataType,
+                                                WeiDataType,
+                                                OutDataType,
+                                                PassThrough,
+                                                PassThrough,
+                                                PassThrough,
+                                                ComputeType>();
+    };
+
     constexpr auto I2 = ck::Number<2>{};
     constexpr auto I3 = ck::Number<3>{};
 

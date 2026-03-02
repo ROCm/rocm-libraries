@@ -85,6 +85,28 @@ def get_dtype(problem_name):
     else:
         raise RuntimeError("Cannot parse data type from problem name: " + problem_name)
 
+def get_k_mfma(dtype, m_per_xdl, n_per_xdl):
+    if m_per_xdl != n_per_xdl:
+        raise RuntimeError("Not supported")
+    if dtype == "float":
+        if m_per_xdl == 32:
+            return 2
+        else:
+            return 4
+    else:
+        if m_per_xdl == 32:
+            return 8
+        else:
+            return 16
+
+def check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector):
+    if a_scalar_per_vector != 1 and a_scalar_per_vector % 2 != 0:
+        return False
+    if b_scalar_per_vector != 1 and b_scalar_per_vector % 2 != 0:
+        return False
+    if c_scalar_per_vector != 1 and c_scalar_per_vector % 2 != 0:
+        return False
+    return True
 
 def generate_calls_inc(instances, problem_name, direction, filter_pattern):
     generate_dir = Path(__file__).resolve().parent
@@ -169,7 +191,7 @@ def parse_fwd_instances(instances, problem_name):
             num_groups_to_merge = 1
         split_image = instance.find("Large") != -1
         double_smem_buffer = instance.find("BlkGemmPipelineVersion: v4") != -1
-        num_wave_groups = 2 if instance.find("BlkGemmPipelineVersion: v5") != -1 else 1
+        num_wave_groups = 1
         scheduler = (
             "Intrawave" if instance.find("BlkGemmPipelineScheduler") == -1 else args[14]
         )
@@ -311,18 +333,11 @@ def parse_bwd_weight_instances(instances, problem_name):
             # Block GEMM pipeline parameters
             blk_gemm_pipeline_schduler = args[6]
             blk_gemm_pipeline_version = args[7]
-
-            # TODO: Double buffer pipeline does not currently compile for explicit GEMM.
-            if blk_gemm_pipeline_version == "v4":
-                raise RuntimeError(
-                    f"Block GEMM pipeline version {blk_gemm_pipeline_version} is not supported for instance {instance_id} with device op {device_op_name}."
-                )
         else:
             spec = args[11]
             block_size = int(args[12])
             m_per_block = int(args[13])
             n_per_block = int(args[14])
-            k0_per_block = int(args[15])
             k1 = int(args[16])
             m_per_xdl = int(args[17])
             n_per_xdl = int(args[18])
@@ -332,7 +347,11 @@ def parse_bwd_weight_instances(instances, problem_name):
             b_scalar_per_vector = int(args[32])
             c_scalar_per_vector = int(args[38])
 
-            k_per_block = k0_per_block * k1
+            if is_v3_instance or is_two_stage_instance:
+                k_per_block = int(args[15])
+            else:
+                k0_per_block = int(args[15])
+                k_per_block = k0_per_block * k1
 
             if is_v3_instance:
                 if len(args) != 45:
@@ -368,8 +387,8 @@ def parse_bwd_weight_instances(instances, problem_name):
             raise RuntimeError(f"Invalid Block GEMM pipeline version: {blk_gemm_pipeline_version} in instance: {instance}")
 
         split_image = instance.find("Large") != -1
-        double_smem_buffer = blk_gemm_pipeline_version == "v4" and not is_explicit_gemm
-        num_wave_groups = 2 if blk_gemm_pipeline_version == "v5" else 1
+        double_smem_buffer = blk_gemm_pipeline_version == "v4"
+        num_wave_groups = 1
         scheduler = blk_gemm_pipeline_schduler
         pipeline_version = blk_gemm_pipeline_version.upper()
 
@@ -384,7 +403,12 @@ def parse_bwd_weight_instances(instances, problem_name):
         dtype = get_dtype(problem_name)
 
         # TODO: k_per_xdl = max(k1, k_mfma) where is compute from the m_per_xdl, n_per_xdl, and data type.
-        k_per_xdl = k1
+        k_per_xdl = max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl))
+
+        if check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector) == False:
+            print(f"Skipping instance {instance_id} with irregular load since it's not supported yet.")
+            continue
+
 
         conv = ConvInstanceTemplateParams(
             spec,
