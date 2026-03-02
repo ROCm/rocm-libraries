@@ -936,6 +936,7 @@ int main(int argc, const char* argv[])
 
                     if(exitOnError && listeners.error() > 0)
                     {
+                        flushTimingBuffer();
                         // error range in shell is [0-255]
                         return std::min(listeners.error(), 255);
                     }
@@ -955,6 +956,9 @@ int main(int argc, const char* argv[])
         ScopedTimer timer("finalize_report");
         listeners.finalizeReport();
     }
+
+    // Flush all buffered timing records to stderr
+    flushTimingBuffer();
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);

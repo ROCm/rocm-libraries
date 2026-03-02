@@ -34,11 +34,12 @@ namespace TensileLite
 {
     namespace Client
     {
+        // threshold is largest allowed delta. -1 uses default for each type
         template <typename T>
-        inline bool AlmostEqual(T a, T b);
+        inline bool AlmostEqual(T a, T b, double threshold = -1.0);
 
         template <>
-        inline bool AlmostEqual(Half a, Half b)
+        inline bool AlmostEqual(Half a, Half b, double threshold)
         {
             Half absA = (a > 0) ? a : -a;
             Half absB = (b > 0) ? b : -b;
@@ -59,7 +60,7 @@ namespace TensileLite
         }
 
         template <>
-        inline bool AlmostEqual(Float8 a, Float8 b)
+        inline bool AlmostEqual(Float8 a, Float8 b, double threshold)
         {
             Float8 absA    = (a > static_cast<Float8>(0.0f)) ? a : static_cast<Float8>(0.0f) - a;
             Float8 absB    = (b > static_cast<Float8>(0.0f)) ? b : static_cast<Float8>(0.0f) - b;
@@ -69,7 +70,7 @@ namespace TensileLite
         }
 
         template <>
-        inline bool AlmostEqual(BFloat8 a, BFloat8 b)
+        inline bool AlmostEqual(BFloat8 a, BFloat8 b, double threshold)
         {
             BFloat8 absA    = (a > static_cast<BFloat8>(0.0f)) ? a : static_cast<BFloat8>(0.0f) - a;
             BFloat8 absB    = (b > static_cast<BFloat8>(0.0f)) ? b : static_cast<BFloat8>(0.0f) - b;
@@ -79,7 +80,7 @@ namespace TensileLite
         }
 
         template <>
-        inline bool AlmostEqual(Float8_fnuz a, Float8_fnuz b)
+        inline bool AlmostEqual(Float8_fnuz a, Float8_fnuz b, double threshold)
         {
             Float8_fnuz absA    = (a > static_cast<Float8_fnuz>(0.0f)) ? a : static_cast<Float8_fnuz>(0.0f) - a;
             Float8_fnuz absB    = (b > static_cast<Float8_fnuz>(0.0f)) ? b : static_cast<Float8_fnuz>(0.0f) - b;
@@ -89,7 +90,7 @@ namespace TensileLite
         }
 
         template <>
-        inline bool AlmostEqual(BFloat8_fnuz a, BFloat8_fnuz b)
+        inline bool AlmostEqual(BFloat8_fnuz a, BFloat8_fnuz b, double threshold)
         {
             BFloat8_fnuz absA    = (a > static_cast<BFloat8_fnuz>(0.0f)) ? a : static_cast<BFloat8_fnuz>(0.0f) - a;
             BFloat8_fnuz absB    = (b > static_cast<BFloat8_fnuz>(0.0f)) ? b : static_cast<BFloat8_fnuz>(0.0f) - b;
@@ -99,7 +100,7 @@ namespace TensileLite
         }
 
     template <>
-        inline bool AlmostEqual(BFloat16 a, BFloat16 b)
+        inline bool AlmostEqual(BFloat16 a, BFloat16 b, double threshold)
         {
             BFloat16 absA = (a > static_cast<BFloat16>(0.0f)) ? a : static_cast<BFloat16>(0.0f) - a;
             BFloat16 absB = (b > static_cast<BFloat16>(0.0f)) ? b : static_cast<BFloat16>(0.0f) - b;
@@ -109,41 +110,42 @@ namespace TensileLite
         }
 
         template <>
-        inline bool AlmostEqual(float a, float b)
+        inline bool AlmostEqual(float a, float b, double threshold)
         {
+            threshold = threshold > 0.0 ? threshold : 0.0001; // default threshold for float
             return std::fabs(a - b) / (std::fabs(a) + std::fabs(b) + 1)
-                   < 0.0001; // 7 digits of precision - 2
+                   < threshold; // 7 digits of precision - 2
         }
 
         template <>
-        inline bool AlmostEqual(double a, double b)
+        inline bool AlmostEqual(double a, double b, double threshold)
         {
             return std::fabs(a - b) / (std::fabs(a) + std::fabs(b) + 1)
                    < 0.000000000001; // 15 digits of precision - 2
         }
         template <>
-        inline bool AlmostEqual(int8_t a, int8_t b)
+        inline bool AlmostEqual(int8_t a, int8_t b, double threshold)
         {
             return a == b;
         }
         template <>
-        inline bool AlmostEqual(int a, int b)
+        inline bool AlmostEqual(int a, int b, double threshold)
         {
             return a == b;
         }
         template <>
-        inline bool AlmostEqual(unsigned int a, unsigned int b)
+        inline bool AlmostEqual(unsigned int a, unsigned int b, double threshold)
         {
             return a == b;
         }
         template <>
-        inline bool AlmostEqual(std::complex<float> a, std::complex<float> b)
+        inline bool AlmostEqual(std::complex<float> a, std::complex<float> b, double threshold)
         {
             return AlmostEqual(a.real(), b.real()) && AlmostEqual(a.imag(), b.imag());
         }
 
         template <>
-        inline bool AlmostEqual(std::complex<double> a, std::complex<double> b)
+        inline bool AlmostEqual(std::complex<double> a, std::complex<double> b, double threshold)
         {
             return AlmostEqual(a.real(), b.real()) && AlmostEqual(a.imag(), b.imag());
         }
