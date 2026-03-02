@@ -208,17 +208,11 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                                                         dividedForWaveId = dividedForWaveId, \
                                                                         vectorWidth=vectorWidth, \
                                                                         maxKId=maxKId)
-        #abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
-        if tc == 'A':
+
+        if tc == 'A' or tc == 'MXSA' or (tc == 'Metadata' and tP["tensorIdx"] == 0):
             abmatrixinfo = writer.states.a
-        elif tc == 'B':
+        elif tc == 'B' or tc == 'MXSB' or (tc == 'Metadata' and tP["tensorIdx"] != 0):
             abmatrixinfo = writer.states.b
-        elif tc == 'MXSA':
-            abmatrixinfo = writer.states.a  # MXSA uses matrix A state
-        elif tc == 'MXSB':
-            abmatrixinfo = writer.states.b  # MXSB uses matrix B state
-        elif tc == 'Metadata':
-            abmatrixinfo = writer.states.a if tP["tensorIdx"] == 0 else writer.states.b
         else:
             raise Exception(f"unsupport tc {tc}")
         perpStride = abmatrixinfo.gNLCPerpStride
@@ -249,7 +243,6 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # FIXME SPARSE
         if kernel["ProblemType"]["Sparse"] != 0:
             if kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() > 16:
-              inputPerThread = kernel["MIInputPerThread"]
               isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
               strideK      = (offsetK if umlds else (mt + LdsPad) * offsetK) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  offsetK else 1)
         #special case for new F8 MFMA -TODO:
