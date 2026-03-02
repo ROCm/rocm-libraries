@@ -838,9 +838,9 @@ struct BlockwiseGemmWmmaops_pipeline_v1<BlockGemmPipelineScheduler::Interwave,
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
                 }
-                static_ford<Sequence<KRepeatPerCluster, KInner>>{}([&](auto kk) {
-                    constexpr auto k0_inner = Number<kk[Number<0>{}]>{};
-                    constexpr auto k_inner  = Number<kk[Number<1>{}]>{};
+                static_ford<Sequence<KRepeatPerCluster, KInner>>{}([&](auto kk_iters) {
+                    constexpr auto k0_inner = Number<kk_iters[Number<0>{}]>{};
+                    constexpr auto k_inner  = Number<kk_iters[Number<1>{}]>{};
                     static_ford<Sequence<MRepeat, NRepeat>>{}([&](auto mn) {
                         constexpr auto m0 = Number<mn[Number<0>{}]>{};
                         constexpr auto n0 = Number<mn[Number<1>{}]>{};
