@@ -37,6 +37,7 @@ add_executable(
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
+    descriptors/TestDataTypeConversion.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp
