@@ -465,48 +465,6 @@ inline bool isfinite(fp8_e5m2 x)
     return !isnan(x) && !isinf(x);
 }
 
-// Rounding functions
-inline fp8_e5m2 floor(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::floor(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 ceil(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::ceil(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 round(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::round(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 trunc(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::trunc(static_cast<float>(x)));
-}
-
-// Math functions (compute in float)
-inline fp8_e5m2 exp(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::exp(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 log(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::log(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 sqrt(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::sqrt(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 tanh(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::tanh(static_cast<float>(x)));
-}
-
 } // namespace hipdnn_data_sdk::types
 
 // std::numeric_limits specialization

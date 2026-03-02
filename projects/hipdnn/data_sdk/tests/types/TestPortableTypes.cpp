@@ -1178,67 +1178,6 @@ TYPED_TEST(StorageFloatTypes, Fabs)
     EXPECT_TRUE(this->nearEqual(fabs(T(4.0f)), T(4.0f)));
 }
 
-TYPED_TEST(StorageFloatTypes, Sqrt)
-{
-    using T = TypeParam;
-
-    T a(4.0f);
-    EXPECT_TRUE(this->nearEqual(sqrt(a), T(2.0f)));
-
-    T b(16.0f);
-    EXPECT_TRUE(this->nearEqual(sqrt(b), T(4.0f)));
-}
-
-TYPED_TEST(StorageFloatTypes, Exp)
-{
-    using T = TypeParam;
-
-    T a(0.0f);
-    EXPECT_TRUE(this->nearEqual(exp(a), T(1.0f)));
-}
-
-TYPED_TEST(StorageFloatTypes, Log)
-{
-    using T = TypeParam;
-
-    T a(1.0f);
-    EXPECT_TRUE(this->nearEqual(log(a), T(0.0f)));
-}
-
-TYPED_TEST(StorageFloatTypes, Tanh)
-{
-    using T = TypeParam;
-
-    T a(0.0f);
-    EXPECT_TRUE(this->nearEqual(tanh(a), T(0.0f)));
-}
-
-TYPED_TEST(StorageFloatTypes, Floor)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    EXPECT_TRUE(this->nearEqual(floor(T(2.5f)), T(2.0f), Traits::large_tolerance));
-    EXPECT_TRUE(this->nearEqual(floor(T(-2.5f)), T(-3.0f), Traits::large_tolerance));
-}
-
-TYPED_TEST(StorageFloatTypes, Ceil)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    EXPECT_TRUE(this->nearEqual(ceil(T(2.5f)), T(3.0f), Traits::large_tolerance));
-    EXPECT_TRUE(this->nearEqual(ceil(T(-2.5f)), T(-2.0f), Traits::large_tolerance));
-}
-
-TYPED_TEST(StorageFloatTypes, Round)
-{
-    using T = TypeParam;
-
-    EXPECT_TRUE(this->nearEqual(round(T(2.0f)), T(2.0f)));
-    EXPECT_TRUE(this->nearEqual(round(T(3.0f)), T(3.0f)));
-}
-
 // ============================================================================
 // Stream Output Tests
 // ============================================================================
