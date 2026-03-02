@@ -102,18 +102,6 @@ TEST(TestUtilsFp8, Comparison)
     ASSERT_GE(0.0215_e4m3, -0.0176_e4m3);
 }
 
-TEST(TestUtilsFp8, Max)
-{
-    fp8_e4m3 a = 1.0_e4m3;
-    fp8_e4m3 b = 2.0_e4m3;
-    fp8_e4m3 nan = fp8_e4m3::from_bits(0x7F);
-    EXPECT_EQ(max(a, b), 2.0_e4m3);
-    EXPECT_EQ(max(b, a), 2.0_e4m3);
-    EXPECT_EQ(max(a, nan), 1.0_e4m3);
-    EXPECT_EQ(max(nan, b), 2.0_e4m3);
-    EXPECT_TRUE(isnan(max(nan, nan)));
-}
-
 TEST(TestUtilsBfp8, BasicUsage)
 {
     fp8_e5m2 bf = 1.0_e5m2;
@@ -140,16 +128,4 @@ TEST(TestUtilsBfp8, Comparison)
     ASSERT_LT(-0.0002_e5m2, 0.0003_e5m2);
     ASSERT_GT(0.0003_e5m2, 0.0002_e5m2);
     ASSERT_GE(0.0002_e5m2, -0.0002_e5m2);
-}
-
-TEST(TestUtilsBfp8, Max)
-{
-    fp8_e5m2 a = 1.0_e5m2;
-    fp8_e5m2 b = 2.0_e5m2;
-    fp8_e5m2 nan = fp8_e5m2::from_bits(0x7F);
-    EXPECT_EQ(max(a, b), 2.0_e5m2);
-    EXPECT_EQ(max(b, a), 2.0_e5m2);
-    EXPECT_EQ(max(a, nan), 1.0_e5m2);
-    EXPECT_EQ(max(nan, b), 2.0_e5m2);
-    EXPECT_TRUE(isnan(max(nan, nan)));
 }

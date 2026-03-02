@@ -451,32 +451,6 @@ inline bool isfinite(fp8_e4m3 x)
     return !isnan(x);
 }
 
-inline fp8_e4m3 max(fp8_e4m3 a, fp8_e4m3 b)
-{
-    if(isnan(a))
-    {
-        return isnan(b) ? fp8_e4m3::from_bits(detail::FP8_E4M3_NAN) : b;
-    }
-    if(isnan(b))
-    {
-        return a;
-    }
-    return a > b ? a : b;
-}
-
-inline fp8_e4m3 min(fp8_e4m3 a, fp8_e4m3 b)
-{
-    if(isnan(a))
-    {
-        return isnan(b) ? fp8_e4m3::from_bits(detail::FP8_E4M3_NAN) : b;
-    }
-    if(isnan(b))
-    {
-        return a;
-    }
-    return a < b ? a : b;
-}
-
 // Rounding functions
 inline fp8_e4m3 floor(fp8_e4m3 x)
 {
