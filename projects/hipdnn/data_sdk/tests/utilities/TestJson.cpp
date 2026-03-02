@@ -115,6 +115,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid matmul graph)";
             break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFpropGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid sdpa fprop graph)";
+            break;
         case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
             graphBuilder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());

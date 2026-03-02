@@ -18,6 +18,7 @@
 #include <hipdnn_data_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/RMSNormAttributes.hpp>
+#include <hipdnn_data_sdk/utilities/json/SdpaAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
 
 namespace hipdnn_data_sdk::data_objects
@@ -34,6 +35,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ConvolutionBwdAttributes, "ConvolutionBwdAttributes"},
      {NodeAttributes::ConvolutionWrwAttributes, "ConvolutionWrwAttributes"},
      {NodeAttributes::MatmulAttributes, "MatmulAttributes"},
+     {NodeAttributes::SdpaAttributes, "SdpaAttributes"},
      {NodeAttributes::LayernormAttributes, "LayernormAttributes"},
      {NodeAttributes::RMSNormAttributes, "RMSNormAttributes"},
      {NodeAttributes::BlockScaleDequantizeAttributes, "BlockScaleDequantizeAttributes"},
@@ -77,6 +79,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::MatmulAttributes:
         nodeJson = *node.attributes_as_MatmulAttributes();
+        break;
+    case data_objects::NodeAttributes::SdpaAttributes:
+        nodeJson = *node.attributes_as_SdpaAttributes();
         break;
     case data_objects::NodeAttributes::LayernormAttributes:
         nodeJson = *node.attributes_as_LayernormAttributes();
@@ -145,6 +150,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ConvolutionWrwAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MatmulAttributes:
             return to<data_objects::MatmulAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::SdpaAttributes:
+            return to<data_objects::SdpaAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::LayernormAttributes:
             return to<data_objects::LayernormAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::RMSNormAttributes:

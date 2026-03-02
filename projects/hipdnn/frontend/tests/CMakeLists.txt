@@ -49,6 +49,8 @@ add_executable(
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp
+    TestSdpaAttributes.cpp
+    TestSdpaFpropNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestRMSNormAttributes.cpp
