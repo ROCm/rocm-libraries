@@ -119,15 +119,27 @@ void latrd_forsytrd_initData(const rocblas_handle handle,
     {
         rocblas_init<T>(hA, true);
 
-        // scale A to avoid singularities
+        // scale A to avoid singularities.
+        // Also make A full symmetric (same values below and above the diagonal)
+        // as needed by this routine
         for(rocblas_int i = 0; i < n; i++)
         {
-            for(rocblas_int j = 0; j < n; j++)
+            for(rocblas_int j = i; j < n; j++)
             {
-                if(i == j || (i == j + 1) || (i == j - 1))
+                if(j == i)
+                {
                     hA[0][i + j * lda] += 400;
+                }
+                else if(j == i + 1)
+                {
+                    hA[0][i + j * lda] += 400;
+                    hA[0][j + i * lda] = hA[0][i + j * lda];
+                }
                 else
+                {
                     hA[0][i + j * lda] -= 4;
+                    hA[0][j + i * lda] = hA[0][i + j * lda];
+                }
             }
         }
     }
@@ -150,17 +162,28 @@ void latrd_forsytrd_initData(const rocblas_handle handle,
     {
         rocblas_init<T>(hA, true);
 
-        // scale A to avoid singularities
+        // scale A to avoid singularities.
+        // Also make A full symmetric (same values below and above the diagonal)
+        // as needed by this routine
         for(rocblas_int i = 0; i < n; i++)
         {
-            for(rocblas_int j = 0; j < n; j++)
+            for(rocblas_int j = i; j < n; j++)
             {
-                if(i == j)
+                if(j == i)
+                {
                     hA[0][i + j * lda] = hA[0][i + j * lda].real() + 400;
-                else if((i == j + 1) || (i == j - 1))
+                    ;
+                }
+                else if(j == i + 1)
+                {
                     hA[0][i + j * lda] += 400;
+                    hA[0][j + i * lda] = std::conj(hA[0][i + j * lda]);
+                }
                 else
+                {
                     hA[0][i + j * lda] -= 4;
+                    hA[0][j + i * lda] = std::conj(hA[0][i + j * lda]);
+                }
             }
         }
     }
