@@ -3194,9 +3194,12 @@ public:
 
                     if(!suffix.empty())
                     {
-                        if(suffix == "KiB") out *= KiB;
-                        else if(suffix == "MiB") out *= MiB;
-                        else if(suffix == "GiB") out *= GiB;
+                        if(suffix == "KiB")
+                            out *= KiB;
+                        else if(suffix == "MiB")
+                            out *= MiB;
+                        else if(suffix == "GiB")
+                            out *= GiB;
                         else
                         {
                             std::cerr << "Error: Failed to parse --" << key << ": unknown suffix \""
@@ -3734,7 +3737,8 @@ private:
     {
         detail::cli_settings s{};
 
-        s.bytes = cli.get<size_t>("bytes",
+        s.bytes = cli.get<size_t>(
+            "bytes",
                                   default_bytes,
                                   "Sets the size (in bytes) of the randomly generated input array, "
                                   "overriding the value provided to `primbench::executor`."
