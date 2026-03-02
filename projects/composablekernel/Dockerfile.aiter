@@ -21,8 +21,7 @@ RUN pip install pandas zmq einops ninja tabulate && \
         git config user.name "assistant-librarian[bot]" && \
         git config user.email "assistant-librarian[bot]@users.noreply.github.com" && \
         git branch -m "$CK_AITER_BRANCH" && git add -A && \
-        git commit -m "import from ROCm/rocm-libraries@$ROCM_LIBRARIES_SHA" && \
-        cd .. && rm -rf rocm-libraries ; \
+        git commit -m "import from ROCm/rocm-libraries@$ROCM_LIBRARIES_SHA" ; \
     else \
         git clone -b "$CK_AITER_BRANCH" https://github.com/ROCm/composable_kernel.git ck ; \
     fi && \
