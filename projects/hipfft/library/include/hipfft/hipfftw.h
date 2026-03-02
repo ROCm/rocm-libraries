@@ -22,10 +22,10 @@
 #define HIPFFTW_H_
 
 #include "hipfft-export.h"
-
-#ifdef __cplusplus
 #include <cstddef>
 #include <cstdlib>
+
+#ifdef __cplusplus
 extern "C" {
 #endif
 
