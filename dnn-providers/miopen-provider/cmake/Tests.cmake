@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(HIPDNN_SKIP_TESTS)
+if(MIOPENPROVIDER_SKIP_TESTS)
     return()
 endif()
 
@@ -26,14 +26,14 @@ function(_build_test_environment_list_internal OUT_VAR)
         set(ENVIRONMENT_LIST ${TEST_ENVIRONMENT})
     endif()
 
-    if(HIPDNN_ENABLE_COVERAGE)
+    if(MIOPENPROVIDER_ENABLE_COVERAGE)
         # Ensure coverage report directory exists
-        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage_report/profraw")
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/coverage-report/profraw")
 
         # For code coverage builds, we want each profraw file to have a unique name.  The %m in the
         # LLVM_PROFILE_FILE environment variable will auto generate a unique id.
         list(APPEND ENVIRONMENT_LIST
-             "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage_report/profraw/%m.profraw"
+             "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/%m.profraw"
         )
     endif()
 
@@ -183,9 +183,6 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
         CACHE INTERNAL "Accumulated global check executable paths" FORCE
     )
 
-    # Track this test target for later use in generating installed CTestTestfile.cmake
-    set_property(GLOBAL APPEND PROPERTY HIPDNN_TEST_TARGETS ${TARGET})
-
     set_target_properties(
         ${TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
@@ -247,14 +244,8 @@ function(install_miopen_plugin_ctest_files)
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
 
-    # Install the generated CTestTestfile.cmake to MIOPEN_PLUGIN_CTEST_FILE_INSTALL_PATH
     install(FILES "${INSTALLED_CTEST_FILE}"
             DESTINATION ${MIOPEN_PLUGIN_CTEST_FILE_INSTALL_PATH} RENAME CTestTestfile.cmake
-    )
-
-    # Also install to legacy path for backwards compatibility with current TheRock
-    install(FILES "${INSTALLED_CTEST_FILE}"
-            DESTINATION "${CMAKE_INSTALL_BINDIR}/miopen_legacy_plugin" RENAME CTestTestfile.cmake
     )
 
 endfunction() # install_miopen_plugin_ctest_files

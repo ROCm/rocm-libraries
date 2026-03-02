@@ -29,6 +29,15 @@ set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_RELATIVE_INSTALL_PLUGIN_E
 # Local should assume flatbuffer is the primary flatbuffer version during configure and build.
 set(flatbuffers_VERSION "@HIPDNN_FLATBUFFERS_VERSION@")
 
+# Validate FlatBuffers version is supported by this build of hipdnn_data_sdk
+set(_hipdnn_supported_flatbuffers_versions "@HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS@")
+if(flatbuffers_VERSION AND NOT flatbuffers_VERSION IN_LIST _hipdnn_supported_flatbuffers_versions)
+    message(FATAL_ERROR
+        "hipDNN Data SDK: Unsupported FlatBuffers version: ${flatbuffers_VERSION}. "
+        "Supported versions are: ${_hipdnn_supported_flatbuffers_versions}"
+    )
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_data_sdkTargets.cmake")
 
 # Add the correct versioned generated headers to the include path based on detected FlatBuffers version

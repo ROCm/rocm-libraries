@@ -8,6 +8,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
+#include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
 #include "HipdnnStatus.h"
 
@@ -130,6 +131,8 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
         return "HIPDNN_TYPE_NORM_FWD_PHASE";
     case HIPDNN_TYPE_RNG_DISTRIBUTION:
         return "HIPDNN_TYPE_RNG_DISTRIBUTION";
+    case HIPDNN_TYPE_CONVOLUTION_MODE:
+        return "HIPDNN_TYPE_CONVOLUTION_MODE";
 
     // Extension API
     case HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT:
@@ -242,6 +245,14 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT";
     case HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED:
         return "HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED";
+    case HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT:
+        return "HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT";
+    case HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT:
+        return "HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT";
+    case HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT:
+        return "HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT";
+    case HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT:
+        return "HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT";
 
     case HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS:
         return "HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS";
@@ -365,6 +376,19 @@ inline const char* hipdnnGetPluginUnloadingModeString(hipdnnPluginUnloadingMode_
         return "HIPDNN_PLUGIN_UNLOAD_EAGER";
     default:
         return "HIPDNN_PLUGIN_UNLOAD_UNKNOWN";
+    }
+}
+
+inline const char* hipdnnGetConvolutionModeString(hipdnnConvolutionMode_t mode)
+{
+    switch(mode)
+    {
+    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+        return "HIPDNN_CONVOLUTION_MODE_CONVOLUTION";
+    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+        return "HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION";
+    default:
+        return "HIPDNN_CONVOLUTION_MODE_UNKNOWN";
     }
 }
 
