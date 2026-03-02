@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 
 #include "PluginCore.hpp"
 

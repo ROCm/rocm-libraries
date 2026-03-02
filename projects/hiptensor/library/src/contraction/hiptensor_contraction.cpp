@@ -580,20 +580,6 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
         return HIPTENSOR_STATUS_ARCH_MISMATCH;
     }
 
-    // TODO: before add support for unary operations in Actor-Critic selection algorithm, disable it here
-    if((desc->mOpA != HIPTENSOR_OP_IDENTITY || desc->mOpB != HIPTENSOR_OP_IDENTITY
-        || desc->mOpC != HIPTENSOR_OP_IDENTITY)
-       && pref->mSelectionAlgorithm == HIPTENSOR_ALGO_ACTOR_CRITIC)
-    {
-        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Actor-Critic selection algorithm does not support unary operations (%s)",
-                 hiptensorGetErrorString(errorCode));
-        logger->logError("contractionInitPlan", msg);
-        return errorCode;
-    }
-
     // At this point, we need to format inputs for kernels as they will be tested via selection model.
     // Brute force method currently uses CK kernel format, so we will adjust inputs to that style.
 
@@ -697,26 +683,48 @@ hiptensorStatus_t contractionInitPlan(const hiptensorHandle_t              handl
         }
         else if(pref->mSelectionAlgorithm == HIPTENSOR_ALGO_ACTOR_CRITIC)
         {
-            result = hiptensor::actorCriticModel(&winner,
-                                                 solutionQ.solutions(),
-                                                 ADataType,
-                                                 hiptensor::getTensorLengths(desc->mDescA),
-                                                 hiptensor::getTensorStrides(desc->mDescA),
-                                                 desc->mModeA,
-                                                 BDataType,
-                                                 hiptensor::getTensorLengths(desc->mDescB),
-                                                 hiptensor::getTensorStrides(desc->mDescB),
-                                                 desc->mModeB,
-                                                 DDataType,
-                                                 hiptensor::getTensorLengths(desc->mDescC),
-                                                 hiptensor::getTensorStrides(desc->mDescC),
-                                                 desc->mModeC,
-                                                 EDataType,
-                                                 hiptensor::getTensorLengths(desc->mDescD),
-                                                 hiptensor::getTensorStrides(desc->mDescD),
-                                                 desc->mModeC,
-                                                 desc->mDescCompute,
-                                                 workspaceSizeLimit);
+            if(hasUnaryOp)
+                result = hiptensor::actorCriticModelUnaryOps(&winner,
+                                                             solutionQ.solutions(),
+                                                             ADataType,
+                                                             hiptensor::getTensorLengths(desc->mDescA),
+                                                             hiptensor::getTensorStrides(desc->mDescA),
+                                                             desc->mModeA,
+                                                             BDataType,
+                                                             hiptensor::getTensorLengths(desc->mDescB),
+                                                             hiptensor::getTensorStrides(desc->mDescB),
+                                                             desc->mModeB,
+                                                             DDataType,
+                                                             hiptensor::getTensorLengths(desc->mDescC),
+                                                             hiptensor::getTensorStrides(desc->mDescC),
+                                                             desc->mModeC,
+                                                             EDataType,
+                                                             hiptensor::getTensorLengths(desc->mDescD),
+                                                             hiptensor::getTensorStrides(desc->mDescD),
+                                                             desc->mModeC,
+                                                             desc->mDescCompute,
+                                                             workspaceSizeLimit);
+            else
+                result = hiptensor::actorCriticModel(&winner,
+                                                     solutionQ.solutions(),
+                                                     ADataType,
+                                                     hiptensor::getTensorLengths(desc->mDescA),
+                                                     hiptensor::getTensorStrides(desc->mDescA),
+                                                     desc->mModeA,
+                                                     BDataType,
+                                                     hiptensor::getTensorLengths(desc->mDescB),
+                                                     hiptensor::getTensorStrides(desc->mDescB),
+                                                     desc->mModeB,
+                                                     DDataType,
+                                                     hiptensor::getTensorLengths(desc->mDescC),
+                                                     hiptensor::getTensorStrides(desc->mDescC),
+                                                     desc->mModeC,
+                                                     EDataType,
+                                                     hiptensor::getTensorLengths(desc->mDescD),
+                                                     hiptensor::getTensorStrides(desc->mDescD),
+                                                     desc->mModeC,
+                                                     desc->mDescCompute,
+                                                     workspaceSizeLimit);
         }
     }
 

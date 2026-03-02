@@ -46,7 +46,7 @@ namespace solver {
 
 struct AnySolver
 {
-    AnySolver() : ptr_value(nullptr) {};
+    AnySolver() : ptr_value(nullptr){};
     template <class U>
     AnySolver(U src) : ptr_value(new AnySolver_tmpl<U>(std::forward<U>(src))){};
     bool IsApplicable(const ExecutionContext& ctx,
@@ -176,7 +176,7 @@ struct AnySolver
     {
         using ptr = std::shared_ptr<const AnySolver_base>;
 
-        virtual ~AnySolver_base() {};
+        virtual ~AnySolver_base(){};
         virtual bool IsApplicable(const ExecutionContext& ctx,
                                   const miopen::conv::ProblemDescription& problem) const = 0;
         virtual bool IsTunable() const                                                   = 0;
@@ -399,7 +399,7 @@ struct AnySolver
                                    std::integral_constant<bool, LegacySolver::Is>());
         }
 
-        AnySolver_tmpl(T obj) : value(std::move(obj)) {};
+        AnySolver_tmpl(T obj) : value(std::move(obj)){};
 
         bool IsApplicable(const ExecutionContext& ctx,
                           const miopen::conv::ProblemDescription& problem) const override

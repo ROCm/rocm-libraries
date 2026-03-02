@@ -35,6 +35,12 @@ else()
     set(CMAKE_INSTALL_PREFIX "C:/dist/TheRock" CACHE PATH "")
 endif()
 
+# Enable ASAN  when THEROCK_SANITIZER is set to ASAN or HOST_ASAN
+if(THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  set(ENABLE_ASAN_PACKAGING ON)
+  message(STATUS "Enabling ASAN for Composable Kernel (THEROCK_SANITIZER=${THEROCK_SANITIZER})")
+endif()
+
 set(version 1.2.0)
 project(composable_kernel VERSION ${version} LANGUAGES CXX)
 include(CTest)
@@ -125,6 +131,9 @@ add_compile_options(-Wno-pass-failed)
 add_compile_options(-Wno-switch-default)
 add_compile_options(-Wno-unique-object-duplication)
 
+# Increase the number of max elements in fold expressions
+add_compile_options(-fbracket-depth=1024)
+
 # add -Og -gdwarf64 for debug builds
 add_compile_options(
     "$<$<CONFIG:Debug>:-Og>"
@@ -208,24 +217,24 @@ message(STATUS "hip_version_flat=${hip_VERSION_FLAT}")
 
 message(STATUS "checking which targets are supported")
 #In order to build just the CK library (without tests and examples) for all supported GPU targets
-#use -D GPU_ARCHS="gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+#use -D GPU_ARCHS="gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201"
 #the GPU_TARGETS flag will be reset in this case in order to avoid conflicts.
 #
 #In order to build CK along with all tests and examples it should be OK to set GPU_TARGETS to just 1 or 2 similar architectures.
 if(NOT ENABLE_ASAN_PACKAGING)
     if(NOT WIN32 AND ${hip_VERSION_FLAT} LESS 600300000)
         # WORKAROUND: compiler does not yet fully support gfx12 targets, need to fix version above
-        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102")
+        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600300000 AND ${hip_VERSION_FLAT} LESS 600400000)
-        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201")
+        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600400000 AND ${hip_VERSION_FLAT} LESS 600443483)
-        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx950")
+        set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx950")
     elseif(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER_EQUAL 600443483)
         set(CK_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx10-3-generic;gfx11-generic;gfx12-generic")
     endif()
 else()
     #build CK only for xnack-supported targets when using ASAN
-    set(CK_GPU_TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
+    set(CK_GPU_TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+")
 endif()
 
 #if user set GPU_ARCHS on the cmake command line, overwrite default target list with user's list
