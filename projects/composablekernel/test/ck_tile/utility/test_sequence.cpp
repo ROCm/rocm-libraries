@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <type_traits>
 #include "ck_tile/core/container/sequence.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/numeric/math.hpp"

@@ -39,9 +39,12 @@ namespace detail {
 // Minimal fixed-size array for constexpr computation.
 // Cannot use ck_tile::array here due to circular include (array.hpp -> functional.hpp ->
 // sequence.hpp).
+// N == 0 is supported (the internal buffer has size 1 to avoid zero-length arrays),
+// but indexing into a zero-size array is undefined behavior.
 template <index_t N>
 struct index_array
 {
+    static_assert(N >= 0, "index_array size must be non-negative");
     index_t data[N > 0 ? N : 1] = {};
     CK_TILE_HOST_DEVICE constexpr index_t& operator[](index_t i) { return data[i]; }
     CK_TILE_HOST_DEVICE constexpr const index_t& operator[](index_t i) const { return data[i]; }
@@ -54,7 +57,7 @@ namespace impl {
 // O(1) type pack indexing via compiler builtin when available,
 // with an O(N) recursive fallback for compilers that lack it (e.g., older MSVC).
 // Does not depend on <tuple> so it is safe for hipRTC / GPU codegen.
-#if __has_builtin(__type_pack_element)
+#if defined(__has_builtin) && __has_builtin(__type_pack_element)
 template <index_t I, typename... Ts>
 using at_index_t = __type_pack_element<I, Ts...>;
 #else
@@ -391,7 +394,7 @@ CK_TILE_HOST_DEVICE constexpr auto compute_reverse_inclusive_scan()
     if constexpr(N > 0)
     {
         result.data[N - 1] = Reduce{}(input[N - 1], Init);
-        for(index_t i = N - 2; i >= 0; --i)
+        for(index_t i = N - 1; i-- > 0;)
         {
             result.data[i] = Reduce{}(input[i], result.data[i + 1]);
         }
