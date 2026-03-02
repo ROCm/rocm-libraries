@@ -179,7 +179,7 @@ namespace TensileLite
             problemInfo.swizzleTensorA = problem.swizzleTensorA();
             problemInfo.swizzleTensorB = problem.swizzleTensorB();
 
-            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
             return problemInfo;
         }
 
