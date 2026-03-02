@@ -115,15 +115,19 @@ tile_eff_m, tile_eff_n, tile_eff_k, overall_tile_efficiency, cu_utilization`
 hw_max_clock_mhz, hw_max_waves_per_cu, hw_wavefront_size, hw_lds_capacity,
 hw_l1_cache_kb, hw_l2_cache_kb, hw_l3_cache_kb, hw_num_xcd`
 
-## Model Performance (fp8 RCR, gfx950, 108 shapes)
+## Model Performance (fp8 RCR, gfx950)
 
-| Metric | Value |
-|---|---|
-| Mean TFLOPS Efficiency | 98.28% |
-| P10 TFLOPS Efficiency | 94.64% |
-| R2 (TFLOPS) | 0.9971 |
-| NDCG@1 | 30.6% |
-| Top-10 Hit Rate | 88.0% |
+| Metric | 108 shapes (original) | 168 shapes (wide coverage) |
+|---|---|---|
+| Mean TFLOPS Efficiency | 98.28% | 97.51% |
+| P10 TFLOPS Efficiency | 94.64% | 93.89% |
+| tiny_m (M=1) Efficiency | 95.57% | 96.04% |
+| R2 (TFLOPS) | 0.997 | 0.993 |
+
+Training uses `log1p(TFLOPS)` as the target by default, which normalizes the
+scale across shapes spanning 0.02 to 2230 TFLOPS. This was the key finding
+that improved tiny-M shapes from 84% to 96% efficiency. See
+[LEARNINGS.md](LEARNINGS.md) for details.
 
 ## Validation
 
@@ -178,7 +182,8 @@ Test coverage includes:
 
 ## Documentation
 
+- **[README.md](README.md)**: This file -- quick start, architecture, performance
 - **[DATA_GENERATION.md](DATA_GENERATION.md)**: Complete guide for building tile engine
   binaries, running benchmarks, managing datasets, and troubleshooting
-- **[plan.md](plan.md)**: Full design plan with architecture diagrams, milestones,
-  deployment gates, and extension roadmap
+- **[LEARNINGS.md](LEARNINGS.md)**: Empirical findings and design decisions (log-transform,
+  IHEM results, tiny-M analysis, feature importance, N=1/K=1 edge cases)

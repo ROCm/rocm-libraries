@@ -56,6 +56,8 @@ class Predictor:
         else:
             self._spec = {}
 
+        self._log_targets = set(self._spec.get("log_targets", []))
+
         if feature_engine is not None:
             self._feature_engine = feature_engine
         else:
@@ -72,32 +74,33 @@ class Predictor:
         self._models[target] = model
         return model
 
+    def _predict_single(self, target: str, problem: dict, kernel_config: dict) -> float:
+        """Predict a single target value, applying inverse log transform if needed."""
+        model = self._load_model(target)
+        if model is None:
+            raise FileNotFoundError(f"No model_{target}.lgbm in {self._model_dir}")
+        features = self._feature_engine.extract(problem, kernel_config)
+        raw = float(model.predict(features.reshape(1, -1))[0])
+        if target in self._log_targets:
+            return float(np.expm1(raw))
+        return raw
+
     def predict_tflops(self, problem: dict, kernel_config: dict) -> float:
         """Predict TFLOPS for a single (problem, kernel) pair.
 
         Returns a real TFLOPS estimate (interpretable, usable as DE surrogate).
+        If the model was trained in log-space, the inverse transform is applied
+        automatically.
         """
-        model = self._load_model("tflops")
-        if model is None:
-            raise FileNotFoundError(f"No model_tflops.lgbm in {self._model_dir}")
-        features = self._feature_engine.extract(problem, kernel_config)
-        return float(model.predict(features.reshape(1, -1))[0])
+        return self._predict_single("tflops", problem, kernel_config)
 
     def predict_latency(self, problem: dict, kernel_config: dict) -> float:
         """Predict latency in milliseconds for a single (problem, kernel) pair."""
-        model = self._load_model("latency")
-        if model is None:
-            raise FileNotFoundError(f"No model_latency.lgbm in {self._model_dir}")
-        features = self._feature_engine.extract(problem, kernel_config)
-        return float(model.predict(features.reshape(1, -1))[0])
+        return self._predict_single("latency", problem, kernel_config)
 
     def predict_bandwidth(self, problem: dict, kernel_config: dict) -> float:
         """Predict bandwidth in GB/s for a single (problem, kernel) pair."""
-        model = self._load_model("bandwidth")
-        if model is None:
-            raise FileNotFoundError(f"No model_bandwidth.lgbm in {self._model_dir}")
-        features = self._feature_engine.extract(problem, kernel_config)
-        return float(model.predict(features.reshape(1, -1))[0])
+        return self._predict_single("bandwidth", problem, kernel_config)
 
     def predict_all(self, problem: dict, kernel_config: dict) -> dict[str, float]:
         """Predict all available targets for a single (problem, kernel) pair.
@@ -143,6 +146,8 @@ class Predictor:
         df = pd.DataFrame(rows)
         X = self._feature_engine.extract_batch(df)
         preds = model.predict(X)
+        if "tflops" in self._log_targets:
+            preds = np.expm1(preds)
 
         results = []
         for i, kc in enumerate(kernel_configs):
