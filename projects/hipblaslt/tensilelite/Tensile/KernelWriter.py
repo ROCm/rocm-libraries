@@ -1287,12 +1287,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
               packINtemsMXSB[j].append(packMXSBItems.pop(0))
 
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-          # for j in range(self.states.numReadsIterCoalescedMetadata):
-          for n in range(ceil(instPerPackM)):
-            if packMItems:
-              packINtemsM[0].append(packMItems.pop(0))
-            else:
-              break
+          if not self.states.asmCaps["HasSWMMAC_gfx1250"]: # gfx942, gfx950
+            for j in range(self.states.numReadsIterCoalescedMetadata):
+              for n in range(ceil(instPerPackM)):
+                if packMItems:
+                    packINtemsM[j].append(packMItems.pop(0))
+                else:
+                  break
+          else:
+            # FIXME: gfx1250
+            # for j in range(self.states.numReadsIterCoalescedMetadata):
+            for n in range(ceil(instPerPackM)):
+              if packMItems:
+                packINtemsM[0].append(packMItems.pop(0))
+              else:
+                break
 
         if packBItems:
           if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
@@ -1335,13 +1344,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   else:
                     break
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-            while packMItems:
-              # for j in range(self.states.numReadsIterCoalescedMetadata):
-              for n in range(ceil(instPerPackM)):
-                if packMItems:
-                  packINtemsM[0].append(packMItems.pop(0))
-                else:
-                  break
+            if not self.states.asmCaps["HasSWMMAC_gfx1250"]: # gfx942, gfx950
+              while packMItems:
+                for j in range(self.states.numReadsIterCoalescedMetadata):
+                  for n in range(ceil(instPerPackM)):
+                    if packMItems:
+                      packINtemsM[j].append(packMItems.pop(0))
+                    else:
+                      break
+            else:
+              # FIXME: gfx1250
+              while packMItems:
+                # for j in range(self.states.numReadsIterCoalescedMetadata):
+                for n in range(ceil(instPerPackM)):
+                  if packMItems:
+                    packINtemsM[0].append(packMItems.pop(0))
+                  else:
+                    break
           while packMXSBItems or packBItems:
             if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
               for n in range(instPerPackB):
@@ -6724,10 +6743,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
 
-    if (((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                 \
-         (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]))                                   \
-        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat())) \
-       or (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1) :
+    if ((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                 \
+        (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) or                                 \
+        (not kernel["UnrollMajorLDSMetadata"] and (kernel["MIInputPerThreadMetadata"] == 4)))                \
+        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()) or \
+        (self.states.asmCaps["HasSWMMAC_gfx1250"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
       self.states.a.startVgprValuPackTemp = vgprIdx
       self.states.b.startVgprValuPackTemp = vgprIdx
       vgprIdx += 1
