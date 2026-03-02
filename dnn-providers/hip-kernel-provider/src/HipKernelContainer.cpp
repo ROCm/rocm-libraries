@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipKernelContainer.hpp"
+#include "CurrentDevicePropertyProvider.hpp"
 #include "engines/HipKernelEngine.hpp"
 #include "engines/plans/BatchnormPlanBuilder.hpp"
 
@@ -19,10 +20,11 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
     static const std::vector<EngineDefinition> s_engineDefinitions = {
         // HIP_KERNEL_ENGINE
         {HIP_KERNEL_ENGINE_ID,
-         []()
+         [](const IDevicePropertyProvider& devicePropertyProvider)
              -> std::unique_ptr<
                  hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>> {
-             auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
+             auto engine
+                 = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID, devicePropertyProvider);
              engine->addPlanBuilder(std::make_unique<BatchnormPlanBuilder>());
              return engine;
          }}};
@@ -54,6 +56,7 @@ uint32_t
 }
 
 HipKernelContainer::HipKernelContainer()
+    : _devicePropertyProvider(std::make_unique<CurrentDevicePropertyProvider>())
 {
     HIPDNN_PLUGIN_LOG_INFO("Creating HipKernelContainer");
 
@@ -62,7 +65,7 @@ HipKernelContainer::HipKernelContainer()
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
-        _engineManager->addEngine(engineDefinition.createEngine());
+        _engineManager->addEngine(engineDefinition.createEngine(*_devicePropertyProvider));
     }
 }
 

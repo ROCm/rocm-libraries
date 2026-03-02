@@ -2,10 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipKernelEngine.hpp"
-#include "hip/HipUtils.hpp"
 #include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
-#include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -17,8 +15,9 @@
 namespace hip_kernel_provider
 {
 
-HipKernelEngine::HipKernelEngine(int64_t id)
+HipKernelEngine::HipKernelEngine(int64_t id, const IDevicePropertyProvider& devicePropertyProvider)
     : _id(id)
+    , _devicePropertyProvider(devicePropertyProvider)
 {
 }
 
@@ -164,10 +163,7 @@ void HipKernelEngine::initializeExecutionContext(
                         &executionContext.plan());
                 if(compilablePlan != nullptr)
                 {
-                    int device = 0;
-                    HIP_CHECK(hipGetDevice(&device));
-                    hipDeviceProp_t deviceProps;
-                    HIP_CHECK(hipGetDeviceProperties(&deviceProps, device));
+                    auto deviceProps = _devicePropertyProvider.getDeviceProperties();
                     compilablePlan->compile(deviceProps);
                 }
             }

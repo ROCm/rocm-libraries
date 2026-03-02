@@ -12,6 +12,7 @@
 
 #include "engines/HipKernelEngine.hpp"
 #include "mocks/MockCompilablePlan.hpp"
+#include "mocks/MockDevicePropertyProvider.hpp"
 #include "mocks/MockPlan.hpp"
 #include "mocks/MockPlanBuilder.hpp"
 
@@ -21,7 +22,8 @@ using namespace hipdnn_data_sdk::flatbuffer_utilities;
 
 TEST(TestHipKernelEngine, ConstructorAndId)
 {
-    HipKernelEngine engine(42);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(42, mockDevicePropertyProvider);
     EXPECT_EQ(engine.id(), 42);
 }
 
@@ -31,7 +33,8 @@ TEST(TestHipKernelEngine, ConstructorAndId)
 
 TEST(TestHipKernelEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilders)
 {
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
 
     HipKernelHandle dummyHandle;
     MockGraph mockGraph;
@@ -51,7 +54,8 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(1337u));
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     HipKernelHandle dummyHandle;
@@ -82,7 +86,8 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsMaxPlanBuilderWorkspace)
     EXPECT_CALL(*mockPlanBuilder2, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(45000u));
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -99,7 +104,8 @@ TEST(TestHipKernelEngine, WorkspaceSizeReturnsZeroIfNoPlanBuilderApplicable)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     HipKernelHandle dummyHandle;
@@ -120,7 +126,8 @@ TEST(TestHipKernelEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(true));
 
-    HipKernelEngine engine(0);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(0, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
@@ -137,7 +144,8 @@ TEST(TestHipKernelEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
         .WillOnce(::testing::Return(true));
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
 
-    HipKernelEngine engine(0);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(0, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -148,7 +156,8 @@ TEST(TestHipKernelEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
 
 TEST(TestHipKernelEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
 {
-    HipKernelEngine engine(0);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(0, mockDevicePropertyProvider);
 
     MockGraph mockGraph;
     HipKernelHandle dummyHandle;
@@ -161,7 +170,8 @@ TEST(TestHipKernelEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     EXPECT_CALL(*mockPlanBuilder, isApplicable(::testing::_, ::testing::_))
         .WillOnce(::testing::Return(false));
 
-    HipKernelEngine engine(0);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(0, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
@@ -175,7 +185,8 @@ TEST(TestHipKernelEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
 
 TEST(TestHipKernelEngine, GetDetailsReturnsSerializedEngineDetails)
 {
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     HipKernelHandle dummyHandle;
     MockGraph mockGraph;
 
@@ -188,7 +199,8 @@ TEST(TestHipKernelEngine, GetDetailsReturnsSerializedEngineDetails)
 
 TEST(TestHipKernelEngine, GetDetailsContainsBenchmarkingKnob)
 {
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     HipKernelHandle dummyHandle;
     MockGraph mockGraph;
 
@@ -237,7 +249,8 @@ TEST(TestHipKernelEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     // Second plan builder should NOT be queried (we break after first non-empty custom knobs)
     EXPECT_CALL(*mockPlanBuilder2, getCustomKnobs(::testing::_, ::testing::_)).Times(0);
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -282,7 +295,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextInvokesFirstApplicablePlanBu
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -297,7 +311,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextInvokesFirstApplicablePlanBu
 
 TEST(TestHipKernelEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 {
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     HipKernelContext ctx;
@@ -328,7 +343,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSetsBenchmarkingEnabled)
 
 TEST(TestHipKernelEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 {
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     HipKernelContext ctx;
@@ -360,7 +376,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSetsBenchmarkingDisabled)
 
 TEST(TestHipKernelEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenConfigInvalid)
 {
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     HipKernelContext ctx;
@@ -375,7 +392,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDefaultsBenchmarkingDisabled
 
 TEST(TestHipKernelEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhenNoKnobs)
 {
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     HipKernelContext ctx;
@@ -394,7 +412,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDefaultsBenchmarkingDisabled
 
 TEST(TestHipKernelEngine, InitializeExecutionContextBenchmarkingRemainsDisabledOnInvalidKnobType)
 {
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     MockGraph mockGraph;
     HipKernelHandle dummyHandle;
     HipKernelContext ctx;
@@ -441,7 +460,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -470,7 +490,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppl
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder1));
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
@@ -503,7 +524,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDoesNotCompileNonCompilableP
                       const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig&,
                       HipKernelContext& ctx) mutable { ctx.setPlan(std::move(plan)); });
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
@@ -518,10 +540,8 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDoesNotCompileNonCompilableP
     EXPECT_TRUE(ctx.hasValidPlan());
 }
 
-TEST(GpuTestHipKernelEngine, InitializeExecutionContextCompilesCompilablePlan)
+TEST(TestHipKernelEngine, InitializeExecutionContextCompilesCompilablePlan)
 {
-    SKIP_IF_NO_DEVICES();
-
     auto mockCompilablePlan = std::make_unique<MockCompilablePlan>();
     auto* mockCompilablePlanPtr = mockCompilablePlan.get();
 
@@ -539,7 +559,12 @@ TEST(GpuTestHipKernelEngine, InitializeExecutionContextCompilesCompilablePlan)
                       const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig&,
                       HipKernelContext& ctx) mutable { ctx.setPlan(std::move(plan)); });
 
-    HipKernelEngine engine(1);
+    MockDevicePropertyProvider mockDevicePropertyProvider;
+    hipDeviceProp_t dummyProps{};
+    EXPECT_CALL(mockDevicePropertyProvider, getDeviceProperties())
+        .WillOnce(::testing::Return(dummyProps));
+
+    HipKernelEngine engine(1, mockDevicePropertyProvider);
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
