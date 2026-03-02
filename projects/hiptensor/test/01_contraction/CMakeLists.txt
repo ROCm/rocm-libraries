@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -143,3 +143,9 @@ set (PlanCacheTestSources ${ContractionCommonSources}
 ${CMAKE_CURRENT_SOURCE_DIR}/plan_cache_contraction_test.cpp)
 set (PlanCacheTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/plan_cache_test_params.yaml)
 add_hiptensor_test(plan_cache_test ${PlanCacheTestConfig}  ${PlanCacheTestSources})
+
+# Contraction with unary ops tests
+set (ConractionUnaryOpsTestSources ${ContractionCommonSources}
+${CMAKE_CURRENT_SOURCE_DIR}/contraction_with_unary_ops_test.cpp)
+set (ConractionUnaryOpsTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/contraction_unary_ops_params.yaml)
+add_hiptensor_test(contraction_with_unary_ops_test ${ConractionUnaryOpsTestConfig}  ${ConractionUnaryOpsTestSources})

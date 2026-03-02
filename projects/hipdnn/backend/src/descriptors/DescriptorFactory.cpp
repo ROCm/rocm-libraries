@@ -3,12 +3,14 @@
 
 #include "DescriptorFactory.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "ConvolutionFwdOperationDescriptor.hpp"
 #include "EngineConfigDescriptor.hpp"
 #include "EngineDescriptor.hpp"
 #include "EngineHeuristicDescriptor.hpp"
 #include "ExecutionPlanDescriptor.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
+#include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
 
@@ -21,8 +23,8 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     THROW_IF_NULL(
         descriptor, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER, "hipdnnBackendDescriptor_t* is null.");
 
-    HIPDNN_LOG_INFO("Creating descriptor of type: {}",
-                    hipdnnGetBackendDescriptorTypeName(descriptorType));
+    HIPDNN_BACKEND_LOG_INFO("Creating descriptor of type: {}",
+                            hipdnnGetBackendDescriptorTypeName(descriptorType));
 
     std::shared_ptr<IBackendDescriptor> privateDesc;
     switch(descriptorType)
@@ -45,6 +47,12 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR:
         privateDesc = std::make_shared<EngineHeuristicDescriptor>();
         break;
+    case HIPDNN_BACKEND_TENSOR_DESCRIPTOR:
+        privateDesc = std::make_shared<TensorDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR:
+        privateDesc = std::make_shared<ConvolutionFwdOperationDescriptor>();
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               std::string("Descriptor type ")
@@ -54,7 +62,7 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
 
     *descriptor = HipdnnBackendDescriptor::packDescriptor(privateDesc);
 
-    HIPDNN_LOG_INFO("Created descriptor: {:p}", static_cast<void*>(*descriptor));
+    HIPDNN_BACKEND_LOG_INFO("Created descriptor: {:p}", static_cast<void*>(*descriptor));
 }
 
 void DescriptorFactory::createGraphExt(hipdnnBackendDescriptor_t* descriptor,
@@ -71,7 +79,7 @@ void DescriptorFactory::createGraphExt(hipdnnBackendDescriptor_t* descriptor,
     graphDescriptor->deserializeGraph(serializedGraph, graphByteSize);
     *descriptor = HipdnnBackendDescriptor::packDescriptor(graphDescriptor);
 
-    HIPDNN_LOG_INFO("Created graph descriptor: {:p}", static_cast<void*>(*descriptor));
+    HIPDNN_BACKEND_LOG_INFO("Created graph descriptor: {:p}", static_cast<void*>(*descriptor));
 }
 
 void DescriptorFactory::destroy(hipdnnBackendDescriptor_t descriptor)
@@ -81,7 +89,7 @@ void DescriptorFactory::destroy(hipdnnBackendDescriptor_t descriptor)
 
     delete descriptor;
 
-    HIPDNN_LOG_INFO("Destroyed descriptor: {:p}", static_cast<void*>(descriptor));
+    HIPDNN_BACKEND_LOG_INFO("Destroyed descriptor: {:p}", static_cast<void*>(descriptor));
 }
 
 } // namespace hipdnn_backend

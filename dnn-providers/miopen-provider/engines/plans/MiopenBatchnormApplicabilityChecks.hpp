@@ -15,7 +15,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // --- Tensor Descriptor Value Object ---
@@ -90,6 +90,7 @@ void checkTensorDataTypesSupported(
     const std::vector<int64_t>& ioTensorIds,
     const std::vector<int64_t>& affineTensorIds,
     const std::vector<int64_t>& statTensorIds,
+    const std::vector<int64_t>& intermediateTensorIds,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
@@ -103,39 +104,45 @@ void checkTensorShapesSupported(
 
 // --- High-Level Configuration Validators ---
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceVarianceExtTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceActivationTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormFwdTrainingTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormFwdTrainingActivationTensorConfigSupported(
+    const hipdnn_data_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+void checkBatchnormBackwardTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
     const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-void checkBatchnormTensorConfigSupported(
+void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
     const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_data_sdk::data_objects::PointwiseAttributes& actAttr,
     const hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
@@ -152,28 +159,30 @@ void checkBatchnormBwdActivationModeSupported(
 
 // MIOpen v6.x requirements:
 // - IO tensors: same type (FLOAT, HALF, or BFLOAT16)
-// - Affine/Stat tensors: FLOAT only
+// - Affine/Stat/Intermediate tensors: FLOAT only
 struct BnTensorTypes
 {
     hipdnn_data_sdk::data_objects::DataType io;
     hipdnn_data_sdk::data_objects::DataType affine;
     hipdnn_data_sdk::data_objects::DataType stat;
+    hipdnn_data_sdk::data_objects::DataType intermediate;
 };
 
 namespace bn_type_configs
 {
 using DT = hipdnn_data_sdk::data_objects::DataType;
 
-inline constexpr BnTensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT};
-inline constexpr BnTensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT};
-inline constexpr BnTensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT};
+inline constexpr BnTensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::FLOAT};
+inline constexpr BnTensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT, DT::FLOAT};
+inline constexpr BnTensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT, DT::FLOAT};
 
 inline constexpr std::array<BnTensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
 
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIoTypes();
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedAffineTypes();
 std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedStatTypes();
+std::unordered_set<hipdnn_data_sdk::data_objects::DataType> getAllowedIntermediateTypes();
 
 } // namespace bn_type_configs
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

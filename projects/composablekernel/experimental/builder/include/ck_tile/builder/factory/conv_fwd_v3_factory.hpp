@@ -26,7 +26,7 @@ template <ConvSignatureDescriptor auto SIGNATURE,
 struct ConvFwdXdlV3Factory
 {
     static constexpr size_t SPATIAL_DIM = SIGNATURE.spatial_dim;
-    using Layouts                       = internal::ConvTensorLayouts<SIGNATURE, SPATIAL_DIM>;
+    using Layouts                       = internal::ConvTensorLayouts<SIGNATURE>;
     using Types                         = internal::ConvTensorDataTypes<SIGNATURE>;
     using Ops                           = internal::ConvElementwiseOps<SIGNATURE>;
     using AlgorithmType                 = decltype(ALGORITHM);
@@ -53,15 +53,17 @@ struct ConvFwdXdlV3Factory
 
     // Check limits for the algorithm parameters.
     static_assert(ValidABlockTransfer<A_BLOCK_TRANSFER,
-                                      typename Types::InDataType,
+                                      Types::input_types.first,
+                                      sizeof(typename Types::InDataType),
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
     static_assert(ValidBBlockTransfer<B_BLOCK_TRANSFER,
-                                      typename Types::WeiDataType,
+                                      Types::weight_types.first,
+                                      sizeof(typename Types::WeiDataType),
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
     static_assert(ValidCBlockTransfer<C_BLOCK_TRANSFER,
-                                      typename Types::OutDataType,
+                                      Types::output_types.first,
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
 
@@ -161,7 +163,8 @@ struct ConvFwdXdlV3Factory
         BLOCK_GEMM.pipeline_version,
         typename Types::InComputeType,
         typename Types::WeiComputeType,
-        IS_DIRECT_LOAD>;
+        IS_DIRECT_LOAD,
+        ALGORITHM.num_conv_groups_to_merge>;
 };
 
 } // namespace ck_tile::builder::factory

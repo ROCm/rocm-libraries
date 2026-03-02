@@ -215,7 +215,8 @@ else()
     add_definitions(-DMIOPEN_TEST_DRIVER_MODE=1)
 endif()
 
-add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR})
+# Exclude *-suite tests added as part of test filter standardization(#3513) from check target to avoid running them during build.
+add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*-suite")
 add_custom_target(tests)
 
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
@@ -298,7 +299,8 @@ elseif(MIOPEN_TEST_BFLOAT16)
               test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
               test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
-              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
+              test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16
+              test_pooling2d test_pooling3d)
 endif()
 
 if(MIOPEN_NO_GPU)
@@ -320,6 +322,7 @@ endif()
 if (MIOPEN_TEST_GFX115X)
     list(APPEND SKIP_TESTS test_ctc)
 endif()
+
 
 # The usage is non-trivial, see function add_test_command.
 if(SKIP_TESTS)

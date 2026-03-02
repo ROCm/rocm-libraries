@@ -1,33 +1,16 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""
+Add SPDX license headers to source files that don't have them.
+
+This script adds the short SPDX license format to files tracked by git
+that don't already contain a license header.
+"""
 
 import argparse
-import datetime
-import re
 import sys
 from pathlib import Path
 
@@ -36,171 +19,175 @@ sys.path.append(str(repo_dir / "scripts" / "lib"))
 
 from rrperf import git  # noqa: E402
 
+# New license text for different file types
+LICENSE_CPP = """\
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
-def can_add_license(path: Path) -> bool:
-    exclusion_list = [
-        "CODEOWNERS",
-        "CppCheckSuppressions.txt",
-        "requirements.txt",
-        ".clang-format",
-    ]
+"""
 
-    acceptable_extensions = [
-        ".txt",
-        ".cmake",
-        ".hpp",
-        ".cpp",
-        ".in",
-        ".py",
-        ".sh",
-    ]
+LICENSE_HASH = """\
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-    return path.name not in exclusion_list and (
-        path.suffix in acceptable_extensions
-        or ("" == path.suffix and "." not in path.stem)
-    )
+"""
+
+# Files that should never have licenses added
+EXCLUDE_NAMES = [
+    "CODEOWNERS",
+    "CppCheckSuppressions.txt",
+    "requirements.txt",
+    ".clang-format",
+    ".gitignore",
+    ".gitattributes",
+    "LICENSE.md",
+]
+
+# Paths containing these substrings should be excluded
+EXCLUDE_PATHS = [
+    "cmake/CMakeRC.cmake",  # External: vector-of-bool
+    "GPUArchitectureGenerator/isa_spec_manager/tinyxml2",  # External: Lee Thomason
+    "GPUArchitectureGenerator/isa_spec_manager/amdisa_",  # Different AMD project
+    "GPUArchitectureGenerator/isa_spec_manager/isa_xml_reader",  # Different AMD project
+    "_deps/",
+]
+
+# Extensions that can have licenses added
+EXTENSIONS_CPP = [".hpp", ".cpp", ".h", ".c", ".in", ".cl", ".ql", ".qll"]
+EXTENSIONS_HASH = [".py", ".sh", ".cmake", ".txt"]
+
+
+def should_exclude(path: Path) -> bool:
+    """Check if a file should be excluded from processing."""
+    if path.name in EXCLUDE_NAMES:
+        return True
+    path_str = str(path)
+    for exclude in EXCLUDE_PATHS:
+        if exclude in path_str:
+            return True
+    return False
+
+
+def get_license_format(path: Path) -> str | None:
+    """Determine license format for file, or None if not applicable."""
+    if path.suffix in EXTENSIONS_CPP:
+        return "cpp"
+    elif path.suffix in EXTENSIONS_HASH:
+        return "hash"
+    elif "dockerfile" in path.name.lower():
+        # Dockerfiles use # comments but have no extension
+        return "hash"
+    elif "doxyfile" in path.name.lower():
+        # Doxyfiles use # comments
+        return "hash"
+    elif path.suffix == "" and path.name not in EXCLUDE_NAMES:
+        # Scripts without extension - check for shebang
+        try:
+            with open(path, "r") as f:
+                first_line = f.readline()
+                if first_line.startswith("#!"):
+                    return "hash"
+        except (IOError, UnicodeDecodeError):
+            pass
+    return None
 
 
 def has_license(text: str) -> bool:
-    mit_found = "MIT License" in text
-    if "opyright" in text and not mit_found:
-        raise RuntimeError("Copyright but no MIT License found")
-    return mit_found
+    """Check if file already has a license."""
+    return "SPDX-License-Identifier" in text or "Copyright" in text
 
 
-def update_date(text: str) -> str:
-    if not has_license(text):
-        raise RuntimeError("No license, can not update copyright date")
+def prepend_license(text: str, license_format: str) -> str:
+    """Prepend license to file content, preserving shebang and encoding lines."""
+    lines = text.split("\n")
+    insert_index = 0
 
-    current_year = datetime.datetime.now().year
-    lines = text.splitlines()
-    found = False
-    for i in range(len(lines)):
-        if "Copyright" not in lines[i]:
-            continue
-        found = True
-        years = re.findall(r"\d+", lines[i])
-        if len(years) == 1:
-            if int(years[0]) != current_year:
-                raise RuntimeError(
-                    f"Please manually update date range: {path}\n{lines[i]}"
-                )
-            break
-        elif len(years) == 2:
-            if int(years[1]) != current_year:
-                print(f"Updating copyright date: {path}")
-                old_year = years[1]
-                lines[i] = lines[i].replace(old_year, str(current_year))
-            break
-        else:
-            raise RuntimeError(f"Malformed date in license: {path}\n{lines[i]}")
+    # Preserve shebang
+    if lines and lines[0].startswith("#!"):
+        insert_index = 1
 
-    if not found:
-        raise RuntimeError("Copyright not found in license")
+    # Preserve encoding declaration
+    if len(lines) > insert_index and "coding:" in lines[insert_index]:
+        insert_index += 1
+
+    license_text = LICENSE_CPP if license_format == "cpp" else LICENSE_HASH
+    license_lines = license_text.rstrip("\n").split("\n")
+
+    # Insert license and blank line
+    lines[insert_index:insert_index] = license_lines + [""]
+
     return "\n".join(lines)
 
 
-def prepend_license(text: str, license_text: str) -> str:
-    lines = text.splitlines()
-    index = 0
-    if len(lines) > index and "#!" in lines[index]:
-        index += 1
-    if len(lines) > index and "# -*- coding:" in lines[index]:
-        index += 1
-    lines[index:index] = license_text.splitlines()
-    return "\n".join(lines)
+def process_file(path: Path, dry_run: bool = False) -> bool:
+    """Process a single file, returning True if it was modified."""
+    if should_exclude(path):
+        return False
 
+    license_format = get_license_format(path)
+    if license_format is None:
+        return False
 
-def select_license_text(suffix: str) -> str:
-    if suffix in [".hpp", ".cpp", ".in"]:
-        return """/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+    try:
+        text = path.read_text()
+    except (IOError, UnicodeDecodeError) as e:
+        print(f"Error reading {path}: {e}")
+        return False
 
-"""
+    if has_license(text):
+        return False
+
+    new_text = prepend_license(text, license_format)
+
+    if dry_run:
+        print(f"Would add license: {path}")
     else:
-        return """
-################################################################################
-#
-# MIT License
-#
-# Copyright 2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
-
-"""
-
-
-def add_and_update_license(path: Path):
-    if not can_add_license(path):
-        return
-
-    text = path.read_text()
-    if not has_license(text):
         print(f"Adding license: {path}")
-        text = prepend_license(text, select_license_text(path.suffix))
-    text = update_date(text)
+        path.write_text(new_text)
 
-    path.write_text(f"{text}\n")
+    return True
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Add licenses to source files")
-
-    parser.add_argument("dir", type=Path, default=Path.cwd(), nargs="?")
+def main():
+    parser = argparse.ArgumentParser(
+        description="Add SPDX license headers to source files"
+    )
+    parser.add_argument(
+        "dir",
+        type=Path,
+        default=repo_dir,
+        nargs="?",
+        help="Directory to process (default: repo root)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be changed without making changes",
+    )
 
     args = parser.parse_args()
 
+    updated = 0
     errors = []
+
     for x in git.ls_tree(args.dir):
         path = args.dir / Path(x)
         if path.is_file():
             try:
-                add_and_update_license(path)
-            except RuntimeError as e:
-                print(e)
+                if process_file(path, args.dry_run):
+                    updated += 1
+            except Exception as e:
+                print(f"Error processing {path}: {e}")
                 errors.append(path)
 
-    if len(errors) > 0:
-        print("\nIssues with the following files, please manually fix:\n")
+    print(
+        f"\n{'Would add license to' if args.dry_run else 'Added license to'} {updated} files"
+    )
+    if errors:
+        print(f"\nErrors in {len(errors)} files:")
         for e in errors:
-            print(e)
+            print(f"  {e}")
+
+
+if __name__ == "__main__":
+    main()

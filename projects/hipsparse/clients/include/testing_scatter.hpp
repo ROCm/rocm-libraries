@@ -142,10 +142,7 @@ void testing_scatter(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(T) * size, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int64_t i = 0; i < nnz; ++i)
-        {
-            hy_gold[hx_ind[i] - idxBase] = hx_val[i];
-        }
+        host_sctr(nnz, hx_val.data(), hx_ind.data(), hy_gold.data(), idxBase);
 
         // Verify results against host
         unit_check_general(1, size, 1, hy_gold.data(), hy.data());

@@ -26,7 +26,7 @@ template <ConvSignatureDescriptor auto SIGNATURE,
 struct ConvFwdXdlFactory
 {
     static constexpr size_t SPATIAL_DIM = SIGNATURE.spatial_dim;
-    using Layouts                       = internal::ConvTensorLayouts<SIGNATURE, SPATIAL_DIM>;
+    using Layouts                       = internal::ConvTensorLayouts<SIGNATURE>;
     using Types                         = internal::ConvTensorDataTypes<SIGNATURE>;
     using Ops                           = internal::ConvElementwiseOps<SIGNATURE>;
     using AlgorithmType                 = decltype(ALGORITHM);
@@ -48,15 +48,20 @@ struct ConvFwdXdlFactory
 
     // Check limits for the algorithm parameters.
     static_assert(ValidABlockTransfer<A_BLOCK_TRANSFER,
-                                      typename Types::InDataType,
+                                      Types::input_types.first,
+                                      sizeof(typename Types::InDataType),
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
+    static_assert(A_BLOCK_TRANSFER.src_vector_dim == 2 ||
+                  (ALGORITHM.num_conv_groups_to_merge > 1 && A_BLOCK_TRANSFER.src_vector_dim == 1));
     static_assert(ValidBBlockTransfer<B_BLOCK_TRANSFER,
-                                      typename Types::WeiDataType,
+                                      Types::weight_types.first,
+                                      sizeof(typename Types::WeiDataType),
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
+    static_assert(B_BLOCK_TRANSFER.src_vector_dim == 2);
     static_assert(ValidCBlockTransfer<C_BLOCK_TRANSFER,
-                                      typename Types::OutDataType,
+                                      Types::output_types.first,
                                       BLOCK.block_size,
                                       BLOCK.per_block>);
 
@@ -74,8 +79,7 @@ struct ConvFwdXdlFactory
                                 NDHWGC,
                                 NGCW,
                                 NGCHW,
-                                NGCDHW> &&
-                  A_BLOCK_TRANSFER.src_vector_dim == 2);
+                                NGCDHW>);
 
     static_assert(IsValidLayout<SIGNATURE.weight.config.layout,
                                 G_K_X_C_strided,
@@ -89,8 +93,7 @@ struct ConvFwdXdlFactory
                                 KZYXGC,
                                 GKCX,
                                 GKCYX,
-                                GKCZYX> &&
-                  B_BLOCK_TRANSFER.src_vector_dim == 2);
+                                GKCZYX>);
 
     static_assert(IsValidLayout<SIGNATURE.output.config.layout,
                                 G_NW_K_strided,

@@ -1,35 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/datatype.hpp>
 #include <miopen/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/util.hpp>
-
-#include <boost/range/adaptors.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -647,20 +623,19 @@ float Col2Im3dGPU(const Handle& handle,
     return handle.GetKernelTime();
 }
 
-float Im2ColGPU(
-    const Handle& handle,
-    std::size_t spatial_dim,
-    ConstData_t im,
-    std::size_t im_offset,
-    std::size_t in_c,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& in_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& wei_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& out_spatial,
-    const std::vector<int>& pad_spatial,
-    const std::vector<int>& stride_spatial,
-    const std::vector<int>& dilation_spatial,
-    Data_t col,
-    miopenDataType_t type)
+float Im2ColGPU(const Handle& handle,
+                std::size_t spatial_dim,
+                ConstData_t im,
+                std::size_t im_offset,
+                std::size_t in_c,
+                const std::vector<size_t>& in_spatial,
+                const std::vector<size_t>& wei_spatial,
+                const std::vector<size_t>& out_spatial,
+                const std::vector<int>& pad_spatial,
+                const std::vector<int>& stride_spatial,
+                const std::vector<int>& dilation_spatial,
+                Data_t col,
+                miopenDataType_t type)
 {
     switch(spatial_dim)
     {
@@ -716,20 +691,19 @@ float Im2ColGPU(
     }
 }
 
-float Col2ImGPU(
-    const Handle& handle,
-    std::size_t spatial_dim,
-    ConstData_t col,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& out_spatial,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& wei_spatial,
-    const std::vector<int>& pad_spatial,
-    const std::vector<int>& stride_spatial,
-    const std::vector<int>& dilation_spatial,
-    std::size_t in_c,
-    const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& in_spatial,
-    Data_t im,
-    std::size_t im_offset,
-    miopenDataType_t type)
+float Col2ImGPU(const Handle& handle,
+                std::size_t spatial_dim,
+                ConstData_t col,
+                const std::vector<size_t>& out_spatial,
+                const std::vector<size_t>& wei_spatial,
+                const std::vector<int>& pad_spatial,
+                const std::vector<int>& stride_spatial,
+                const std::vector<int>& dilation_spatial,
+                std::size_t in_c,
+                const std::vector<size_t>& in_spatial,
+                Data_t im,
+                std::size_t im_offset,
+                miopenDataType_t type)
 {
     switch(spatial_dim)
     {
@@ -803,7 +777,7 @@ float transpose_NCHW2CNHW(const Handle& handle,
                           miopenDataType_t type)
 {
 
-    std::string program_name = "MIOpenUtilKernels4.cl";
+    std::string program_name = "MIOpenUtilKernels4.cpp";
 
     std::string network_config = "t" + std::to_string(type);
 
@@ -824,15 +798,18 @@ float transpose_NCHW2CNHW(const Handle& handle,
 
         const std::vector<size_t> vld{std::min(MAP_RD, WG_SIZE), 1, 1};
         std::vector<size_t> vgd{MAP_RD, 1, 1};
+        if(vgd[0] % vld[0] != 0)
+        {
+            vgd[0] = ((vgd[0] / vld[0]) + 1) * vld[0];
+        }
 
         if(MAP_RD < static_cast<size_t>(MAX_ACTIVE_THREADS))
         {
-            vgd = {MAP_RD, static_cast<size_t>(n), 1};
+            vgd[1] = static_cast<size_t>(n);
             kernel_name += "_2D_WG";
         }
         else
         {
-            vgd = {MAP_RD, 1, 1};
             kernel_name += "_1D_WG";
         }
 
@@ -864,19 +841,12 @@ float transpose_NCHW2CNHW(const Handle& handle,
         size_t gd0 = static_cast<size_t>(h_out) * w_out;
         std::vector<size_t> vgd{gd0, 1, static_cast<size_t>(c)};
         const std::vector<size_t> vld{std::min(WG_SIZE, gd0), 1, 1};
+        if(vgd[0] % vld[0] != 0)
+        {
+            vgd[0] = ((vgd[0] / vld[0]) + 1) * vld[0];
+        }
 
-// disable 3D_WG kernel due to idx calc overhead
-#if 0
-        if((gd0 * c) < MAX_ACTIVE_THREADS)
-        {
-            vgd = {gd0, static_cast<size_t>(n), static_cast<size_t>(c)};
-            kernel_name += "_3D_WG";
-        }
-        else
-#endif
-        {
-            kernel_name += "_2D_WG";
-        }
+        kernel_name += "_2D_WG";
 
         kernel_name += "_off64";
 
@@ -937,7 +907,7 @@ float transpose_CNHW2NCHW(const Handle& handle,
                           miopenDataType_t type)
 {
 
-    std::string program_name = "MIOpenUtilKernels4.cl";
+    std::string program_name = "MIOpenUtilKernels4.cpp";
 
     std::string network_config = "t" + std::to_string(type);
 
@@ -958,10 +928,14 @@ float transpose_CNHW2NCHW(const Handle& handle,
 
         const std::vector<size_t> vld{std::min(MAP_RD, WG_SIZE), 1, 1};
         std::vector<size_t> vgd{MAP_RD, 1, 1};
+        if(vgd[0] % vld[0] != 0)
+        {
+            vgd[0] = ((vgd[0] / vld[0]) + 1) * vld[0];
+        }
 
         if(MAP_RD < static_cast<size_t>(MAX_ACTIVE_THREADS))
         {
-            vgd = {MAP_RD, static_cast<size_t>(n), 1};
+            vgd[1] = static_cast<size_t>(n);
             kernel_name += "_2D_WG";
         }
         else
@@ -994,19 +968,12 @@ float transpose_CNHW2NCHW(const Handle& handle,
         size_t gd0 = static_cast<size_t>(h_out) * w_out;
         const std::vector<size_t> vld{std::min(gd0, WG_SIZE), 1, 1};
         std::vector<size_t> vgd{gd0, 1, static_cast<size_t>(c)};
+        if(vgd[0] % vld[0] != 0)
+        {
+            vgd[0] = ((vgd[0] / vld[0]) + 1) * vld[0];
+        }
 
-// disable 3D_WG kernel due to idx calc overhead
-#if 0
-        if(gd0 < MAX_ACTIVE_THREADS)
-        {
-            vgd = {gd0, static_cast<size_t>(n), static_cast<size_t>(c)};
-            kernel_name += "_3D_WG";
-        }
-        else
-#endif
-        {
-            kernel_name += "_2D_WG";
-        }
+        kernel_name += "_2D_WG";
 
         /// After switching to 64-bit offsets, do not use old kernels
         /// from the binary cache that use 32-bit offsets.
@@ -1197,7 +1164,7 @@ float transpose_packed_MN2NM(const Handle& handle,
                              miopenDataType_t type)
 {
 
-    std::string program_name = "MIOpenUtilKernels4.cl";
+    std::string program_name = "MIOpenUtilKernels4.cpp";
 
     std::string network_config = "t" + std::to_string(type);
 
@@ -1214,7 +1181,7 @@ float transpose_packed_MN2NM(const Handle& handle,
 
     size_t gd0 = static_cast<size_t>(m) * n;
     const std::vector<size_t> vld{std::min(WG_SIZE, gd0), 1, 1};
-    std::vector<size_t> vgd{gd0, 1, 1};
+    std::vector<size_t> vgd{(((gd0 + (vld[0] - 1)) / vld[0]) * vld[0]), 1, 1};
 
     if(!kernels.empty())
     {

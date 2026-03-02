@@ -66,6 +66,8 @@ int main(int argc, char* argv[])
         exit(0); // NOLINT (concurrency-mt-unsafe)
     }
 
+    drv->name = base_arg;
+
     drv->AddCmdLineArgs();
     int rc = drv->ParseCmdLineArgs(argc, argv);
     if(rc != 0)
@@ -104,8 +106,8 @@ int main(int argc, char* argv[])
         rc = drv->RunForwardGPU();
         cumulative_rc |= rc;
         if(rc != 0)
-            std::cout << "RunForwardGPU() FAILED, rc = "
-                      << "0x" << std::hex << rc << std::dec << std::endl;
+            std::cout << "RunForwardGPU() FAILED, rc = " << "0x" << std::hex << rc << std::dec
+                      << std::endl;
         if(verifyarg) // Verify even if Run() failed.
             cumulative_rc |= drv->VerifyForward();
     }
@@ -115,8 +117,8 @@ int main(int argc, char* argv[])
         rc = drv->RunBackwardGPU();
         cumulative_rc |= rc;
         if(rc != 0)
-            std::cout << "RunBackwardGPU() FAILED, rc = "
-                      << "0x" << std::hex << rc << std::dec << std::endl;
+            std::cout << "RunBackwardGPU() FAILED, rc = " << "0x" << std::hex << rc << std::dec
+                      << std::endl;
         if(verifyarg) // Verify even if Run() failed.
             cumulative_rc |= drv->VerifyBackward();
     }

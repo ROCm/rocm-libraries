@@ -1,33 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-#include <miopen/handle.hpp>
-
-#include <miopen/binary_cache.hpp>
 #include <miopen/config.h>
+#include <miopen/handle.hpp>
+#include <miopen/binary_cache.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle_lock.hpp>
 #include <miopen/invoker.hpp>
@@ -37,9 +13,8 @@
 #include <miopen/manage_ptr.hpp>
 #include <miopen/ocldeviceinfo.hpp>
 #include <miopen/timer.hpp>
-
 #include <miopen/filesystem.hpp>
-#include <boost/filesystem/operations.hpp>
+#include <miopen/unique_path.hpp>
 
 #include <string>
 
@@ -251,7 +226,7 @@ Handle::Handle() : impl(new HandleImpl())
     impl->queue = HandleImpl::AqPtr{
         clCreateCommandQueueWithProperties(impl->context.get(), impl->device, cq_props, &status)};
 #else
-    impl->queue  = HandleImpl::AqPtr{clCreateCommandQueue(
+    impl->queue = HandleImpl::AqPtr{clCreateCommandQueue(
         impl->context.get(), impl->device, CL_QUEUE_PROFILING_ENABLE, &status)};
 #endif
     if(status != CL_SUCCESS)
@@ -415,7 +390,7 @@ Program Handle::LoadProgram(const std::string& program_name,
         miopen::SaveBinary(
             binary, this->GetTargetProperties(), this->GetMaxComputeUnits(), program_name, params);
 #else
-        auto path = miopen::GetCachePath(false) / boost::filesystem::unique_path().string();
+        const auto path = miopen::GetCachePath(false) / miopen::unique_path();
         miopen::SaveProgramBinary(p, path.string());
         miopen::SaveBinary(path, this->GetTargetProperties(), program_name, params);
 #endif

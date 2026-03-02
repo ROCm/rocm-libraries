@@ -23,6 +23,7 @@
 
 #level2
 include: test_bsrmv.yaml
+include: test_bsrxmv.yaml
 include: test_bsrsv2.yaml
 include: test_gemvi.yaml
 
