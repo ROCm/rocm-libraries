@@ -1,4 +1,3 @@
-/*! \file */
 /* ************************************************************************
  * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
@@ -22,37 +21,22 @@
  *
  * ************************************************************************ */
 
-#pragma once
+#include "test.hpp"
+#include "testing_sptrsv.hpp"
 
-#include "rocsparse_singular_info_t.hpp"
-#include "rocsparse_trm_data_t.hpp"
-
-struct _rocsparse_bsrsv_info : rocsparse::trm_data_t
-{
-protected:
-    rocsparse::singular_info_t m_singularity_numeric_exact;
-
-public:
-    ~_rocsparse_bsrsv_info() = default;
-    void copy(const _rocsparse_bsrsv_info* that, hipStream_t stream)
-    {
-        this->rocsparse::trm_data_t::copy(that, stream);
-        this->m_singularity_numeric_exact.copy_singular_info_async(
-            &that->m_singularity_numeric_exact, stream);
-        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
-    }
-
-    rocsparse::singular_info_t* get_singularity_numeric_exact()
-    {
-        return &this->m_singularity_numeric_exact;
-    }
-
-    void create_singularity_numeric_exact(int64_t             batch_count,
-                                          rocsparse_indextype indextype,
-                                          hipStream_t         stream)
-    {
-        THROW_IF_ROCSPARSE_ERROR(this->m_singularity_numeric_exact.create_singular_pivot_async(
-            batch_count, indextype, stream));
-    }
-};
-typedef _rocsparse_bsrsv_info* rocsparse_bsrsv_info;
+TEST_ROUTINE_WITH_CONFIG(sptrsv,
+                         level2,
+                         rocsparse_test_config_ijt,
+                         arg.formatA,
+                         arg.batch_count,
+                         arg.M,
+                         arg.N,
+                         arg.alpha,
+                         arg.alphai,
+                         arg.transA,
+                         arg.baseA,
+                         arg.diag,
+                         arg.uplo,
+                         arg.sptrsv_alg,
+                         arg.matrix,
+                         arg.graph_test);

@@ -5165,6 +5165,34 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_dnvec_get_strided_batch gets the dense matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr descr,
+                                                   rocsparse_int*              batch_count,
+                                                   int64_t*                    batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, batch_count);
+    ROCSPARSE_CHECKARG_POINTER(2, batch_stride);
+
+    *batch_count  = descr->batch_count;
+    *batch_stride = descr->batch_stride;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_dnmat_set_strided_batch sets the dense matrix batch count
  * and batch stride.
  *******************************************************************************/
@@ -5198,6 +5226,32 @@ try
     descr->batch_count  = batch_count;
     descr->batch_stride = batch_stride;
 
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_dnvec_set_strided_batch sets the dense matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
+                                                   rocsparse_int         batch_count,
+                                                   int64_t               batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
+
+    descr->batch_count  = batch_count;
+    descr->batch_stride = batch_stride;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

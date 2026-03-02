@@ -196,7 +196,6 @@ namespace rocsparse
                                                    p_exact + nfullgroups * p_exact_shift,
                                                    p_near + nfullgroups * p_near_shift,
                                                    buffer);
-
                 RETURN_IF_HIP_ERROR(hipMemcpyAsync(data + nfullgroups * data_shift,
                                                    buffer,
                                                    sizeofelm * rem,
@@ -235,7 +234,6 @@ namespace rocsparse
                                                     rocsparse_indextype    position_indextype,
                                                     void*                  position)
     {
-
         const int64_t near_batch_count  = (near != nullptr) ? near->get_batch_count() : 0;
         const int64_t exact_batch_count = (exact != nullptr) ? exact->get_batch_count() : 0;
         if(near && near->get_position())

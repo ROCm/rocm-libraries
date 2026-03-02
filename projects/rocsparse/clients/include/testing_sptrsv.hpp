@@ -1,8 +1,9 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
+ * of this software and associated documentation files (the Software), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
@@ -11,7 +12,7 @@
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * THE SOFTWARE IS PROVIDED AS IS, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -21,14 +22,14 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_csric0_info.hpp"
-void _rocsparse_csric0_info::copy(const _rocsparse_csric0_info* that, hipStream_t stream)
-{
-    this->rocsparse::trm_data_t::copy(that, stream);
-    this->m_singularity_numeric_exact.copy_singular_info_async(&that->m_singularity_numeric_exact,
-                                                               stream);
-    this->m_singularity_numeric_near.copy_singular_info_async(&that->m_singularity_numeric_near,
-                                                              stream);
-    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
-}
-_rocsparse_csric0_info::~_rocsparse_csric0_info() {}
+#pragma once
+
+#include "rocsparse_arguments.hpp"
+
+template <typename I, typename J, typename T>
+void testing_sptrsv_bad_arg(const Arguments& arg);
+
+void testing_sptrsv_extra(const Arguments& arg);
+
+template <typename I, typename J, typename T>
+void testing_sptrsv(const Arguments& arg);

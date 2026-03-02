@@ -26,6 +26,8 @@
 void _rocsparse_bsric0_info::copy(const _rocsparse_bsric0_info* that, hipStream_t stream)
 {
     this->rocsparse::trm_data_t::copy(that, stream);
+    this->m_singularity_numeric_exact.copy_singular_info_async(&that->m_singularity_numeric_exact,
+                                                               stream);
     THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
 }
 _rocsparse_bsric0_info::~_rocsparse_bsric0_info() {}

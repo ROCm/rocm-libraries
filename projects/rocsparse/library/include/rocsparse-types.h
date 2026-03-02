@@ -1039,7 +1039,9 @@ typedef enum rocsparse_sptrsv_input_
  */
 typedef enum rocsparse_sptrsv_output_
 {
-    rocsparse_sptrsv_output_zero_pivot_position /**< Get zero pivot int64_t based position for output from SpTRSV descriptor. */
+    rocsparse_sptrsv_output_zero_pivot_position, /**< Get zero pivot int64_t based position for output from SpTRSV descriptor. */
+    rocsparse_sptrsv_output_singularity, /**< Get the type of \ref rocsparse_singularity detected during Sptrsv calculation for output from SpTRSV descriptor. */
+    rocsparse_sptrsv_output_singularity_position /**< Get singularity int64_t based position for output from SpTRSV descriptor. */
 } rocsparse_sptrsv_output;
 
 /*! \ingroup types_module

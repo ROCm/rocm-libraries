@@ -1560,6 +1560,48 @@ rocsparse_status rocsparse_spmv_set_input(rocsparse_handle     handle,
 *  \brief Sparse matrix sptrsv.
 *
 *  \details
+*  \p rocsparse_sptrsv_descr_create creates the descriptor of the configuration of the sparse Incomplete LU of level 0.
+
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[out]
+*  p_sptrsv_descr        pointer to the descriptor of the Sptrsv routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+*
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sptrsv_descr_create(rocsparse_handle        handle,
+                                               rocsparse_sptrsv_descr* p_sptrsv_descr,
+                                               rocsparse_error*        p_error);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix sptrsv.
+*
+*  \details
+*  \p rocsparse_sptrsv_descr_create destroys the descriptor of the configuration of the sparse Incomplete LU of level 0.
+*
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  sptrsv_descr        descriptor of the sptrsv routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_sptrsv_descr_destroy(rocsparse_handle       handle,
+                                                rocsparse_sptrsv_descr sptrsv_descr,
+                                                rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+*  \brief Sparse matrix sptrsv.
+*
+*  \details
 *  \p rocsparse_create_sptrsv_descr creates the descriptor of the \ref rocsparse_sptrsv_buffer_size and
 *  \ref rocsparse_sptrsv routines.
 
@@ -3133,6 +3175,44 @@ rocsparse_status rocsparse_dnmat_get_strided_batch(rocsparse_const_dnmat_descr d
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
+                                                   rocsparse_int         batch_count,
+                                                   int64_t               batch_stride);
+
+/*! \ingroup aux_module
+ *  \brief Get the batch count and batch stride from the dense vector descriptor
+ *
+ *  @param[in]
+ *  descr        the pointer to the dense vector descriptor.
+ *  @param[out]
+ *  batch_count  the batch count in the dense vector.
+ *  @param[out]
+ *  batch_stride the batch stride in the dense vector.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr descr,
+                                                   rocsparse_int*              batch_count,
+                                                   int64_t*                    batch_stride);
+
+/*! \ingroup aux_module
+ *  \brief Set the batch count and batch stride in the dense vector descriptor
+ *
+ *  @param[inout]
+ *  descr        the pointer to the dense vector descriptor.
+ *  @param[in]
+ *  batch_count  the batch count in the dense vector.
+ *  @param[in]
+ *  batch_stride the batch stride in the dense vector.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
                                                    rocsparse_int         batch_count,
                                                    int64_t               batch_stride);
 

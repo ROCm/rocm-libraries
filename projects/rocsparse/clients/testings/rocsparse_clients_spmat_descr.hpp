@@ -43,7 +43,10 @@ namespace rocsparse_clients
         device_sell_matrix<T, I, J>  m_device_sell{};
 
         host_csr_matrix<T, I, J>   m_host_csr{};
+        host_coo_matrix<T, I>      m_host_coo{};
         host_gebsr_matrix<T, I, J> m_host_gebsr{};
+
+        device_dense_vector<T>* m_device_values{};
 
         int64_t                m_batch_count{1};
         int64_t                m_val_stride{0};
@@ -51,6 +54,15 @@ namespace rocsparse_clients
         device_dense_vector<T> m_device_val{};
 
     public:
+        device_dense_vector<T>* get_values()
+        {
+            return m_device_values;
+        }
+        const device_dense_vector<T>* get_values() const
+        {
+            return m_device_values;
+        }
+
         T* get_batched_host_val(int64_t i)
         {
             switch(this->m_format)
@@ -79,6 +91,16 @@ namespace rocsparse_clients
                 }
             }
             case rocsparse_format_coo:
+            {
+                if(this->m_batch_count > 1)
+                {
+                    return &this->m_host_val[i * this->m_val_stride];
+                }
+                else
+                {
+                    return this->m_host_coo.val;
+                }
+            }
             case rocsparse_format_csc:
             case rocsparse_format_coo_aos:
             case rocsparse_format_ell:
@@ -158,8 +180,37 @@ namespace rocsparse_clients
                 break;
             }
 
-            case rocsparse_format_csc:
             case rocsparse_format_coo:
+            {
+                if(this->m_batch_count == 1)
+                {
+                    if((symbolic[0] == -1) && (numeric[0] == -1))
+                    {
+                        this->m_host_coo.val.near_check(this->m_device_coo.val);
+                    }
+                }
+                else
+                {
+                    const int64_t nnz = this->m_device_coo.nnz;
+                    for(int64_t i = 0; i < this->m_batch_count; ++i)
+                    {
+                        if((symbolic[i] != -1) || (numeric[i] != -1))
+                        {
+                            std::ignore = hipMemset(&this->m_device_val[this->m_val_stride * i],
+                                                    0,
+                                                    sizeof(T) * this->m_device_coo.nnz);
+                            for(int64_t j = 0; j < nnz; ++j)
+                            {
+                                this->m_host_val[this->m_val_stride * i + j] = static_cast<T>(0);
+                            }
+                        }
+                    }
+                    this->m_host_val.near_check(this->m_device_val);
+                }
+
+                break;
+            }
+            case rocsparse_format_csc:
             case rocsparse_format_coo_aos:
             case rocsparse_format_bell:
             case rocsparse_format_ell:
@@ -181,6 +232,11 @@ namespace rocsparse_clients
                 return (this->m_device_csr.m == this->m_device_csr.n);
             }
 
+            case rocsparse_format_coo:
+            {
+                return (this->m_device_coo.m == this->m_device_coo.n);
+            }
+
             case rocsparse_format_bsr:
             {
                 return (
@@ -189,13 +245,153 @@ namespace rocsparse_clients
             }
 
             case rocsparse_format_csc:
-            case rocsparse_format_coo:
             case rocsparse_format_coo_aos:
             case rocsparse_format_bell:
             case rocsparse_format_ell:
             case rocsparse_format_sell:
             {
                 return true;
+            }
+            }
+        }
+
+        int64_t get_nrows() const
+        {
+            ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+            switch(this->m_format)
+            {
+
+            case rocsparse_format_csr:
+            {
+                return this->m_device_csr.m;
+            }
+
+            case rocsparse_format_coo:
+            {
+                return this->m_device_coo.m;
+            }
+
+            case rocsparse_format_bsr:
+            {
+                return this->m_device_gebsr.mb * this->m_device_gebsr.row_block_dim;
+            }
+
+            case rocsparse_format_csc:
+
+            case rocsparse_format_coo_aos:
+            case rocsparse_format_bell:
+            case rocsparse_format_ell:
+            case rocsparse_format_sell:
+            {
+                return 0;
+            }
+            }
+        }
+
+        void set_batch(int64_t batch_count, int64_t size, int64_t stride)
+        {
+            this->m_batch_count = batch_count;
+            if(batch_count == 1)
+                return;
+
+            switch(this->m_format)
+            {
+            case rocsparse_format_csr:
+            {
+                this->m_val_stride = stride;
+                this->m_host_val.resize(size);
+                memset(this->m_host_val, 255 - 1, sizeof(T) * size);
+                for(int64_t i = 0; i < batch_count; ++i)
+                {
+                    CHECK_HIP_ERROR(hipMemcpy(&this->m_host_val[i * stride],
+                                              this->m_device_csr.val,
+                                              sizeof(T) * this->m_device_csr.val.size(),
+                                              hipMemcpyDefault));
+                }
+
+                this->m_device_values = &this->m_device_csr.val;
+                this->m_device_val.resize(size);
+                this->m_device_val.transfer_from(this->m_host_val);
+
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_csr_set_strided_batch(this->descr, batch_count, 0, stride));
+                if(this->m_device_val != nullptr)
+                {
+                    CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(this->descr,
+                                                                     this->m_device_csr.ptr,
+                                                                     this->m_device_csr.ind,
+                                                                     this->m_device_val));
+                }
+                this->m_device_values = &this->m_device_val;
+                break;
+            }
+
+            case rocsparse_format_bsr:
+            {
+                this->m_val_stride = stride;
+                this->m_host_val.resize(size);
+                memset(this->m_host_val, 255 - 1, sizeof(T) * size);
+                for(int64_t i = 0; i < batch_count; ++i)
+                {
+                    CHECK_HIP_ERROR(hipMemcpy(&this->m_host_val[i * stride],
+                                              this->m_device_gebsr.val,
+                                              sizeof(T) * this->m_device_csr.val.size(),
+                                              hipMemcpyDefault));
+                }
+
+                this->m_device_values = &this->m_device_gebsr.val;
+                this->m_device_val.resize(batch_count * stride);
+                this->m_device_val.transfer_from(this->m_host_val);
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_csr_set_strided_batch(this->descr, batch_count, 0, stride));
+
+                if(this->m_device_val != nullptr)
+                    CHECK_ROCSPARSE_ERROR(rocsparse_bsr_set_pointers(this->descr,
+                                                                     this->m_device_gebsr.ptr,
+                                                                     this->m_device_gebsr.ind,
+                                                                     this->m_device_val));
+                this->m_device_values = &this->m_device_val;
+
+                break;
+            }
+
+            case rocsparse_format_coo:
+            {
+
+                this->m_val_stride = stride;
+                this->m_host_val.resize(size);
+                memset(this->m_host_val, 255 - 1, sizeof(T) * size);
+                for(int64_t i = 0; i < batch_count; ++i)
+                {
+                    CHECK_HIP_ERROR(hipMemcpy(&this->m_host_val[i * stride],
+                                              this->m_device_coo.val,
+                                              sizeof(T) * this->m_device_coo.val.size(),
+                                              hipMemcpyDefault));
+                }
+
+                this->m_device_values = &this->m_device_coo.val;
+                this->m_device_val.resize(size);
+                this->m_device_val.transfer_from(this->m_host_val);
+
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_coo_set_strided_batch(this->descr, batch_count, stride));
+                if(this->m_device_val != nullptr)
+                {
+                    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_pointers(this->descr,
+                                                                     this->m_device_coo.row_ind,
+                                                                     this->m_device_coo.col_ind,
+                                                                     this->m_device_val));
+                }
+                this->m_device_values = &this->m_device_val;
+                break;
+            }
+            case rocsparse_format_sell:
+            case rocsparse_format_bell:
+            case rocsparse_format_ell:
+            case rocsparse_format_coo_aos:
+            case rocsparse_format_csc:
+            {
+                break;
             }
             }
         }
@@ -211,84 +407,124 @@ namespace rocsparse_clients
             {
             case rocsparse_format_csr:
             {
-                if(batch_count > 1)
+                //
+                // Host
+                //
+                const int64_t nnz    = this->m_device_csr.nnz;
+                const int64_t stride = (batch_count > 1) ? (nnz + stride_shift) : 0;
+                this->m_val_stride   = stride;
+                this->m_host_val.resize(batch_count * stride);
+                memset(this->m_host_val, 255 - 1, sizeof(T) * m_host_val.size());
+                for(int i = 0; i < batch_count; ++i)
                 {
-                    int64_t nnz        = this->m_device_csr.nnz;
-                    int64_t stride     = nnz + stride_shift;
-                    this->m_val_stride = stride;
-
-                    this->m_host_val.resize(batch_count * stride);
-                    this->m_device_val.resize(batch_count * stride);
-                    memset(this->m_host_val, 255 - 1, sizeof(T) * m_host_val.size());
-                    for(int i = 0; i < batch_count; ++i)
+                    T* p = &this->m_host_val[i * stride];
+                    CHECK_HIP_ERROR(
+                        hipMemcpy(p, this->m_device_csr.val, sizeof(T) * nnz, hipMemcpyDefault));
+                    if(i > 0)
                     {
-                        T* p = &this->m_host_val[i * stride];
-                        CHECK_HIP_ERROR(hipMemcpy(
-                            p, this->m_device_csr.val, sizeof(T) * nnz, hipMemcpyDefault));
-                        if(i > 0)
+                        for(int64_t j = 0; j < nnz; ++j)
                         {
-                            for(int64_t j = 0; j < nnz; ++j)
-                            {
-                                p[j] = p[j]
-                                       * (1.0
-                                          + random_cached_generator<float>(1.0, 2.0)
-                                                * random_multiplier);
-                            }
+                            p[j] = p[j]
+                                   * (1.0
+                                      + random_cached_generator<float>(1.0, 2.0)
+                                            * random_multiplier);
                         }
                     }
-
-                    this->m_device_val.transfer_from(this->m_host_val);
-                    CHECK_ROCSPARSE_ERROR(
-                        rocsparse_csr_set_strided_batch(this->descr, batch_count, 0, stride));
-
-                    if(this->m_device_val != nullptr)
-                        CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(this->descr,
-                                                                         this->m_device_csr.ptr,
-                                                                         this->m_device_csr.ind,
-                                                                         this->m_device_val));
                 }
+
+                this->m_device_values = &this->m_device_csr.val;
+                this->m_device_val.resize(batch_count * stride);
+                this->m_device_val.transfer_from(this->m_host_val);
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_csr_set_strided_batch(this->descr, batch_count, 0, stride));
+                if(this->m_device_val != nullptr)
+                    CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_pointers(this->descr,
+                                                                     this->m_device_csr.ptr,
+                                                                     this->m_device_csr.ind,
+                                                                     this->m_device_val));
+                this->m_device_values = &this->m_device_val;
+                break;
+            }
+
+            case rocsparse_format_coo:
+            {
+                //
+                // Host
+                //
+                const int64_t nnz    = this->m_device_coo.nnz;
+                const int64_t stride = (batch_count > 1) ? (nnz + stride_shift) : 0;
+                this->m_val_stride   = stride;
+                this->m_host_val.resize(batch_count * stride);
+                memset(this->m_host_val, 255 - 1, sizeof(T) * m_host_val.size());
+                for(int i = 0; i < batch_count; ++i)
+                {
+                    T* p = &this->m_host_val[i * stride];
+                    CHECK_HIP_ERROR(
+                        hipMemcpy(p, this->m_device_coo.val, sizeof(T) * nnz, hipMemcpyDefault));
+                    if(i > 0)
+                    {
+                        for(int64_t j = 0; j < nnz; ++j)
+                        {
+                            p[j] = p[j]
+                                   * (1.0
+                                      + random_cached_generator<float>(1.0, 2.0)
+                                            * random_multiplier);
+                        }
+                    }
+                }
+
+                this->m_device_values = &this->m_device_coo.val;
+                this->m_device_val.resize(batch_count * stride);
+                this->m_device_val.transfer_from(this->m_host_val);
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_coo_set_strided_batch(this->descr, batch_count, stride));
+                if(this->m_device_val != nullptr)
+                    CHECK_ROCSPARSE_ERROR(rocsparse_coo_set_pointers(this->descr,
+                                                                     this->m_device_coo.row_ind,
+                                                                     this->m_device_coo.col_ind,
+                                                                     this->m_device_val));
+                this->m_device_values = &this->m_device_val;
                 break;
             }
 
             case rocsparse_format_bsr:
             {
-                if(batch_count > 1)
+                const int64_t nnz = int64_t(this->m_device_gebsr.nnzb)
+                                    * this->m_device_gebsr.row_block_dim
+                                    * this->m_device_gebsr.col_block_dim;
+                const int64_t stride = nnz + stride_shift;
+                this->m_val_stride   = stride;
+                this->m_host_val.resize(batch_count * stride);
+                memset(this->m_host_val, 255 - 1, sizeof(T) * m_host_val.size());
+                for(int i = 0; i < batch_count; ++i)
                 {
-                    const int64_t nnz = int64_t(this->m_device_gebsr.nnzb)
-                                        * this->m_device_gebsr.row_block_dim
-                                        * this->m_device_gebsr.row_block_dim;
-                    int64_t stride     = nnz + stride_shift;
-                    this->m_val_stride = stride;
-                    this->m_host_val.resize(batch_count * stride);
-                    this->m_device_val.resize(batch_count * stride);
-
-                    memset(this->m_host_val, 255 - 1, sizeof(T) * m_host_val.size());
-                    for(int i = 0; i < batch_count; ++i)
+                    T* p = &this->m_host_val[i * stride];
+                    CHECK_HIP_ERROR(
+                        hipMemcpy(p, this->m_device_gebsr.val, sizeof(T) * nnz, hipMemcpyDefault));
+                    if(i > 0)
                     {
-                        T* p = &this->m_host_val[i * stride];
-                        CHECK_HIP_ERROR(hipMemcpy(
-                            p, this->m_device_gebsr.val, sizeof(T) * nnz, hipMemcpyDefault));
-                        if(i > 0)
+                        for(int64_t j = 0; j < nnz; ++j)
                         {
-                            for(int64_t j = 0; j < nnz; ++j)
-                            {
-                                p[j] = p[j]
-                                       * (1.0
-                                          + random_cached_generator<float>(1.0, 2.0)
-                                                * random_multiplier);
-                            }
+                            p[j] = p[j]
+                                   * (1.0
+                                      + random_cached_generator<float>(1.0, 2.0)
+                                            * random_multiplier);
                         }
                     }
-                    this->m_device_val.transfer_from(this->m_host_val);
-
-                    CHECK_ROCSPARSE_ERROR(
-                        rocsparse_csr_set_strided_batch(this->descr, batch_count, 0, stride));
-                    if(this->m_device_val != nullptr)
-                        CHECK_ROCSPARSE_ERROR(rocsparse_bsr_set_pointers(this->descr,
-                                                                         this->m_device_gebsr.ptr,
-                                                                         this->m_device_gebsr.ind,
-                                                                         this->m_device_val));
                 }
+
+                this->m_device_values = &this->m_device_gebsr.val;
+                this->m_device_val.resize(batch_count * stride);
+                this->m_device_val.transfer_from(this->m_host_val);
+                CHECK_ROCSPARSE_ERROR(
+                    rocsparse_csr_set_strided_batch(this->descr, batch_count, 0, stride));
+
+                if(this->m_device_val != nullptr)
+                    CHECK_ROCSPARSE_ERROR(rocsparse_bsr_set_pointers(this->descr,
+                                                                     this->m_device_gebsr.ptr,
+                                                                     this->m_device_gebsr.ind,
+                                                                     this->m_device_val));
+                this->m_device_values = &this->m_device_val;
 
                 break;
             }
@@ -296,7 +532,6 @@ namespace rocsparse_clients
             case rocsparse_format_ell:
             case rocsparse_format_sell:
             case rocsparse_format_bell:
-            case rocsparse_format_coo:
             case rocsparse_format_coo_aos:
             case rocsparse_format_csc:
             {
@@ -305,7 +540,7 @@ namespace rocsparse_clients
             }
         }
 
-        explicit spmat_descr(const Arguments& arg, bool full_rank = false)
+        explicit spmat_descr(const Arguments& arg, int64_t batch_count, bool full_rank)
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             const rocsparse_format format = arg.formatA;
@@ -314,6 +549,28 @@ namespace rocsparse_clients
             {
 
             case rocsparse_format_coo:
+            {
+                const bool                     to_int = arg.timing ? false : true;
+                rocsparse_matrix_factory<T, I> matrix_factory(arg, to_int, full_rank);
+                matrix_factory.init_coo(this->m_host_coo);
+                this->m_device_coo(this->m_host_coo);
+                const rocsparse_status status
+                    = rocsparse_create_coo_descr(&this->descr,
+                                                 this->m_device_coo.m,
+                                                 this->m_device_coo.n,
+                                                 this->m_device_coo.nnz,
+                                                 this->m_device_coo.row_ind,
+                                                 this->m_device_coo.col_ind,
+                                                 this->m_device_coo.val,
+                                                 get_indextype<I>(),
+                                                 this->m_device_coo.base,
+                                                 get_datatype<T>());
+
+                if(status != rocsparse_status_success)
+                {
+                    throw(status);
+                }
+            }
             case rocsparse_format_coo_aos:
             case rocsparse_format_csc:
             case rocsparse_format_ell:
@@ -409,10 +666,6 @@ namespace rocsparse_clients
             //
             const int64_t stride_shift          = 0;
             const double  randomized_multiplier = 1.0e-6;
-            int64_t       batch_count           = arg.batch_count;
-            if(batch_count == -1)
-                batch_count = 1;
-
             set_randomized_batch(batch_count, stride_shift, randomized_multiplier);
         }
 

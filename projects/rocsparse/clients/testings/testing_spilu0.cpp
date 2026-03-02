@@ -37,6 +37,29 @@ namespace rocsparse_clients
         rocsparse_spilu0_descr m_descr{};
 
     public:
+        struct config
+        {
+            rocsparse_spilu0_alg      alg{};
+            rocsparse_analysis_policy analysis_policy{};
+            rocsparse_datatype        compute_datatype{};
+            rocsparse_pointer_mode    singular_pivot_tolerance_pointer_mode{};
+            const void*               singular_pivot_tolerance{};
+            const int32_t             boost_enable{};
+            rocsparse_pointer_mode    boost_val_pointer_mode{};
+            const void*               boost_val{};
+            rocsparse_pointer_mode    boost_tolerance_pointer_mode{};
+            const void*               boost_tolerance{};
+        };
+
+    protected:
+        config* m_config;
+
+    public:
+        const config* get_config() const
+        {
+            return this->m_config;
+        }
+
         host_dense_vector<int64_t> m_cpu_symbolic_singularity_position{};
         host_dense_vector<int64_t> m_cpu_numeric_exact_singularity_position{};
         host_dense_vector<int64_t> m_cpu_numeric_near_singularity_position{};
@@ -961,8 +984,9 @@ void rocsparse_clients_spilu0_host(rocsparse_clients::spilu0_descr&         spil
 }
 
 template <typename I, typename J, typename T>
-void testing_spilu0(const Arguments& arg)
+void testing_spilu0(const Arguments& arg_)
 {
+    Arguments arg(arg_);
 
     rocsparse_error* p_error = nullptr;
     //
@@ -972,20 +996,15 @@ void testing_spilu0(const Arguments& arg)
     {
         return;
     }
+
     static constexpr const bool full_rank   = true;
     int64_t                     batch_count = arg.batch_count;
     if(batch_count == -1)
         batch_count = 1;
 
-    rocsparse_clients::spmat_descr<T, I, J> A(arg, full_rank);
-
-    if(false == A.is_square())
-    {
-        return;
-    }
-
     rocsparse_local_handle handle(arg);
-    hipStream_t            stream;
+
+    hipStream_t stream;
     CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
 
     const double                    h_singular_pivot_tolerance[1] = {0.001};
@@ -996,10 +1015,18 @@ void testing_spilu0(const Arguments& arg)
     const T                         h_boost_value[1]              = {arg.get_boostval<T>()};
     const floating_data_t<T> h_boost_tolerance[1] = {static_cast<floating_data_t<T>>(arg.boosttol)};
 
+    rocsparse_clients::spmat_descr<T, I, J> A(arg, batch_count, full_rank);
+
+    if(false == A.is_square())
+    {
+        return;
+    }
+
     rocsparse_clients::spilu0_descr spilu0_descr(handle, batch_count);
 
     CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_set_input(
         handle, spilu0_descr, rocsparse_spilu0_input_alg, &alg, sizeof(alg), p_error));
+
     CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_set_input(handle,
                                                      spilu0_descr,
                                                      rocsparse_spilu0_input_analysis_policy,
@@ -1058,7 +1085,7 @@ void testing_spilu0(const Arguments& arg)
                                                            rocsparse_spilu0_stage_analysis,
                                                            &buffer_size_in_bytes,
                                                            p_error));
-
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         device_dense_vector<char> buffer(buffer_size_in_bytes);
         CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
 
@@ -1121,7 +1148,7 @@ void testing_spilu0(const Arguments& arg)
                                                                rocsparse_spilu0_stage_compute,
                                                                &buffer_size_in_bytes,
                                                                p_error));
-
+            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
             device_dense_vector<char> buffer(buffer_size_in_bytes);
             CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
             CHECK_ROCSPARSE_ERROR(rocsparse_spilu0(handle,
@@ -1187,6 +1214,7 @@ void testing_spilu0(const Arguments& arg)
 
     if(arg.timing)
     {
+
         size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
         CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_buffer_size(handle,
                                                            spilu0_descr,
@@ -1195,6 +1223,7 @@ void testing_spilu0(const Arguments& arg)
                                                            rocsparse_spilu0_stage_compute,
                                                            &buffer_size_in_bytes,
                                                            p_error));
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         device_dense_vector<char> buffer(buffer_size_in_bytes);
         CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
 

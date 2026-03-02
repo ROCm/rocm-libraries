@@ -35,16 +35,22 @@
 
 namespace rocsparse
 {
-    rocsparse_status csrsm_zero_pivot(rocsparse_handle         handle,
-                                      rocsparse::pivot_info_t* info,
-                                      rocsparse_indextype      indextype,
-                                      void*                    position)
+    rocsparse_status csrsm_zero_pivot(rocsparse_handle     handle,
+                                      rocsparse_csrsm_info info,
+                                      rocsparse_indextype  indextype,
+                                      void*                position)
 
     {
         ROCSPARSE_ROUTINE_TRACE;
-
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(
-            handle, 1, info, nullptr, nullptr, handle->pointer_mode, indextype, position));
+        auto numeric_exact_position = (info) ? info->get_singularity_numeric_exact() : nullptr;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::singularity_get_position_async(handle,
+                                                                            1,
+                                                                            info,
+                                                                            numeric_exact_position,
+                                                                            nullptr,
+                                                                            handle->pointer_mode,
+                                                                            indextype,
+                                                                            position));
         switch(indextype)
         {
         case rocsparse_indextype_i32:
