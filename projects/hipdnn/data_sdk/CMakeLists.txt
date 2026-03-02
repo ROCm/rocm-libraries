@@ -99,7 +99,6 @@ if(TARGET FlatBuffers)
     endif()
     _hipdnn_data_sdk_process_dependency(
         FlatBuffers flatbuffers::flatbuffers INCLUDE_DIR ${HIP_DNN_FLATBUFFERS_INCLUDE_DIR}
-        INCLUDE_SUBDIR flatbuffers
     )
 endif()
 
