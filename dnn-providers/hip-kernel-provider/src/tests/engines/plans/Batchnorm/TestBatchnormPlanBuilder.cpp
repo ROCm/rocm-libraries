@@ -6,6 +6,10 @@
 #include "HipKernelContext.hpp"
 #include "HipKernelHandle.hpp"
 #include "engines/plans/BatchnormPlanBuilder.hpp"
+#include "mocks/MockCompiledProgram.hpp"
+#include "mocks/MockDevicePropertyProvider.hpp"
+#include "mocks/MockKernelCompiler.hpp"
+#include "mocks/MockRunnableKernel.hpp"
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -19,9 +23,33 @@ using hipdnn_test_sdk::utilities::MockEngineConfig;
 class TestBatchnormPlanBuilder : public ::testing::Test
 {
 protected:
-    BatchnormPlanBuilder _planBuilder;
+    MockKernelCompiler _mockKernelCompiler;
+    MockDevicePropertyProvider _mockDevicePropertyProvider;
+    BatchnormPlanBuilder _planBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
     HipKernelHandle _dummyHandle;
     MockEngineConfig _mockEngineConfig;
+
+    void setupMockCompileChain()
+    {
+        hipDeviceProp_t deviceProps = {};
+        deviceProps.multiProcessorCount = 60;
+        deviceProps.warpSize = 64;
+        strncpy(deviceProps.gcnArchName, "gfx942", sizeof(deviceProps.gcnArchName));
+
+        EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
+            .WillOnce(::testing::Return(deviceProps));
+
+        auto mockKernel = std::make_unique<MockRunnableKernel>();
+        EXPECT_CALL(*mockKernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*mockKernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+
+        auto mockProgram = std::make_unique<MockCompiledProgram>();
+        EXPECT_CALL(*mockProgram, getKernel(::testing::_))
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
+
+        EXPECT_CALL(_mockKernelCompiler, compile(::testing::_, ::testing::_))
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
+    }
 };
 
 // ============================================================================
@@ -65,6 +93,8 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsFalseForThreeNodeGraph)
 
 TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeInference)
 {
+    setupMockCompileChain();
+
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
@@ -76,6 +106,8 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeInference)
 
 TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForFusedInferenceActivation)
 {
+    setupMockCompileChain();
+
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());

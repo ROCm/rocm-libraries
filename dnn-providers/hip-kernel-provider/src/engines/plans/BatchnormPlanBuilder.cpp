@@ -13,6 +13,13 @@
 namespace hip_kernel_provider
 {
 
+BatchnormPlanBuilder::BatchnormPlanBuilder(const IKernelCompiler& kernelCompiler,
+                                           const IDevicePropertyProvider& devicePropertyProvider)
+    : _kernelCompiler(kernelCompiler)
+    , _devicePropertyProvider(devicePropertyProvider)
+{
+}
+
 namespace
 {
 void batchnormFwdFusionCheckTensors(
@@ -206,19 +213,24 @@ void buildPlanInferenceSingleNode(
     [[maybe_unused]] const HipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+    const IKernelCompiler& kernelCompiler,
+    const IDevicePropertyProvider& devicePropertyProvider,
     HipKernelContext& executionContext)
 {
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
 
     BatchnormFwdInferenceParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params), kernelCompiler);
+    plan->compile(devicePropertyProvider.getDeviceProperties());
     executionContext.setPlan(std::move(plan));
 }
 
 void buildPlanFusedFwdInferenceActivation(
     [[maybe_unused]] const HipKernelHandle& handle,
     const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const IKernelCompiler& kernelCompiler,
+    const IDevicePropertyProvider& devicePropertyProvider,
     HipKernelContext& executionContext)
 {
     const auto& node0 = opGraph.getNodeWrapper(0);
@@ -230,7 +242,8 @@ void buildPlanFusedFwdInferenceActivation(
         = node1.attributesAs<hipdnn_data_sdk::data_objects::PointwiseAttributes>();
 
     BatchnormFwdInferenceParams params(fwdInference, activation, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
+    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params), kernelCompiler);
+    plan->compile(devicePropertyProvider.getDeviceProperties());
     executionContext.setPlan(std::move(plan));
 }
 
@@ -253,7 +266,8 @@ void BatchnormPlanBuilder::buildPlan(
     if(opGraph.nodeCount() == 2)
     {
         HIPDNN_PLUGIN_LOG_INFO("Building batchnorm inference + activation fusion plan");
-        buildPlanFusedFwdInferenceActivation(handle, opGraph, executionContext);
+        buildPlanFusedFwdInferenceActivation(
+            handle, opGraph, _kernelCompiler, _devicePropertyProvider, executionContext);
         return;
     }
 
@@ -261,7 +275,8 @@ void BatchnormPlanBuilder::buildPlan(
     const auto nodeName = nodeWrapper.name();
 
     HIPDNN_PLUGIN_LOG_INFO("Building batchnorm fwd inference plan for node: " << nodeName);
-    buildPlanInferenceSingleNode(handle, opGraph, nodeWrapper, executionContext);
+    buildPlanInferenceSingleNode(
+        handle, opGraph, nodeWrapper, _kernelCompiler, _devicePropertyProvider, executionContext);
 }
 
 std::vector<hipdnn_data_sdk::data_objects::KnobT> BatchnormPlanBuilder::getCustomKnobs(

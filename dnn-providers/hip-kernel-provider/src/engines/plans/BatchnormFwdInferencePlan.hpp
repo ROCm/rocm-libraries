@@ -5,14 +5,15 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-#include <hipdnn_plugin_sdk/interfaces/ICompilablePlan.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipKernelHandle.hpp"
 #include "HipKernelUtils.hpp"
-#include "hip/HipKernel.hpp"
-#include "hip/HipProgram.hpp"
+#include "hip/ICompiledProgram.hpp"
+#include "hip/IKernelCompiler.hpp"
+#include "hip/IRunnableKernel.hpp"
 
-#include <optional>
+#include <memory>
 
 namespace hip_kernel_provider
 {
@@ -59,18 +60,19 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
-class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::ICompilablePlan<HipKernelHandle>
+class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
 {
 public:
-    explicit BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams);
+    BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
+                              const IKernelCompiler& kernelCompiler);
 
     BatchnormFwdInferencePlan(const BatchnormFwdInferencePlan&) = delete;
     BatchnormFwdInferencePlan& operator=(const BatchnormFwdInferencePlan&) = delete;
 
     BatchnormFwdInferencePlan(BatchnormFwdInferencePlan&&) = default;
-    BatchnormFwdInferencePlan& operator=(BatchnormFwdInferencePlan&&) = default;
+    BatchnormFwdInferencePlan& operator=(BatchnormFwdInferencePlan&&) = delete;
 
-    void compile(const hipDeviceProp_t& deviceProperties) override;
+    void compile(const hipDeviceProp_t& deviceProperties);
 
     size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
 
@@ -81,10 +83,11 @@ public:
 
 private:
     BatchnormFwdInferenceParams _inferenceParams;
+    const IKernelCompiler& _kernelCompiler;
 
     // Populated by compile()
-    std::optional<HipProgram> _compiledProgram;
-    std::optional<HipKernel> _compiledKernel;
+    std::unique_ptr<ICompiledProgram> _compiledProgram;
+    std::unique_ptr<IRunnableKernel> _runnableKernel;
 
     // Kernel launch parameters computed during compile()
     unsigned int _channels = 0;

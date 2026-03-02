@@ -4,42 +4,24 @@
 #pragma once
 
 #include "HipUtils.hpp"
-#include <array>
-#include <hip/hip_runtime_api.h>
+#include "IRunnableKernel.hpp"
 #include <string>
 
 class HipProgram;
 
-class HipKernel
+class HipKernel : public hip_kernel_provider::IRunnableKernel
 {
 public:
     HipKernel(const HipProgram& program, const std::string& kernelName);
 
-    void setBlockSize(unsigned int x, unsigned int y = 1, unsigned int z = 1);
-    void setGridSize(unsigned int x, unsigned int y = 1, unsigned int z = 1);
-    void setSharedMemBytes(unsigned int bytes);
+    void setBlockSize(unsigned int x, unsigned int y = 1, unsigned int z = 1) override;
+    void setGridSize(unsigned int x, unsigned int y = 1, unsigned int z = 1) override;
+    void setSharedMemBytes(unsigned int bytes) override;
 
-    template <typename... Args>
-    void launch(hipStream_t stream, Args&&... args) const
-    {
-        // Pack arguments into void* array
-        std::array<void*, sizeof...(Args)> kernelParams
-            = {const_cast<void*>(static_cast<const void*>(&args))...};
+    ~HipKernel() override = default;
 
-        HIP_CHECK(hipModuleLaunchKernel(_kernel,
-                                        _gridX,
-                                        _gridY,
-                                        _gridZ,
-                                        _blockX,
-                                        _blockY,
-                                        _blockZ,
-                                        _sharedMemBytes,
-                                        stream,
-                                        kernelParams.data(),
-                                        nullptr));
-    }
-
-    ~HipKernel() = default;
+protected:
+    void launchImpl(hipStream_t stream, void** kernelParams) const override;
 
 private:
     std::string _kernelName;

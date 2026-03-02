@@ -10,14 +10,12 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
-#include <hipdnn_plugin_sdk/interfaces/ICompilablePlan.hpp>
 
 namespace hip_kernel_provider
 {
 
-HipKernelEngine::HipKernelEngine(int64_t id, const IDevicePropertyProvider& devicePropertyProvider)
+HipKernelEngine::HipKernelEngine(int64_t id)
     : _id(id)
-    , _devicePropertyProvider(devicePropertyProvider)
 {
 }
 
@@ -154,20 +152,6 @@ void HipKernelEngine::initializeExecutionContext(
         if(planBuilder->isApplicable(handle, opGraph))
         {
             planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
-
-            // If the plan implements ICompilablePlan, compile it now
-            if(executionContext.hasValidPlan())
-            {
-                auto* compilablePlan
-                    = dynamic_cast<hipdnn_plugin_sdk::ICompilablePlan<HipKernelHandle>*>(
-                        &executionContext.plan());
-                if(compilablePlan != nullptr)
-                {
-                    auto deviceProps = _devicePropertyProvider.getDeviceProperties();
-                    compilablePlan->compile(deviceProps);
-                }
-            }
-
             break;
         }
     }

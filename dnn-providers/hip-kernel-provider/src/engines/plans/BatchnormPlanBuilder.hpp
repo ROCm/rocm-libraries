@@ -8,6 +8,8 @@
 #include "HipKernelContext.hpp"
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
+#include "IDevicePropertyProvider.hpp"
+#include "hip/IKernelCompiler.hpp"
 #include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
 namespace hip_kernel_provider
@@ -17,7 +19,8 @@ class BatchnormPlanBuilder
     : public hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>
 {
 public:
-    BatchnormPlanBuilder() = default;
+    BatchnormPlanBuilder(const IKernelCompiler& kernelCompiler,
+                         const IDevicePropertyProvider& devicePropertyProvider);
     ~BatchnormPlanBuilder() override = default;
 
     // Disallow copy and assignment
@@ -45,6 +48,10 @@ public:
     std::vector<hipdnn_data_sdk::data_objects::KnobT>
         getCustomKnobs(const HipKernelHandle& handle,
                        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
+private:
+    const IKernelCompiler& _kernelCompiler;
+    const IDevicePropertyProvider& _devicePropertyProvider;
 };
 
 }

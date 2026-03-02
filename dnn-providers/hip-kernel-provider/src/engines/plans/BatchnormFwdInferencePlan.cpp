@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferencePlan.hpp"
-#include "hip/HipUtils.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -84,8 +83,10 @@ const hipdnn_data_sdk::data_objects::TensorAttributes*
     return _activationOut;
 }
 
-BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams)
+BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
+                                                     const IKernelCompiler& kernelCompiler)
     : _inferenceParams(std::move(inferenceParams))
+    , _kernelCompiler(kernelCompiler)
 {
 }
 
@@ -263,13 +264,13 @@ void BatchnormFwdInferencePlan::compile(const hipDeviceProp_t& deviceProperties)
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
     // Compile kernel and configure launch dimensions
-    _compiledProgram.emplace("BatchNormFwdInferSpatial.cpp", options);
-    _compiledKernel.emplace(*_compiledProgram, "BatchNormFwdInferSpatialEstInvVar");
+    _compiledProgram = _kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
+    _runnableKernel = _compiledProgram->getKernel("BatchNormFwdInferSpatialEstInvVar");
 
-    _compiledKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
+    _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
                                   static_cast<unsigned int>(ylocalsize),
                                   static_cast<unsigned int>(zlocalsize));
-    _compiledKernel->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+    _runnableKernel->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
                                  static_cast<unsigned int>(ygridsize / ylocalsize),
                                  static_cast<unsigned int>(zgridsize / zlocalsize));
 
@@ -287,7 +288,7 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
                                         uint32_t numDeviceBuffers,
                                         [[maybe_unused]] void* workspace) const
 {
-    if(!_compiledKernel.has_value())
+    if(!_runnableKernel)
     {
         throw std::runtime_error("BatchnormFwdInferencePlan::execute() called before compile()");
     }
@@ -310,7 +311,7 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
         auto activationOutBuffer = hip_kernel_utils::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
-        _compiledKernel->launch(handle.getStream(),
+        _runnableKernel->launch(handle.getStream(),
                                 xBuffer.ptr,
                                 activationOutBuffer.ptr,
                                 estMeanBuffer.ptr,
@@ -331,7 +332,7 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
         auto yBuffer = hip_kernel_utils::findDeviceBuffer(
             _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
-        _compiledKernel->launch(handle.getStream(),
+        _runnableKernel->launch(handle.getStream(),
                                 xBuffer.ptr,
                                 yBuffer.ptr,
                                 estMeanBuffer.ptr,

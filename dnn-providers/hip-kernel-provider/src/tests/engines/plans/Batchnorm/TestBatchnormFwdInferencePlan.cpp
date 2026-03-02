@@ -4,9 +4,9 @@
 #include <gtest/gtest.h>
 
 #include "engines/plans/BatchnormFwdInferencePlan.hpp"
+#include "mocks/MockKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_plugin_sdk/interfaces/ICompilablePlan.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -100,7 +100,7 @@ TEST(TestBatchnormFwdInferenceParams, FusedParamsHasActivation)
 namespace
 {
 
-BatchnormFwdInferencePlan createPlanFromSingleNodeGraph()
+BatchnormFwdInferencePlan createPlanFromSingleNodeGraph(const IKernelCompiler& kernelCompiler)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
@@ -110,30 +110,23 @@ BatchnormFwdInferencePlan createPlanFromSingleNodeGraph()
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
 
     BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
-    return BatchnormFwdInferencePlan(std::move(params));
+    return {std::move(params), kernelCompiler};
 }
 
 } // namespace
 
-TEST(TestBatchnormFwdInferencePlan, ImplementsICompilablePlan)
-{
-    auto plan = createPlanFromSingleNodeGraph();
-    auto* asIPlan = static_cast<hipdnn_plugin_sdk::IPlan<HipKernelHandle>*>(&plan);
-    auto* asCompilable
-        = dynamic_cast<hipdnn_plugin_sdk::ICompilablePlan<HipKernelHandle>*>(asIPlan);
-    EXPECT_NE(asCompilable, nullptr);
-}
-
 TEST(TestBatchnormFwdInferencePlan, ExecuteWithoutCompileThrows)
 {
-    auto plan = createPlanFromSingleNodeGraph();
+    MockKernelCompiler mockCompiler;
+    auto plan = createPlanFromSingleNodeGraph(mockCompiler);
     HipKernelHandle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), std::runtime_error);
 }
 
 TEST(TestBatchnormFwdInferencePlan, GetWorkspaceSizeReturnsZero)
 {
-    auto plan = createPlanFromSingleNodeGraph();
+    MockKernelCompiler mockCompiler;
+    auto plan = createPlanFromSingleNodeGraph(mockCompiler);
     HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }

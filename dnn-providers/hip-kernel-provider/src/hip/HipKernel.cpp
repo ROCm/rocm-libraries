@@ -28,3 +28,18 @@ void HipKernel::setSharedMemBytes(unsigned int bytes)
 {
     _sharedMemBytes = bytes;
 }
+
+void HipKernel::launchImpl(hipStream_t stream, void** kernelParams) const
+{
+    HIP_CHECK(hipModuleLaunchKernel(_kernel,
+                                    _gridX,
+                                    _gridY,
+                                    _gridZ,
+                                    _blockX,
+                                    _blockY,
+                                    _blockZ,
+                                    _sharedMemBytes,
+                                    stream,
+                                    kernelParams,
+                                    nullptr));
+}

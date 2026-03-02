@@ -8,7 +8,6 @@
 #include "HipKernelContext.hpp"
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
-#include "IDevicePropertyProvider.hpp"
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
@@ -19,7 +18,7 @@ class HipKernelEngine
     : public hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>
 {
 public:
-    HipKernelEngine(int64_t id, const IDevicePropertyProvider& devicePropertyProvider);
+    explicit HipKernelEngine(int64_t id);
 
     int64_t id() const override;
 
@@ -46,7 +45,6 @@ public:
 
 private:
     int64_t _id;
-    const IDevicePropertyProvider& _devicePropertyProvider;
     std::vector<std::unique_ptr<
         hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>>>
         _planBuilders;
