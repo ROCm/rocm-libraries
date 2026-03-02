@@ -106,10 +106,10 @@ namespace
     }
 
     //----------------------------------------------------------------------
-    // IRParser declaration (MLIR-style format)
+    // IRParser declaration
     //----------------------------------------------------------------------
 
-    /// Parser for the StinkyTofu MLIR-style IR text format.
+    /// Parser for the StinkyTofu IR text format.
     /// Format: destRegs = "Stinkytofu.mnemonic"(srcRegs) { attributes }
     /// Or labels: label_name:
     class IRParser
@@ -122,8 +122,10 @@ namespace
     public:
         explicit IRParser(IRLexer& lex);
 
-        /// Parse the entire IR file and return a list of parsed instructions.
-        std::vector<std::unique_ptr<ParsedInstruction>> parse();
+        /// Parse the entire IR file and return a parsed function.
+        /// Hierarchical format (st.func @name() { ... }) returns structured blocks.
+        /// Flat format returns a single block "entry" with all instructions.
+        std::unique_ptr<ParsedFunction> parse();
 
         /// Check if any errors were encountered during parsing.
         bool hasErrors() const
@@ -142,7 +144,7 @@ namespace
 
     private:
         //------------------------------------------------------------------
-        // Parsing methods (MLIR-style)
+        // Parsing methods
         //------------------------------------------------------------------
 
         /// Parse a single instruction line.
@@ -152,6 +154,18 @@ namespace
         /// Parse label (identifier followed by colon).
         /// Format: label_name:
         std::unique_ptr<ParsedInstruction> parseLabel();
+
+        /// Parse hierarchical format: st.func @name() { ^block: ... }
+        std::unique_ptr<ParsedFunction> parseFunction();
+
+        /// Parse block: ^blockId: instructions [Successors: ^a, ^b]
+        std::unique_ptr<ParsedBlock> parseBlock();
+
+        /// Parse Successors: ^id, ^id, ...
+        bool parseSuccessorsLine(ParsedBlock& block);
+
+        /// Parse block label: ^blockId:
+        std::optional<std::string> parseBlockLabel();
 
         /// Parse destination registers (comma-separated).
         /// Format: v[14:17], s[0]
@@ -166,8 +180,14 @@ namespace
         bool parseOperands(ParsedInstruction& inst);
 
         /// Parse attributes in braces.
-        /// Format: { issueCycles = 4, latencyCycles = 56 }
+        /// Format: { issueCycles = 4, latencyCycles = 56, mod.ds = { na = 1, ... }, ... }
         bool parseAttributes(ParsedInstruction& inst);
+
+        /// Parse a modifier dict: { field = value, ... }. Returns nullopt on error.
+        std::optional<std::unordered_map<std::string, std::string>> parseModifierDict();
+
+        /// Parse a single attribute value (int, float, quoted string, true, false).
+        std::optional<std::string> parseAttributeValue();
 
         /// Parse a single register reference.
         /// Formats: v[14:17], s[0], acc[0:15], BARRIER[0], SCC[0], DS_WRITE[0], 0x1, 42, 3.14
@@ -232,24 +252,50 @@ namespace
     {
     }
 
-    std::vector<std::unique_ptr<ParsedInstruction>> IRParser::parse()
+    std::unique_ptr<ParsedFunction> IRParser::parse()
     {
-        std::vector<std::unique_ptr<ParsedInstruction>> instructions;
-
         // Skip any leading newlines
         skipNewlines();
 
+        // Check for hierarchical format: st.func @name() {
+        bool hierarchical = false;
+        if(peek().kind == TokenKind::Identifier)
+        {
+            std::string_view text = peek().text;
+            if(text == "st.func")
+            {
+                hierarchical = true;
+            }
+        }
+
+        if(hierarchical)
+        {
+            return parseFunction();
+        }
+
+        // Flat format: parse instructions and labels into a single block
+        auto block     = std::make_unique<ParsedBlock>();
+        block->blockId = "entry";
+
         while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
         {
+            // Check for block label ^blockId: (hierarchical style in flat context)
+            auto blockLabel = parseBlockLabel();
+            if(blockLabel)
+            {
+                auto label = std::make_unique<ParsedInstruction>(*blockLabel, true);
+                block->instructions.push_back(std::move(label));
+                skipNewlines();
+                continue;
+            }
+
             // Check if this is a label (identifier followed by colon)
-            // Peek ahead to verify BEFORE consuming tokens
             if(peek().kind == TokenKind::Identifier && lexer.peekAhead(1).kind == TokenKind::Colon)
             {
-                // This is definitely a label
                 auto label = parseLabel();
                 if(label)
                 {
-                    instructions.push_back(std::move(label));
+                    block->instructions.push_back(std::move(label));
                     skipNewlines();
                     continue;
                 }
@@ -258,11 +304,10 @@ namespace
             auto inst = parseInstruction();
             if(inst)
             {
-                instructions.push_back(std::move(inst));
+                block->instructions.push_back(std::move(inst));
             }
             else
             {
-                // Error occurred, try to recover by skipping to next line
                 while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof
                       && peek().kind != TokenKind::Newline)
                 {
@@ -277,7 +322,10 @@ namespace
             skipNewlines();
         }
 
-        return instructions;
+        auto func      = std::make_unique<ParsedFunction>();
+        func->funcName = "";
+        func->blocks.push_back(std::move(block));
+        return func;
     }
 
     void IRParser::printDiagnostics() const
@@ -290,7 +338,7 @@ namespace
 
     std::unique_ptr<ParsedInstruction> IRParser::parseInstruction()
     {
-        // MLIR-style format: [destRegs =] "Stinkytofu.mnemonic"(srcRegs) { attributes }
+        // format: [destRegs =] "Stinkytofu.mnemonic"(srcRegs) { attributes }
 
         auto inst = std::make_unique<ParsedInstruction>("");
 
@@ -380,6 +428,189 @@ namespace
         // Store label name without the colon, set isLabel flag to true
         auto inst = std::make_unique<ParsedInstruction>(std::string(labelTok.text), true);
         return inst;
+    }
+
+    std::unique_ptr<ParsedFunction> IRParser::parseFunction()
+    {
+        // Format: st.func @name() { ^block: ... }
+        if(peek().kind != TokenKind::Identifier || std::string(peek().text) != "st.func")
+        {
+            emitError("Expected 'st.func'");
+            return nullptr;
+        }
+        consume(); // st.func
+
+        // @funcName
+        if(peek().kind != TokenKind::Identifier || peek().text.empty() || peek().text[0] != '@')
+        {
+            emitError("Expected function name (@name)");
+            return nullptr;
+        }
+        std::string funcName(peek().text);
+        if(funcName.size() > 1)
+            funcName = funcName.substr(1); // strip @
+        consume();
+
+        if(!expect(TokenKind::LeftParen, "Expected '(' after function name"))
+            return nullptr;
+        if(!expect(TokenKind::RightParen, "Expected ')'"))
+            return nullptr;
+        if(!expect(TokenKind::LeftBrace, "Expected '{' to start function body"))
+            return nullptr;
+
+        skipNewlines();
+
+        auto parsedFunc      = std::make_unique<ParsedFunction>();
+        parsedFunc->funcName = funcName;
+
+        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+        {
+            if(peek().kind == TokenKind::RightBrace)
+            {
+                consume();
+                return parsedFunc;
+            }
+
+            auto block = parseBlock();
+            if(!block)
+            {
+                return nullptr;
+            }
+            parsedFunc->blocks.push_back(std::move(block));
+            skipNewlines();
+        }
+
+        emitError("Expected '}' to close function body");
+        return nullptr;
+    }
+
+    std::unique_ptr<ParsedBlock> IRParser::parseBlock()
+    {
+        auto blockId = parseBlockLabel();
+        if(!blockId)
+        {
+            emitError("Expected block label (^blockId:)");
+            return nullptr;
+        }
+
+        auto block     = std::make_unique<ParsedBlock>();
+        block->blockId = *blockId;
+        skipNewlines();
+
+        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+        {
+            // Successors: ^a, ^b
+            if(peek().kind == TokenKind::Identifier && std::string(peek().text) == "Successors")
+            {
+                if(!parseSuccessorsLine(*block))
+                    return nullptr;
+                skipNewlines();
+                break;
+            }
+
+            // Next block or function end (peek only - don't consume)
+            if(peek().kind == TokenKind::RightBrace)
+                break;
+            if(peek().kind == TokenKind::Identifier && !peek().text.empty() && peek().text[0] == '^'
+               && lexer.peekAhead(1).kind == TokenKind::Colon)
+            {
+                break; // Next block - caller will parse it
+            }
+
+            auto inst = parseInstruction();
+            if(inst)
+            {
+                block->instructions.push_back(std::move(inst));
+            }
+            else
+            {
+                // Try label (flat style) for backward compat
+                if(peek().kind == TokenKind::Identifier
+                   && lexer.peekAhead(1).kind == TokenKind::Colon)
+                {
+                    auto label = parseLabel();
+                    if(label)
+                    {
+                        block->instructions.push_back(std::move(label));
+                        skipNewlines();
+                        continue;
+                    }
+                }
+                // Error recovery
+                while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof
+                      && peek().kind != TokenKind::Newline)
+                {
+                    consume();
+                }
+            }
+            skipNewlines();
+        }
+
+        return block;
+    }
+
+    bool IRParser::parseSuccessorsLine(ParsedBlock& block)
+    {
+        if(peek().kind != TokenKind::Identifier || std::string(peek().text) != "Successors")
+        {
+            emitError("Expected 'Successors'");
+            return false;
+        }
+        consume(); // Successors
+
+        if(!expect(TokenKind::Colon, "Expected ':' after Successors"))
+            return false;
+
+        skipNewlines();
+
+        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+        {
+            if(peek().kind == TokenKind::Newline)
+                break;
+
+            if(peek().kind == TokenKind::Identifier && !peek().text.empty()
+               && peek().text[0] == '^')
+            {
+                std::string id(peek().text);
+                consume();
+                block.successorIds.push_back(std::move(id));
+
+                if(peek().kind == TokenKind::Comma)
+                {
+                    consume();
+                    continue;
+                }
+                // Next token could be newline or next block
+                break;
+            }
+            else
+            {
+                emitError("Expected block reference (^blockId)");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    std::optional<std::string> IRParser::parseBlockLabel()
+    {
+        // Format: ^blockId:  (blockId stored without ^ for BasicBlock::label)
+        if(peek().kind != TokenKind::Identifier || peek().text.empty() || peek().text[0] != '^')
+        {
+            return std::nullopt;
+        }
+        std::string blockId(peek().text);
+        consume();
+
+        if(peek().kind != TokenKind::Colon)
+        {
+            return std::nullopt;
+        }
+        consume(); // :
+
+        if(blockId.size() > 1)
+            blockId = blockId.substr(1); // strip ^
+        return blockId;
     }
 
     bool IRParser::parseDestRegisters(ParsedInstruction& inst)
@@ -544,8 +775,19 @@ namespace
                 return false;
             }
 
-            // Parse attribute value (integer or float)
-            if(peek().kind == TokenKind::IntegerLiteral)
+            // Parse attribute value
+            if(attrStr.size() >= 4 && attrStr.substr(0, 4) == "mod."
+               && peek().kind == TokenKind::LeftBrace)
+            {
+                // Modifier dict: mod.X = { field = value, ... }
+                auto dictOpt = parseModifierDict();
+                if(!dictOpt)
+                {
+                    return false;
+                }
+                inst.modifiers[attrStr] = std::move(*dictOpt);
+            }
+            else if(peek().kind == TokenKind::IntegerLiteral)
             {
                 const Token& valueTok = consume();
                 auto         value    = safeStoi(std::string(valueTok.text));
@@ -594,7 +836,7 @@ namespace
             }
             else
             {
-                emitError("Expected integer or float value for attribute");
+                emitError("Expected integer, float, or modifier dict for attribute");
                 return false;
             }
 
@@ -619,9 +861,113 @@ namespace
         return false;
     }
 
+    std::optional<std::unordered_map<std::string, std::string>> IRParser::parseModifierDict()
+    {
+        // Format: { field = value, field = value, ... }
+        if(peek().kind != TokenKind::LeftBrace)
+        {
+            emitError("Expected '{' for modifier dict");
+            return std::nullopt;
+        }
+        consume(); // consume '{'
+
+        std::unordered_map<std::string, std::string> dict;
+
+        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+        {
+            if(peek().kind == TokenKind::RightBrace)
+            {
+                consume();
+                return dict;
+            }
+
+            if(peek().kind != TokenKind::Identifier)
+            {
+                emitError("Expected field name in modifier dict");
+                return std::nullopt;
+            }
+            const Token& fieldTok = consume();
+            std::string  fieldName(fieldTok.text);
+
+            if(!expect(TokenKind::Equal, "Expected '=' after field name in modifier dict"))
+            {
+                return std::nullopt;
+            }
+
+            auto valueOpt = parseAttributeValue();
+            if(!valueOpt)
+            {
+                return std::nullopt;
+            }
+            dict[fieldName] = std::move(*valueOpt);
+
+            if(peek().kind == TokenKind::Comma)
+            {
+                consume();
+                continue;
+            }
+            if(peek().kind == TokenKind::RightBrace)
+            {
+                continue; // Will be consumed in next iteration
+            }
+            emitError("Expected ',' or '}' after modifier dict field");
+            return std::nullopt;
+        }
+
+        emitError("Unexpected end of file in modifier dict");
+        return std::nullopt;
+    }
+
+    std::optional<std::string> IRParser::parseAttributeValue()
+    {
+        if(peek().kind == TokenKind::IntegerLiteral)
+        {
+            const Token& tok = consume();
+            return std::string(tok.text);
+        }
+        if(peek().kind == TokenKind::HexLiteral)
+        {
+            const Token& tok = consume();
+            return std::string(tok.text);
+        }
+        if(peek().kind == TokenKind::FloatLiteral)
+        {
+            const Token& tok = consume();
+            return std::string(tok.text);
+        }
+        if(peek().kind == TokenKind::QuotedString)
+        {
+            const Token& tok = consume();
+            std::string  s(tok.text);
+            if(s.size() >= 2 && s.front() == '"' && s.back() == '"')
+                s = s.substr(1, s.size() - 2);
+            return s;
+        }
+        if(peek().kind == TokenKind::KW_true)
+        {
+            consume();
+            return "true";
+        }
+        if(peek().kind == TokenKind::KW_false)
+        {
+            consume();
+            return "false";
+        }
+        if(peek().kind == TokenKind::Identifier)
+        {
+            const Token& tok = consume();
+            std::string  s(tok.text);
+            if(s == "true" || s == "false")
+                return s;
+            return s; // Allow other identifiers as string values
+        }
+        emitError("Expected attribute value (integer, float, string, true, or false)");
+        return std::nullopt;
+    }
+
     std::optional<StinkyRegister> IRParser::parseRegister()
     {
-        // Parse MLIR-style register references:
+        // Parse register references:
         // v[10], v[14:17], s[0], acc[0:15], BARRIER[0], SCC[0], DS_WRITE[0]
         // Also literals: 0x1, 42, 3.14
 
@@ -671,7 +1017,35 @@ namespace
 
         const Token& regTypeTok = consume();
         std::string  regTypeStr(regTypeTok.text);
-        RegType      regType = stringToRegType(regTypeStr);
+
+        // Handle label_*: label reference (e.g. label_LoopEndL, label_LoopBeginL)
+        if(regTypeStr.size() >= 6 && regTypeStr.substr(0, 6) == "label_")
+        {
+            return StinkyRegister(regTypeStr);
+        }
+        else if(regTypeStr == "BufferLimit")
+        {
+            return StinkyRegister(regTypeStr);
+        }
+
+        // Handle "v10" / "s5" / "acc12" etc.: identifier = regType + digits (no space)
+        // Try longest prefix first so "acc10" is "acc" + "10" not "a" + "cc10"
+        for(size_t prefixLen = regTypeStr.size(); prefixLen >= 1; --prefixLen)
+        {
+            std::string prefix = regTypeStr.substr(0, prefixLen);
+            std::string suffix = regTypeStr.substr(prefixLen);
+            RegType     rt     = stringToRegType(prefix);
+            if(isValidRegType(rt) && !suffix.empty()
+               && std::all_of(
+                   suffix.begin(), suffix.end(), [](unsigned char c) { return std::isdigit(c); }))
+            {
+                auto idx = safeStoi(suffix);
+                if(idx)
+                    return StinkyRegister(rt, *idx, 1);
+            }
+        }
+
+        RegType regType = stringToRegType(regTypeStr);
 
         // Validate register type
         if(!isValidRegType(regType))
@@ -680,7 +1054,7 @@ namespace
             return std::nullopt;
         }
 
-        // Check for format: v12 (no brackets)
+        // Check for format: v 12 (separate tokens - reg type then integer)
         if(peek().kind == TokenKind::IntegerLiteral)
         {
             const Token& idxTok = consume();
@@ -801,31 +1175,34 @@ namespace
 
 namespace stinkytofu
 {
-    std::vector<std::unique_ptr<ParsedInstruction>> parseSourceString(const std::string& sourceStr)
-    {
-        // Create lexer and tokenize
-        IRLexer lexer(sourceStr);
-        lexer.lex();
-
-        // Create parser and parse
-        return IRParser(lexer).parse();
-    }
-
     ParseResult parseSourceStringWithDiagnostics(const std::string& sourceStr)
     {
         ParseResult result;
 
-        // Create lexer and tokenize
         IRLexer lexer(sourceStr);
         lexer.lex();
 
-        // Create parser and parse
         IRParser parser(lexer);
-        result.instructions = parser.parse();
-
-        // Copy diagnostics from parser
-        result.diagnostics = parser.getDiagnostics();
+        result.parsedFunction = parser.parse();
+        result.diagnostics    = parser.getDiagnostics();
 
         return result;
     }
-}
+
+    std::vector<ParsedInstruction> ParseResult::getInstructions() const
+    {
+        std::vector<ParsedInstruction> instructions;
+        if(parsedFunction && !parsedFunction->blocks.empty())
+        {
+            for(const auto& block : parsedFunction->blocks)
+            {
+                for(const auto& instruction : block->instructions)
+                {
+                    instructions.push_back(*instruction);
+                }
+            }
+        }
+        return instructions;
+    }
+
+} // namespace stinkytofu

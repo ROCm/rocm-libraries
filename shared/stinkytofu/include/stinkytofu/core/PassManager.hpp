@@ -24,8 +24,8 @@
 
 #include <cassert>
 #include <functional>
-#include <memory>
 #include <iosfwd>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -276,6 +276,9 @@ namespace stinkytofu
         unsigned printAfterAll : 1;
         unsigned printBeforeAll : 1;
 
+        std::string dumpFileNameBefore;
+        std::string dumpFileNameAfter;
+
         std::unique_ptr<std::ostream> dumpStreamBefore;
         std::unique_ptr<std::ostream> dumpStreamAfter;
 
@@ -298,6 +301,8 @@ namespace stinkytofu
 
         std::ostream& getOutputStreamInBefore() const;
         std::ostream& getOutputStreamInAfter() const;
+
+        void prepareDumpOutputStream();
 
     public:
         // Note: The debug only functions will use internal global static

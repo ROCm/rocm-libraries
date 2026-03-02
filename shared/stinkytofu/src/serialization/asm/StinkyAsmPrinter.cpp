@@ -22,186 +22,202 @@
  * ************************************************************************ */
 
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "ModifierSerializer.hpp"
+#include "stinkytofu/support/Casting.hpp"
 #include <iomanip>
-#include <iostream>
-
-namespace
-{
-    void printBasicBlock(stinkytofu::AsmPrinter& printer, const stinkytofu::BasicBlock& bb)
-    {
-        for(const stinkytofu::IRBase& ir : bb)
-        {
-            if(const stinkytofu::StinkyInstruction* inst
-               = dyn_cast<stinkytofu::StinkyInstruction>(&ir))
-            {
-                printer.getStream() << std::setw(printer.getOptions().indent) << "";
-                printer.print(*inst);
-            }
-        }
-    }
-} // namespace
+#include <sstream>
 
 namespace stinkytofu
 {
     //----------------------------------------------------------------------
-    // RegisterPrinter implementation
+    // AsmPrinter implementation
     //----------------------------------------------------------------------
-    void RegisterPrinter::print(const StinkyRegister& reg)
+    void AsmPrinter::print(const StinkyRegister& reg)
+    {
+        printRegister(reg);
+    }
+
+    void AsmPrinter::printRegister(const StinkyRegister& reg)
     {
         switch(reg.dataType)
         {
         case StinkyRegister::Type::Register:
         {
-            // Print register with optional prefix for AGPR (shown as "acc")
             std::string prefix = regTypeToString(reg.reg.type);
             if(reg.reg.type == RegType::AGPR)
                 prefix = "acc";
 
-            // Single register without brackets (e.g., v12, BARRIER0)
-            // Range with brackets (e.g., v[10:13])
-            if(reg.hasSymbolicName())
-            {
-                if(reg.reg.num == 1)
-                {
-                    os << prefix << "[" << reg.getSymbolicName() << "]";
-                }
-                else
-                {
-                    os << prefix << "[" << reg.getSymbolicName() << ":" << reg.getSymbolicName()
-                       << "+" << (reg.reg.num - 1) << "]";
-                }
-            }
-            else if(reg.reg.num == 1)
-            {
+            // Don't use symbolic name for now
+            // if(reg.hasSymbolicName())
+            // {
+            //     if(reg.reg.num == 1)
+            //         os << prefix << "[" << reg.getSymbolicName() << "]";
+            //     else
+            //         os << prefix << "[" << reg.getSymbolicName() << ":" << reg.getSymbolicName()
+            //            << "+" << (reg.reg.num - 1) << "]";
+            // }
+            if(reg.reg.num == 1)
                 os << prefix << reg.reg.idx;
-            }
             else
-            {
                 os << prefix << "[" << reg.reg.idx << ":" << (reg.reg.idx + reg.reg.num - 1) << "]";
-            }
             break;
         }
-
         case StinkyRegister::Type::LiteralInt:
             os << reg.getLiteralInt();
             break;
-
         case StinkyRegister::Type::LiteralDouble:
             os << std::fixed << std::setprecision(6) << reg.getLiteralDouble();
             break;
-
         case StinkyRegister::Type::LiteralString:
             os << reg.getLiteralString();
             break;
-
         case StinkyRegister::Type::Invalid:
             os << "<invalid>";
             break;
         }
     }
 
-    //----------------------------------------------------------------------
-    // AsmPrinter implementation
-    //----------------------------------------------------------------------
     void AsmPrinter::print(const StinkyInstruction& inst)
     {
-        // Check if this is a label
-        if(inst.getUnifiedOpcode() == GFX::LABEL)
+        printInstruction(inst);
+    }
+
+    void AsmPrinter::print(const AsmDirective& directive)
+    {
+        printDirective(directive);
+    }
+
+    void AsmPrinter::print(const Function& function)
+    {
+        os << "st.func @" << function.getName() << "() {\n";
+        size_t index = 0;
+        for(const BasicBlock& bb : function)
         {
-            if(const LabelData* labelMod = inst.getModifier<LabelData>())
-            {
-                os << labelMod->label << ":\n";
-                return;
-            }
+            printBlock(bb, index);
+            ++index;
         }
+        os << "}\n";
+    }
 
-        // MLIR-style format:
-        // destRegs = "operation.mnemonic"(srcRegs) { attributes }
+    void AsmPrinter::printBlock(const BasicBlock& bb, size_t blockIndex)
+    {
+        std::string blockId
+            = bb.getLabel().empty() ? ("bb" + std::to_string(blockIndex)) : bb.getLabel();
+        os << "^" << blockId << ":\n";
+        for(const IRBase& ir : bb)
+            printIR(ir);
+        printSuccessorsLine(bb);
+    }
 
-        // Print destination registers
+    void AsmPrinter::printIR(const IRBase& ir)
+    {
+        switch(ir.getType())
+        {
+        case IRBase::IRType::StinkyTofu:
+        {
+            if(const StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&ir))
+                printInstruction(*inst);
+            else
+            {
+                // other StinkyTofu: indent and dump
+                os << std::string(static_cast<size_t>(options.indent), ' ');
+                ir.dump(os);
+                os << "\n";
+            }
+            break;
+        }
+        case IRBase::IRType::StinkyAsmDirective:
+            if(const AsmDirective* directive = dyn_cast<AsmDirective>(&ir))
+                printDirective(*directive);
+            else
+            {
+                os << std::string(static_cast<size_t>(options.indent), ' ');
+                ir.dump(os);
+                os << "\n";
+            }
+            break;
+        case IRBase::IRType::LogicalIR:
+            os << std::string(static_cast<size_t>(options.indent), ' ');
+            ir.dump(os);
+            os << "\n";
+            break;
+        }
+    }
+
+    void AsmPrinter::printInstruction(const StinkyInstruction& inst)
+    {
+        // labels are block boundaries; do not print LABEL as instruction
+        if(inst.getUnifiedOpcode() == GFX::LABEL)
+            return;
+
+        os << std::string(static_cast<size_t>(options.indent), ' ');
+
         if(!inst.getDestRegs().empty())
         {
             for(size_t i = 0; i < inst.getDestRegs().size(); ++i)
             {
                 if(i > 0)
+                {
                     os << ", ";
-                regPrinter.print(inst.getDestRegs()[i]);
+                }
+                printRegister(inst.getDestRegs()[i]);
             }
             os << " = ";
         }
 
-        // Print operation name with namespace
-        // TODO: get namespace from IR context
         const std::string irNamespace = "st";
         os << "\"" << irNamespace << "." << inst.getHwInstDesc()->mnemonic << "\"";
 
-        // Print source registers as operands
         os << "(";
-        if(!inst.getSrcRegs().empty())
+        for(size_t i = 0; i < inst.getSrcRegs().size(); ++i)
         {
-            // Check if instruction has VOP3 modifiers
-            const VOP3Modifiers* vop3Mod = inst.getModifier<VOP3Modifiers>();
-
-            for(size_t i = 0; i < inst.getSrcRegs().size(); ++i)
+            if(i > 0)
             {
-                if(i > 0)
-                    os << ", ";
-
-                bool needsNeg = false;
-                bool needsAbs = false;
-
-                // Check VOP3 modifiers for this source operand
-                if(vop3Mod)
-                {
-                    switch(i)
-                    {
-                    case 0:
-                        needsNeg = vop3Mod->neg_src0;
-                        needsAbs = vop3Mod->abs_src0;
-                        break;
-                    case 1:
-                        needsNeg = vop3Mod->neg_src1;
-                        needsAbs = vop3Mod->abs_src1;
-                        break;
-                    case 2:
-                        needsNeg = vop3Mod->neg_src2;
-                        needsAbs = vop3Mod->abs_src2;
-                        break;
-                    }
-                }
-
-                // Print modifiers
-                if(needsNeg)
-                    os << "-";
-                if(needsAbs)
-                    os << "abs(";
-
-                regPrinter.print(inst.getSrcRegs()[i]);
-
-                if(needsAbs)
-                    os << ")";
+                os << ", ";
             }
+            printRegister(inst.getSrcRegs()[i]);
         }
         os << ")";
-        if(auto waitCntData = inst.getModifier<SWaitCntData>())
+
+        // Attributes: issueCycles, latencyCycles, then mod.X = { ... } for each modifier
+        os << " { issueCycles = " << inst.issueCycles << ", latencyCycles = " << inst.latencyCycles;
+        for(const auto& mod : inst.getModifiers())
         {
-            os << " (" << *waitCntData << ")";
+            printModifierAsDict(*mod);
         }
-
-        // Print attributes
-        os << " { ";
-        // Always print issue and latency cycles
-        os << "issueCycles = " << inst.issueCycles;
-        os << ", latencyCycles = " << inst.latencyCycles;
-
-        os << " }";
-        os << "\n";
+        os << " }\n";
     }
 
-    void AsmPrinter::print(const Function& function)
+    bool AsmPrinter::printModifierAsDict(const Modifier& mod)
     {
-        for(const BasicBlock& bb : function)
-            printBasicBlock(*this, bb);
+        return ModifierSerializer::serialize(mod, os);
+    }
+
+    void AsmPrinter::printDirective(const AsmDirective& directive)
+    {
+        os << std::string(static_cast<size_t>(options.indent), ' ');
+        os << "\"st.asm_directive\"(\"" << directive.name << "\"";
+        if(!directive.symbol.empty())
+            os << ", \"" << directive.symbol << "\"";
+        if(!directive.value.empty())
+            os << ", \"" << directive.value << "\"";
+        os << ")\n";
+    }
+
+    void AsmPrinter::printSuccessorsLine(const BasicBlock& bb)
+    {
+        const auto& succs = bb.getSuccessors();
+        if(succs.empty())
+            return;
+        os << std::string(static_cast<size_t>(options.indent), ' ');
+        os << "Successors: ";
+        for(size_t i = 0; i < succs.size(); ++i)
+        {
+            if(i > 0)
+                os << ", ";
+            os << "^" << succs[i]->getLabel();
+        }
+        os << "\n";
     }
 
 } // namespace stinkytofu

@@ -25,12 +25,34 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+
+/*
+ * @brief Define the options for the ModuleOptions struct
+ * @note This macro is used to define the options for the ModuleOptions struct
+ */
+#define MODULE_OPTIONS_LIST(X)     \
+    X(dumpIRBetweenPasses, bool)   \
+    X(OptLevel, int)               \
+    X(TileA0, int)                 \
+    X(TileB0, int)                 \
+    X(TileM0, int)                 \
+    X(NumGRA, uint32_t)            \
+    X(NumGRB, uint32_t)            \
+    X(NumGRM, uint32_t)            \
+    X(wavefrontSize, int)          \
+    X(SubGroup0, int)              \
+    X(SubGroup1, int)              \
+    X(VectorWidthA, int)           \
+    X(VectorWidthB, int)           \
+    X(GlobalReadVectorWidthA, int) \
+    X(GlobalReadVectorWidthB, int) \
+    X(DirectToLdsA, bool)          \
+    X(DirectToLdsB, bool)          \
+    X(UseSgprForGRO, int)
 
 namespace stinkytofu
 {
@@ -65,6 +87,17 @@ namespace stinkytofu
     class StinkyAsmModule
     {
     public:
+        /**
+         * @brief Options for the StinkyAsmModule
+         * @note This struct is used to store the information for the StinkyAsmModule
+         */
+        struct ModuleOptions
+        {
+#define GEN_MEMBER_OPTION(name, type) type name;
+            MODULE_OPTIONS_LIST(GEN_MEMBER_OPTION)
+#undef GEN_MEMBER_OPTION
+        };
+
         /**
          * @brief Construct a new StinkyAsmModule
          * @param name Module/kernel name
@@ -149,9 +182,22 @@ namespace stinkytofu
         void updateInstructionGroups(const std::vector<const std::string*>& groups,
                                      size_t                                 instsCountBefore);
 
+        /**
+         * @brief Get the ModuleOptions
+         * @return ModuleOptions
+         */
+        const ModuleOptions& getModuleOptions() const;
+
+        /**
+         * @brief Set the ModuleOptions
+         * @param moduleOptions ModuleOptions
+         */
+        void setModuleOptions(const ModuleOptions& moduleOptions);
+
     private:
         struct Impl;
         std::unique_ptr<Impl> pImpl;
+        ModuleOptions         moduleOptions;
     };
 
 } // namespace stinkytofu

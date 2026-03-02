@@ -17,8 +17,12 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include <climits>
+#include <cstdlib>
 #include <iostream>
+#include <sstream>
 
+#include "ModifierSerializer.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -37,56 +41,89 @@ namespace stinkytofu
     {
     }
 
+    static void convertInstruction(AsmIRBuilder&                             irBuilder,
+                                   const std::unique_ptr<ParsedInstruction>& inst,
+                                   GfxArchID                                 arch)
+    {
+        if(inst->isLabel)
+        {
+            irBuilder.createLabel(inst->opcodeStr);
+            return;
+        }
+
+        auto              opcode     = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
+        const HwInstDesc* hwInstDesc = getMCIDByIsaOp(static_cast<IsaOpcode>(opcode), arch);
+
+        if(hwInstDesc == nullptr)
+        {
+            std::cerr << "Warning: No hardware instruction descriptor found for opcode " << opcode
+                      << " in arch gfx" << static_cast<int>(arch) << "\n";
+            return;
+        }
+
+        StinkyInstruction* stinkyInst = irBuilder.create(hwInstDesc);
+        stinkyInst->setDestRegs(inst->destRegs);
+        stinkyInst->setSrcRegs(inst->srcRegs);
+
+        if(inst->issueCycles > 0)
+            stinkyInst->issueCycles = inst->issueCycles;
+        if(inst->latencyCycles > 0)
+            stinkyInst->latencyCycles = inst->latencyCycles;
+
+        if(!inst->modifiers.empty())
+        {
+            ModifierSerializer::deserialize(stinkyInst, inst->modifiers);
+        }
+    }
+
     StinkyErrorCode StinkyIRConverter::populateFunctionFromString(const std::string& irText,
                                                                   Function&          func,
                                                                   PassContext&       passCtx,
                                                                   GfxArchID          arch)
     {
-        // Parse the raw instruction string
-        auto parsedInstructions = parseSourceString(irText);
+        auto result = parseSourceStringWithDiagnostics(irText);
 
-        // Create an entry BasicBlock to hold all instructions
-        BasicBlock* entryBB = func.createBasicBlock("entry");
+        if(result.hasErrors())
+            return StinkyErrorCode::PARSE_ERROR;
 
-        // Create the IR builder
-        AsmIRBuilder irBuilder(*entryBB, arch);
+        if(!result.parsedFunction || result.parsedFunction->blocks.empty())
+            return StinkyErrorCode::PARSE_ERROR;
 
-        // Convert parsed instructions to StinkyInstruction objects
-        for(const auto& inst : parsedInstructions)
+        func.clear();
+        func.setName(result.parsedFunction->funcName);
+
+        std::unordered_map<std::string, BasicBlock*> blockMap;
+
+        for(auto& parsedBlock : result.parsedFunction->blocks)
         {
-            // Check if it's a label
-            if(inst->isLabel)
+            BasicBlock* bb                 = func.createBasicBlock(parsedBlock->blockId);
+            blockMap[parsedBlock->blockId] = bb;
+
+            AsmIRBuilder irBuilder(*bb, arch);
+            for(auto& inst : parsedBlock->instructions)
             {
-                irBuilder.createLabel(inst->opcodeStr);
+                convertInstruction(irBuilder, inst, arch);
+            }
+        }
+
+        // Wire successors
+        for(size_t i = 0; i < result.parsedFunction->blocks.size(); ++i)
+        {
+            ParsedBlock& parsedBlock = *result.parsedFunction->blocks[i];
+            BasicBlock*  bb          = blockMap[parsedBlock.blockId];
+            if(!bb)
                 continue;
-            }
 
-            // Get the opcode and hardware instruction descriptor
-            auto              opcode     = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
-            const HwInstDesc* hwInstDesc = getMCIDByIsaOp(static_cast<IsaOpcode>(opcode), arch);
-
-            if(hwInstDesc == nullptr)
+            for(const std::string& succId : parsedBlock.successorIds)
             {
-                std::cerr << "Warning: No hardware instruction descriptor found for opcode "
-                          << opcode << " in arch gfx" << static_cast<int>(arch) << "\n";
-            }
-            else
-            {
-                StinkyInstruction* stinkyInst = irBuilder.create(hwInstDesc);
-
-                // Move destination and source registers
-                stinkyInst->setDestRegs(inst->destRegs);
-                stinkyInst->setSrcRegs(inst->srcRegs);
-
-                // Overwrite cycles when valid (> 0), otherwise use default from HwInstDesc
-                if(inst->issueCycles > 0)
+                std::string key = succId;
+                if(!key.empty() && key[0] == '^')
+                    key = key.substr(1);
+                BasicBlock* succ = blockMap[key];
+                if(succ)
                 {
-                    stinkyInst->issueCycles = inst->issueCycles;
-                }
-
-                if(inst->latencyCycles > 0)
-                {
-                    stinkyInst->latencyCycles = inst->latencyCycles;
+                    bb->addSuccessor(succ);
+                    succ->addPredecessor(bb);
                 }
             }
         }

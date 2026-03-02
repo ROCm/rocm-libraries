@@ -31,8 +31,8 @@
 
 #include <gtest/gtest.h>
 
-#include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/serialization/asm/IRParser.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -59,9 +59,9 @@ protected:
     /**
      * Helper to parse assembly string
      */
-    std::vector<std::unique_ptr<ParsedInstruction>> parseAssemblyString(const std::string& input)
+    std::vector<ParsedInstruction> parseAssemblyString(const std::string& input)
     {
-        return parseSourceString(input);
+        return parseSourceStringWithDiagnostics(input).getInstructions();
     }
 };
 
@@ -76,12 +76,12 @@ TEST_F(IRParserTest, ParsesSimpleVALUInstruction)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    ASSERT_NE(instructions[0], nullptr);
+    ASSERT_NE(instructions[0].opcodeStr, "");
     // Parser strips namespace prefix
-    EXPECT_EQ(instructions[0]->opcodeStr, "v_add_f32");
-    EXPECT_FALSE(instructions[0]->isLabel);
-    EXPECT_EQ(instructions[0]->destRegs.size(), 1);
-    EXPECT_EQ(instructions[0]->srcRegs.size(), 2);
+    EXPECT_EQ(instructions[0].opcodeStr, "v_add_f32");
+    EXPECT_FALSE(instructions[0].isLabel);
+    EXPECT_EQ(instructions[0].destRegs.size(), 1);
+    EXPECT_EQ(instructions[0].srcRegs.size(), 2);
 }
 
 TEST_F(IRParserTest, ParsesMultipleInstructions)
@@ -104,8 +104,37 @@ TEST_F(IRParserTest, ParsesSALUInstruction)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    ASSERT_NE(instructions[0], nullptr);
-    EXPECT_EQ(instructions[0]->opcodeStr, "s_add_u32");
+    ASSERT_NE(instructions[0].opcodeStr, "");
+    EXPECT_EQ(instructions[0].opcodeStr, "s_add_u32");
+}
+
+TEST_F(IRParserTest, ParsesRegisterV10Format)
+{
+    // "v10" (no brackets) should parse as reg type 'v' with index 10
+    const std::string input = R"(v10 = "st.v_mov_b32"(v[0]))";
+
+    auto instructions = parseAssemblyString(input);
+
+    ASSERT_EQ(instructions.size(), 1);
+    ASSERT_NE(instructions[0].opcodeStr, "");
+    ASSERT_EQ(instructions[0].destRegs.size(), 1);
+    EXPECT_EQ(instructions[0].destRegs[0].reg.type, RegType::V);
+    EXPECT_EQ(instructions[0].destRegs[0].reg.idx, 10u);
+}
+
+TEST_F(IRParserTest, ParsesLabelReference)
+{
+    // label_* should parse as label reference (string literal)
+    const std::string input
+        = R"("st.s_cbranch_scc1"(label_LoopEndL) { issueCycles = 1, latencyCycles = 1 })";
+
+    auto instructions = parseAssemblyString(input);
+
+    ASSERT_EQ(instructions.size(), 1);
+    ASSERT_NE(instructions[0].opcodeStr, "");
+    ASSERT_EQ(instructions[0].srcRegs.size(), 1);
+    EXPECT_EQ(instructions[0].srcRegs[0].dataType, StinkyRegister::Type::LiteralString);
+    EXPECT_EQ(instructions[0].srcRegs[0].literalValue, "label_LoopEndL");
 }
 
 TEST_F(IRParserTest, ParsesMemoryInstruction)
@@ -115,8 +144,8 @@ TEST_F(IRParserTest, ParsesMemoryInstruction)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    ASSERT_NE(instructions[0], nullptr);
-    EXPECT_EQ(instructions[0]->opcodeStr, "global_load_dword");
+    ASSERT_NE(instructions[0].opcodeStr, "");
+    EXPECT_EQ(instructions[0].opcodeStr, "global_load_dword");
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithImmediate)
@@ -126,7 +155,7 @@ TEST_F(IRParserTest, ParsesInstructionWithImmediate)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    EXPECT_EQ(instructions[0]->srcRegs.size(), 2);
+    EXPECT_EQ(instructions[0].srcRegs.size(), 2);
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithHexImmediate)
@@ -136,7 +165,7 @@ TEST_F(IRParserTest, ParsesInstructionWithHexImmediate)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    EXPECT_EQ(instructions[0]->srcRegs.size(), 1);
+    EXPECT_EQ(instructions[0].srcRegs.size(), 1);
 }
 
 TEST_F(IRParserTest, ParsesInstructionWithComment)
@@ -146,8 +175,8 @@ TEST_F(IRParserTest, ParsesInstructionWithComment)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    ASSERT_NE(instructions[0], nullptr);
-    EXPECT_EQ(instructions[0]->opcodeStr, "v_add_f32");
+    ASSERT_NE(instructions[0].opcodeStr, "");
+    EXPECT_EQ(instructions[0].opcodeStr, "v_add_f32");
 }
 
 TEST_F(IRParserTest, ParsesWaitInstruction)
@@ -182,15 +211,15 @@ TEST_F(IRParserTest, ParsesUnknownOpcodeWithoutValidation)
     // IRParser does NOT validate opcodes (that's IRValidator's job)
     // Parser only checks syntax is valid
     ASSERT_EQ(instructions.size(), 1) << "Parser should accept syntactically valid instruction";
-    ASSERT_NE(instructions[0], nullptr);
+    ASSERT_NE(instructions[0].opcodeStr, "");
 
     // Verify parser extracted the opcode string correctly
-    EXPECT_EQ(instructions[0]->opcodeStr, "v_unknown_instruction");
-    EXPECT_FALSE(instructions[0]->isLabel);
+    EXPECT_EQ(instructions[0].opcodeStr, "v_unknown_instruction");
+    EXPECT_FALSE(instructions[0].isLabel);
 
     // Verify operands were parsed
-    EXPECT_EQ(instructions[0]->destRegs.size(), 1);
-    EXPECT_EQ(instructions[0]->srcRegs.size(), 2);
+    EXPECT_EQ(instructions[0].destRegs.size(), 1);
+    EXPECT_EQ(instructions[0].srcRegs.size(), 2);
 
     // NOTE: Semantic validation should happen in a separate pass
     // See future IRValidatorTest for opcode validation tests
@@ -229,11 +258,11 @@ TEST_F(IRParserTest, ParsesLargeRegisterRangeWithoutValidation)
     // Parser is LENIENT - it parses syntax, validation happens later
     // Range 0:999 is syntactically valid (even if semantically wrong for hardware)
     ASSERT_EQ(instructions.size(), 1) << "Parser should accept syntactically valid range";
-    ASSERT_NE(instructions[0], nullptr);
+    ASSERT_NE(instructions[0].opcodeStr, "");
 
     // Verify the parse result structure
-    EXPECT_EQ(instructions[0]->opcodeStr, "v_mov_b32");
-    EXPECT_FALSE(instructions[0]->destRegs.empty());
+    EXPECT_EQ(instructions[0].opcodeStr, "v_mov_b32");
+    EXPECT_FALSE(instructions[0].destRegs.empty());
 
     // The range should be captured in the parsed structure
     // A separate IRValidator component should later reject ranges exceeding
@@ -288,7 +317,7 @@ TEST_F(IRParserTest, HandlesMissingQuotesAroundOpcode)
     else
     {
         // May have parsed with lenient rules
-        EXPECT_NE(instructions[0], nullptr) << "Parser should not crash";
+        EXPECT_NE(instructions[0].opcodeStr, "") << "Parser should not crash";
     }
 
     // Key requirement: Doesn't crash on missing quotes
@@ -309,7 +338,7 @@ TEST_F(IRParserTest, HandlesUnclosedParentheses)
     else
     {
         // Lenient parser may have recovered
-        EXPECT_NE(instructions[0], nullptr) << "Parser handled error without crashing";
+        EXPECT_NE(instructions[0].opcodeStr, "") << "Parser handled error without crashing";
     }
 
     // Key requirement: Doesn't crash on unbalanced parentheses
@@ -351,9 +380,9 @@ TEST_F(IRParserTest, HandlesMissingOpcode)
     else
     {
         // If parsed, verify structure
-        EXPECT_NE(instructions[0], nullptr);
+        EXPECT_NE(instructions[0].opcodeStr, "");
         // Opcode string should be empty or have some default
-        EXPECT_TRUE(instructions[0]->opcodeStr.empty() || !instructions[0]->opcodeStr.empty())
+        EXPECT_TRUE(instructions[0].opcodeStr.empty() || !instructions[0].opcodeStr.empty())
             << "Parser handled missing opcode";
     }
 
@@ -376,8 +405,8 @@ TEST_F(IRParserTest, HandlesInvalidAttributeSyntax)
     else
     {
         // May have parsed instruction but skipped bad attributes
-        ASSERT_NE(instructions[0], nullptr);
-        EXPECT_EQ(instructions[0]->opcodeStr, "v_add_f32");
+        ASSERT_NE(instructions[0].opcodeStr, "");
+        EXPECT_EQ(instructions[0].opcodeStr, "v_add_f32");
         // Malformed attributes should be ignored, leaving default values
         // Key point: Parser continues despite attribute errors
     }
@@ -509,8 +538,8 @@ TEST_F(IRParserTest, ParsesVectorRegisterRange)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    EXPECT_EQ(instructions[0]->destRegs.size(), 1);
-    EXPECT_EQ(instructions[0]->srcRegs.size(), 1);
+    EXPECT_EQ(instructions[0].destRegs.size(), 1);
+    EXPECT_EQ(instructions[0].srcRegs.size(), 1);
 }
 
 // ============================================================================
@@ -540,8 +569,84 @@ TEST_F(IRParserTest, HandlesWithAttributes)
     auto instructions = parseAssemblyString(input);
 
     ASSERT_EQ(instructions.size(), 1);
-    EXPECT_EQ(instructions[0]->issueCycles, 4);
-    EXPECT_EQ(instructions[0]->latencyCycles, 52);
+    EXPECT_EQ(instructions[0].issueCycles, 4);
+    EXPECT_EQ(instructions[0].latencyCycles, 52);
+}
+
+TEST_F(IRParserTest, ParsesStructuredModifierFormat)
+{
+    // New format: mod.X = { field = value, ... }
+    const std::string input
+        = R"(v[0] = "st.ds_load_b128"(v[40]) { issueCycles = 4, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } })";
+
+    auto instructions = parseAssemblyString(input);
+
+    ASSERT_EQ(instructions.size(), 1);
+    EXPECT_EQ(instructions[0].issueCycles, 4);
+    EXPECT_EQ(instructions[0].latencyCycles, 56);
+    ASSERT_EQ(instructions[0].modifiers.size(), 1);
+    auto it = instructions[0].modifiers.find("mod.ds");
+    ASSERT_NE(it, instructions[0].modifiers.end());
+    EXPECT_EQ(it->second["na"], "1");
+    EXPECT_EQ(it->second["offset"], "0");
+    EXPECT_EQ(it->second["gds"], "false");
+}
+
+TEST_F(IRParserTest, ParsesMultipleModifiers)
+{
+    const std::string input
+        = R"(v[0] = "st.v_add_f32"(v[1], v[2]) { issueCycles = 2, latencyCycles = 4, mod.vop3 = { neg_src0 = true, abs_src1 = false }, mod.exec = { setHi = true } })";
+
+    auto instructions = parseAssemblyString(input);
+
+    ASSERT_EQ(instructions.size(), 1);
+    EXPECT_EQ(instructions[0].modifiers.size(), 2);
+    auto vop3 = instructions[0].modifiers.find("mod.vop3");
+    ASSERT_NE(vop3, instructions[0].modifiers.end());
+    EXPECT_EQ(vop3->second["neg_src0"], "true");
+    EXPECT_EQ(vop3->second["abs_src1"], "false");
+    auto exec = instructions[0].modifiers.find("mod.exec");
+    ASSERT_NE(exec, instructions[0].modifiers.end());
+    EXPECT_EQ(exec->second["setHi"], "true");
+}
+
+TEST_F(IRParserTest, ParsesHierarchicalFunctionFormat)
+{
+    const std::string input = R"(
+st.func @temp() {
+^entry:
+  v[0] = "st.ds_load_b128"(v[40]) { issueCycles = 4, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_wait_dscnt"(0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    auto result = parseSourceStringWithDiagnostics(input);
+
+    ASSERT_FALSE(result.hasErrors()) << "Parse should succeed";
+    ASSERT_NE(result.parsedFunction, nullptr) << "parsedFunction should be set";
+    EXPECT_EQ(result.parsedFunction->funcName, "temp");
+    ASSERT_EQ(result.parsedFunction->blocks.size(), 1u) << "Should have 1 block";
+    EXPECT_EQ(result.parsedFunction->blocks[0]->blockId, "entry");
+    ASSERT_EQ(result.parsedFunction->blocks[0]->instructions.size(), 2u)
+        << "Should have 2 instructions";
+    ASSERT_NE(result.parsedFunction->blocks[0]->instructions[0]->opcodeStr, "");
+    ASSERT_NE(result.parsedFunction->blocks[0]->instructions[1]->opcodeStr, "");
+    EXPECT_EQ(result.parsedFunction->blocks[0]->instructions[0]->opcodeStr, "ds_load_b128");
+    EXPECT_EQ(result.parsedFunction->blocks[0]->instructions[1]->opcodeStr, "s_wait_dscnt");
+}
+
+TEST_F(IRParserTest, ParsesBlockLabelWithCaret)
+{
+    // Flat format with ^blockId: style label
+    const std::string input = R"(^entry:
+v[0] = "st.v_add_f32"(v[1], v[2]) { issueCycles = 1, latencyCycles = 1 })";
+
+    auto instructions = parseAssemblyString(input);
+
+    ASSERT_EQ(instructions.size(), 2);
+    EXPECT_TRUE(instructions[0].isLabel);
+    EXPECT_EQ(instructions[0].opcodeStr, "entry");
+    EXPECT_EQ(instructions[1].opcodeStr, "v_add_f32");
 }
 
 // ============================================================================
@@ -665,13 +770,13 @@ v[2] = "st.v_sub_f32"(v[5], v[6])
     auto result = parseSourceStringWithDiagnostics(input);
 
     // Should have parsed at least one valid instruction
-    EXPECT_GE(result.instructions.size(), 1) << "Should parse valid instructions";
+    EXPECT_GE(result.getInstructions().size(), 1) << "Should parse valid instructions";
 
     // Should also have error diagnostics
     EXPECT_TRUE(result.hasErrors()) << "Should report syntax errors";
 
     // Both results available simultaneously
-    EXPECT_FALSE(result.instructions.empty());
+    EXPECT_FALSE(result.getInstructions().empty());
     EXPECT_FALSE(result.diagnostics.empty());
 }
 
@@ -699,14 +804,14 @@ v[5] = "st.v_max_f32"(v[9], v[10])
     EXPECT_GT(result.errorCount(), 2) << "Should find multiple errors";
 
     // Should still parse the valid instructions
-    EXPECT_GE(result.instructions.size(), 3)
+    EXPECT_GE(result.getInstructions().size(), 3)
         << "Should parse at least 3 valid instructions despite errors";
 
     // Check that we got some valid instructions
     int validCount = 0;
-    for(const auto& inst : result.instructions)
+    for(const auto& inst : result.getInstructions())
     {
-        if(!inst->opcodeStr.empty())
+        if(!inst.opcodeStr.empty())
         {
             validCount++;
         }
@@ -776,28 +881,28 @@ v[2] = "st.v_sub_f32"(v[5], v[6])
     EXPECT_TRUE(result.hasErrors());
 
     // Should have valid instructions
-    EXPECT_GE(result.instructions.size(), 2) << "Should parse valid instructions after errors";
+    EXPECT_GE(result.getInstructions().size(), 2) << "Should parse valid instructions after errors";
 
     // Check that valid instructions are actually correct
     int v_add_found = 0, v_mul_found = 0, v_sub_found = 0;
 
-    for(const auto& inst : result.instructions)
+    for(const auto& inst : result.getInstructions())
     {
-        if(inst->opcodeStr == "v_add_f32")
+        if(inst.opcodeStr == "v_add_f32")
         {
             v_add_found++;
             // Check that operands are correct
-            EXPECT_GE(inst->srcRegs.size(), 2) << "v_add_f32 should have source operands";
+            EXPECT_GE(inst.srcRegs.size(), 2) << "v_add_f32 should have source operands";
         }
-        if(inst->opcodeStr == "v_mul_f32")
+        if(inst.opcodeStr == "v_mul_f32")
         {
             v_mul_found++;
-            EXPECT_GE(inst->srcRegs.size(), 2) << "v_mul_f32 should have source operands";
+            EXPECT_GE(inst.srcRegs.size(), 2) << "v_mul_f32 should have source operands";
         }
-        if(inst->opcodeStr == "v_sub_f32")
+        if(inst.opcodeStr == "v_sub_f32")
         {
             v_sub_found++;
-            EXPECT_GE(inst->srcRegs.size(), 2) << "v_sub_f32 should have source operands";
+            EXPECT_GE(inst.srcRegs.size(), 2) << "v_sub_f32 should have source operands";
         }
     }
 
@@ -840,17 +945,18 @@ TEST_F(IRParserTest, StressTestHalfBadInstructions)
     EXPECT_GE(result.errorCount(), 40) << "Should detect most of the 50 bad instructions";
 
     // Should still parse the good instructions
-    EXPECT_GE(result.instructions.size(), 40) << "Should parse most of the 50 good instructions";
+    EXPECT_GE(result.getInstructions().size(), 40)
+        << "Should parse most of the 50 good instructions";
 
     // Check that parser didn't crash or hang
-    EXPECT_LT(result.instructions.size(), 200)
+    EXPECT_LT(result.getInstructions().size(), 200)
         << "Parser should not generate spurious instructions";
 
     // Verify some parsed instructions are actually valid
     int validWithOperands = 0;
-    for(const auto& inst : result.instructions)
+    for(const auto& inst : result.getInstructions())
     {
-        if(inst->opcodeStr == "v_add_f32" && inst->srcRegs.size() >= 2)
+        if(inst.opcodeStr == "v_add_f32" && inst.srcRegs.size() >= 2)
         {
             validWithOperands++;
         }

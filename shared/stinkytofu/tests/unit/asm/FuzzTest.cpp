@@ -76,7 +76,7 @@ TEST_F(FuzzTest, IRParserHandlesUnicode)
     std::string input  = "v[0] = ???";
     auto        result = parseSourceStringWithDiagnostics(input);
     // Should produce error but not crash
-    EXPECT_TRUE(result.hasErrors() || result.instructions.empty());
+    EXPECT_TRUE(result.hasErrors() || result.getInstructions().empty());
 }
 
 TEST_F(FuzzTest, IRParserHandlesDeepNesting)
@@ -101,7 +101,7 @@ TEST_F(FuzzTest, IRParserHandlesLargeNumbers)
     // Should produce error, not crash or throw
     EXPECT_TRUE(result.hasErrors());
     EXPECT_GT(result.diagnostics.size(), 0);
-    EXPECT_TRUE(result.instructions.empty());
+    EXPECT_TRUE(result.getInstructions().empty());
 }
 
 TEST_F(FuzzTest, IRParserHandlesManyQuotes)

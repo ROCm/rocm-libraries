@@ -584,12 +584,13 @@ namespace stinkytofu
 
     bool IRLexer::isIdentifierStart(char c)
     {
-        return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
+        // ^ for block IDs (^entry), @ for symbol names (@func)
+        return std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '^' || c == '@';
     }
 
     bool IRLexer::isIdentifierContinue(char c)
     {
-        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.';
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '+';
     }
 
     bool IRLexer::isDigit(char c)

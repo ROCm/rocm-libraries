@@ -32,6 +32,7 @@ namespace stinkytofu
     {
         SUCCESS       = 0,
         PASSCTX_EMPTY = 1,
+        PARSE_ERROR   = 2,
     };
 
     /// GEMM-specific tile configuration
