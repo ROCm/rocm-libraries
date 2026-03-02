@@ -464,7 +464,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
         if(zero_pivot != -1)
         {
-            return rocsparse_status_zero_pivot;
+            return rocsparse_status_success;
         }
 
         //
