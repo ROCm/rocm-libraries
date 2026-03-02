@@ -484,6 +484,20 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
             kargs.init_logits_soft_cap(logits_soft_cap);
         }
 
+        // Check that the maximum offset won't overflow.
+        if constexpr(kPageBlockSize < FmhaPipeline::kN0)
+        {
+            if(num_total_pages > 1)
+            {
+                constexpr int64_t kInt32Max =
+                    static_cast<int64_t>(std::numeric_limits<index_t>::max());
+                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_k <= kInt32Max &&
+                       "KV cache K offset overflow: exceed int32 max");
+                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_v <= kInt32Max &&
+                       "KV cache V offset overflow: exceed int32 max");
+            }
+        }
+
         return kargs;
     }
 
@@ -635,6 +649,20 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         if constexpr(kHasLogitsSoftCap)
         {
             kargs.init_logits_soft_cap(logits_soft_cap);
+        }
+
+        // Check that the maximum offset won't overflow.
+        if constexpr(kPageBlockSize < FmhaPipeline::kN0)
+        {
+            if(num_total_pages > 1)
+            {
+                constexpr int64_t kInt32Max =
+                    static_cast<int64_t>(std::numeric_limits<index_t>::max());
+                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_k <= kInt32Max &&
+                       "KV cache K offset overflow: exceed int32 max");
+                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_v <= kInt32Max &&
+                       "KV cache V offset overflow: exceed int32 max");
+            }
         }
 
         return kargs;
