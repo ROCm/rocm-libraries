@@ -83,6 +83,7 @@
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
+#include <hipdnn_frontend/detail/GraphPacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
@@ -820,6 +821,16 @@ public:
      */
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
+        // TODO: Remove this feature flag once all operation types support descriptor-based
+        // lowering and the flatbuffer path is no longer needed.
+        static const bool s_useDescriptorApi
+            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_USE_DESCRIPTOR_API") == "1";
+
+        if(s_useDescriptorApi)
+        {
+            return build_operation_graph_via_descriptors(handle);
+        }
+
         HIPDNN_FE_LOG_INFO("Building operation graph " << graph_attributes.get_name());
 
         if(!_preferredEngineId.has_value())
@@ -853,6 +864,71 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+protected:
+    // Returns the raw backend graph descriptor, or nullptr if the graph has not been built.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    hipdnnBackendDescriptor_t get_raw_graph_descriptor() const
+    {
+        return _graphDesc ? _graphDesc->get() : nullptr;
+    }
+
+    /// Builds the operation graph using the backend descriptor C API.
+    /// Each node creates its operation descriptor(s) via virtual dispatch,
+    /// then the GraphDescriptor is assembled and finalized.
+    ///
+    /// NOTE: This method is intentionally not yet exposed publicly. It will replace
+    /// the FlatBuffer-based build_operation_graph() once all operation types are implemented.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error build_operation_graph_via_descriptors(hipdnnHandle_t handle)
+    {
+        HIPDNN_FE_LOG_INFO("Building operation graph via descriptors "
+                           << graph_attributes.get_name());
+
+        assignUnsetTensorUids();
+
+        if(!_preferredEngineId.has_value())
+        {
+            _preferredEngineId
+                = hipdnn_frontend::engine_override::getPreferredIdFromOverrideConfig(*this);
+        }
+
+        // Collect all tensor descriptors (keyed by UID for deduplication)
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+
+        // Collect operation descriptors
+        std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+
+        // Each node creates its operation descriptor(s) via virtual dispatch
+        for(const auto& node : _sub_nodes)
+        {
+            HIPDNN_CHECK_ERROR(node->create_operation(tensorDescs, operations));
+        }
+
+        if(operations.empty())
+        {
+            return {ErrorCode::INVALID_VALUE, "No operations created for graph"};
+        }
+
+        // Assemble the graph descriptor from operations
+        auto computeDt = toHipdnnDataType(graph_attributes.get_compute_data_type());
+        auto intermediateDt = toHipdnnDataType(graph_attributes.get_intermediate_data_type());
+        auto ioDt = toHipdnnDataType(graph_attributes.get_io_data_type());
+        if(!computeDt || !intermediateDt || !ioDt)
+        {
+            return {ErrorCode::INVALID_VALUE, "Unsupported data type in graph attributes"};
+        }
+        HIPDNN_CHECK_ERROR(detail::assembleGraphDescriptor(operations,
+                                                           handle,
+                                                           *computeDt,
+                                                           *intermediateDt,
+                                                           *ioDt,
+                                                           _preferredEngineId,
+                                                           _graphDesc));
+
+        return {ErrorCode::OK, ""};
+    }
+
+public:
     /**
      * @brief Get available configuration knobs for a specific engine
      * @param engineId The engine ID to query
@@ -1311,7 +1387,8 @@ public:
     /**
      * @brief Execute the graph with tensor pointers mapped by tensor handles
      * @param handle The hipDNN handle
-     * @param tensorLookup Map from std::shared_ptr<TensorAttributes> (tensor handles) to device memory pointers
+     * @param tensorLookup Map from std::shared_ptr<TensorAttributes> (tensor handles) to device
+     * memory pointers
      * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
      * @return Error indicating success or failure
      *
