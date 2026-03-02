@@ -21,7 +21,6 @@ const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
  * compile-time known.
  */
 
-
 constexpr size_t possibleTileSizesCount = 35;
 
 constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSizes

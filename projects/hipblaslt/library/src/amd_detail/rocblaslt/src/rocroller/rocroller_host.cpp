@@ -547,7 +547,7 @@ rocblaslt_status
         {
             kernel = *existingSolution;
         }
-        
+
         // Fill out heuristicResultsArray
         // The most important thing to do is set the solutionIndex
         memset(heuristicResultsArray[i].algo.data, 0, sizeof(heuristicResultsArray[i].algo.data));
