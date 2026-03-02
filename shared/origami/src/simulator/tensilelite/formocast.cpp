@@ -804,6 +804,11 @@ namespace origami
             if (bpRead <= 4) {
                 grStallCycles = 1;
             }
+            // Theoretically, the maximum number of entries that can be retained is max of readStalledLength.
+            const int maxRetainedEntries = (grFIFOLength - 4) * numWaves;
+            while (fifo.size() > maxRetainedEntries) {
+                fifo.pop_front();
+            }
             // pop finished GRs
             if (fifo.size() < grFIFOLength) {
                 // if FIFO is not empty, set finalCycle to the last cycle + 1. Only 1 GR can be issued in each cycle.

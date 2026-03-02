@@ -915,7 +915,7 @@ namespace rocisa
                     if (soffsetStr.find("s") != std::string::npos) {
                         hasSgprOffset = true;
                     }
-                    cycles = formocast.getGlobalReadQueueFullStallCycles(currCycles, hwGRFIFO, bpr, numWaves, (rocIsa::getInstance().getKernel().isaVersion[0] == 9), false);
+                    cycles = formocast.getGlobalReadQueueFullStallCycles(currCycles, hwGRFIFO, bpr, numWaves, (rocIsa::getInstance().getKernel().isaVersion[0] == 9), hasSgprOffset);
                 }
                 if(auto wInst = std::dynamic_pointer_cast<DSStoreB128>(item))
                 {
