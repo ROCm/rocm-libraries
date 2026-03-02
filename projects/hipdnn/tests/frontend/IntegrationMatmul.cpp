@@ -142,13 +142,17 @@ protected:
         auto aAttr
             = makeTensorAttributes("A", getDataTypeEnumFromType<Data_type>(), bundle.aTensor);
         if(useManualUids)
+        {
             aAttr.set_uid(uid++);
+        }
         tensors.a = std::make_shared<TensorAttributes>(std::move(aAttr));
 
         auto bAttr
             = makeTensorAttributes("B", getDataTypeEnumFromType<Data_type>(), bundle.bTensor);
         if(useManualUids)
+        {
             bAttr.set_uid(uid++);
+        }
         tensors.b = std::make_shared<TensorAttributes>(std::move(bAttr));
 
         MatmulAttributes matmulAttrs;
@@ -156,7 +160,9 @@ protected:
 
         tensors.c = graph->matmul(tensors.a, tensors.b, matmulAttrs);
         if(useManualUids)
+        {
             tensors.c->set_uid(uid++);
+        }
         tensors.c->set_output(true);
 
         return {graph, tensors};
