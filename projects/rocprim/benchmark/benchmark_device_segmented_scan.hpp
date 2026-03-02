@@ -203,7 +203,7 @@ struct device_segmented_scan_benchmark : public primbench::benchmark_interface
             {
                 HIP_CHECK(run_device_segmented_scan(d_temporary_storage.get(),
                                                     temporary_storage_bytes,
-                                                    d_values_output.get(),
+                                                    d_values_input.get(),
                                                     d_values_output.get(),
                                                     segments_count,
                                                     d_offsets.get(),

@@ -47,8 +47,9 @@
 int main(int argc, char* argv[])
 {
     primbench::settings settings;
-    settings.size                 = 128 * primbench::MiB;
-    settings.min_gpu_ms_per_batch = 100;
+    settings.size                    = 128 * primbench::MiB;
+    settings.min_gpu_ms_per_batch    = 100;
+    settings.noise_tolerance_percent = 2;
     primbench::executor executor(argc, argv, settings);
 
 #ifndef BENCHMARK_CONFIG_TUNING
