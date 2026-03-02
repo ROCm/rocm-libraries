@@ -28,8 +28,8 @@ struct PerformanceConfigSoftmax : PerfConfigBase<PerformanceConfigSoftmax>
     int local_size;
     bool initialized = false;
     PerformanceConfigSoftmax(int _local_size) : local_size(_local_size) {}
-    PerformanceConfigSoftmax() : local_size(static_cast<int>(1)) {}
-    PerformanceConfigSoftmax(bool) : local_size(static_cast<int>(1)) {}
+    PerformanceConfigSoftmax() : local_size(start_local_size) {}
+    PerformanceConfigSoftmax(bool) : local_size(start_local_size) {}
     void HeuristicInit(const miopen::softmax::ProblemDescription& problem);
     bool SetNextValue(const miopen::softmax::ProblemDescription& problem);
     bool IsValidValue() const;
@@ -69,34 +69,30 @@ struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>
         // after tuning to make sure tuning doesn't affect the output
         auto invoke_context_softmax = invoke_context.CastTo<miopen::softmax::InvokeParams>();
         std::vector<unsigned char> data_backup;
-        if(invoke_context_softmax.forward_y != nullptr)
+        if(problem.IsForward() && invoke_context_softmax.forward_y != nullptr)
         {
-            auto y_bytepointer = reinterpret_cast<unsigned char*>(invoke_context_softmax.forward_y);
-            data_backup        = std::vector<unsigned char>(
-                y_bytepointer, y_bytepointer + invoke_context_softmax.yDesc.GetNumBytes());
+            data_backup = std::vector<unsigned char>(invoke_context_softmax.yDesc.GetNumBytes());
             context.GetStream().ReadTo(data_backup.data(),
                                        invoke_context_softmax.forward_y,
                                        invoke_context_softmax.yDesc.GetNumBytes());
         }
-        if(invoke_context_softmax.dx != nullptr)
+        else if(!problem.IsForward() && invoke_context_softmax.dx != nullptr)
         {
-            auto dx_bytepointer = reinterpret_cast<unsigned char*>(invoke_context_softmax.dx);
-            data_backup         = std::vector<unsigned char>(
-                dx_bytepointer, dx_bytepointer + invoke_context_softmax.xdxDesc.GetNumBytes());
-            context.GetStream().ReadTo(invoke_context_softmax.dx,
-                                       data_backup.data(),
+            data_backup = std::vector<unsigned char>(invoke_context_softmax.xdxDesc.GetNumBytes());
+            context.GetStream().ReadTo(data_backup.data(),
+                                       invoke_context_softmax.dx,
                                        invoke_context_softmax.xdxDesc.GetNumBytes());
         }
 
         auto result = GenericSearch(*this, context, problem, invoke_context);
 
-        if(invoke_context_softmax.forward_y != nullptr)
+        if(problem.IsForward() && invoke_context_softmax.forward_y != nullptr)
         {
             context.GetStream().WriteTo(data_backup.data(),
                                         invoke_context_softmax.forward_y,
                                         invoke_context_softmax.yDesc.GetNumBytes());
         }
-        if(invoke_context_softmax.dx != nullptr)
+        else if(!problem.IsForward() && invoke_context_softmax.dx != nullptr)
         {
             context.GetStream().WriteTo(data_backup.data(),
                                         invoke_context_softmax.dx,

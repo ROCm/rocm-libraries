@@ -17,7 +17,7 @@
 namespace miopen {
 
 namespace {
-constexpr int nextPow2(int v)
+constexpr uint64_t nextPow2(uint64_t v)
 {
     if(v == 1)
     {
@@ -31,6 +31,7 @@ constexpr int nextPow2(int v)
         v |= v >> 4;
         v |= v >> 8;
         v |= v >> 16;
+        v |= v >> 32;
         v++;
         return v;
     }
@@ -128,9 +129,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
         mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[1] * lengths[2] * lengths[3] : lengths[1];
     auto num_batch =
         vector_size < config.local_size ? nextPow2(config.local_size / vector_size) : 1;
-    auto workgroups   = num_batch == 1               ? grid_size
-                        : grid_size % num_batch == 0 ? grid_size / num_batch
-                                                     : grid_size / num_batch + 1;
+    auto workgroups   = num_batch == 1 ? grid_size : (grid_size + num_batch - 1) / num_batch;
     auto batch_size   = config.local_size / num_batch;
     auto u_batch_size = vector_size > batch_size ? nextPow2(vector_size / batch_size) : 1;
 
@@ -146,34 +145,34 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     kernel.kernel_file = "MIOpenSoftmax.cpp";
     kernel.kernel_name = problem.IsForward() ? "SoftmaxFwd" : "SoftmaxBwd";
 
-    const auto build_params =
-        KernelBuildParameters{{"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
-                              {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
-                              {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-                              {"DATA_TYPE", data_dtype == "bfloat16" ? "ushort" : data_dtype},
-                              {"USE_SOFTMAX_FAST", algorithm == MIOPEN_SOFTMAX_FAST},
-                              {"USE_SOFTMAX_ACCURATE", algorithm == MIOPEN_SOFTMAX_ACCURATE},
-                              {"USE_SOFTMAX_LOG", algorithm == MIOPEN_SOFTMAX_LOG},
-                              {"USE_SOFTMAX_MODE_INSTANCE", mode == MIOPEN_SOFTMAX_MODE_INSTANCE},
-                              {"USE_SOFTMAX_MODE_CHANNEL", mode == MIOPEN_SOFTMAX_MODE_CHANNEL},
-                              {"HEIGHT", lengths[2]},
-                              {"WIDTH", lengths[3]},
-                              {"N_STRIDE", strides[0]},
-                              {"C_STRIDE", strides[1]},
-                              {"H_STRIDE", strides[2]},
-                              {"W_STRIDE", strides[3]},
-                              {"LOCAL_SIZE", config.local_size},
-                              {"WORKGROUPS", workgroups},
-                              {"GRID_SIZE", grid_size},
-                              {"SPATIAL_DIM", spatial_dim},
-                              {"VECTOR_SIZE", vector_size},
-                              {"NUM_BATCH", num_batch},
-                              {"BATCH_SIZE", batch_size},
-                              {"U_BATCH_SIZE", u_batch_size},
-                              {"IS_INPUT_CONTIGUOUS", problem.GetXDesc().IsContiguous()},
-                              {"IS_OUTPUT_CONTIGUOUS", problem.GetYDesc().IsContiguous()},
-                              {"IS_DINPUT_CONTIGUOUS", problem.GetdXDesc().IsContiguous()},
-                              {"IS_DOUTPUT_CONTIGUOUS", problem.GetdYDesc().IsContiguous()}};
+    const auto build_params = KernelBuildParameters{
+        {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
+        {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
+        {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
+        {"DATA_TYPE", data_dtype == "bfloat16" ? "ushort" : data_dtype},
+        {"USE_SOFTMAX_FAST", algorithm == MIOPEN_SOFTMAX_FAST},
+        {"USE_SOFTMAX_ACCURATE", algorithm == MIOPEN_SOFTMAX_ACCURATE},
+        {"USE_SOFTMAX_LOG", algorithm == MIOPEN_SOFTMAX_LOG},
+        {"USE_SOFTMAX_MODE_INSTANCE", mode == MIOPEN_SOFTMAX_MODE_INSTANCE},
+        {"USE_SOFTMAX_MODE_CHANNEL", mode == MIOPEN_SOFTMAX_MODE_CHANNEL},
+        {"HEIGHT", lengths[2]},
+        {"WIDTH", lengths[3]},
+        {"N_STRIDE", strides[0]},
+        {"C_STRIDE", strides[1]},
+        {"H_STRIDE", strides[2]},
+        {"W_STRIDE", strides[3]},
+        {"LOCAL_SIZE", config.local_size},
+        {"WORKGROUPS", workgroups},
+        {"GRID_SIZE", grid_size},
+        {"SPATIAL_DIM", spatial_dim},
+        {"VECTOR_SIZE", vector_size},
+        {"NUM_BATCH", num_batch},
+        {"BATCH_SIZE", batch_size},
+        {"U_BATCH_SIZE", u_batch_size},
+        {"IS_INPUT_CONTIGUOUS", problem.IsForward() && problem.GetXDesc().IsContiguous()},
+        {"IS_OUTPUT_CONTIGUOUS", problem.GetYDesc().IsContiguous()},
+        {"IS_DINPUT_CONTIGUOUS", !problem.IsForward() && problem.GetdXDesc().IsContiguous()},
+        {"IS_DOUTPUT_CONTIGUOUS", !problem.IsForward() && problem.GetdYDesc().IsContiguous()}};
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
@@ -291,7 +290,6 @@ bool PerformanceConfigSoftmax::IsValid(const ExecutionContext&,
     case miopenInt64:
     default: MIOPEN_THROW("Unsupported datatype");
     }
-    return false;
 #endif
 }
 
