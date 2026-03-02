@@ -681,8 +681,9 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                                     const ExecutionContext& ctx,
                                     const std::string& device)
 {
-    const bool is3d = true; //problem.Is3d();
-    //Use 3D path also for 2D models
+    const bool is3d = problem.Is3d();
+    const bool is2d = problem.Is2d();
+
 
     // Check cache FIRST - avoids expensive model creation if we have cached results
     auto cached_result = GetCachedPrediction(problem, device, is3d);
@@ -694,13 +695,13 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     if(is3d)
     {
         // 3D path: Use TunaNet3D model
-        std::unique_ptr<conv3d::Model3D> model = conv3d::Get3DModel(device);
+        std::unique_ptr<convnd::ModelND> model = convnd::GetNDModel(device);
         if(!model || !model->IsProblemSupported(problem, ctx))
         {
             return {}; // Fallback: empty vector
         }
 
-        MIOPEN_LOG_I2("Evaluating 3D TunaNet");
+        MIOPEN_LOG_I2("Evaluating ND TunaNet");
         std::vector<float> predictions = model->Forward(problem);
 
         return ProcessAndCachePredictions(
@@ -726,39 +727,39 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 } // namespace immed_mode
 
 /**
- * @brief 3D convolution AI heuristics namespace
+ * @brief ND convolution AI heuristics namespace
  *
- * This namespace contains classes and functions for 3D convolution AI heuristics
- * using TunaNet3D neural networks to predict optimal solvers for 3D convolution
+ * This namespace contains classes and functions for ND convolution AI heuristics
+ * using TunaNetND neural networks to predict optimal solvers for ND convolution
  * operations (NCDHW layout).
  */
-namespace conv3d {
+namespace convnd {
 
-// Metadata3D implementation moved to metadata_3d.cpp
+// MetadataND implementation moved to metadata_nd.cpp
 
-class TunaNet3DModel : public Model3D
+class TunaNetNDModel : public ModelND
 {
 private:
     const std::string device_name; // Device name (e.g., "gfx942", "gfx950")
 
 public:
-    Metadata3D metadata;
+    MetadataND metadata;
 
-    explicit TunaNet3DModel(const std::string& device)
-        : device_name(device), metadata(Metadata3D(device))
+    explicit TunaNetNDModel(const std::string& device)
+        : device_name(device), metadata(MetadataND(device))
     {
-        MIOPEN_LOG_I2("TunaNet3DModel initialized for device: " << device_name);
+        MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name);
     }
 
     std::vector<float> Forward(const conv::ProblemDescription& problem) const override
     {
         std::vector<float> features = ToFeatures(problem);
-        MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
+        MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
 
-        // Use fdeep to run TunaNet3D inference
-        const std::string model_path = Model3DPath(device_name);
+        // Use fdeep to run TunaNetND inference
+        const std::string model_path = ModelNDPath(device_name);
         const auto model             = fdeep::load_model(model_path);
-        MIOPEN_LOG_I2("TunaNet3DModel: Loaded fdeep model from " << model_path << ".");
+        MIOPEN_LOG_I2("TunaNetNDModel: Loaded fdeep model from " << model_path << ".");
 
         // Convert features to fdeep tensor
         const auto input_tensor = fdeep::tensor(fdeep::tensor_shape(features.size()), features);
@@ -766,7 +767,7 @@ public:
 
         // Extract predictions from result
         const auto predictions = result[0].to_vector();
-        MIOPEN_LOG_I2("TunaNet3DModel: TunaNet3D returned " << predictions.size()
+        MIOPEN_LOG_I2("TunaNetNDModel: TunaNetND returned " << predictions.size()
                                                             << " predictions");
         return predictions;
     }
@@ -783,7 +784,7 @@ public:
         {
             return false;
         }
-        MIOPEN_LOG_I2("3D problem supported by TunaNet3DModel");
+        MIOPEN_LOG_I2("3D problem supported by TunaNetNDModel");
         return true;
     }
 
@@ -891,26 +892,26 @@ protected:
             };
         }
 
-        MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
+        MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
         return features;
     }
 
-    static std::string Model3DPath(const std::string& device)
+    static std::string ModelNDPath(const std::string& device)
     {
         // const auto file_path = GetSystemDbPath() / (device + "_3d.tn.model");
         const auto file_path = GetSystemDbPath() / (device + ".tn.model");
         if(!fs::exists(file_path))
         {
             MIOPEN_THROW(miopenStatusInternalError,
-                         "Unable to load 3D AI model file: " + file_path.string());
+                         "Unable to load ND AI model file: " + file_path.string());
         }
         return file_path.string();
     }
 };
 
-std::unique_ptr<Model3D> Get3DModel(const std::string& device)
+std::unique_ptr<ModelND> GetNDModel(const std::string& device)
 {
-    MIOPEN_LOG_I2("Get3DModel called for device: " << device);
+    MIOPEN_LOG_I2("GetNDModel called for device: " << device);
 
     // List of devices with 3D TunaNet models
     // Note: gfx942 included for testing purposes (no dedicated 3D model yet)
@@ -919,27 +920,27 @@ std::unique_ptr<Model3D> Get3DModel(const std::string& device)
         try
         {
             // Pass device name to constructor - it will append "_3d" internally
-            auto model = std::make_unique<TunaNet3DModel>(device);
-            MIOPEN_LOG_I2("Successfully created 3D model for device: " << device);
+            auto model = std::make_unique<TunaNetNDModel>(device);
+            MIOPEN_LOG_I2("Successfully created ND model for device: " << device);
             return model;
         }
         catch(const std::exception& e)
         {
-            MIOPEN_LOG_E("Exception during 3D model construction: " << e.what());
+            MIOPEN_LOG_E("Exception during ND model construction: " << e.what());
             return nullptr;
         }
         catch(...)
         {
-            MIOPEN_LOG_E("Unknown exception during 3D model construction");
+            MIOPEN_LOG_E("Unknown exception during ND model construction");
             return nullptr;
         }
     }
 
-    MIOPEN_LOG_I2("Device " << device << " not supported for 3D models");
+    MIOPEN_LOG_I2("Device " << device << " not supported for ND models");
     return nullptr;
 }
 
-} // namespace conv3d
+} // namespace convnd
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 

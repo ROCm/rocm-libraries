@@ -133,16 +133,16 @@ MIOPEN_INTERNALS_EXPORT std::vector<uint64_t> PredictSolver(const conv::ProblemD
  * using TunaNet3D neural networks to predict optimal solvers for 3D convolution
  * operations (NCDHW layout).
  */
-namespace conv3d {
+namespace convnd {
 
 /**
- * @brief 3D-specific metadata handler for TunaNet3D models
+ * @brief 3D-specific metadata handler for TunaNetND models
  *
- * This class provides a simple interface for accessing 3D convolution metadata.
+ * This class provides a simple interface for accessing ND convolution metadata.
  * All data is loaded during construction with proper error handling.
  * Design matches 2D Metadata pattern for consistency.
  */
-class Metadata3D
+class MetadataND
 {
 private:
     const std::string model_prefix;
@@ -192,7 +192,7 @@ public:
      * @param device Device name (e.g., "gfx942", "gfx950") - "_3d" suffix appended internally
      * @note Does not throw - use IsValid() to check for errors
      */
-    MIOPEN_INTERNALS_EXPORT explicit Metadata3D(const std::string& device);
+    MIOPEN_INTERNALS_EXPORT explicit MetadataND(const std::string& device);
 
     /**
      * @brief Check if metadata was loaded successfully
@@ -299,10 +299,10 @@ public:
  * Implementations should provide device-specific TunaNet3D inference
  * for predicting optimal 3D convolution solvers.
  */
-class Model3D
+class ModelND
 {
 public:
-    virtual ~Model3D() = default;
+    virtual ~ModelND() = default;
 
     /**
      * @brief Check if a 3D convolution problem is supported by this model
@@ -314,8 +314,8 @@ public:
                                     const ExecutionContext& ctx) const = 0;
 
     /**
-     * @brief Run TunaNet3D inference on the given 3D problem
-     * @param problem 3D convolution problem description
+     * @brief Run TunaNetND inference on the given 3D problem
+     * @param problem ND convolution problem description
      * @return Vector of solver probabilities (one per solver)
      */
     virtual std::vector<float> Forward(const conv::ProblemDescription& problem) const = 0;
@@ -328,20 +328,20 @@ public:
 
 protected:
     /**
-     * @brief Extract numerical features from 3D convolution problem
+     * @brief Extract numerical features from ND convolution problem
      * @param problem 3D convolution problem description
-     * @return Feature vector for TunaNet3D input
+     * @return Feature vector for TunaNetND input
      */
     virtual std::vector<float> ToFeatures(const conv::ProblemDescription& problem) const = 0;
 };
 
 /**
- * @brief Factory function to create 3D AI heuristics model for given device
+ * @brief Factory function to create ND AI heuristics model for given device
  * @param device GPU device name (e.g., "gfx942", "gfx950")
  * @return Device-specific 3D model instance, or nullptr if unsupported
  */
-MIOPEN_INTERNALS_EXPORT std::unique_ptr<Model3D> Get3DModel(const std::string& device);
-} // namespace conv3d
+MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device);
+} // namespace convnd
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING

@@ -33,7 +33,7 @@
 
 namespace miopen {
 namespace ai {
-namespace conv3d {
+namespace convnd {
 
 // Helper function to safely load JSON with error handling
 static std::optional<nlohmann::json> LoadJSONSafe(const std::string& arch)
@@ -59,7 +59,7 @@ static std::optional<nlohmann::json> LoadJSONSafe(const std::string& arch)
 }
 
 // Static helper functions for loading individual components
-std::optional<std::vector<std::string>> Metadata3D::LoadFeatures(const std::string& arch)
+std::optional<std::vector<std::string>> MetadataND::LoadFeatures(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -76,7 +76,7 @@ std::optional<std::vector<std::string>> Metadata3D::LoadFeatures(const std::stri
     }
 }
 
-std::optional<size_t> Metadata3D::LoadNumInputs(const std::string& arch)
+std::optional<size_t> MetadataND::LoadNumInputs(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -93,7 +93,7 @@ std::optional<size_t> Metadata3D::LoadNumInputs(const std::string& arch)
     }
 }
 
-std::optional<size_t> Metadata3D::LoadNumOutputs(const std::string& arch)
+std::optional<size_t> MetadataND::LoadNumOutputs(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -110,7 +110,7 @@ std::optional<size_t> Metadata3D::LoadNumOutputs(const std::string& arch)
     }
 }
 
-std::optional<size_t> Metadata3D::LoadNumSolvers(const std::string& arch)
+std::optional<size_t> MetadataND::LoadNumSolvers(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -128,7 +128,7 @@ std::optional<size_t> Metadata3D::LoadNumSolvers(const std::string& arch)
 }
 
 std::optional<std::unordered_map<size_t, std::string>>
-Metadata3D::LoadSolverMap(const std::string& arch)
+MetadataND::LoadSolverMap(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -146,7 +146,7 @@ Metadata3D::LoadSolverMap(const std::string& arch)
 }
 
 std::optional<std::vector<float>>
-Metadata3D::LoadFeaturesMean([[maybe_unused]] const std::string& arch, size_t num_inputs)
+MetadataND::LoadFeaturesMean([[maybe_unused]] const std::string& arch, size_t num_inputs)
 {
     // For now, return default values (could be enhanced to load from JSON stats)
     // This is a simplified version that returns zeros for mean
@@ -154,7 +154,7 @@ Metadata3D::LoadFeaturesMean([[maybe_unused]] const std::string& arch, size_t nu
 }
 
 std::optional<std::vector<float>>
-Metadata3D::LoadFeaturesStd([[maybe_unused]] const std::string& arch, size_t num_inputs)
+MetadataND::LoadFeaturesStd([[maybe_unused]] const std::string& arch, size_t num_inputs)
 {
     // For now, return default values (could be enhanced to load from JSON stats)
     // This is a simplified version that returns ones for std
@@ -162,7 +162,7 @@ Metadata3D::LoadFeaturesStd([[maybe_unused]] const std::string& arch, size_t num
 }
 
 std::optional<std::unordered_map<std::string, int>>
-Metadata3D::LoadDirectionEncodings(const std::string& arch)
+MetadataND::LoadDirectionEncodings(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -182,7 +182,7 @@ Metadata3D::LoadDirectionEncodings(const std::string& arch)
 }
 
 std::optional<std::unordered_map<std::string, int>>
-Metadata3D::LoadPrecisionEncodings(const std::string& arch)
+MetadataND::LoadPrecisionEncodings(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -202,7 +202,7 @@ Metadata3D::LoadPrecisionEncodings(const std::string& arch)
 }
 
 std::optional<std::unordered_map<std::string, int>>
-Metadata3D::LoadInLayoutEncodings(const std::string& arch)
+MetadataND::LoadInLayoutEncodings(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -222,7 +222,7 @@ Metadata3D::LoadInLayoutEncodings(const std::string& arch)
 }
 
 std::optional<std::unordered_map<std::string, int>>
-Metadata3D::LoadFilLayoutEncodings(const std::string& arch)
+MetadataND::LoadFilLayoutEncodings(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -242,7 +242,7 @@ Metadata3D::LoadFilLayoutEncodings(const std::string& arch)
 }
 
 std::optional<std::unordered_map<std::string, int>>
-Metadata3D::LoadOutLayoutEncodings(const std::string& arch)
+MetadataND::LoadOutLayoutEncodings(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
@@ -263,7 +263,7 @@ Metadata3D::LoadOutLayoutEncodings(const std::string& arch)
 
 // Constructor - loads all data immediately with error handling
 MIOPEN_INTERNALS_EXPORT
-Metadata3D::Metadata3D(const std::string& device)
+MetadataND::MetadataND(const std::string& device)
     : model_prefix(device + "_3d"), // Automatically append "_3d" suffix to device name
       is_valid(false),              // Initialize to false, will be set to true if all loads succeed
       features(),
@@ -289,7 +289,7 @@ Metadata3D::Metadata3D(const std::string& device)
     // Check if basic components loaded successfully
     if(!features_opt || !num_inputs_opt || !num_outputs_opt || !num_solvers_opt || !solver_map_opt)
     {
-        MIOPEN_LOG_I2("Metadata3D: Failed to load basic components for " << model_prefix);
+        MIOPEN_LOG_I2("MetadataND: Failed to load basic components for " << model_prefix);
         return;
     }
 
@@ -309,7 +309,7 @@ Metadata3D::Metadata3D(const std::string& device)
        !precision_encodings_opt || !in_layout_encodings_opt || !fil_layout_encodings_opt ||
        !out_layout_encodings_opt)
     {
-        MIOPEN_LOG_I2("Metadata3D: Failed to load encoding components for " << model_prefix);
+        MIOPEN_LOG_I2("MetadataND: Failed to load encoding components for " << model_prefix);
         return;
     }
 
@@ -340,7 +340,7 @@ Metadata3D::Metadata3D(const std::string& device)
 
 // Encoding methods with safe error handling
 MIOPEN_INTERNALS_EXPORT
-size_t Metadata3D::EncodeDirection(miopen::conv::Direction dir) const
+size_t MetadataND::EncodeDirection(miopen::conv::Direction dir) const
 {
     if(!is_valid)
         return 0;
@@ -356,13 +356,13 @@ size_t Metadata3D::EncodeDirection(miopen::conv::Direction dir) const
     }
     catch(...)
     {
-        MIOPEN_LOG_W("Direction encoding failed in 3D metadata, returning 0");
+        MIOPEN_LOG_W("Direction encoding failed in ND metadata, returning 0");
         return 0;
     }
 }
 
 MIOPEN_INTERNALS_EXPORT
-size_t Metadata3D::EncodePrecision(miopenDataType_t data_type) const
+size_t MetadataND::EncodePrecision(miopenDataType_t data_type) const
 {
     if(!is_valid)
         return 0;
@@ -377,19 +377,19 @@ size_t Metadata3D::EncodePrecision(miopenDataType_t data_type) const
             return precision_encodings_3d.at("FP32");
         else
         {
-            MIOPEN_LOG_W("Unsupported data type in 3D metadata, returning 0");
+            MIOPEN_LOG_W("Unsupported data type in ND metadata, returning 0");
             return 0;
         }
     }
     catch(...)
     {
-        MIOPEN_LOG_W("Precision encoding failed in 3D metadata, returning 0");
+        MIOPEN_LOG_W("Precision encoding failed in ND metadata, returning 0");
         return 0;
     }
 }
 
 MIOPEN_INTERNALS_EXPORT
-size_t Metadata3D::EncodeLayout(const std::string& layout) const
+size_t MetadataND::EncodeLayout(const std::string& layout) const
 {
     if(!is_valid)
         return 0;
@@ -398,12 +398,12 @@ size_t Metadata3D::EncodeLayout(const std::string& layout) const
     if(it != in_layout_encodings.end())
         return it->second;
 
-    MIOPEN_LOG_W("Unsupported layout " << layout << " in 3D metadata, returning 0");
+    MIOPEN_LOG_W("Unsupported layout " << layout << " in ND metadata, returning 0");
     return 0;
 }
 
 MIOPEN_INTERNALS_EXPORT
-size_t Metadata3D::EncodeInLayout(const std::string& layout) const
+size_t MetadataND::EncodeInLayout(const std::string& layout) const
 {
     if(!is_valid)
         return 0;
@@ -413,7 +413,7 @@ size_t Metadata3D::EncodeInLayout(const std::string& layout) const
 }
 
 MIOPEN_INTERNALS_EXPORT
-size_t Metadata3D::EncodeFilLayout(const std::string& layout) const
+size_t MetadataND::EncodeFilLayout(const std::string& layout) const
 {
     if(!is_valid)
         return 0;
@@ -423,7 +423,7 @@ size_t Metadata3D::EncodeFilLayout(const std::string& layout) const
 }
 
 MIOPEN_INTERNALS_EXPORT
-size_t Metadata3D::EncodeOutLayout(const std::string& layout) const
+size_t MetadataND::EncodeOutLayout(const std::string& layout) const
 {
     if(!is_valid)
         return 0;
