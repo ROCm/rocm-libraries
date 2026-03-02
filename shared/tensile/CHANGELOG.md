@@ -4,11 +4,11 @@
 
 ## Changed
 
-- Disable optimizations for `RunGEMMKernel_test`
+- Disable optimizations for `RunGEMMKernel_test`.
 
-## Resolve issues
+## Resolved issues
 
-- Fixed toolchain finding empty Windows ROCm directory
+- Fixed how the toolchain handles an empty Windows ROCm directory.
 
 ## Tensile 4.45.0 for ROCm 7.2.0
 
