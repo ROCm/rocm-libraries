@@ -718,7 +718,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         MIOPEN_LOG_I2("Evaluating TunaNet");
         std::vector<float> predictions = model->Forward(problem);
 
-        return  ProcessAndCachePredictions(
+        return ProcessAndCachePredictions(
             problem, device, false, predictions, model->metadata.solver_map);
     }
 }
