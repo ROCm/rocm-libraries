@@ -31,6 +31,7 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
+ *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting.
 *  \details
 *  \p rocsparse_spic0_buffer_size returns the size of the non-persistent buffer
 *  that is required by \p rocsparse_spic0, and must be allocated  by the user.
@@ -92,24 +93,9 @@ rocsparse_status rocsparse_spic0_buffer_size(rocsparse_handle            handle,
    *    L_{ij} = \left\{
    *    \begin{array}{ll}
    *        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \ \
-   *        \frac{1}{L_{jj}}(A_{jj} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
+   *        \frac{1}{L_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
    *    \end{array}
    *    \right.
-   *  \f]
-   *  for each entry found in the matrix \f$A\f$.
-   *
-   *  \details
-   *  \p rocsparse_spic0 computes the incomplete LU factorization with 0 fill-ins and no
-   *  pivoting of a sparse \f$m \times m\f$ matrix \f$A\f$, such that
-   *  \f[
-   *    A \approx LU
-   *  \f]
-   *  where the lower triangular matrix \f$L\f$ and the upper triangular matrix \f$U\f$ are computed using:
-   *  \f[
-   *    \begin{array}{ll}
-   *        L_{ij} = \frac{1}{U_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times U_{kj}), & \text{if i > j} \ \
-   *        U_{ij} = (A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times U_{kj}), & \text{if i <= j}
-   *    \end{array}
    *  \f]
    *  for each entry found in the matrix \f$A\f$.
    *
@@ -117,7 +103,7 @@ rocsparse_status rocsparse_spic0_buffer_size(rocsparse_handle            handle,
    *  The stage \ref rocsparse_spic0_stage_analysis is required to perform the stage \ref rocsparse_spic0_stage_compute and only need to be called once for a given sparse matrix \f$A\f$ while the stage \ref rocsparse_spic0_stage_compute can be repeatedly used with different matrices \f$A\f$ but having the same sparsity pattern.
    *
    *  \p rocsparse_spic0 supports the following
-   *  data types for \p A: \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f64_r, and \ref rocsparse_datatype_f64_c.
+   *  data types for \p A: \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
    *
    *  \note The descriptor \p rocsparse_spic0_descr needs to be configured with \ref rocsparse_spic0_set_input.
    *  \note

@@ -81,7 +81,6 @@ struct csx_matrix
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
         this->define(that_.m, that_.n, that_.nnz, that_.base);
         this->storage_mode = that_.storage_mode;
-        ;
         if(transfer)
         {
             this->transfer_from(that_);

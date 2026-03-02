@@ -1582,7 +1582,7 @@ rocsparse_status rocsparse_sptrsv_descr_create(rocsparse_handle        handle,
 *  \brief Sparse matrix sptrsv.
 *
 *  \details
-*  \p rocsparse_sptrsv_descr_create destroys the descriptor of the configuration of the sparse Incomplete LU of level 0.
+*  \p rocsparse_sptrsv_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete LU of level 0.
 *
  *  @param[in]
  *  handle  the handle to the rocSPARSE library context.
@@ -1800,7 +1800,7 @@ rocsparse_status rocsparse_spic0_descr_create(rocsparse_handle       handle,
 *  \brief Sparse matrix spic0.
 *
 *  \details
-*  \p rocsparse_spic0_descr_create destroys the descriptor of the configuration of the sparse Incomplete Cholesky of level 0.
+*  \p rocsparse_spic0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete Cholesky of level 0.
 *
  *  @param[in]
  *  handle  the handle to the rocSPARSE library context.
@@ -1858,8 +1858,8 @@ rocsparse_status rocsparse_spic0_set_input(rocsparse_handle      handle,
 /*! \ingroup aux_module
  *  \brief Get the requested \ref rocsparse_spic0_output data from the SpIC0 descriptor
  *  \note
- *  -     \ref rocsparse_spic0_output_singularity is \ref rocsparse_singularity, it will be consider as an array of size batch_count.
- *  -     \ref rocsparse_spic0_output_singularity_position is int64_t, it will be consider as an array of size batch_count.
+ *  -     \ref rocsparse_spic0_output_singularity is \ref rocsparse_singularity, it will be considered as an array of size batch_count.
+ *  -     \ref rocsparse_spic0_output_singularity_position is int64_t, it will be considered as an array of size batch_count.
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
  *  @param[inout]
@@ -1912,7 +1912,7 @@ rocsparse_status rocsparse_spilu0_descr_create(rocsparse_handle        handle,
 *  \brief Sparse matrix spilu0.
 *
 *  \details
-*  \p rocsparse_spilu0_descr_create destroys the descriptor of the configuration of the sparse Incomplete LU of level 0.
+*  \p rocsparse_spilu0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete LU of level 0.
 *
  *  @param[in]
  *  handle  the handle to the rocSPARSE library context.
@@ -1970,8 +1970,8 @@ rocsparse_status rocsparse_spilu0_set_input(rocsparse_handle       handle,
 /*! \ingroup aux_module
  *  \brief Get the requested \ref rocsparse_spilu0_output data from the SpILU0 descriptor
  *  \note
- *  -     \ref rocsparse_spilu0_output_singularity is \ref rocsparse_singularity, it will be consider as an array of size batch_count.
- *  -     \ref rocsparse_spilu0_output_singularity_position is int64_t, it will be consider as an array of size batch_count.
+ *  -     \ref rocsparse_spilu0_output_singularity is \ref rocsparse_singularity, it will be considered as an array of size batch_count.
+ *  -     \ref rocsparse_spilu0_output_singularity_position is int64_t, it will be considered as an array of size batch_count.
  *  @param[in]
  *  handle      the pointer to the handle to the rocSPARSE library context.
  *  @param[inout]

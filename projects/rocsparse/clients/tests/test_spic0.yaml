@@ -81,7 +81,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -94,7 +94,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -108,7 +108,7 @@ Tests:
   precision: *double_only_precisions_complex
   M_N: *M_N_range_checkin
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -122,7 +122,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_nightly
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -136,7 +136,7 @@ Tests:
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -155,7 +155,7 @@ Tests:
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -174,7 +174,7 @@ Tests:
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -194,7 +194,7 @@ Tests:
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -210,7 +210,7 @@ Tests:
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -225,7 +225,7 @@ Tests:
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -240,7 +240,7 @@ Tests:
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -254,7 +254,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -273,7 +273,7 @@ Tests:
   M: 1
   N: 1
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: *all_rocsparse_index_base
   formatA: [rocsparse_format_csr]
@@ -296,8 +296,8 @@ Tests:
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_zero]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
@@ -312,8 +312,8 @@ Tests:
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
@@ -327,7 +327,7 @@ Tests:
   N: 1
   block_dim: [2, 4, 5, 10]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
@@ -346,7 +346,7 @@ Tests:
   N: 1
   block_dim: [2, 3, 4, 6]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
@@ -363,7 +363,7 @@ Tests:
   N: 1
   block_dim: [3, 5, 15]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
@@ -380,7 +380,7 @@ Tests:
   N: 1
   block_dim: [3, 9, 27]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
@@ -405,10 +405,10 @@ Tests:
   M_N: *M_N_bsr_range_checkin
   block_dim: [3, 6, 15, 27]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
@@ -441,7 +441,7 @@ Tests:
   N: 1
   block_dim: [5, 8]
   transA: [rocsparse_operation_none]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: *all_rocsparse_analysis_policy
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
@@ -479,8 +479,8 @@ Tests:
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
   graph_test: true
   formatA: [rocsparse_format_bsr]
@@ -496,8 +496,8 @@ Tests:
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse]
   spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
   formatA: [rocsparse_format_bsr]
   indextype: *i32

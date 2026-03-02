@@ -154,7 +154,7 @@ void host_csric0(J                    M,
             // Check for numeric negative
             if((std::real(diag_val) <= tol) && (std::imag(diag_val) == 0))
             {
-                // Numerical negative diagonal
+                // Numerically negative diagonal
                 *singular_pivot = (*singular_pivot == -1)
                                       ? (col_j + base)
                                       : std::min(*singular_pivot, int64_t(col_j + base));
@@ -163,7 +163,7 @@ void host_csric0(J                    M,
             // Check for numeric zero
             if(diag_val == static_cast<T>(0))
             {
-                // Numerical zero diagonal
+                // Numerically zero diagonal
                 *numeric_pivot = (*numeric_pivot == -1)
                                      ? (col_j + base)
                                      : std::min(*numeric_pivot, int64_t(col_j + base));
@@ -368,7 +368,7 @@ void host_bsric0(rocsparse_direction  direction,
                 // Check for numeric zero
                 if(inv_diag == static_cast<T>(0))
                 {
-                    // Numerical non-invertible block diagonal
+                    // Numerically non-invertible block diagonal
                     if(*numeric_pivot == -1)
                     {
                         *numeric_pivot = block_col_j + base;
@@ -442,7 +442,7 @@ void host_bsric0(rocsparse_direction  direction,
             bsr_val[diag_val_index] = diag_entry;
             if(diag_entry == static_cast<T>(0))
             {
-                // Numerical non-invertible block diagonal
+                // Numerically non-invertible block diagonal
                 if(*numeric_pivot == -1)
                 {
                     *numeric_pivot = i / block_dim + base;
@@ -562,14 +562,19 @@ void testing_spic0_buffer_size_bad_arg(const Arguments& arg)
 
     rocsparse_error* p_error = nullptr;
     {
-        size_t* p_buffer_size_in_bytes = (size_t*)0x4;
-#define PARAMS_BUFFER_SIZE handle, spic0_descr, A, P, spic0_stage, p_buffer_size_in_bytes, p_error
-
-        static constexpr int nex     = 1;
-        static const int     ex[nex] = {6};
-        select_bad_arg_analysis(rocsparse_spic0_buffer_size, nex, ex, PARAMS_BUFFER_SIZE);
-
-#undef PARAMS_BUFFER_SIZE
+        size_t*              p_buffer_size_in_bytes = (size_t*)0x4;
+        static constexpr int nex                    = 1;
+        static const int     ex[nex]                = {6};
+        select_bad_arg_analysis(rocsparse_spic0_buffer_size,
+                                nex,
+                                ex,
+                                handle,
+                                spic0_descr,
+                                A,
+                                P,
+                                spic0_stage,
+                                p_buffer_size_in_bytes,
+                                p_error);
     }
 }
 
@@ -993,10 +998,6 @@ void testing_spic0(const Arguments& arg)
                                                     &compute_datatype,
                                                     sizeof(compute_datatype),
                                                     p_error));
-
-    //
-    // singular_tol ?
-    //
 
     //
     // Perform analysis.

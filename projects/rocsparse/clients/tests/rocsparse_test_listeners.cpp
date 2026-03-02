@@ -83,6 +83,13 @@ void rocsparse_clients::configurable_event_listener::OnTestCaseStart(
 
 void rocsparse_clients::configurable_event_listener::OnTestStart(const testing::TestInfo& test_info)
 {
+    if(redirectOutput)
+    {
+        // Clear and redirect streams before each test
+        this->m_redirector.clear();
+        this->m_redirector.redirect();
+    }
+
     if(showTestNames)
     {
         if(!showSkipped)
@@ -110,6 +117,23 @@ void rocsparse_clients::configurable_event_listener::OnTestPartResult(
 
 void rocsparse_clients::configurable_event_listener::OnTestEnd(const testing::TestInfo& test_info)
 {
+    if(redirectOutput)
+    {
+        // Restore streams after test
+        this->m_redirector.restore();
+
+        // Check if test failed
+        if(test_info.result()->Failed())
+        {
+            const std::string content = this->m_redirector.get_stream().str();
+
+            if(!content.empty())
+            {
+                std::cerr << content << std::endl;
+            }
+        }
+    }
+
     bool show = false;
     if(test_info.result()->Failed())
     {

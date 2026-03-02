@@ -373,24 +373,3 @@ rocsparse_status rocsparse::get_rocsparse_status_for_hip_status(hipError_t statu
         return rocsparse_status_internal_error;
     }
 }
-
-rocsparse_pointer_mode rocsparse::get_pointer_mode(const void* data)
-{
-    hipPointerAttribute_t attributes;
-    THROW_IF_HIP_ERROR(hipPointerGetAttributes(&attributes, data));
-    switch(attributes.type)
-    {
-    case hipMemoryTypeHost:
-    case hipMemoryTypeUnregistered:
-    {
-        return rocsparse_pointer_mode_host;
-    }
-    case hipMemoryTypeManaged:
-    case hipMemoryTypeUnified:
-    case hipMemoryTypeDevice:
-    case hipMemoryTypeArray:
-    {
-        return rocsparse_pointer_mode_device;
-    }
-    }
-}

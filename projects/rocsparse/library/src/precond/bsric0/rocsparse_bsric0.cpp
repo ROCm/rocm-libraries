@@ -35,7 +35,7 @@ rocsparse_status rocsparse::bsric0(rocsparse_handle      handle,
 {
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    //    ROCSPARSE_CHECKARG_POINTER(1, bsric0_info);
+
     ROCSPARSE_CHECKARG_POINTER(2, A);
 
     const bool quick_return = (A->rows == 0 || A->batch_count == 0);
@@ -49,6 +49,8 @@ rocsparse_status rocsparse::bsric0(rocsparse_handle      handle,
     {
         return rocsparse_status_success;
     }
+
+    ROCSPARSE_CHECKARG_POINTER(1, bsric0_info);
 
     const rocsparse_mat_descr descr = A->descr;
     ROCSPARSE_CHECKARG(

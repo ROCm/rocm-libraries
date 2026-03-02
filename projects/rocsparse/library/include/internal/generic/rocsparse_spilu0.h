@@ -31,6 +31,7 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
+ *  \brief Get buffer size for Incomplete LU factorization with 0 fill-ins and no pivoting.
 *  \details
 *  \p rocsparse_spilu0_buffer_size returns the size of the non-persistent buffer
 *  that is required by \p rocsparse_spilu0, and must be allocated  by the user.
@@ -41,9 +42,6 @@ extern "C" {
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
-*
-*  \note
-*  This routine does not support batched computation.
 *
 *  \note
 *  Supported formats are \ref rocsparse_format_csr, and \ref rocsparse_format_bsr.
@@ -97,10 +95,10 @@ rocsparse_status rocsparse_spilu0_buffer_size(rocsparse_handle            handle
 *  for each entry found in the matrix \f$A\f$.
 *
 *  Performing the above operation requires two stages, the stage \ref rocsparse_spilu0_stage_analysis and the stage \ref rocsparse_spilu0_stage_compute.
-*  The stage \ref rocsparse_spilu0_stage_analysis is required to perform the stage \ref rocsparse_spilu0_stage_compute and only need to be called once for a given sparse matrix \f$A\f$ while the stage \ref rocsparse_spilu0_stage_compute can be repeatedly used with different matrices \f$A\f$ but having the same sparsity pattern.
+*  The stage \ref rocsparse_spilu0_stage_analysis is required to perform the stage \ref rocsparse_spilu0_stage_compute and only needs to be called once for a given sparse matrix \f$A\f$ while the stage \ref rocsparse_spilu0_stage_compute can be repeatedly used with different matrices \f$A\f$ but having the same sparsity pattern.
 *
 *  \p rocsparse_spilu0 supports the following
-*  data types for \p A: \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f64_r, and \ref rocsparse_datatype_f64_c.
+*  data types for \p A: \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
 *
 *  \note The descriptor \p rocsparse_spilu0_descr needs to be configured with \ref rocsparse_spilu0_set_input.
 *  \note
