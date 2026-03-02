@@ -679,6 +679,11 @@ public:
         HIPDNN_FE_LOG_INFO("Creating new Graph instance");
     }
 
+    // Copy operations disabled via INode base class
+    // Move operations defaulted - automatically handles all members
+    Graph(Graph&&) = default;
+    Graph& operator=(Graph&&) = default;
+
     /**
      * @brief Validate the graph structure and tensor configurations
      * @return Error indicating success or describing validation failures
