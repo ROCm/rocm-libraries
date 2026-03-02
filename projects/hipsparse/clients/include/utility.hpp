@@ -589,21 +589,32 @@ void hipsparseInit(std::vector<T>& A, int M, int N)
 /* ============================================================================================ */
 /*! \brief  vector initialization: */
 // initialize sparse index vector with nnz entries ranging from start to end
+// Uses Fisher-Yates shuffle for efficiency
 template <typename I>
 void hipsparseInitIndex(I* x, int nnz, int start, int end)
 {
-    std::vector<bool> check(end - start, false);
-    int               num = 0;
-    while(num < nnz)
+    int range = end - start;
+
+    // Create sequential array and shuffle first nnz elements
+    std::vector<int> indices(range);
+    for(int i = 0; i < range; ++i)
     {
-        int val = start + rand() % (end - start);
-        if(!check[val - start])
-        {
-            x[num]             = val;
-            check[val - start] = true;
-            ++num;
-        }
+        indices[i] = start + i;
     }
+
+    // Partial Fisher-Yates shuffle - only need first nnz elements
+    for(int i = 0; i < nnz; ++i)
+    {
+        int j = i + rand() % (range - i);
+        std::swap(indices[i], indices[j]);
+    }
+
+    // Copy first nnz elements
+    for(int i = 0; i < nnz; ++i)
+    {
+        x[i] = indices[i];
+    }
+
     std::sort(x, x + nnz);
 };
 
