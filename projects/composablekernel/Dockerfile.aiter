@@ -2,6 +2,7 @@ ARG BASE_DOCKER="rocm/pytorch:latest"
 FROM $BASE_DOCKER
 ARG AITER_BRANCH="main"
 ARG CK_AITER_BRANCH="develop"
+# CK_FROM_ROCM_LIBRARIES - 1: CK from rocm-libraries sparse-checkout; 0: direct clone from ROCm/composable_kernel
 ARG CK_FROM_ROCM_LIBRARIES=1
 RUN pip install pandas zmq einops ninja tabulate && \
     pip install numpy==1.26.2 && \
@@ -9,7 +10,7 @@ RUN pip install pandas zmq einops ninja tabulate && \
     sudo mkdir /home/jenkins/workspace && \
     cd /home/jenkins/workspace && rm -rf rocm-libraries ck && \
     if [ "$CK_FROM_ROCM_LIBRARIES" = "1" ]; then \
-        git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git && \
+        git clone --depth 1 -b "$CK_AITER_BRANCH" --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git && \
         cd rocm-libraries && \
         git sparse-checkout init --cone && \
         git sparse-checkout set projects/composablekernel && \
@@ -23,10 +24,10 @@ RUN pip install pandas zmq einops ninja tabulate && \
         git branch -m "$CK_AITER_BRANCH" && git add -A && \
         git commit -m "import from ROCm/rocm-libraries@$ROCM_LIBRARIES_SHA" ; \
     else \
-        git clone -b "$CK_AITER_BRANCH" https://github.com/ROCm/composable_kernel.git ck ; \
+        git clone --depth 1 -b "$CK_AITER_BRANCH" https://github.com/ROCm/composable_kernel.git ck ; \
     fi && \
     cd /home/jenkins/workspace && rm -rf aiter && \
-    git clone -b "$AITER_BRANCH" --recursive https://github.com/ROCm/aiter.git && \
+    git clone --depth 1 -b "$AITER_BRANCH" --recursive https://github.com/ROCm/aiter.git && \
     cd aiter && \
     rm -rf 3rdparty/composable_kernel/ && \
     git clone -b "$CK_AITER_BRANCH" ../ck 3rdparty/composable_kernel/ && \
