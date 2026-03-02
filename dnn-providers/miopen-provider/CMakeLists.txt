@@ -210,7 +210,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     finalize_test_targets("${PROJECT_NAME}")
 
     # For standalone builds we need to install the ctest files
-    if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
+    if(NOT ROCM_LIBS_SUPERBUILD)
         install_miopen_plugin_ctest_files()
     endif()
 endif()

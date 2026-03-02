@@ -123,18 +123,6 @@ For standalone build instructions, see:
 
 ## Troubleshooting
 
-### Provider fails to find hipDNN SDKs
-
-Ensure `hipdnn` is listed before any providers in `ROCM_LIBS_ENABLE_COMPONENTS`:
-
-```bash
-# Correct order
--DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider"
-
-# Wrong: provider without hipdnn
--DROCM_LIBS_ENABLE_COMPONENTS="miopen-provider"
-```
-
 ### Target name collisions
 
 If you see CMake errors about duplicate target names, ensure you are building from the repository root (not from a component subdirectory) when using the superbuild. The superbuild sets `ROCM_LIBS_SUPERBUILD=ON`, which enables target name prefixing.

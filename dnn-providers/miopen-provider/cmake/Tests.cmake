@@ -148,7 +148,7 @@ function(finalize_test_targets prefix_name)
     # cmake-format: off
     # Determine if we should create legacy aliases (only in standalone builds)
     set(CREATE_ALIASES FALSE)
-    if(NOT BUILD_PLUGIN_AS_DEPENDENCY AND NOT ROCM_LIBS_SUPERBUILD)
+    if(NOT ROCM_LIBS_SUPERBUILD)
         set(CREATE_ALIASES TRUE)
     endif()
 

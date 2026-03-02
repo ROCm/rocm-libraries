@@ -144,8 +144,6 @@ if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    # Disable plugin builds - plugins are built as separate superbuild components
-    set(HIPDNN_BUILD_PLUGINS OFF)
     add_subdirectory_with_message(
         COMPONENT hipdnn
         PREFIX_PATH projects
