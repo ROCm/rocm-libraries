@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -109,13 +109,16 @@ Key Functions:
 
 import os
 import re
+import shutil
 import subprocess
-import tempfile
 import time
 import sys
 
 from Tensile.Common import print1, printWarning, ClientExecutionLock
 from Tensile.Common.GlobalParameters import globalParameters
+
+# Wall-clock deadline in seconds from launch; all GPU processes must finish within this window
+GPU_WALL_TIMEOUT_SECS = 60
 
 
 def detectAvailableGpus():
@@ -132,7 +135,7 @@ def detectAvailableGpus():
             gpu_indices = set(re.findall(r'GPU\[(\d+)\]', result.stdout))
             if gpu_indices:
                 return len(gpu_indices)
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+    except Exception:
         pass
 
     # Fallback: try to parse from HIP
@@ -147,7 +150,7 @@ def detectAvailableGpus():
             match = re.search(r'Number of devices:\s*(\d+)', result.stdout)
             if match:
                 return int(match.group(1))
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+    except Exception:
         pass
 
     return 1  # Default to single GPU
@@ -210,21 +213,6 @@ def mergeResultsCsv(resultsPaths, outputPath):
                     outFile.writelines(lines[1:])
 
 
-def runClientOnGpu(clientExe, configPath, timingFlag, buildPath):
-    """Run the client on a single GPU. Returns (returncode, gpuIdx)."""
-    # Extract GPU index from config filename for logging
-    gpuIdx = re.search(r'gpu(\d+)_', os.path.basename(configPath))
-    gpuIdx = int(gpuIdx.group(1)) if gpuIdx else 0
-
-    args = [clientExe, "--config-file", configPath]
-    if timingFlag:
-        args.append("--timing-instrumentation")
-
-    process = subprocess.Popen(args, cwd=buildPath)
-    process.wait()
-    return process.returncode, gpuIdx
-
-
 def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath):
     """Run the client in parallel across multiple GPUs.
 
@@ -239,7 +227,7 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
         Overall return code (max of all GPU return codes)
     """
     clientExe = getClientExecutablePath()
-    startTime = time.time()
+    startTime = time.time_ns()
 
     # Process each config file
     overallReturnCode = 0
@@ -258,73 +246,86 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
 
         print1(f"# Parallel execution: {totalProblems} problems across {effectiveGpus} GPUs ({problemsPerGpu} problems/GPU)")
 
-        # Create temp directory for per-GPU configs and results
-        with tempfile.TemporaryDirectory(prefix="tensile_parallel_") as tempDir:
-            # Create per-GPU config files
-            gpuConfigs = []  # List of (configPath, resultsPath, gpuIdx)
-            for gpuIdx in range(effectiveGpus):
-                problemStartIdx = gpuIdx * problemsPerGpu
-                # Last GPU gets remaining problems
-                if gpuIdx == effectiveGpus - 1:
-                    gpuNumProblems = totalProblems - problemStartIdx
-                else:
-                    gpuNumProblems = min(problemsPerGpu, totalProblems - problemStartIdx)
+        # Create a persistent directory for per-GPU configs and results.
+        # Only cleaned up after a successful merge; preserved on failure for debugging.
+        parallelDir = os.path.join(str(buildPath), "parallel_gpu")
+        if os.path.exists(parallelDir):
+            shutil.rmtree(parallelDir)
+        os.makedirs(parallelDir)
 
-                if gpuNumProblems <= 0:
-                    continue
+        # Create per-GPU config files
+        gpuConfigs = []  # List of (configPath, resultsPath, gpuIdx)
+        for gpuIdx in range(effectiveGpus):
+            problemStartIdx = gpuIdx * problemsPerGpu
+            # Last GPU gets remaining problems
+            if gpuIdx == effectiveGpus - 1:
+                gpuNumProblems = totalProblems - problemStartIdx
+            else:
+                gpuNumProblems = min(problemsPerGpu, totalProblems - problemStartIdx)
 
-                perGpuConfig, perGpuResults = createPerGpuConfig(
-                    configPath, gpuIdx, problemStartIdx, gpuNumProblems, tempDir
-                )
-                gpuConfigs.append((perGpuConfig, perGpuResults, gpuIdx))
+            if gpuNumProblems <= 0:
+                continue
 
-            # Launch all GPU clients in parallel
-            processes = []
-            with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
-                try:
-                    for perGpuConfig, perGpuResults, gpuIdx in gpuConfigs:
-                        args = [clientExe, "--config-file", perGpuConfig]
-                        if timingEnabled:
-                            args.append("--timing-instrumentation")
+            perGpuConfig, perGpuResults = createPerGpuConfig(
+                configPath, gpuIdx, problemStartIdx, gpuNumProblems, parallelDir
+            )
+            gpuConfigs.append((perGpuConfig, perGpuResults, gpuIdx))
 
-                        print1(f"# Launching client on GPU {gpuIdx}")
-                        proc = subprocess.Popen(args, cwd=str(buildPath))
-                        processes.append((proc, gpuIdx, perGpuResults))
+        # TODO: Support PinClocks for parallel execution (per-GPU clock pinning/reset).
+        #       The single-GPU path pins clocks via writeRunScript; this path skips it.
 
-                    # Wait for all processes to complete with timeout
-                    # (HIP runtime can hang during cleanup with multiple GPU processes)
-                    for proc, gpuIdx, _ in processes:
-                        try:
-                            proc.wait(timeout=30)
-                        except subprocess.TimeoutExpired:
-                            print1(f"# Client on GPU {gpuIdx} hung, killing...")
-                            proc.kill()
-                            proc.wait()
-                        if proc.returncode and proc.returncode > 0:
-                            printWarning(f"Client on GPU {gpuIdx} exited with code {proc.returncode}")
-                            overallReturnCode = max(overallReturnCode, proc.returncode)
-                finally:
-                    # Final cleanup - kill anything still running
-                    for proc, gpuIdx, _ in processes:
-                        if proc.poll() is None:
-                            proc.kill()
-                            proc.wait()
+        # Launch all GPU clients in parallel
+        processes = []
+        with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
+            try:
+                for perGpuConfig, perGpuResults, gpuIdx in gpuConfigs:
+                    args = [clientExe, "--config-file", perGpuConfig]
+                    if timingEnabled:
+                        args.append("--timing-instrumentation")
 
-            # Merge results from all GPUs
-            originalResultsPath = None
-            with open(configPath, 'r') as f:
-                for line in f:
-                    if line.strip().startswith('results-file='):
-                        originalResultsPath = line.strip().split('=', 1)[1]
-                        break
+                    print1(f"# Launching client on GPU {gpuIdx}")
+                    proc = subprocess.Popen(args, cwd=str(buildPath))
+                    processes.append((proc, gpuIdx, perGpuResults))
 
-            if originalResultsPath:
-                resultsPaths = [r for _, r, _ in gpuConfigs]
-                mergeResultsCsv(resultsPaths, originalResultsPath)
-                print1(f"# Merged results from {len(resultsPaths)} GPUs to {originalResultsPath}")
+                # Wait for all processes with a shared wall-clock deadline
+                launchTime = time.time()
+                for proc, gpuIdx, _ in processes:
+                    remaining = max(0, GPU_WALL_TIMEOUT_SECS - (time.time() - launchTime))
+                    try:
+                        proc.wait(timeout=remaining if remaining > 0 else 0.001)
+                    except subprocess.TimeoutExpired:
+                        print1(f"# Client on GPU {gpuIdx} exceeded {GPU_WALL_TIMEOUT_SECS}s wall-clock deadline, killing...")
+                        proc.kill()
+                        proc.wait()
+                    if proc.returncode and proc.returncode > 0:
+                        printWarning(f"Client on GPU {gpuIdx} exited with code {proc.returncode}")
+                        overallReturnCode = max(overallReturnCode, proc.returncode)
+            finally:
+                # Final cleanup - kill anything still running
+                for proc, gpuIdx, _ in processes:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.wait()
+
+        # Merge results from all GPUs
+        originalResultsPath = None
+        with open(configPath, 'r') as f:
+            for line in f:
+                if line.strip().startswith('results-file='):
+                    originalResultsPath = line.strip().split('=', 1)[1]
+                    break
+
+        if originalResultsPath:
+            resultsPaths = [r for _, r, _ in gpuConfigs]
+            mergeResultsCsv(resultsPaths, originalResultsPath)
+            print1(f"# Merged results from {len(resultsPaths)} GPUs to {originalResultsPath}")
+            # Clean up per-GPU files only after successful merge
+            shutil.rmtree(parallelDir)
+        else:
+            printWarning(f"No results-file found in {configPath}; per-GPU results preserved at {parallelDir}")
 
     if timingEnabled:
-        elapsed = (time.time() - startTime) * 1000
+        elapsed = (time.time_ns() - startTime) / 1_000_000
         print(f"TIMING:python_client_execution:{elapsed:.3f}", file=sys.stderr)
 
     return overallReturnCode

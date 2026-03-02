@@ -246,13 +246,12 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     numGpus = parallelGpus
 
   # Use parallel execution only for benchmarking with multiple GPUs
-  if numGpus > 1 and forBenchmark and configPaths:
+  if numGpus > 1 and forBenchmark:
     return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
 
   # Original single-GPU path
   runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 
-  timingEnabled = globalParameters.get("TimingInstrumentation", False)
   # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
   startTime = time.time_ns()
 
