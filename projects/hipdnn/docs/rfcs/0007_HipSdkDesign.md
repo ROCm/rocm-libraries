@@ -1,4 +1,4 @@
-# RFC 0007: HIP Compilation SDK Design
+# RFC 0007: Plugin HIP SDK Design
 
 ## Table of Contents
 
@@ -16,24 +16,25 @@
 
 This RFC a new hipDNN SDK that defines common components that can be used for development of plugins that use HIP kernels
 directly. It defines classes for kernel and program objects which are owned by a `HipHandle` class to manage their lifetimes
-and wrap common HIP operations, such as executing those objects.
+and wrap common HIP stream operations and device queries. Satisfying the requirements for AOT compilation are left to future
+considerations as they need more input from the hipDNN backend component owners to enable the functionality in the APIs
+they are responsible for.
 
 ## Problem Statement
 
-The nature of a plugin that defines it's own HIP kernels to implement graph operations is that the plugin needs mechanisms
+The nature of a plugin that defines its own HIP kernels to implement graph operations is that the plugin needs mechanisms
 to compile and execute those kernels. In order for the direct HIP plugin to be performant and portable there are the
 following requirements:
 
-* Just In Time (JIT) compilation - Plugin must be able to compile HIP kernels from source strings during program execution
+* Just In Time (JIT) compilation - Plugin HIP kernels must be compilable from source strings during program execution
   using [hipRTC](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html).
-* Ahead Of Time (AOT) compilation - Plugin must be able to consume HIP kernels compiled prior to application execution,
-  i.e. using `hipcc`.
+* Ahead Of Time (AOT) compilation - Plugin must be able to consume HIP kernels compiled prior to application execution.
 * Device-less compilation - There must be a mechanism to compile the HIP kernels the plugin defines on a machine without
   a GPU (or non-matching GPU) based on a target device description.
 * Caching - The HIP `hipFunction_t` kernels handles already created during the course of plugin execution should be cached so that they
   can be reused without having to fallback to loading the binary object again, i.e. `hipModuleLoadData().`
 * Serialization - A plugin should be able to serialize and deserialize compiled kernel binaries. That is, save the
-  binary blob to a file, and load an executable binary blob from a file. This should be combined wit the device less compilation
+  binary blob to a file, and load an executable binary blob from a file. This should be combined with the device less compilation
   requirement to enable shipping of serialized blobs for a variety of supported GPUs for users to deserialize and run.
 
 ## Current System Overview
@@ -46,36 +47,28 @@ performs caching of the creating execution plans, then that will implicitly also
 
 ## Proposed Design
 
-> TODO - Iterate on to address feedback.
+Diagram showing first usage of a kernel when all caches are cold.
 
-### Overview
+![hipDNN Plugin HIP SDK Flow](../images/hipdnn_plugin_hip_sdk.png)
 
-High level plan for Once implementation/refactoring from the new plugin into an SDK actually starts then this design may change,
-it is primarily intended as a starting point to make that work easier by reducing initial design work.
+The red box for setting the target device represents an API interface that doesn't currently exist between the hipDNN backend
+and plugin for setting the target device. Separating the target device from the actual stream is important for AOT and
+device-less compilation requirements, so we want to make sure they are not coupled together. In an initial implementation
+however the target device could be inferred from the stream.
+
+### Namespace
 
 Objects are defined in the following namespace and use C++ exceptions for error handling.
 
+```cpp
+namespace hipdnn_plugin_hip_sdk;
 ```
-namespace hipdnn_hip_sdk;
-```
-
-Diagram showing first usage of a kernel when all caches are cold.
-
-![HIP SDK Flow](../images/hipdnn_hip_sdk.png)
-
-### CMake
-
-* Requires hipRTC to build
-* Checks for presence of SQLite database
-* CMake variable to build without caching, primarily for developers. See `MIOPEN_DEV` CMake variable.
 
 ### Handle
 
-A Hip handle provides an object for interfacing with the HIP runtime, and managing the currently active HIP stream/device.
-See `miopen::Handle` as reference. It also owns the objects allocated by the user, and manages when they are freed.
-Either at the request of the user or when the `HIPHandle` is destroyed.
-
-Initial version can be whatever is required for the MVP hip kernel plugin, but it can be extended over time.
+A `HipHandle` owns the objects allocated by the user to manage when they are freed, either at the request of
+the user or when the `HIPHandle` is destroyed. It also provides a wrapper for interfacing with the HIP runtime
+for common stream operations and queries of the target device.
 
 ```cpp
 /*
@@ -88,26 +81,22 @@ class HipHandle {
 // @detail Frees underlying resources which have handles returned to the user, e.g Programs and Kernels.
 ~HipHandle();
 
-// Methods for managing deivce/stream:
-// * get/set HIP stream
-// * get/set HIP device
+// Methods for managing device/stream. Note that these are set by the plugin user,
+// and only cached in the handle:
+// * hipStream_t getHipStream() const;
+// * void setHipStream(hipStream_t stream);
+// * hipDeviceProp_t getTargetDevice() const;
+// * void setTargetDevice(hipDeviceProp_t device_props);
 
-// Device query methods:
+// Device query methods which should be taken from the target device rather than the stream to
+// be enable devicel-ess compilation flows.
 // * getMaxComputeUnits()
 // * getWavefrontWidth()
 
-// HIP runtime wrappers:
+// HIP runtime wrappers for stream operations
 // * finish() 
 // * memcpy host->device, device->host
 
-// Methods for managing DB of JITed binaries:
-
-/// @brief Returns literal based on macro set during Cmake configure.
-bool hasDBSupport();  
-
-/// @brief Creates object for managing the cache and returns pointer to user
-BinaryCacheDB initBinaryCacheDB(std::string path_to_db);
-                 
 /*
   @brief Creates program object and returns pointer to the user
   @detail Checks if Program can be found in the cache before building new object
@@ -144,7 +133,6 @@ std::vector<Kernel> GetKernels(const std::string& algorithm,
                                
 private:
   // RAII owned allocations, which the .get() element is returned to users as handles.
-  std::unique_ptr<BinaryCacheDBImpl> _binary_db_cache;
   std::vector<unique_ptr<KernelImpl>> _kernels;
   std::vector<unique_ptr<Program>> _programs;
   
@@ -165,56 +153,9 @@ private:
 };
 ```
 
-### Binary cache DB
-
-Manages access to SQLite cache, see MIOpen `binary_cache.cpp`, `db.cpp`, and `sqlite_db.hpp`
-
-```cpp
-// User works with a handle to the created object, but doesn't own it
-using BinaryCacheDB = BinaryCacheDBImpl *;
-
-class BinaryCacheDBImpl {
-  /// @brief Constructor taking path to cache.
-  /// @throws if path is invalid
-  BinaryCacheDBImpl(std::string cache_path)
-
-  /// @brief Loads a binary from cache
-  /// @detail Uses SQLite as implementation detail, DB key is a combination of
-  /// name, hash, and args for a DB specific to target.
-  /// @param target ASIC to lookup
-  /// @param name Name for program
-  /// @param source_hash std::hash<string> of source string
-  /// @param args Configuration of program
-  /// @return Binary blob as a list of bytes, or empty list if lookup failed
-  std::vector<uint8t> LoadBinary(const TargetProperties& target,
-                                 const std::string& name,
-                                 size_t source_hash,
-                                 const std::string& args);
-              
-   /// @brief Stores a binary into cache
-   /// @detail Uses SQLite as implementation detail, DB key is a combination of
-   /// name, hash, and args for a DB specific to target.
-   /// @param binary Binary blob as a list of bytes to store at DB dentry
-   /// @param target ASIC of DB entry
-   /// @param name Name for program
-   /// @param source_hash std::hash<string> of source string
-   /// @param args Configuration of program
-   void SaveBinary(const std::vector<uint8_t>& binary,
-                   const TargetProperties& target,
-                   const std::string& name,
-                   size_t source_hash,
-                   const std::string& args);
-                   
-  // Implementation details will be more complex than outlined here, e.g con
-  // * A DB per ASIC target
-  // * A single table in DB for program binaries, then can use other tables for
-  //   equivalents of perfdb etc.
-};
-```
-
 ### Program / Kernels
 
-Define classes for working with HIP program & kernel objects JITed from source using HIP RTC or loaded from a cache.
+Define classes for working with HIP program & kernel objects.
 
 #### Program classes
 
@@ -237,9 +178,8 @@ public:
    ~ProgramImpl();
            
    /*
-   @brief Uses hip RTC to compile source into a binary blob (if build from source) and load into hip module.
    @detail Calls hiprtcProgram, hiprtcDestroyProgram, hipModuleLoadData
-   @param options Compilation options for program, e.g. `--gpu-architecture`
+   @param options Compilation options for program, e.g. macro definitions
    @throws If there is a compilation error or the program has already been built.
    */
    void build(std::string options);
@@ -287,6 +227,8 @@ public:
       @brief Creates an invocable kernel object 
       @param stream the HIP stream the kernel will be invoked on
       @param args Argument pack of kernel argument
+      @throws If the device associated with the stream doesn't match the device arch
+      which the program used to create the kernel was compiled for.
     */
    template <typename... Args>
    void Launch(hipStream_t stream, Args&&... args);
@@ -310,24 +252,14 @@ public:
 
 ## Execution Plan
 
-### Prerequisite Work
-
 The need for a HIP compilation SDK is predicated on the existence of a plugin that defines and executes it's own
 HIP kernels. The development of the plugin is already underway as the `hip-kernel-provider` plugin and will begin
 with batchnorm operation support. These kernels will be JIT compiled for the current GPU using code that lives
 within the plugin itself.
 
-### Refactor
-
 Once the batchnorm operations are established in the direct plugin we will be able to begin on the implementation
-work of the HIP compilation SDK defined by this RFC. In this initial step the compilation code can be refactored
+work of the HIP compilation SDK defined by this RFC. In this step the compilation code can be refactored
 out of the plugin into the SDK into the program and kernel SDK classes for the plugin code to use.
-
-### Enhance
-
-The initially refactoring work won't implement the functionality the SDK enables for device-less AOT compilation
-and serialization/deserialization. This will be done afterwards as follow-on work based on priority and may also
-involve integration into the hipDNN backend.
 
 ## Testing Plan
 
@@ -338,6 +270,8 @@ ensure that it's functionality hasn't regressed.
 
 ## Future Considerations
 
-This RFC design is primarily intended as a starting point for implementation work, as well as a focal point for
-discussion between stakeholders to make sure requirements are understood. Therefore the proposed design may not
-survive unmodified from the final SDK API once implementation work is underway.
+This design is primarily focused on refactoring out common functionality for managing HIP kernel JIT
+compilation in way that leaves SDK components decoupled enough for AOT/serialization/device-less requirements
+to be added later. The extra functionality to meet those requirements will require changes to the plugin API to
+allow plugins to provides callbacks for generic save/load support which will be implemented in a plugin specific
+manner.
