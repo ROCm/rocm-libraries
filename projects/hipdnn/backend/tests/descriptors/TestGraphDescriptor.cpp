@@ -41,6 +41,10 @@ TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
     GraphDescriptor descriptor;
     descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
 
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    descriptor.finalize();
+
     auto output = descriptor.getSerializedGraph();
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(output.ptr), output.size);
     ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
