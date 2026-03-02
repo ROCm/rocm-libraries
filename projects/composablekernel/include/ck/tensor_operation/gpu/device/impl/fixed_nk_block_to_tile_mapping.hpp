@@ -9,7 +9,7 @@ namespace ck {
 namespace tensor_operation {
 namespace device {
 
-template <typename UnderlyingBlockToCTileMap>
+template <typename UnderlyingBlockToCTileMap, bool HasSplitKSupport = true>
 struct OffsettedBlockToCTileMapMLoops
 {
     using underlying_type = UnderlyingBlockToCTileMap;
@@ -29,7 +29,16 @@ struct OffsettedBlockToCTileMapMLoops
         auto idx_bot = block_to_ctile_map_.CalculateBottomIndex(
             make_multi_index(idx_top[Number<0>{}] - block_start_ + id_off_));
 
-        return make_tuple(idx_bot[Number<0>{}], idx_bot[Number<1>{}], idx_bot[Number<2>{}]);
+        // Workarounds the fact that gridwise gemm implementations not supporting splitk require
+        // different index mapping.
+        if constexpr(HasSplitKSupport)
+        {
+            return make_tuple(idx_bot[Number<0>{}], idx_bot[Number<1>{}], idx_bot[Number<2>{}]);
+        }
+        else
+        {
+            return make_tuple(idx_bot[Number<1>{}], idx_bot[Number<2>{}]);
+        }
     }
 
     template <typename CTileIdx, typename CTileDim>

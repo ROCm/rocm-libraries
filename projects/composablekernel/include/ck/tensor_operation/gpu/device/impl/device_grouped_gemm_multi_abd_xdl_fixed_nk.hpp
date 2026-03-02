@@ -271,7 +271,7 @@ struct DeviceGroupedGemm_Xdl_Multi_ABD_Fixed_NK
     using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
 
     using Block2ETileMap = BlockToCTileMap_KBatch_M00_N0_M01Adapt_MLoops<MPerBlock, NPerBlock>;
-    using GroupedGemmBlock2ETileMap = OffsettedBlockToCTileMapMLoops<Block2ETileMap>;
+    using GroupedGemmBlock2ETileMap = OffsettedBlockToCTileMapMLoops<Block2ETileMap, false>;
 
     using KernelArgument = GroupedGemmMultiABDKernelArgument<NumATensor, NumBTensor, NumDTensor>;
 
