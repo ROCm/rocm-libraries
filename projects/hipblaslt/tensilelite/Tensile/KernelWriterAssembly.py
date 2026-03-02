@@ -60,13 +60,8 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
-<<<<<<< HEAD
   VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
-  VCmpLtU32, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, \
-=======
-  VBfeU32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpLeI32, VCmpLtI32, \
   VCmpLtU32, VCmpUF32, VCmpXGeU32, VCmpXLtU32, VCmpXLtU64, VCndMaskB32, VCvtF16toF32, VCvtI32toF32, \
->>>>>>> fa4af1a235 ([hipSPARSELt] Fix 8-bit metadata vGPRS number and idx. Add i8is support when using bias.)
   VCvtF32toF16, VCvtFP8toF32, VCvtInstruction, VCvtPkF32toBF16, VCvtPkF32toBF8, \
   VCvtPkF32toFP8, VCvtPkFP8toF32, VCvtSRF32toBF8, VCvtSRF32toFP8, VCvtScaleFP8toF16, \
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
@@ -1249,10 +1244,11 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       moduleVgprMacro.add(RegSet("v", "vgprG2LMetadata", "vgprBase", self.states.m.startVgprG2L - self.states.startVgpr))
 
-    if (((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                               \
-         (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]))                                                 \
-        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat())) \
-        or (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
+    if ((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                              \
+        (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) or                                              \
+        (not kernel["UnrollMajorLDSMetadata"] and (kernel["MIInputPerThreadMetadata"] == 4)))                \
+        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()) or \
+        (self.states.asmCaps["HasSWMMAC_gfx1250"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
       moduleVgprMacro.add(RegSet("v", "vgprPackTemp", "vgprBase", self.states.a.startVgprValuPackTemp - self.states.startVgpr))
 
     if self.states.globalReadIncsUseVgpr:
@@ -5662,10 +5658,11 @@ class KernelWriterAssembly(KernelWriter):
     imodMisc        = Module("tailLoopAllocValuMiscVgpr")
     vgprBaseMisc    = -1
     numVgprPackTemp = 0
-    if (((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"])                                    \
-        or (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]))                                 \
-        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat())) \
-       or (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
+    if ((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"])                                   \
+        or (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])                                \
+        or (not kernel["UnrollMajorLDSMetadata"] and (kernel["MIInputPerThreadMetadata"] == 4)))             \
+        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()) or \
+        (self.states.asmCaps["HasSWMMAC_gfx1250"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
       numVgprPackTemp = 1
     numVgprCvtTemp = 0
     if self.states.a.startVgprValuCvtTemp != -1 or self.states.b.startVgprValuCvtTemp != -1:
@@ -7701,7 +7698,7 @@ class KernelWriterAssembly(KernelWriter):
     numMIInputB      = kernel["MIInputPerThreadB"]
     numMIInputMXSA   = kernel["MIInputPerThreadMXSA"] if kernel["ProblemType"]["MXBlockA"] else 0
     numMIInputMXSB   = kernel["MIInputPerThreadMXSB"] if kernel["ProblemType"]["MXBlockB"] else 0
-    numMIInputM      = kernel["MIInputPerThreadMetadata"]
+    numMIInputM      = kernel["MIInputPerThreadMetadata"] if kernel["ProblemType"]["Sparse"] else 0
     numMIInput       = max(numMIInputA, numMIInputB)
     numMIInUnroll    = max(numMIInputA//numTileInInstA, numMIInputB//numTileInInstB)
 
@@ -7721,7 +7718,7 @@ class KernelWriterAssembly(KernelWriter):
     vgprPerInputB    = int(numMIInputB * numRegistersInB)
     vgprPerInputMXSA = ceil(numMIInputMXSA * numRegistersInMXSA)
     vgprPerInputMXSB = ceil(numMIInputMXSB * numRegistersInMXSB)
-    vgprPerInputM    = int(ceil(numMIInputM / self.states.bpr))
+    vgprPerInputM    = int(ceil(numMIInputM / self.states.bpr)) if kernel["ProblemType"]["Sparse"] else 0
     vgprPerInput     = max(vgprPerInputA, vgprPerInputB)
     vgprPerInUnrollA = vgprPerInputA // numTileInInstA
     vgprPerInUnrollB = vgprPerInputB // numTileInInstB
@@ -7835,7 +7832,9 @@ class KernelWriterAssembly(KernelWriter):
             if numSet0GroupA > 1 or (is_wmma_v2 and vgprPerInUnrollA > 2):
               if group == 0:
                 multiplyBy = numMIInUnroll
-                if kernel["ProblemType"]["Sparse"] == 1:
+                if kernel["ProblemType"]["Sparse"] == 1 and self.states.asmCaps["HasSWMMAC_gfx1250"]:
+                  multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAA
+                elif kernel["ProblemType"]["Sparse"] and not self.states.asmCaps["HasSWMMAC_gfx1250"]:
                   multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAA
                 elif is_wmma_v3:
                   vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPA["bpe"] * 8)
@@ -7846,7 +7845,10 @@ class KernelWriterAssembly(KernelWriter):
                 shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif blocksPerTGroupSMFMAA == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAA * numRegistersIn):
-                kIncA = blockOffsetSMFMAA + (numMIInUnroll//numSet0GroupA)
+                if kernel["ProblemType"]["Sparse"]:
+                  kIncA = blockOffsetSMFMAA + (numMIInUnroll//numSet0GroupA) * (max(group - 1, 0) if not self.states.asmCaps["HasSWMMAC_gfx1250"] else 1)
+                else:
+                  kIncA = blockOffsetSMFMAA + (numMIInUnroll//numSet0GroupA)
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K (block offset + group offset)"))
               else:
                 kIncA = numMIInUnroll // numSet0GroupA
@@ -7906,7 +7908,9 @@ class KernelWriterAssembly(KernelWriter):
             if numSet0GroupB > 1 or (is_wmma_v2 and vgprPerInUnrollB > 2):
               if group == 0:
                 multiplyBy = numMIInUnroll
-                if kernel["ProblemType"]["Sparse"] == 2:
+                if kernel["ProblemType"]["Sparse"] == 2 and self.states.asmCaps["HasSWMMAC_gfx1250"]:
+                  multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAB
+                elif kernel["ProblemType"]["Sparse"] and not self.states.asmCaps["HasSWMMAC_gfx1250"]:
                   multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAB
                 elif is_wmma_v3:
                   vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
@@ -7916,7 +7920,10 @@ class KernelWriterAssembly(KernelWriter):
                 shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif blocksPerTGroupSMFMAB == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAB * numRegistersIn):
-                kIncB = blockOffsetSMFMAB + numMIInUnroll//numSet0GroupB
+                if kernel["ProblemType"]["Sparse"]:
+                  kIncB = blockOffsetSMFMAB + (numMIInUnroll//numSet0GroupB) * (max(group - 1, 0) if not self.states.asmCaps["HasSWMMAC_gfx1250"] else 1)
+                else:
+                  kIncB = blockOffsetSMFMAB + (numMIInUnroll//numSet0GroupB)
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K (block offset + group offset)"))
               else:
                 kIncB = numMIInUnroll//numSet0GroupB
