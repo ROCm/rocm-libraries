@@ -242,8 +242,8 @@ void batchNormSpatialHostFwdTrain(const tensor<T>& input,
                     // iterating through the stack of images in the mini_batch
                     curCount += 1.;
                     mean_accum_old = mean_accum;
-                    // Given that each thread processes one channel, and the values are computed per channel, 
-                    // no concurrency conflicts are expected
+                    // Given that each thread processes one channel, and the values are computed per
+                    // channel, no concurrency conflicts are expected
                     auto inval = static_cast<double>(input(bidx, cidx, row, column));
                     mean_accum = (mean_accum * (curCount - 1) + inval) / curCount;
                     variance_accum += (inval - mean_accum_old) * (inval - mean_accum);
@@ -251,7 +251,8 @@ void batchNormSpatialHostFwdTrain(const tensor<T>& input,
             } // end for (row)
         } // end for (n)
 
-        // The mean is always normalized by the number of values, necessary for the proper calculation of variance
+        // The mean is always normalized by the number of values, necessary for the proper
+        // calculation of variance
         variance_accum /= nhw;
         invVar = 1.0 / sqrt(variance_accum + epsilon);
 
