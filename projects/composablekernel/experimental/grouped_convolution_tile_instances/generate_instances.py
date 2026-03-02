@@ -402,7 +402,6 @@ def parse_bwd_weight_instances(instances, problem_name):
         k_warp = int(block_size / (warp_size * m_warp * n_warp))
         dtype = get_dtype(problem_name)
 
-        # TODO: k_per_xdl = max(k1, k_mfma) where is compute from the m_per_xdl, n_per_xdl, and data type.
         k_per_xdl = max(k1, get_k_mfma(dtype, m_per_xdl, n_per_xdl))
 
         if check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector) == False:
