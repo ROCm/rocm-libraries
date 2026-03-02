@@ -73,7 +73,7 @@ struct ExtendedFloatBoolOp
 };
 
 /**
- * \brief ExtendedFloatBinOp general functor - Because hipcub::Sum(), Difference(), Division(),
+ * \brief ExtendedFloatBinOp general functor - Because test_utils::plus{}, Difference(), Division(),
  * Max() and Min() don't work with input types <test_utils::half, test_utils::half>,
  * <test_utils::bfloat16, test_utils::bfloat16> and
  * <test_utils::half, float> and <test_utils::bfloat16, float>.

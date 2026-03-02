@@ -495,6 +495,16 @@ struct minimum
     }
 };
 
+struct plus
+{
+    template<class A, class B>
+    HIPCUB_HOST_DEVICE
+    constexpr auto operator()(const A& a, const B& b) const -> decltype(a + b)
+    {
+        return a + b;
+    }
+};
+
 } // namespace benchmark_utils
 
 // Need for hipcub::DeviceReduce::Min/Max etc.

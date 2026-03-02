@@ -162,7 +162,7 @@ TYPED_TEST(HipcubThreadOperatorsTests, Sum)
 {
     using input_type  = typename TestFixture::input_type;
     using output_type = typename TestFixture::output_type;
-    using Sum         = typename AlgebraicSelector<hipcub::Sum, input_type, output_type>::type;
+    using Sum         = typename AlgebraicSelector<test_utils::plus, input_type, output_type>::type;
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -462,8 +462,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, SwizzleScanOp)
         std::iota(h_input.begin(), h_input.end(), static_cast<input_type>(1));
 
         // Scan function: SwizzleScanOp.
-        hipcub::Sum                        sum_op{};
-        hipcub::SwizzleScanOp<hipcub::Sum> scan_op(sum_op);
+        test_utils::plus                        sum_op{};
+        hipcub::SwizzleScanOp<test_utils::plus> scan_op(sum_op);
 
         // Calculate expected results on host.
         std::vector<output_type> h_expected(input_size);
@@ -507,8 +507,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceBySegmentOp)
         }
 
         // Reduce and scan operators.
-        hipcub::Sum                            sum_op{};
-        hipcub::ReduceBySegmentOp<hipcub::Sum> op(sum_op);
+        test_utils::plus                            sum_op{};
+        hipcub::ReduceBySegmentOp<test_utils::plus> op(sum_op);
 
         // Calculate expected results on host.
         std::vector<pair_type> expected{};
@@ -588,8 +588,8 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceByKeyOp)
         }
 
         // Reduce operators.
-        hipcub::Sum                        sum_op;
-        hipcub::ReduceByKeyOp<hipcub::Sum> op{};
+        test_utils::plus                        sum_op;
+        hipcub::ReduceByKeyOp<test_utils::plus> op{};
 
         // Calculate output on host.
         std::vector<output_type> h_output(h_unique_keys);

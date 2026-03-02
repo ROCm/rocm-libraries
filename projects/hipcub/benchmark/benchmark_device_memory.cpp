@@ -113,7 +113,7 @@ struct operation<block_scan, T, ItemsPerThread, BlockSize>
 
         // sync before re-using shared memory from load
         __syncthreads();
-        block_scan_type(storage).InclusiveScan(input, input, hipcub::Sum());
+        block_scan_type(storage).InclusiveScan(input, input, benchmark_utils::plus{});
     }
 };
 
