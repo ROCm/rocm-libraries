@@ -99,7 +99,7 @@ struct LibEnvVar
 private:
     struct LibEnvVarBase
     {
-        virtual ~LibEnvVarBase() {};
+        virtual ~LibEnvVarBase(){};
         virtual std::optional<std::string> Get() const    = 0;
         virtual void Update(std::string_view value) const = 0;
         virtual void Clear() const                        = 0;
@@ -112,7 +112,7 @@ private:
         static_assert(is_type_bool<value_type> || is_type_int<value_type> ||
                       is_type_str<value_type>);
 
-        LibEnvVarImpl(const T& var_in) : var(var_in) {};
+        LibEnvVarImpl(const T& var_in) : var(var_in){};
 
         std::optional<std::string> Get() const override
         {

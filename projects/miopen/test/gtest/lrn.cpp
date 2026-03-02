@@ -135,8 +135,7 @@ struct verify_lrn_forward
     void fail() const
     {
         std::cout << "verify_lrn_forward" << std::endl;
-        std::cout << "Input Tensor"
-                  << " " << input.desc.ToString() << std::endl;
+        std::cout << "Input Tensor" << " " << input.desc.ToString() << std::endl;
     }
 };
 
@@ -256,12 +255,9 @@ struct verify_lrn_bwd
     void fail() const
     {
         std::cout << "verify_lrn_bwd" << std::endl;
-        std::cout << "Input Tensor Y"
-                  << " " << inputY.desc.ToString() << std::endl;
-        std::cout << "Input Tensor DY"
-                  << " " << inputDY.desc.ToString() << std::endl;
-        std::cout << "Input Tensor X"
-                  << " " << scale.desc.ToString() << std::endl;
+        std::cout << "Input Tensor Y" << " " << inputY.desc.ToString() << std::endl;
+        std::cout << "Input Tensor DY" << " " << inputDY.desc.ToString() << std::endl;
+        std::cout << "Input Tensor X" << " " << scale.desc.ToString() << std::endl;
     }
 };
 
