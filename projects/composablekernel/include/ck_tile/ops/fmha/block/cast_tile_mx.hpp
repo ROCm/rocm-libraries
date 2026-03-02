@@ -180,6 +180,9 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
                 src1[j()] = src_thread_buffer[number<i * 32 + j * 2 + 1>{}];
             });
             const auto x = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(src0, src1, scale);
+            // Workaround for a compiler issue (LCOMPILER-561) with v_cvt_scalef32_2xpk16_fp6_f32:
+            // src registers can be incorrectly used as dst registers
+            asm(";" ::"v"(x), "v"(src0), "v"(src1), "v"(scale));
             static_for<0, 6, 1>{}([&](auto j) {
                 dst_tensor.get_thread_buffer().template set_as<uint32_t>(number<i * 6 + j>{},
                                                                          x[j()]);
