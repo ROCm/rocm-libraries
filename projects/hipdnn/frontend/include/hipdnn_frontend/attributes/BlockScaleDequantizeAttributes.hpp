@@ -14,8 +14,8 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
 #include <cstdint>
+#include <hipdnn_data_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -126,7 +126,6 @@ public:
         return block_size;
     }
 
-    // Set a single block_size value at a given index (cuDNN-compatible overload)
     // NOLINTNEXTLINE(readability-identifier-naming)
     BlockScaleDequantizeAttributes& set_block_size(int32_t value, int32_t idx = 0)
     {
@@ -136,13 +135,12 @@ public:
         }
         if(static_cast<int32_t>(block_size.size()) < idx + 1)
         {
-            block_size.resize(idx + 1, 1);
+            block_size.resize(static_cast<size_t>(idx + 1), 1);
         }
-        block_size[idx] = value;
+        block_size[static_cast<size_t>(idx)] = value;
         return *this;
     }
 
-    // Set block_size from raw pointer and length (cuDNN-compatible overload)
     // NOLINTNEXTLINE(readability-identifier-naming)
     BlockScaleDequantizeAttributes& set_block_size(const int32_t* values, int32_t len = 1)
     {
@@ -152,13 +150,12 @@ public:
         }
         if(static_cast<int32_t>(block_size.size()) < len)
         {
-            block_size.resize(len);
+            block_size.resize(static_cast<size_t>(len));
         }
         std::copy(values, values + len, block_size.begin());
         return *this;
     }
 
-    // Set block_size from a vector (cuDNN-compatible overload)
     // NOLINTNEXTLINE(readability-identifier-naming)
     BlockScaleDequantizeAttributes& set_block_size(const std::vector<int32_t>& values)
     {
@@ -215,7 +212,9 @@ public:
     }
 
 private:
+    // NOLINTNEXTLINE(readability-identifier-naming)
     std::vector<int32_t> block_size;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     bool is_negative_scale = false;
 };
 

@@ -10,7 +10,7 @@ TEST(TestBlockScaleDequantizeAttributes, CreateBlockScaleDequantizeAttributes)
     attrs.set_x(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     attrs.set_scale(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     attrs.set_y(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
-    attrs.set_block_size({32});
+    attrs.set_block_size(std::vector<int32_t>{32});
 
     auto inputTensor = attrs.get_x();
     inputTensor->set_uid(1)

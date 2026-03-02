@@ -22,7 +22,7 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNode)
     attrs.set_scale(scaleTensor);
 
     attrs.set_y(std::make_shared<TensorAttributes>());
-    attrs.set_block_size({32});
+    attrs.set_block_size(std::vector<int32_t>{32});
 
     GraphAttributes graphAttributes;
     BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
@@ -37,7 +37,7 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeMissingX)
 
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_y(std::make_shared<TensorAttributes>());
-    attrs.set_block_size({32});
+    attrs.set_block_size(std::vector<int32_t>{32});
 
     GraphAttributes graphAttributes;
     BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
@@ -52,7 +52,7 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeMissingScale)
 
     attrs.set_x(std::make_shared<TensorAttributes>());
     attrs.set_y(std::make_shared<TensorAttributes>());
-    attrs.set_block_size({32});
+    attrs.set_block_size(std::vector<int32_t>{32});
 
     GraphAttributes graphAttributes;
     BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
@@ -67,7 +67,7 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeMissingY)
 
     attrs.set_x(std::make_shared<TensorAttributes>());
     attrs.set_scale(std::make_shared<TensorAttributes>());
-    attrs.set_block_size({32});
+    attrs.set_block_size(std::vector<int32_t>{32});
 
     GraphAttributes graphAttributes;
     BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
@@ -98,7 +98,7 @@ TEST(TestBlockScaleDequantizeNode, InferPropertiesNode)
     attrs.set_x(std::make_shared<TensorAttributes>());
     attrs.set_scale(std::make_shared<TensorAttributes>());
     attrs.set_y(std::make_shared<TensorAttributes>());
-    attrs.set_block_size({32});
+    attrs.set_block_size(std::vector<int32_t>{32});
 
     auto inputTensor = attrs.get_x();
     inputTensor->set_uid(1)
@@ -148,7 +148,7 @@ TEST(TestBlockScaleDequantizeNode, PackNode)
 {
     BlockScaleDequantizeAttributes attrs;
     attrs.set_name("BlockScaleDequantize");
-    attrs.set_block_size({32});
+    attrs.set_block_size(std::vector<int32_t>{32});
 
     auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_uid(1)
@@ -205,7 +205,7 @@ TEST(TestBlockScaleDequantizeNode, PackNodeWithNegativeScale)
 {
     BlockScaleDequantizeAttributes attrs;
     attrs.set_name("BlockScaleDequantize");
-    attrs.set_block_size({32, 64});
+    attrs.set_block_size(std::vector<int32_t>{32, 64});
     attrs.set_is_negative_scale(true);
 
     auto xTensor = std::make_shared<TensorAttributes>();

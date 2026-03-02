@@ -18,7 +18,7 @@ inline void to_json(nlohmann::json& blockScaleJson, const BlockScaleDequantizeAt
     auto& outputs = blockScaleJson["outputs"] = {};
     outputs["y_tensor_uid"] = bsd.y_tensor_uid();
 
-    if(bsd.block_size() != nullptr && bsd.block_size()->size() > 0)
+    if(bsd.block_size() != nullptr && !bsd.block_size()->empty())
     {
         auto& blockSizeArray = blockScaleJson["block_size"] = nlohmann::json::array();
         for(auto val : *bsd.block_size())
@@ -34,8 +34,9 @@ inline void to_json(nlohmann::json& blockScaleJson, const BlockScaleDequantizeAt
 namespace hipdnn_data_sdk::json
 {
 template <>
-inline auto to<data_objects::BlockScaleDequantizeAttributes>(flatbuffers::FlatBufferBuilder& builder,
-                                                             const nlohmann::json& entry)
+inline auto
+    to<data_objects::BlockScaleDequantizeAttributes>(flatbuffers::FlatBufferBuilder& builder,
+                                                     const nlohmann::json& entry)
 {
     auto& inputs = entry["inputs"];
 
