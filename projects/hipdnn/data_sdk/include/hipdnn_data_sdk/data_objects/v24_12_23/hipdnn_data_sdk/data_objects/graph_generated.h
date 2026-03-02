@@ -17,6 +17,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 24 &&
 #include "batchnorm_backward_attributes_generated.h"
 #include "batchnorm_inference_attributes_generated.h"
 #include "batchnorm_inference_attributes_variance_ext_generated.h"
+#include "block_scale_dequantize_attributes_generated.h"
 #include "convolution_bwd_attributes_generated.h"
 #include "convolution_fwd_attributes_generated.h"
 #include "convolution_wrw_attributes_generated.h"
@@ -56,11 +57,12 @@ enum class NodeAttributes : uint8_t {
   MatmulAttributes = 9,
   LayernormAttributes = 10,
   RMSNormAttributes = 11,
+  BlockScaleDequantizeAttributes = 12,
   MIN = NONE,
-  MAX = RMSNormAttributes
+  MAX = BlockScaleDequantizeAttributes
 };
 
-inline const NodeAttributes (&EnumValuesNodeAttributes())[12] {
+inline const NodeAttributes (&EnumValuesNodeAttributes())[13] {
   static const NodeAttributes values[] = {
     NodeAttributes::NONE,
     NodeAttributes::BatchnormInferenceAttributes,
@@ -73,13 +75,14 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[12] {
     NodeAttributes::BatchnormInferenceAttributesVarianceExt,
     NodeAttributes::MatmulAttributes,
     NodeAttributes::LayernormAttributes,
-    NodeAttributes::RMSNormAttributes
+    NodeAttributes::RMSNormAttributes,
+    NodeAttributes::BlockScaleDequantizeAttributes
   };
   return values;
 }
 
 inline const char * const *EnumNamesNodeAttributes() {
-  static const char * const names[13] = {
+  static const char * const names[14] = {
     "NONE",
     "BatchnormInferenceAttributes",
     "PointwiseAttributes",
@@ -92,13 +95,14 @@ inline const char * const *EnumNamesNodeAttributes() {
     "MatmulAttributes",
     "LayernormAttributes",
     "RMSNormAttributes",
+    "BlockScaleDequantizeAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::RMSNormAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::BlockScaleDequantizeAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -151,6 +155,10 @@ template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::RMSNormAtt
   static const NodeAttributes enum_value = NodeAttributes::RMSNormAttributes;
 };
 
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::BlockScaleDequantizeAttributes;
+};
+
 template<typename T> struct NodeAttributesUnionTraits {
   static const NodeAttributes enum_value = NodeAttributes::NONE;
 };
@@ -197,6 +205,10 @@ template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::Layer
 
 template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::RMSNormAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::RMSNormAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::BlockScaleDequantizeAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -317,6 +329,14 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::RMSNormAttributes ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value) : nullptr;
   }
+  hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *AsBlockScaleDequantizeAttributes() {
+    return type == NodeAttributes::BlockScaleDequantizeAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *AsBlockScaleDequantizeAttributes() const {
+    return type == NodeAttributes::BlockScaleDequantizeAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *>(value) : nullptr;
+  }
 };
 
 
@@ -369,6 +389,10 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
     case NodeAttributes::RMSNormAttributes: {
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::BlockScaleDequantizeAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -451,6 +475,9 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::RMSNormAttributes *attributes_as_RMSNormAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(attributes()) : nullptr;
   }
+  const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes *attributes_as_BlockScaleDequantizeAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes ? static_cast<const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes *>(attributes()) : nullptr;
+  }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
   }
@@ -511,6 +538,10 @@ template<> inline const hipdnn_data_sdk::data_objects::LayernormAttributes *Node
 
 template<> inline const hipdnn_data_sdk::data_objects::RMSNormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::RMSNormAttributes>() const {
   return attributes_as_RMSNormAttributes();
+}
+
+template<> inline const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes>() const {
+  return attributes_as_BlockScaleDequantizeAttributes();
 }
 
 struct NodeBuilder {
@@ -843,8 +874,8 @@ inline void Graph::UnPackTo(GraphT *_o, const ::flatbuffers::resolver_function_t
   { auto _e = compute_data_type(); _o->compute_data_type = _e; }
   { auto _e = intermediate_data_type(); _o->intermediate_data_type = _e; }
   { auto _e = io_data_type(); _o->io_data_type = _e; }
-  { auto _e = tensors(); if (_e) { _o->tensors.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->tensors[_i]) { _e->Get(_i)->UnPackTo(_o->tensors[_i].get(), _resolver); } else { _o->tensors[_i] = std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>(_e->Get(_i)->UnPack(_resolver)); }; } } else { _o->tensors.resize(0); } }
-  { auto _e = nodes(); if (_e) { _o->nodes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->nodes[_i]) { _e->Get(_i)->UnPackTo(_o->nodes[_i].get(), _resolver); } else { _o->nodes[_i] = std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>(_e->Get(_i)->UnPack(_resolver)); }; } } else { _o->nodes.resize(0); } }
+  { auto _e = tensors(); if (_e) { _o->tensors.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->tensors[_i]) { _e->Get(_i)->UnPackTo(_o->tensors[_i].get(), _resolver); } else { _o->tensors[_i] = std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->tensors.resize(0); } }
+  { auto _e = nodes(); if (_e) { _o->nodes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->nodes[_i]) { _e->Get(_i)->UnPackTo(_o->nodes[_i].get(), _resolver); } else { _o->nodes[_i] = std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->nodes.resize(0); } }
   { auto _e = preferred_engine_id(); _o->preferred_engine_id = _e; }
 }
 
@@ -923,6 +954,10 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case NodeAttributes::BlockScaleDequantizeAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -986,6 +1021,10 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
+    case NodeAttributes::BlockScaleDequantizeAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -1037,6 +1076,10 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value);
       return CreateRMSNormAttributes(_fbb, ptr, _rehasher).Union();
     }
+    case NodeAttributes::BlockScaleDequantizeAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *>(value);
+      return CreateBlockScaleDequantizeAttributes(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -1085,6 +1128,10 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
     }
     case NodeAttributes::RMSNormAttributes: {
       value = new hipdnn_data_sdk::data_objects::RMSNormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::BlockScaleDequantizeAttributes: {
+      value = new hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *>(u.value));
       break;
     }
     default:
@@ -1146,6 +1193,11 @@ inline void NodeAttributesUnion::Reset() {
     }
     case NodeAttributes::RMSNormAttributes: {
       auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::BlockScaleDequantizeAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributesT *>(value);
       delete ptr;
       break;
     }

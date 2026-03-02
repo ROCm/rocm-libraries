@@ -78,6 +78,7 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
@@ -97,6 +98,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
@@ -644,6 +646,19 @@ private:
                     }
                     _sub_nodes.emplace_back(
                         std::make_shared<RMSNormNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::
+                    BlockScaleDequantizeAttributes:
+                {
+                    auto attr = BlockScaleDequantizeAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_BlockScaleDequantizeAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(std::make_shared<BlockScaleDequantizeNode>(
+                        std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -1757,6 +1772,25 @@ public:
             std::make_shared<RMSNormNode>(std::move(attributes), graph_attributes));
 
         return {y, invRmsOut};
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        block_scale_dequantize(BlockScaleDequantizeAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BlockScaleDequantize_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<BlockScaleDequantizeNode>(std::move(attributes), graph_attributes));
+
+        return y;
     }
 
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
