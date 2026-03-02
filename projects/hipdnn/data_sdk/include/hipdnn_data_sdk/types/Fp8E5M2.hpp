@@ -420,7 +420,7 @@ static_assert(std::is_standard_layout_v<fp8_e5m2>, "fp8_e5m2 must be standard la
 
 // User-defined literal
 // NOLINTNEXTLINE(readability-identifier-naming)
-inline fp8_e5m2 operator""_bfp8(long double val)
+inline fp8_e5m2 operator""_e5m2(long double val)
 {
     return fp8_e5m2(static_cast<float>(val));
 }
