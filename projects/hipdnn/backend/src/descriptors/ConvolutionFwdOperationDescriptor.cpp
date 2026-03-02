@@ -159,20 +159,29 @@ void ConvolutionFwdOperationDescriptor::setConvMode(hipdnnBackendAttributeType_t
                                                     int64_t elementCount,
                                                     const void* arrayOfElements)
 {
-    checkSetArgs(HIPDNN_TYPE_INT64,
+    checkSetArgs(HIPDNN_TYPE_CONVOLUTION_MODE,
                  attributeType,
                  arrayOfElements,
                  "ConvolutionFwdOperationDescriptor::setAttribute()");
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    "ConvolutionFwdOperationDescriptor::setAttribute(): elementCount is not 1");
-    auto mode = static_cast<hipdnn_data_sdk::data_objects::ConvMode>(
-        *static_cast<const int64_t*>(arrayOfElements));
-    THROW_IF_TRUE(mode < hipdnn_data_sdk::data_objects::ConvMode::MIN
-                      || mode > hipdnn_data_sdk::data_objects::ConvMode::MAX,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionFwdOperationDescriptor::setAttribute(): invalid ConvMode value");
-    _data.conv_mode = mode;
+    auto mode = *static_cast<const hipdnnConvolutionMode_t*>(arrayOfElements);
+
+    // Map hipdnnConvolutionMode_t to Data SDK ConvMode
+    switch(mode)
+    {
+    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+        _data.conv_mode = hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION;
+        break;
+    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+        _data.conv_mode = hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION;
+        break;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "ConvolutionFwdOperationDescriptor::setAttribute(): invalid "
+                              "hipdnnConvolutionMode_t value");
+    }
 }
 
 // ============================================================================
@@ -302,8 +311,9 @@ void ConvolutionFwdOperationDescriptor::getConvMode(hipdnnBackendAttributeType_t
                                                     int64_t* elementCount,
                                                     void* arrayOfElements) const
 {
-    checkGetArgs(
-        HIPDNN_TYPE_INT64, attributeType, "ConvolutionFwdOperationDescriptor::getAttribute()");
+    checkGetArgs(HIPDNN_TYPE_CONVOLUTION_MODE,
+                 attributeType,
+                 "ConvolutionFwdOperationDescriptor::getAttribute()");
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -322,7 +332,24 @@ void ConvolutionFwdOperationDescriptor::getConvMode(hipdnnBackendAttributeType_t
     {
         *elementCount = 1;
     }
-    *static_cast<int64_t*>(arrayOfElements) = static_cast<int64_t>(_data.conv_mode);
+
+    // Map Data SDK ConvMode to hipdnnConvolutionMode_t
+    hipdnnConvolutionMode_t result;
+    switch(_data.conv_mode)
+    {
+    case hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION:
+        result = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+        break;
+    case hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION:
+        result = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+        break;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "ConvolutionFwdOperationDescriptor::getAttribute(): invalid "
+                              "internal ConvMode value");
+        break;
+    }
+    *static_cast<hipdnnConvolutionMode_t*>(arrayOfElements) = result;
 }
 
 // ============================================================================

@@ -15,8 +15,20 @@ def main():
     # Get the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
     schemas_dir = os.path.join(script_dir, "..", "data_sdk", "schemas")
+
+    # Convert version to directory format (e.g., "25.9.23" -> "v25_9_23")
+    # Output path matches multi-version structure: include/.../data_objects/v{ver}/hipdnn_data_sdk/data_objects/
+    ver_tag = REQUIRED_VER.replace(".", "_")
     output_dir = os.path.join(
-        script_dir, "..", "data_sdk", "include", "hipdnn_data_sdk", "data_objects"
+        script_dir,
+        "..",
+        "data_sdk",
+        "include",
+        "hipdnn_data_sdk",
+        "data_objects",
+        f"v{ver_tag}",
+        "hipdnn_data_sdk",
+        "data_objects",
     )
 
     # Find flatc in PATH and prepare to validate its version

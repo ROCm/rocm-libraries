@@ -284,5 +284,5 @@ public:
     }
 };
 
-typedef ConvDgradAttributes Conv_dgrad_attributes; ///< @brief cuDNN compatibility alias
+typedef ConvDgradAttributes Conv_dgrad_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

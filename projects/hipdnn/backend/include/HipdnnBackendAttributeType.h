@@ -93,6 +93,9 @@ typedef enum
     /** @brief Random number generator distribution */
     HIPDNN_TYPE_RNG_DISTRIBUTION,
 
+    /** @brief Convolution mode enumeration (hipdnnConvolutionMode_t) */
+    HIPDNN_TYPE_CONVOLUTION_MODE,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types
