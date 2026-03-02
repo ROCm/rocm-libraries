@@ -452,31 +452,59 @@ bool PerformanceConfigHipImplicitGemmGroupBwdXdlops::IsModelApplicable(
 // best average performance when selected by 1st applicable in list
 // clang-format off
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static const std::vector<std::string> ranked_1st_applicable = {
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 128, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 2, 1, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 1, 1, 4, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 2, 2, 1, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<128, 128, 32, 32, 8, 8, Default, 32, 32, 2, 1, 8, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 8, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Default, 32, 32, 1, 1, 8, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Default, 32, 32, 1, 1, 4, 2, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 16, 4, 4, Default, 16, 16, 1, 1, 4, 1, 1, 1>",
-"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>"
+static const std::vector<std::tuple<std::string, int>> ranked_gemm_grp_bwd = {
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 2, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Filter1x1Stride1Pad0, 32, 32, 1, 1, 4, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 128, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 2, 1, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 1, 1, 4, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 2, 2, 1, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<128, 128, 32, 32, 8, 8, Default, 32, 32, 2, 1, 8, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Default, 32, 32, 1, 1, 8, 2, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Default, 16, 16, 1, 1, 8, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 16, 4, 4, Default, 32, 32, 1, 1, 4, 2, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 16, 4, 4, Default, 16, 16, 1, 1, 4, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>", 1)
+};
+
+static const std::vector<std::tuple<std::string, int>> ranked_gemm_grp_bwd_navi = {
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 128, 128, 32, 8, 8, Default, 16, 16, 8, 2, 8, 4, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<256, 128, 256, 64, Default, 8, 8, 8>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 4, 2, 1, 1, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 32, 64, 32, 8, 8, Default, 16, 16, 2, 1, 4, 1, 1, 1>", 4),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, 32, 64, 32, 8, 8, Default, 16, 16, 2, 1, 4, 1, 1, 1>", 2),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 4, 4, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 1, 8, 1, 1>", 1),
+std::make_tuple("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 32, 32, 8, 8, Default, 16, 16, 4, 1, 8, 1, 1, 1>", 1)
 };
 // clang-format on
 
-void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList()
+void PerformanceConfigHipImplicitGemmGroupBwdXdlops::DefaultKernelFromList(const ExecutionContext& ctx)
 {
-    for(const auto& kernel_str : ranked_1st_applicable)
+    const auto dev_name = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
+    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+
+    auto* ranked_p = &ranked_gemm_grp_bwd;
+    if(is_gfx11 || is_gfx12)
+        ranked_p = &ranked_gemm_grp_bwd_navi;
+
+    const auto ranked_1st_applicable = *ranked_p;
+
+    for(const auto& kernel : ranked_1st_applicable)
     {
-        auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
+        const auto& kernel_str = std::get<0>(kernel);
+        const auto& it         = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
         if(it != valid_kernels.end())
         {
             index     = it - valid_kernels.begin();
@@ -548,7 +576,7 @@ void PerformanceConfigHipImplicitGemmGroupBwdXdlops::HeuristicInit(
     }
 
     if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-        DefaultKernelFromList();
+        DefaultKernelFromList(ctx);
 
     // Invariant: split_k must always be 1 in deterministic mode
     assert(!is_deterministic || split_k == 1);

@@ -427,7 +427,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
 
 // clang-format off
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static const std::vector<std::tuple<std::string, int>> ranked_1st_applicable = {
+static const std::vector<std::tuple<std::string, int>> ranked_gemm_3d_grp_wrw = {
 std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<Default, CRR> BlkSize: 256, BlkTile: 128x128x64, WaveTile: 32x32, WaveMap: 2x2, VmemReadVec: 8x8, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3, BlkGemmPipelinePrefetchStages: 2>", 128),
 std::make_tuple("DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<Default, CRR> BlkSize: 256, BlkTile: 128x128x64, WaveTile: 32x32, WaveMap: 2x2, VmemReadVec: 4x4, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v4, BlkGemmPipelinePrefetchStages: 3>", 64),
 std::make_tuple("DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle<64, 16, 256, 32, Default, 8, 1, 16, 8, 8, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 8>", -1),
@@ -513,10 +513,24 @@ std::make_tuple("DeviceGroupedConvBwdWeight_Xdl_CShuffle<64, 32, 64, 4, Default,
 std::make_tuple("DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Default, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>", 128),
 std::make_tuple("DeviceGroupedConvBwdWeight_Xdl_CShuffle<64, 64, 64, 4, Default, 4, 2, 2, 1, 4, 1, 4, 1, 1, 1>", 32)
 };
+
+//no results
+static const std::vector<std::tuple<std::string, int>> ranked_gemm_3d_grp_wrw_navi = {
+};
 // clang-format on
 
-void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::DefaultKernelFromList()
+void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::DefaultKernelFromList(const ExecutionContext& ctx)
 {
+    const auto dev_name = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
+    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+
+    auto* ranked_p = &ranked_gemm_3d_grp_wrw;
+    if(is_gfx11 || is_gfx12)
+        ranked_p = &ranked_gemm_3d_grp_wrw_navi;
+
+    const auto ranked_1st_applicable = *ranked_p;
+
     for(const auto& kernel : ranked_1st_applicable)
     {
         const auto& kernel_str = std::get<0>(kernel);
@@ -524,7 +538,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::DefaultKernelFromList()
         if(it != valid_kernels.end())
         {
             index     = it - valid_kernels.begin();
-            split_k   = 1; // std::get<1>(kernel);
+            split_k   = 1;
             kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
             return;
         }
@@ -663,7 +677,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
         split_k   = 1;
         kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
         if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-            DefaultKernelFromList();
+            DefaultKernelFromList(ctx);
 
         MIOPEN_LOG_I("Step 2: Default initialization selected kernel: " << kernel_id
                                                                         << " at index: " << index);

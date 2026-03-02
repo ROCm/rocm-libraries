@@ -470,7 +470,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
 // best average performance when selected by 1st applicable in list
 // clang-format off
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static const std::vector<std::string> ranked_1st_applicable = {
+static const std::vector<std::string> ranked_gemm_3d_grp_bwd = {
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 8, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Filter1x1Stride1Pad0, 32, 32, 1, 1, 16, 2, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Filter1x1Stride1Pad0, 16, 16, 1, 1, 16, 1, 1, 1>",
@@ -496,10 +496,29 @@ static const std::vector<std::string> ranked_1st_applicable = {
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 128, 32, 8, 8, Default, 32, 32, 1, 2, 1, 8, 1, 1>",
 "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 64, 64, 32, 8, 8, Default, 32, 32, 2, 2, 1, 1, 1, 1>"
 };
+
+static const std::vector<std::string> ranked_gemm_3d_grp_bwd_navi = {
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 8, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<64, 64, 64, 32, 8, 8, Default, 16, 16, 4, 2, 1, 1, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 1, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 4, 1, 8, 1, 1>",
+"DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 16, 64, 32, 8, 8, Default, 16, 16, 1, 4, 8, 1, 1, 1>"
+};
 // clang-format on
 
-void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::DefaultKernelFromList()
+void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::DefaultKernelFromList(const ExecutionContext& ctx)
 {
+    const auto dev_name = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
+    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+
+    auto* ranked_p = &ranked_gemm_3d_grp_bwd;
+    if(is_gfx11 || is_gfx12)
+        ranked_p = &ranked_gemm_3d_grp_bwd_navi;
+
+    const auto ranked_1st_applicable = *ranked_p;
+
     for(const auto& kernel_str : ranked_1st_applicable)
     {
         auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
@@ -617,7 +636,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
         index     = 0;
         kernel_id = valid_kernels[index];
         if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-            DefaultKernelFromList();
+            DefaultKernelFromList(ctx);
 
         MIOPEN_LOG_I("Step 2: Default initialization selected kernel: " << kernel_id
                                                                         << " at index: " << index);

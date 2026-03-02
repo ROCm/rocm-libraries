@@ -426,11 +426,11 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsModelApplicable(
     return true;
 }
 
-// list of best guess kernel configurations
+// list of best guess kernel configurations (mi355 tangent archs)
 // best average performance when selected by 1st applicable in list
 // clang-format off
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables, cert-err58-cpp)
-static const std::vector<std::string> ranked_1st_applicable = {
+static const std::vector<std::string> ranked_gemm_grp_fwd = {
 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 16, 32, Filter3x3, 16, 16, 4, 1, 4, 1, 1, 1, 1, 16>",
 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 16, 32, Default, 16, 16, 4, 1, 4, 1, 1, 1, 1, 8>",
 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 16, 16, Filter3x3, 16, 16, 4, 1, 4, 1, 1, 1, 1, 16>",
@@ -469,10 +469,63 @@ static const std::vector<std::string> ranked_1st_applicable = {
 "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor<64, 64, 64, 16, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1>",
 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1, 1>"
 };
+
+static const std::vector<std::string> ranked_gemm_grp_fwd_navi = {
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 16, 16, Default, 16, 16, 4, 1, 4, 1, 1, 1, 1, 16>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 16, 16, Filter3x3, 16, 16, 4, 1, 4, 1, 1, 1, 1, 16>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 128, 64, Filter1x1Stride1Pad0, 16, 16, 2, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 16, 16, Default, 16, 16, 4, 1, 4, 1, 1, 1, 1, 8>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<128, 64, 64, 32, OddC, 8, 16, 16, 2, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 1, BBlockTransferSrcScalarPerVector: 1",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<64, 64, 16, 16, Filter3x3, 16, 16, 4, 1, 4, 1, 1, 1, 1, 8>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 128, 64, 64, Filter1x1Stride1Pad0, 16, 16, 2, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Pad0, 8, 16, 16, 2, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 1, BBlockTransferSrcScalarPerVector: 1",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Filter1x1Stride1Pad0, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 32, 64, 64, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<128, 64, 64, 32, Default, 8, 16, 16, 2, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 1, BBlockTransferSrcScalarPerVector: 1",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<64, 32, 32, 64, Filter1x1Pad0, 8, 16, 16, 1, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 256, 128, 32, Filter1x1Stride1Pad0, 32, 32, 4, 2, 8, 8, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<128, 64, 64, 32, Filter1x1Stride1Pad0, 8, 16, 16, 2, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 1, BBlockTransferSrcScalarPerVector: 1",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<64, 64, 32, 32, Filter1x1Pad0, 8, 16, 16, 2, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 256, 64, Filter1x1Stride1Pad0, 16, 16, 4, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Filter1x1Pad0, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 64, 64, 32, Filter1x1Pad0, 16, 16, 1, 2, 1, 2, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<32, 16, 16, 32, Filter1x1Pad0, 8, 16, 16, 1, 1> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 256, 128, 32, Default, 32, 32, 4, 2, 8, 8, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 64, 64, 32, Filter1x1Stride1Pad0, 16, 16, 2, 2, 4, 4, 4, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 32, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<64, 32, 32, 64, Filter1x1Stride1Pad0, 8, 16, 16, 1, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<32, 16, 16, 32, Default, 8, 16, 16, 1, 1> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 256, 32, Filter1x1Stride1Pad0, 16, 16, 4, 4, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<64, 32, 32, 64, OddC, 8, 16, 16, 1, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<128, 128, 64, 32, OddC, 8, 16, 16, 4, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 128, 128, 32, Filter1x1Stride1Pad0, 32, 32, 2, 2, 1, 1, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 64, 64, 32, Filter1x1Stride1Pad0, 16, 16, 1, 2, 1, 2, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<128, 128, 64, 32, Filter1x1Pad0, 8, 16, 16, 4, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 32, 64, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<32, 16, 16, 32, Filter1x1Stride1Pad0, 8, 16, 16, 1, 1> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 8, BBlockTransferSrcScalarPerVector: 8",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<128, 64, 64, 64, Filter1x1Pad0, 16, 16, 2, 2, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<256, 128, 256, 64, Default, 16, 16, 4, 4, 8, 8, 1, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Default, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<256, 64, 64, 32, Default, 16, 16, 2, 2, 4, 4, 4, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Filter1x1Pad0, 16, 16, 2, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>",
+"DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<128, 128, 128, 32, Default, 32, 32, 4, 2, 8, 8, 8, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor_WmmaPorted<64, 64, 64, 32, Default, 32, 32, 2, 2, 1, 1, 1, 1, 1>",
+"DeviceGroupedConvFwdMultipleD_Wmma_CShuffle<64, 64, 32, 64, OddC, 16, 16, 16, 2, 2> AEnableLds: 1, BEnableLds: 1, ABlockTransferSrcScalarPerVector: 16, BBlockTransferSrcScalarPerVector: 16"
+};
 // clang-format on
 
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList()
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::DefaultKernelFromList(const ExecutionContext& ctx)
 {
+    const auto dev_name = ctx.GetStream().GetDeviceName();
+    const bool is_gfx11 = StartsWith(dev_name, "gfx11");
+    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+
+    auto* ranked_p = &ranked_gemm_grp_fwd;
+    if(is_gfx11 || is_gfx12)
+        ranked_p = &ranked_gemm_grp_fwd_navi;
+
+    const auto ranked_1st_applicable = *ranked_p;
+
     for(const auto& kernel_str : ranked_1st_applicable)
     {
         auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
@@ -527,7 +580,7 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
     }
 
     if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-        DefaultKernelFromList();
+        DefaultKernelFromList(ctx);
 #endif
 }
 
