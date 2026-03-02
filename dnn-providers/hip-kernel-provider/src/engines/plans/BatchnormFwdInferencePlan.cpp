@@ -2,11 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferencePlan.hpp"
-#include "hip/HipKernel.hpp"
-#include "hip/HipProgram.hpp"
 #include "hip/HipUtils.hpp"
 
-#include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <stdexcept>
@@ -122,17 +119,8 @@ size_t computeVectorSize(bool isLayoutNhwc, int channels, unsigned int inCstride
 
 } // namespace
 
-void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
-                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                        uint32_t numDeviceBuffers,
-                                        [[maybe_unused]] void* workspace) const
+void BatchnormFwdInferencePlan::compile(const hipDeviceProp_t& deviceProperties)
 {
-    // Get device and properties
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, device));
-
     // Determine data type configuration
     auto xDataType = _inferenceParams.x()->data_type();
     auto scaleDataType = _inferenceParams.scale()->data_type();
@@ -223,8 +211,8 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
 
     zlocalsize = 1;
     size_t activeThreadsXy = xgridsize * ygridsize;
-    auto maxActiveThreads
-        = static_cast<size_t>(props.multiProcessorCount) * 32 * static_cast<size_t>(props.warpSize);
+    auto maxActiveThreads = static_cast<size_t>(deviceProperties.multiProcessorCount) * 32
+                            * static_cast<size_t>(deviceProperties.warpSize);
 
     if(activeThreadsXy < maxActiveThreads)
     {
@@ -236,7 +224,7 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
     }
 
     // Detect GPU architecture
-    std::string archName(props.gcnArchName);
+    std::string archName(deviceProperties.gcnArchName);
     bool isGfx103x = (archName.find("gfx103") == 0);
     bool isGfx110x = (archName.find("gfx110") == 0);
     bool isGfx120x = (archName.find("gfx120") == 0);
@@ -244,15 +232,13 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
 
     // Get activation parameters
     int nrnOpId = 0;
-    auto alpha = 0.0f;
-    auto beta = 0.0f;
 
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
         const auto& activation = *_inferenceParams.optActivation();
         nrnOpId = static_cast<int>(activation.mode);
-        alpha = static_cast<float>(activation.alpha);
-        beta = static_cast<float>(activation.beta);
+        _activationAlpha = static_cast<float>(activation.alpha);
+        _activationBeta = static_cast<float>(activation.beta);
     }
 
     // Prepare compilation options
@@ -274,18 +260,37 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120x ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115x ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
-    options.emplace_back(std::string("--offload-arch=") + props.gcnArchName);
+    options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
-    // Create and configure kernel
-    auto hipProgram = HipProgram("BatchNormFwdInferSpatial.cpp", options);
-    auto hipKernel = HipKernel(hipProgram, "BatchNormFwdInferSpatialEstInvVar");
+    // Compile kernel and configure launch dimensions
+    _compiledProgram.emplace("BatchNormFwdInferSpatial.cpp", options);
+    _compiledKernel.emplace(*_compiledProgram, "BatchNormFwdInferSpatialEstInvVar");
 
-    hipKernel.setBlockSize(static_cast<unsigned int>(xlocalsize),
-                           static_cast<unsigned int>(ylocalsize),
-                           static_cast<unsigned int>(zlocalsize));
-    hipKernel.setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                          static_cast<unsigned int>(ygridsize / ylocalsize),
-                          static_cast<unsigned int>(zgridsize / zlocalsize));
+    _compiledKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
+                                  static_cast<unsigned int>(ylocalsize),
+                                  static_cast<unsigned int>(zlocalsize));
+    _compiledKernel->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
+                                 static_cast<unsigned int>(ygridsize / ylocalsize),
+                                 static_cast<unsigned int>(zgridsize / zlocalsize));
+
+    // Store kernel launch parameters
+    _channels = static_cast<unsigned int>(c);
+    _inCstride = inCstride;
+    _batchCount = static_cast<unsigned int>(n);
+    _cStride = static_cast<unsigned int>(cStride);
+    _hwStride = static_cast<unsigned int>(wStride);
+    _batchStride = static_cast<unsigned int>(nStride);
+}
+
+void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
+                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                        uint32_t numDeviceBuffers,
+                                        [[maybe_unused]] void* workspace) const
+{
+    if(!_compiledKernel.has_value())
+    {
+        throw std::runtime_error("BatchnormFwdInferencePlan::execute() called before compile()");
+    }
 
     // Get device buffer pointers
     auto xBuffer = hip_kernel_utils::findDeviceBuffer(
@@ -299,51 +304,48 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
     auto invVarianceBuffer = hip_kernel_utils::findDeviceBuffer(
         _inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
-    auto hwStride = static_cast<unsigned int>(wStride);
-    auto batchStride = static_cast<unsigned int>(nStride);
-
     // Launch kernel with appropriate output buffer
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
         auto activationOutBuffer = hip_kernel_utils::findDeviceBuffer(
             _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
 
-        hipKernel.launch(handle.getStream(),
-                         xBuffer.ptr,
-                         activationOutBuffer.ptr,
-                         estMeanBuffer.ptr,
-                         invVarianceBuffer.ptr,
-                         scaleBuffer.ptr,
-                         biasBuffer.ptr,
-                         static_cast<unsigned int>(c),
-                         inCstride,
-                         static_cast<unsigned int>(n),
-                         static_cast<unsigned int>(cStride),
-                         hwStride,
-                         batchStride,
-                         alpha,
-                         beta);
+        _compiledKernel->launch(handle.getStream(),
+                                xBuffer.ptr,
+                                activationOutBuffer.ptr,
+                                estMeanBuffer.ptr,
+                                invVarianceBuffer.ptr,
+                                scaleBuffer.ptr,
+                                biasBuffer.ptr,
+                                _channels,
+                                _inCstride,
+                                _batchCount,
+                                _cStride,
+                                _hwStride,
+                                _batchStride,
+                                _activationAlpha,
+                                _activationBeta);
     }
     else
     {
         auto yBuffer = hip_kernel_utils::findDeviceBuffer(
             _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
-        hipKernel.launch(handle.getStream(),
-                         xBuffer.ptr,
-                         yBuffer.ptr,
-                         estMeanBuffer.ptr,
-                         invVarianceBuffer.ptr,
-                         scaleBuffer.ptr,
-                         biasBuffer.ptr,
-                         static_cast<unsigned int>(c),
-                         inCstride,
-                         static_cast<unsigned int>(n),
-                         static_cast<unsigned int>(cStride),
-                         hwStride,
-                         batchStride,
-                         alpha,
-                         beta);
+        _compiledKernel->launch(handle.getStream(),
+                                xBuffer.ptr,
+                                yBuffer.ptr,
+                                estMeanBuffer.ptr,
+                                invVarianceBuffer.ptr,
+                                scaleBuffer.ptr,
+                                biasBuffer.ptr,
+                                _channels,
+                                _inCstride,
+                                _batchCount,
+                                _cStride,
+                                _hwStride,
+                                _batchStride,
+                                _activationAlpha,
+                                _activationBeta);
     }
 }
 

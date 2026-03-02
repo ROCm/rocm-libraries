@@ -5,10 +5,14 @@
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
-#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
+#include <hipdnn_plugin_sdk/interfaces/ICompilablePlan.hpp>
 
 #include "HipKernelHandle.hpp"
 #include "HipKernelUtils.hpp"
+#include "hip/HipKernel.hpp"
+#include "hip/HipProgram.hpp"
+
+#include <optional>
 
 namespace hip_kernel_provider
 {
@@ -55,7 +59,7 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
-class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
+class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::ICompilablePlan<HipKernelHandle>
 {
 public:
     explicit BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams);
@@ -66,6 +70,8 @@ public:
     BatchnormFwdInferencePlan(BatchnormFwdInferencePlan&&) = default;
     BatchnormFwdInferencePlan& operator=(BatchnormFwdInferencePlan&&) = default;
 
+    void compile(const hipDeviceProp_t& deviceProperties) override;
+
     size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
 
     void execute(const HipKernelHandle& handle,
@@ -75,6 +81,20 @@ public:
 
 private:
     BatchnormFwdInferenceParams _inferenceParams;
+
+    // Populated by compile()
+    std::optional<HipProgram> _compiledProgram;
+    std::optional<HipKernel> _compiledKernel;
+
+    // Kernel launch parameters computed during compile()
+    unsigned int _channels = 0;
+    unsigned int _inCstride = 0;
+    unsigned int _batchCount = 0;
+    unsigned int _cStride = 0;
+    unsigned int _hwStride = 0;
+    unsigned int _batchStride = 0;
+    float _activationAlpha = 0.0f;
+    float _activationBeta = 0.0f;
 };
 
 }

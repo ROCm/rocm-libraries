@@ -20,7 +20,7 @@ public:
     void setSharedMemBytes(unsigned int bytes);
 
     template <typename... Args>
-    void launch(hipStream_t stream, Args&&... args)
+    void launch(hipStream_t stream, Args&&... args) const
     {
         // Pack arguments into void* array
         std::array<void*, sizeof...(Args)> kernelParams

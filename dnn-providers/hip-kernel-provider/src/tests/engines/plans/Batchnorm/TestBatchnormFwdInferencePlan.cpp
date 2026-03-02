@@ -6,6 +6,8 @@
 #include "engines/plans/BatchnormFwdInferencePlan.hpp"
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/interfaces/ICompilablePlan.hpp>
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hip_kernel_provider;
@@ -89,4 +91,49 @@ TEST(TestBatchnormFwdInferenceParams, FusedParamsHasActivation)
     EXPECT_NE(params.invVariance(), nullptr);
     EXPECT_TRUE(params.optActivation().has_value());
     EXPECT_NE(params.activationOut(), nullptr);
+}
+
+// ============================================================================
+// BatchnormFwdInferencePlan - ICompilablePlan interface
+// ============================================================================
+
+namespace
+{
+
+BatchnormFwdInferencePlan createPlanFromSingleNodeGraph()
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
+                                                              builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
+    return BatchnormFwdInferencePlan(std::move(params));
+}
+
+} // namespace
+
+TEST(TestBatchnormFwdInferencePlan, ImplementsICompilablePlan)
+{
+    auto plan = createPlanFromSingleNodeGraph();
+    auto* asIPlan = static_cast<hipdnn_plugin_sdk::IPlan<HipKernelHandle>*>(&plan);
+    auto* asCompilable
+        = dynamic_cast<hipdnn_plugin_sdk::ICompilablePlan<HipKernelHandle>*>(asIPlan);
+    EXPECT_NE(asCompilable, nullptr);
+}
+
+TEST(TestBatchnormFwdInferencePlan, ExecuteWithoutCompileThrows)
+{
+    auto plan = createPlanFromSingleNodeGraph();
+    HipKernelHandle handle;
+    EXPECT_THROW(plan.execute(handle, nullptr, 0), std::runtime_error);
+}
+
+TEST(TestBatchnormFwdInferencePlan, GetWorkspaceSizeReturnsZero)
+{
+    auto plan = createPlanFromSingleNodeGraph();
+    HipKernelHandle handle;
+    EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }

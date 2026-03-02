@@ -2,14 +2,17 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipKernelEngine.hpp"
+#include "hip/HipUtils.hpp"
 #include "hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
+#include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/interfaces/ICompilablePlan.hpp>
 
 namespace hip_kernel_provider
 {
@@ -152,6 +155,23 @@ void HipKernelEngine::initializeExecutionContext(
         if(planBuilder->isApplicable(handle, opGraph))
         {
             planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
+
+            // If the plan implements ICompilablePlan, compile it now
+            if(executionContext.hasValidPlan())
+            {
+                auto* compilablePlan
+                    = dynamic_cast<hipdnn_plugin_sdk::ICompilablePlan<HipKernelHandle>*>(
+                        &executionContext.plan());
+                if(compilablePlan != nullptr)
+                {
+                    int device = 0;
+                    HIP_CHECK(hipGetDevice(&device));
+                    hipDeviceProp_t deviceProps;
+                    HIP_CHECK(hipGetDeviceProperties(&deviceProps, device));
+                    compilablePlan->compile(deviceProps);
+                }
+            }
+
             break;
         }
     }
