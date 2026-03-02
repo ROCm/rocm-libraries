@@ -1,0 +1,113 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include "Node.hpp"
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
+
+namespace hipdnn_frontend::graph
+{
+class BlockScaleQuantizeNode : public BaseNode<BlockScaleQuantizeNode>
+{
+public:
+    BlockScaleQuantizeAttributes attributes;
+
+    BlockScaleQuantizeNode(BlockScaleQuantizeAttributes&& blockScaleQuantizeAttrs,
+                           const GraphAttributes& graphAttrs)
+        : BaseNode(graphAttrs)
+        , attributes(std::move(blockScaleQuantizeAttrs))
+    {
+    }
+
+    Error pre_validate_node() const override
+    {
+        // SECTION 1: Validate required tensor pointers
+        HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BlockScaleQuantizeNode missing x for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_y(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BlockScaleQuantizeNode missing y for pre-validation");
+
+        HIPDNN_RETURN_IF_FALSE(attributes.get_scale(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BlockScaleQuantizeNode missing scale for pre-validation");
+
+        // SECTION 2: Validate block_size if set
+        auto blockSize = attributes.get_block_size();
+        if(blockSize.has_value())
+        {
+            HIPDNN_RETURN_IF_FALSE(blockSize.value() > 0,
+                                   ErrorCode::INVALID_VALUE,
+                                   "BlockScaleQuantizeNode block_size must be positive, got "
+                                       + std::to_string(blockSize.value()));
+        }
+
+        // SECTION 3: Validate tensor dimensions (when set)
+        auto x = attributes.get_x();
+        auto y = attributes.get_y();
+
+        if(detail::areTensorDimensionsSet(x))
+        {
+            HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 1, "Input tensor (x)"));
+        }
+
+        // Quantize preserves shape -- output dims must match input if set
+        if(detail::areTensorDimensionsSet(x) && detail::areTensorDimensionsSet(y))
+        {
+            HIPDNN_CHECK_ERROR(
+                detail::validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    Error infer_properties_node() override
+    {
+        auto x = attributes.get_x();
+        auto y = attributes.get_y();
+
+        if(!x)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "BlockScaleQuantizeNode missing x for setting properties"};
+        }
+
+        if(!y)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "BlockScaleQuantizeNode missing y for setting properties"};
+        }
+
+        HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
+
+        if(y->get_dim().empty())
+        {
+            y->set_dim(x->get_dim());
+        }
+
+        if(y->get_stride().empty() && !x->get_stride().empty())
+        {
+            y->set_stride(x->get_stride());
+        }
+
+        return {};
+    }
+
+    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
+        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
+    {
+        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
+            builder,
+            attributes.get_name().c_str(),
+            toSdkType(attributes.compute_data_type),
+            hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes,
+            attributes.pack_attributes(builder).Union());
+    }
+};
+} // namespace hipdnn_frontend::graph
