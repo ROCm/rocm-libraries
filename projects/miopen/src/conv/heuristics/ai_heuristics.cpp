@@ -681,7 +681,8 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                                     const ExecutionContext& ctx,
                                     const std::string& device)
 {
-    const bool is3d = problem.Is3d();
+    const bool is3d = true; //problem.Is3d();
+    //Use 3D path also for 2D models
 
     // Check cache FIRST - avoids expensive model creation if we have cached results
     auto cached_result = GetCachedPrediction(problem, device, is3d);
@@ -717,7 +718,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         MIOPEN_LOG_I2("Evaluating TunaNet");
         std::vector<float> predictions = model->Forward(problem);
 
-        return ProcessAndCachePredictions(
+        return  ProcessAndCachePredictions(
             problem, device, false, predictions, model->metadata.solver_map);
     }
 }
@@ -757,6 +758,7 @@ public:
         // Use fdeep to run TunaNet3D inference
         const std::string model_path = Model3DPath(device_name);
         const auto model             = fdeep::load_model(model_path);
+        MIOPEN_LOG_I2("TunaNet3DModel: Loaded fdeep model from " << model_path << ".");
 
         // Convert features to fdeep tensor
         const auto input_tensor = fdeep::tensor(fdeep::tensor_shape(features.size()), features);
@@ -777,7 +779,7 @@ public:
     bool IsProblemSupported(const conv::ProblemDescription& problem,
                             const ExecutionContext& /*ctx*/) const override
     {
-        if(!problem.Is3d())
+        if(!problem.Is3d() & false)
         {
             return false;
         }
@@ -790,53 +792,104 @@ protected:
     {
         const bool isFwd = problem.GetDirection() == conv::Direction::Forward;
 
-        std::vector<float> features = {
-            // Input dimensions
-            static_cast<float>(isFwd ? problem.GetInChannels()
-                                     : problem.GetOutChannels()),                     // in_channels
-            static_cast<float>(isFwd ? problem.GetInDepth() : problem.GetOutDepth()), // in_d
-            static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
-            static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
+        std::vector<float> features = {};
+        if ( true ) //2d version as in the
+        {
+            features = {
+                // Input dimensions
+                static_cast<float>(isFwd ? problem.GetInChannels()
+                                        : problem.GetOutChannels()),                     // in_channels
+                static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
+                static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
 
-            // Output dimensions
-            static_cast<float>(isFwd ? problem.GetOutChannels()
-                                     : problem.GetInChannels()), // out_channels
-            static_cast<float>(isFwd ? problem.GetOutDepth() : problem.GetInDepth()),   // out_d
-            static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
-            static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
+                // Output dimensions
+                static_cast<float>(isFwd ? problem.GetOutChannels()
+                                        : problem.GetInChannels()), // out_channels
+                static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
+                static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
 
-            // Filter dimensions
-            static_cast<float>(problem.GetWeightsDepth()),  // fil_d
-            static_cast<float>(problem.GetWeightsHeight()), // fil_h
-            static_cast<float>(problem.GetWeightsWidth()),  // fil_w
+                // Filter dimensions
+                static_cast<float>(problem.GetWeightsHeight()), // fil_h
+                static_cast<float>(problem.GetWeightsWidth()),  // fil_w
 
-            // Padding
-            static_cast<float>(problem.GetPadD()), // pad_d
-            static_cast<float>(problem.GetPadH()), // pad_h
-            static_cast<float>(problem.GetPadW()), // pad_w
+                // Padding
+                static_cast<float>(problem.GetPadH()), // pad_h
+                static_cast<float>(problem.GetPadW()), // pad_w
 
-            // Stride
-            static_cast<float>(problem.GetKernelStrideD()), // stride_d
-            static_cast<float>(problem.GetKernelStrideH()), // stride_h
-            static_cast<float>(problem.GetKernelStrideW()), // stride_w
+                // Stride
+                static_cast<float>(problem.GetKernelStrideH()), // stride_h
+                static_cast<float>(problem.GetKernelStrideW()), // stride_w
 
-            // Batch size
-            static_cast<float>(problem.GetOutBatchSize()), // batchsize
+                // Dilation
+                static_cast<float>(problem.GetDilationH()), // dilation_h
+                static_cast<float>(problem.GetDilationW()), // dilation_w
 
-            // Layout encodings
-            static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())),       // in_layout
-            static_cast<float>(metadata.EncodeFilLayout(problem.GetWeightsLayout())), // fil_layout
-            static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())),     // out_layout
+                // Batch size
+                static_cast<float>(problem.GetOutBatchSize()), // batchsize
 
-            // Precision encoding
-            static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
+                // Layout encodings
+                static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())),       // in_layout
+                static_cast<float>(metadata.EncodeFilLayout(problem.GetWeightsLayout())), // fil_layout
+                static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())),     // out_layout
 
-            // Direction encoding
-            static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
+                // Precision encoding
+                static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
 
-            // Group count
-            static_cast<float>(problem.GetGroupCount()), // group_count
-        };
+                // Direction encoding
+                static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
+
+                // Group count
+                static_cast<float>(problem.GetGroupCount()), // group_count
+            };
+        } else {
+            features = {
+                // Input dimensions
+                static_cast<float>(isFwd ? problem.GetInChannels()
+                                        : problem.GetOutChannels()),                     // in_channels
+                static_cast<float>(isFwd ? problem.GetInDepth() : problem.GetOutDepth()), // in_d
+                static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
+                static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
+
+                // Output dimensions
+                static_cast<float>(isFwd ? problem.GetOutChannels()
+                                        : problem.GetInChannels()), // out_channels
+                static_cast<float>(isFwd ? problem.GetOutDepth() : problem.GetInDepth()),   // out_d
+                static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
+                static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
+
+                // Filter dimensions
+                static_cast<float>(problem.GetWeightsDepth()),  // fil_d
+                static_cast<float>(problem.GetWeightsHeight()), // fil_h
+                static_cast<float>(problem.GetWeightsWidth()),  // fil_w
+
+                // Padding
+                static_cast<float>(problem.GetPadD()), // pad_d
+                static_cast<float>(problem.GetPadH()), // pad_h
+                static_cast<float>(problem.GetPadW()), // pad_w
+
+                // Stride
+                static_cast<float>(problem.GetKernelStrideD()), // stride_d
+                static_cast<float>(problem.GetKernelStrideH()), // stride_h
+                static_cast<float>(problem.GetKernelStrideW()), // stride_w
+
+                // Batch size
+                static_cast<float>(problem.GetOutBatchSize()), // batchsize
+
+                // Layout encodings
+                static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())),       // in_layout
+                static_cast<float>(metadata.EncodeFilLayout(problem.GetWeightsLayout())), // fil_layout
+                static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())),     // out_layout
+
+                // Precision encoding
+                static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
+
+                // Direction encoding
+                static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
+
+                // Group count
+                static_cast<float>(problem.GetGroupCount()), // group_count
+            };
+        }
 
         MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
         return features;
@@ -844,7 +897,8 @@ protected:
 
     static std::string Model3DPath(const std::string& device)
     {
-        const auto file_path = GetSystemDbPath() / (device + "_3d.tn.model");
+        // const auto file_path = GetSystemDbPath() / (device + "_3d.tn.model");
+        const auto file_path = GetSystemDbPath() / (device + ".tn.model");
         if(!fs::exists(file_path))
         {
             MIOPEN_THROW(miopenStatusInternalError,

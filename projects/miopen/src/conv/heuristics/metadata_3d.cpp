@@ -38,19 +38,22 @@ namespace conv3d {
 // Helper function to safely load JSON with error handling
 static std::optional<nlohmann::json> LoadJSONSafe(const std::string& arch)
 {
+
+    const std::string archh = "gfx942";
+    MIOPEN_LOG_I2("Override: " << arch << "->" << archh);
     try
     {
-        const auto file_path = GetSystemDbPath() / (arch + "_metadata.tn.model");
+        const auto file_path = GetSystemDbPath() / (archh + "_metadata.tn.model");
         return common::LoadJSON(file_path);
     }
     catch(const std::exception& e)
     {
-        MIOPEN_LOG_I2("Failed to load JSON for " << arch << ": " << e.what());
+        MIOPEN_LOG_I2("Failed to load JSON for " << archh << ": " << e.what());
         return std::nullopt;
     }
     catch(...)
     {
-        MIOPEN_LOG_I2("Failed to load JSON for " << arch << ": unknown error");
+        MIOPEN_LOG_I2("Failed to load JSON for " << archh << ": unknown error");
         return std::nullopt;
     }
 }
