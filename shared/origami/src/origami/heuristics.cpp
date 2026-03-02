@@ -292,7 +292,7 @@ void heuristics_database_t::initialize_defaults() {
 
     // BF16 NN configurations
     std::vector<cms_config> bf16_nn_configs = {
-        {128, 256, 64, 1.0 / 1.10},
+        {128, 256, 64, 1.0 / 1.05},
         {160, 256, 64, 1.0 / 1.10},
         {192, 256, 64, 1.0 / 1.05},
         {208, 256, 64, 1.0 / 1.10},
@@ -317,7 +317,6 @@ void heuristics_database_t::initialize_defaults() {
     std::vector<cms_config> bf16_tn_configs = {
         {160, 256, 64, 1.0 / 1.10},
         {192, 256, 64, 1.0 / 1.10},
-        {192, 320, 64, 1.0 / 1.10},
         {224, 256, 64, 1.0 / 1.05},
         {256, 96, 64, 1.0 / 1.10},
         {256, 160, 64, 1.0 / 1.10},
