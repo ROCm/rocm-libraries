@@ -68,7 +68,7 @@ if(BUILD_THREAD_SANITIZER)
     # Define sanitizer flags as variables for reuse
     set(SANITIZER_COMPILE_FLAGS -fsanitize=thread -fno-omit-frame-pointer)
 
-    set(SANITIZER_LINK_FLAGS -fsanitize=thread -fno-omit-frame-pointer)
+    set(SANITIZER_LINK_FLAGS -fsanitize=thread -fno-omit-frame-pointer -shared-libsan)
 
     # Apply sanitizer flags globally (can be overridden per target)
     add_compile_options(${SANITIZER_COMPILE_FLAGS})
