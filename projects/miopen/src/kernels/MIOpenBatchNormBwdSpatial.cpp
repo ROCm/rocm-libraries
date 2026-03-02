@@ -652,7 +652,21 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                                              INHW);
             }
 
-            // This synchronization is not required but somehow the kernel runs faster with it
+            // Synchronization is not required for correctness but enhances performance.
+            //
+            // Loop is memory bound as it iterates across all the batches in the tensor,
+            // and has memory access strides of CHW size once all the elements in a single
+            // sample have been processed, which may be large.
+            //
+            // `__syncthreads()` helps to coalesce memory accesses as each work-item accesses
+            // adjacent elements to its neighbours on the same loop iteration, leading to contiguous
+            // memory access across all the waves in a workgroup. By keeping all the waves on the
+            // same loop iteration it prevents waves on different loop iterations from stalling
+            // as they wait for memory.
+            //
+            // This can be seen by profiling the kernel with rocprofv3 and comparing the
+            // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
+            // compute viewer and seeing the impact on occupancy.
             __syncthreads();
 
             if(l < lessout)

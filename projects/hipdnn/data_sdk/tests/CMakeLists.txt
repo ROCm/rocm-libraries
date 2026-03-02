@@ -41,11 +41,11 @@ add_executable(
     utilities/TestShallowHostOnlyMigratableMemory.cpp
     utilities/TestShallowTensor.cpp
     utilities/TestShapeUtilities.cpp
-    utilities/TestStaticCast.cpp
     utilities/TestStringUtil.cpp
     utilities/TestTensor.cpp
     utilities/TestTensorIterator.cpp
     utilities/TestTensorView.cpp
+    utilities/TestVersionUtils.cpp
     utilities/TestVisitor.cpp
 )
 

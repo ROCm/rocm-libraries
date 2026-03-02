@@ -229,8 +229,7 @@ struct verify_rnn_api_base
         std::stringstream ss{};
         ss << "./bin/MIOpenDriver rnn_seq ";
 
-        ss << " -F 0 "
-           << " -m ";
+        ss << " -F 0 " << " -m ";
 
         switch(rnnDesc.rnnMode)
         {
@@ -364,7 +363,7 @@ struct rnn_ref
                           std::vector<T>& workSpace,
                           bool nohx) const = 0;
 
-    virtual ~rnn_ref() {};
+    virtual ~rnn_ref(){};
 };
 
 template <class T>

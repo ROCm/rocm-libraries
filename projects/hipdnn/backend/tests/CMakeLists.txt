@@ -19,6 +19,7 @@ verifyamdrocmcompiler(${CMAKE_HIP_COMPILER} "HIP")
 
 set(TEST_PLUGIN1_NAME "hipdnn_test_plugin1")
 set(TEST_PLUGIN2_NAME "hipdnn_test_plugin2")
+set(TEST_NO_API_VERSION_PLUGIN_NAME "hipdnn_test_no_api_version_plugin_name")
 set(TEST_ENGINE_PLUGIN1_NAME "hipdnn_test_engine_plugin1")
 
 add_executable(
@@ -30,6 +31,10 @@ add_executable(
     descriptors/TestEngineHeuristicDescriptor.cpp
     descriptors/TestExecutionPlanDescriptor.cpp
     descriptors/TestGraphDescriptor.cpp
+    descriptors/TestTensorDescriptor.cpp
+    descriptors/TestConvolutionFwdOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorOps.cpp
+    descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp
@@ -39,6 +44,7 @@ add_executable(
     TestHandle.cpp
     TestHelpers.cpp
     TestBackendLogger.cpp
+    TestPlatformUtils.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
     utilities/TestEngineOrdering.cpp
@@ -58,6 +64,7 @@ target_compile_definitions(
     hipdnn_backend_tests
     PRIVATE HIPDNN_BACKEND_COMPILATION TEST_PLUGIN1_NAME="${TEST_PLUGIN1_NAME}"
             TEST_PLUGIN2_NAME="${TEST_PLUGIN2_NAME}"
+            TEST_NO_API_VERSION_PLUGIN_NAME="${TEST_NO_API_VERSION_PLUGIN_NAME}"
             TEST_ENGINE_PLUGIN1_NAME="${TEST_ENGINE_PLUGIN1_NAME}"
 )
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -105,6 +112,28 @@ set_target_properties(
 )
 
 install(TARGETS ${TEST_PLUGIN2_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+        RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+)
+
+# libhipdnn_test_no_api_version_plugin.so or libhipdnn_test_no_api_version_plugin.dll (used by TestPlugin.cpp)
+add_library(${TEST_NO_API_VERSION_PLUGIN_NAME} SHARED plugins/PluginApiImpl.cpp plugins/NoApiVersionPlugin.cpp)
+target_link_libraries(${TEST_NO_API_VERSION_PLUGIN_NAME} PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk)
+set_target_properties(${TEST_NO_API_VERSION_PLUGIN_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_compile_options(${TEST_NO_API_VERSION_PLUGIN_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_definitions(${TEST_NO_API_VERSION_PLUGIN_NAME} PRIVATE HIPDNN_COMPONENT_NAME="noApiVersionPlugin" HIPDNN_API_VERSION_UNDEFINED)
+clang_tidy_check(${TEST_NO_API_VERSION_PLUGIN_NAME})
+add_dependencies(hipdnn_backend_tests ${TEST_NO_API_VERSION_PLUGIN_NAME})
+
+set_target_properties(
+    ${TEST_NO_API_VERSION_PLUGIN_NAME}
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        THEROCK_INSTALL_RPATH_ORIGIN "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+)
+
+install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 

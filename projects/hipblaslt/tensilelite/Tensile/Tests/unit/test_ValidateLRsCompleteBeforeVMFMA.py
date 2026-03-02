@@ -25,13 +25,16 @@
 from typing import Any, Optional
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CMSValidator import verify_lrs_finished_before_vmfma, index_for_force_unroll_sub_iter, lr_needed_by_mfma
+from Tensile.Components.CMSValidator import (
+    add_local_read_constraints,
+    index_for_force_unroll_sub_iter, lr_needed_by_mfma,
+)
 from cms_validation_base import CMSValidationTestBase
 from Tensile.Common import IsaVersion
 
+
 class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
     def test_simple_LR0(self):
         """
@@ -152,9 +155,9 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         ]
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
-    def test_simple_LR1_never_guaranteed(self):
+    def test_simple_LR1_guaranteed_too_late(self):
         """
-        Case where LR1 is finished before the end of loop.
+        Case where LR1 is guaranteed too late.
         """
         assert self.num_vmfma == 8
 
@@ -169,7 +172,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         ]
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=1."
+            "LRA1 @ idx=4 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=1."
         )
 
     def test_complex_LR1(self):
@@ -327,7 +330,7 @@ class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):
         }
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
-            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=3."
+            "LRA1 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3."
         )
 
         # 3. SwaitCnt after all LRs
@@ -361,8 +364,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
         kernel_updates.update({"UseF32XEmulation": True, "ISA": IsaVersion(9,5,0), "DepthU": 32, "ForceUnrollSubIter": True})
         super().setUp(kernel_updates)
 
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
     def test_LR0s_pass(self):
         """
@@ -436,8 +438,7 @@ class TestValidateLRsCompleteBeforeVMFMA_tf32(CMSValidationTestBase):
         self.validate(optSchedule, syncCode, 1, None, None, 0, None)
 
 class TestValidateLRsCompleteBeforeVMFMA_MfmaReorder(CMSValidationTestBase):
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
     def test_simple_bf16(self):
         """
@@ -634,8 +635,7 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None):
         super().setUp({"ForceUnrollSubIter": True, "MIWaveTileA": 4, "MIWaveTileB": 4, "DepthU": 32})
 
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_lrs_finished_before_vmfma(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints]
 
 
     def test_bf16_pass(self):
@@ -672,7 +672,7 @@ class TestValidateLRsCompleteBeforeVMFMA_ForceUnrollSubIter(CMSValidationTestBas
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="For LR0s"),
         ]
 
-        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 but only guaranteed @ idx=3.")
+        self.validate(optSchedule, syncCode, 1, None, None, 0, "LRA3 @ idx=7 issued too late, must be guaranteed before MFMA @ idx=0 (of next iteration) but only guaranteed @ idx=3.")
 
 
 class TestIndexForForceUnrollSubIter:
