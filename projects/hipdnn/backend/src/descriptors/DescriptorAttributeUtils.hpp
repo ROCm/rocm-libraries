@@ -6,7 +6,7 @@
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnDataType.h"
 #include "HipdnnException.hpp"
-#include "descriptors/TensorDescriptor.hpp"
+#include "TensorDescriptor.hpp"
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>

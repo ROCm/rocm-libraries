@@ -63,7 +63,7 @@ constexpr std::array<int64_t, 2> K_AUTO_DILATION = {1, 1};
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationConvolutionWrwDescriptorLowering : public ::testing::Test
+class IntegrationConvolutionWgradDescriptorLowering : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -96,7 +96,7 @@ protected:
 // via build_operation_graph_via_descriptors, retrieves the serialized graph,
 // and verifies all tensor and operation attributes match the values set
 // in the frontend.
-TEST_F(IntegrationConvolutionWrwDescriptorLowering, ConvWgradGraphRoundTrip)
+TEST_F(IntegrationConvolutionWgradDescriptorLowering, ConvWgradGraphRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
     graph->set_name("TestConvWgradGraph")
@@ -210,7 +210,7 @@ TEST_F(IntegrationConvolutionWrwDescriptorLowering, ConvWgradGraphRoundTrip)
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
 // through the lowering round-trip.
-TEST_F(IntegrationConvolutionWrwDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
+TEST_F(IntegrationConvolutionWgradDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
     graph->set_name("AutoUidWgradGraph")
