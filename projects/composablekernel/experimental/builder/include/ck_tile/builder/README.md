@@ -177,7 +177,9 @@ concept TensorOperatorDescriptor = requires(T t) {
 **Supported Operations:**
 - `PASS_THROUGH`: No operation (identity)
 - `SCALE`: Multiply by a scalar
+- `BILINEAR`: Bilinear interpolation (scale-add with an auxiliary tensor)
 - `CLAMP`: Clamp values to a range
+- `ADD_CLAMP`: Element-wise addition followed by clamp
 - `BIAS_BNORM_CLAMP`: Bias addition + batch normalization + clamp
 - `SCALEADD_SCALEADD_RELU`: Fused scale-add operations + ReLU activation
 
