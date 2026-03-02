@@ -105,7 +105,8 @@ namespace TensileLite
                               void const*             resPtr,
                               size_t                  maxElements,
                               bool                    isgpu,
-                              size_t                  validationStride);
+                              size_t                  validationStride,
+                              double                  threshold);
 
             template <typename ValidType>
             bool checkResultsTyped(TensorDescriptor const& tensor,
@@ -113,7 +114,8 @@ namespace TensileLite
                                    ValidType const*        result,
                                    size_t                  maxElement,
                                    bool                    isgpu,
-                                   size_t                  validationStride);
+                                   size_t                  validationStride,
+                                   double                  threshold);
 
             void printTensors(ContractionProblemGemm const& problem,
                               ContractionInputs const&      reference,
