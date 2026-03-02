@@ -33,9 +33,11 @@ void add_device_operation_instances(std::vector<std::unique_ptr<BaseOp>>& op_ins
         else
         {
             static_assert(std::is_base_of_v<BaseOp, NewOpInstance>,
-                          "NewOpInstance must derive from BaseOp");
+                          "add_device_operation_instances: NewOpInstance must derive from BaseOp");
             static_assert(std::is_default_constructible_v<NewOpInstance>,
-                          "NewOpInstance must be default-constructible");
+                          "add_device_operation_instances: NewOpInstance must be default-constructible; "
+                          "registration default-constructs instances and ignores tuple values, so store "
+                          "configuration in template parameters instead of constructor arguments.");
             op_instances.push_back(std::make_unique<NewOpInstance>());
         }
     });
