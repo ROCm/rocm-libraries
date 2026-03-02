@@ -1001,7 +1001,6 @@ def _get_schedule_256x96x64_16bit_DPLB(kernel, useLDSTr, TLDS):
     numMfma = 48
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     opt1.disableValidationPass(cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS, "GR validation is not yet supported for DtlPlusLdsBuf")
-    opt1.disableValidationPass(cmsv.ValidatorPass.ADD_GR_FINISH_BEFORE_LR_CONSTRAINTS, "GR validation is not yet supported for DtlPlusLdsBuf")
     return True, opt1
 
 @RegisterSchedule(
