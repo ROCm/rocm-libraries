@@ -175,8 +175,8 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
             {
                 // Full global offset (original code path for ps1, ps16, etc.)
                 const index_t physical_page = physical_pages[k0];
-                kv_offset_vec[k0] = static_cast<long_index_t>(physical_page) * stride_page_block +
-                                    static_cast<long_index_t>(token_idx_in_page) * stride_token;
+                kv_offset_vec[k0] =
+                    physical_page * stride_page_block + token_idx_in_page * stride_token;
             }
         });
     }
@@ -219,16 +219,14 @@ CK_TILE_HOST_DEVICE void kv_offset_array_transform(const IndexArrayType& physica
                 if constexpr(kKVMemoryLayout ==
                              BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT)
                 {
-                    const long_index_t token_offset =
-                        static_cast<long_index_t>((token_idx_in_page / kVectorSize) *
-                                                  (stride_token * kVectorSize)) +
+                    const index_t token_offset =
+                        (token_idx_in_page / kVectorSize) * (stride_token * kVectorSize) +
                         (token_idx_in_page % kVectorSize);
                     kv_offset_vec[k0] = page_base_offset + token_offset;
                 }
                 else
                 {
-                    kv_offset_vec[k0] = page_base_offset +
-                                        static_cast<long_index_t>(token_idx_in_page) * stride_token;
+                    kv_offset_vec[k0] = page_base_offset + token_idx_in_page * stride_token;
                 }
             }
         });
@@ -631,10 +629,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 // resulting SRD lands in SGPRs (required by buffer load instructions).
                 physical_page        = __builtin_amdgcn_readfirstlane(physical_page);
                 const auto* base_ptr = k_dram_block_window.get_bottom_tensor_view().buf_.p_data_;
-                const auto* page_ptr = reinterpret_cast<const KDataType*>(
-                    reinterpret_cast<const char*>(base_ptr) +
-                    static_cast<long_index_t>(physical_page) * page_stride_k * sizeof(KDataType));
-                window.set_bottom_tensor_view_data_ptr(const_cast<KDataType*>(page_ptr));
+                const auto* page_ptr =
+                    base_ptr + static_cast<long_index_t>(physical_page) * page_stride_k;
+                window.set_bottom_tensor_view_data_ptr(page_ptr);
                 window.init_raw();
             }
         };
@@ -645,10 +642,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
                 physical_page = __builtin_amdgcn_readfirstlane(physical_page);
                 const auto* base_ptr =
                     v_dram_block_window_tmp.get_bottom_tensor_view().buf_.p_data_;
-                const auto* page_ptr = reinterpret_cast<const VDataType*>(
-                    reinterpret_cast<const char*>(base_ptr) +
-                    static_cast<long_index_t>(physical_page) * page_stride_v * sizeof(VDataType));
-                window.set_bottom_tensor_view_data_ptr(const_cast<VDataType*>(page_ptr));
+                const auto* page_ptr =
+                    base_ptr + static_cast<long_index_t>(physical_page) * page_stride_v;
+                window.set_bottom_tensor_view_data_ptr(page_ptr);
                 window.init_raw();
             }
         };
