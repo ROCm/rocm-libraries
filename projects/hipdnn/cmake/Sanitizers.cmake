@@ -8,6 +8,23 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_THREAD_SANITIZER)
     )
 endif()
 
+# Standalone sanitizer builds require Linux-specific compiler runtime libraries and flags.
+# See: https://github.com/ROCm/rocm-libraries/issues/5022
+if(BUILD_ADDRESS_SANITIZER AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "BUILD_ADDRESS_SANITIZER is only supported on Linux. "
+                        "The standalone sanitizer build flow requires Linux-specific "
+                        "compiler runtime libraries and flags."
+    )
+endif()
+
+if(BUILD_THREAD_SANITIZER AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "BUILD_THREAD_SANITIZER is only supported on Linux. "
+                        "Thread Sanitizer is not available on Windows and the standalone "
+                        "sanitizer build flow requires Linux-specific compiler runtime "
+                        "libraries and flags."
+    )
+endif()
+
 # Enable Address Sanitizer and set linker flags. This configuration is for standalone builds outside
 # of TheRock
 if(BUILD_ADDRESS_SANITIZER)
