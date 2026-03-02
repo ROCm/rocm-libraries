@@ -595,6 +595,16 @@ void hipsparseInitIndex(I* x, int nnz, int start, int end)
 {
     int range = end - start;
 
+    if(nnz >= range)
+    {
+        for(int i = 0; i < nnz; ++i)
+        {
+            x[i] = start + i;
+        }
+
+        return;
+    }
+
     // Create sequential array and shuffle first nnz elements
     std::vector<int> indices(range);
     for(int i = 0; i < range; ++i)
