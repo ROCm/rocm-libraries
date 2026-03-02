@@ -888,50 +888,6 @@ TYPED_TEST(StorageFloatTypes, ExplicitConversionToDouble)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(d), 2.0f));
 }
 
-// ============================================================================
-// Arithmetic Operator Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, Addition)
-{
-    using T = TypeParam;
-
-    T a(1.0f);
-    T b(2.0f);
-    T c = a + b;
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 3.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, Subtraction)
-{
-    using T = TypeParam;
-
-    T a(4.0f);
-    T b(2.0f);
-    T c = a - b;
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 2.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, Multiplication)
-{
-    using T = TypeParam;
-
-    T a(2.0f);
-    T b(4.0f);
-    T c = a * b;
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 8.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, Division)
-{
-    using T = TypeParam;
-
-    T a(8.0f);
-    T b(2.0f);
-    T c = a / b;
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 4.0f));
-}
-
 TYPED_TEST(StorageFloatTypes, UnaryNegation)
 {
     using T = TypeParam;
@@ -953,46 +909,6 @@ TYPED_TEST(StorageFloatTypes, UnaryPlus)
     T a(4.0f);
     T b = +a;
     EXPECT_EQ(Traits::to_bits(a), Traits::to_bits(b));
-}
-
-// ============================================================================
-// Compound Assignment Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, CompoundAddition)
-{
-    using T = TypeParam;
-
-    T a(1.0f);
-    a += T(2.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 3.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, CompoundSubtraction)
-{
-    using T = TypeParam;
-
-    T a(4.0f);
-    a -= T(2.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 2.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, CompoundMultiplication)
-{
-    using T = TypeParam;
-
-    T a(2.0f);
-    a *= T(4.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 8.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, CompoundDivision)
-{
-    using T = TypeParam;
-
-    T a(8.0f);
-    a /= T(2.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 4.0f));
 }
 
 // ============================================================================

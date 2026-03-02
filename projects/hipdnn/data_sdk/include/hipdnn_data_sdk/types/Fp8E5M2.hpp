@@ -329,51 +329,11 @@ struct fp8_e5m2
         return *this;
     }
 
-    // Arithmetic operators (compute in float, return fp8_e5m2)
-    friend fp8_e5m2 operator+(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return fp8_e5m2(static_cast<float>(a) + static_cast<float>(b));
-    }
-
-    friend fp8_e5m2 operator-(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return fp8_e5m2(static_cast<float>(a) - static_cast<float>(b));
-    }
-
-    friend fp8_e5m2 operator*(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return fp8_e5m2(static_cast<float>(a) * static_cast<float>(b));
-    }
-
-    friend fp8_e5m2 operator/(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return fp8_e5m2(static_cast<float>(a) / static_cast<float>(b));
-    }
-
-    // Compound assignment operators
-    fp8_e5m2& operator+=(fp8_e5m2 other) noexcept
-    {
-        *this = *this + other;
-        return *this;
-    }
-
-    fp8_e5m2& operator-=(fp8_e5m2 other) noexcept
-    {
-        *this = *this - other;
-        return *this;
-    }
-
-    fp8_e5m2& operator*=(fp8_e5m2 other) noexcept
-    {
-        *this = *this * other;
-        return *this;
-    }
-
-    fp8_e5m2& operator/=(fp8_e5m2 other) noexcept
-    {
-        *this = *this / other;
-        return *this;
-    }
+    // Deleted compound assignment operators - FP8 types are storage-only
+    fp8_e5m2& operator+=(fp8_e5m2) = delete;
+    fp8_e5m2& operator-=(fp8_e5m2) = delete;
+    fp8_e5m2& operator*=(fp8_e5m2) = delete;
+    fp8_e5m2& operator/=(fp8_e5m2) = delete;
 
     // Comparison operators (compare via float conversion)
     friend bool operator==(fp8_e5m2 a, fp8_e5m2 b) noexcept
