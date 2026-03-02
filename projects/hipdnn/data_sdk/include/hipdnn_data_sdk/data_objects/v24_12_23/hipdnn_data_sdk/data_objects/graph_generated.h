@@ -17,7 +17,6 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 24 &&
 #include "batchnorm_backward_attributes_generated.h"
 #include "batchnorm_inference_attributes_generated.h"
 #include "batchnorm_inference_attributes_variance_ext_generated.h"
-#include "block_scale_quantize_attributes_generated.h"
 #include "convolution_bwd_attributes_generated.h"
 #include "convolution_fwd_attributes_generated.h"
 #include "convolution_wrw_attributes_generated.h"
@@ -26,6 +25,7 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 24 &&
 #include "matmul_attributes_generated.h"
 #include "pointwise_attributes_generated.h"
 #include "rmsnorm_attributes_generated.h"
+#include "sdpa_attributes_generated.h"
 #include "tensor_attributes_generated.h"
 
 namespace hipdnn_data_sdk {
@@ -55,11 +55,11 @@ enum class NodeAttributes : uint8_t {
   ConvolutionWrwAttributes = 7,
   BatchnormInferenceAttributesVarianceExt = 8,
   MatmulAttributes = 9,
-  LayernormAttributes = 10,
-  RMSNormAttributes = 11,
-  BlockScaleQuantizeAttributes = 12,
+  RMSNormAttributes = 10,
+  LayernormAttributes = 11,
+  SdpaAttributes = 12,
   MIN = NONE,
-  MAX = BlockScaleQuantizeAttributes
+  MAX = SdpaAttributes
 };
 
 inline const NodeAttributes (&EnumValuesNodeAttributes())[13] {
@@ -74,9 +74,9 @@ inline const NodeAttributes (&EnumValuesNodeAttributes())[13] {
     NodeAttributes::ConvolutionWrwAttributes,
     NodeAttributes::BatchnormInferenceAttributesVarianceExt,
     NodeAttributes::MatmulAttributes,
-    NodeAttributes::LayernormAttributes,
     NodeAttributes::RMSNormAttributes,
-    NodeAttributes::BlockScaleQuantizeAttributes
+    NodeAttributes::LayernormAttributes,
+    NodeAttributes::SdpaAttributes
   };
   return values;
 }
@@ -93,16 +93,16 @@ inline const char * const *EnumNamesNodeAttributes() {
     "ConvolutionWrwAttributes",
     "BatchnormInferenceAttributesVarianceExt",
     "MatmulAttributes",
-    "LayernormAttributes",
     "RMSNormAttributes",
-    "BlockScaleQuantizeAttributes",
+    "LayernormAttributes",
+    "SdpaAttributes",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameNodeAttributes(NodeAttributes e) {
-  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::BlockScaleQuantizeAttributes)) return "";
+  if (::flatbuffers::IsOutRange(e, NodeAttributes::NONE, NodeAttributes::SdpaAttributes)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesNodeAttributes()[index];
 }
@@ -147,16 +147,16 @@ template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::MatmulAttr
   static const NodeAttributes enum_value = NodeAttributes::MatmulAttributes;
 };
 
-template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::LayernormAttributes> {
-  static const NodeAttributes enum_value = NodeAttributes::LayernormAttributes;
-};
-
 template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::RMSNormAttributes> {
   static const NodeAttributes enum_value = NodeAttributes::RMSNormAttributes;
 };
 
-template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes> {
-  static const NodeAttributes enum_value = NodeAttributes::BlockScaleQuantizeAttributes;
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::LayernormAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::LayernormAttributes;
+};
+
+template<> struct NodeAttributesTraits<hipdnn_data_sdk::data_objects::SdpaAttributes> {
+  static const NodeAttributes enum_value = NodeAttributes::SdpaAttributes;
 };
 
 template<typename T> struct NodeAttributesUnionTraits {
@@ -199,16 +199,16 @@ template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::Matmu
   static const NodeAttributes enum_value = NodeAttributes::MatmulAttributes;
 };
 
-template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::LayernormAttributesT> {
-  static const NodeAttributes enum_value = NodeAttributes::LayernormAttributes;
-};
-
 template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::RMSNormAttributesT> {
   static const NodeAttributes enum_value = NodeAttributes::RMSNormAttributes;
 };
 
-template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT> {
-  static const NodeAttributes enum_value = NodeAttributes::BlockScaleQuantizeAttributes;
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::LayernormAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::LayernormAttributes;
+};
+
+template<> struct NodeAttributesUnionTraits<hipdnn_data_sdk::data_objects::SdpaAttributesT> {
+  static const NodeAttributes enum_value = NodeAttributes::SdpaAttributes;
 };
 
 struct NodeAttributesUnion {
@@ -313,14 +313,6 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::MatmulAttributes ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value) : nullptr;
   }
-  hipdnn_data_sdk::data_objects::LayernormAttributesT *AsLayernormAttributes() {
-    return type == NodeAttributes::LayernormAttributes ?
-      reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value) : nullptr;
-  }
-  const hipdnn_data_sdk::data_objects::LayernormAttributesT *AsLayernormAttributes() const {
-    return type == NodeAttributes::LayernormAttributes ?
-      reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value) : nullptr;
-  }
   hipdnn_data_sdk::data_objects::RMSNormAttributesT *AsRMSNormAttributes() {
     return type == NodeAttributes::RMSNormAttributes ?
       reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value) : nullptr;
@@ -329,13 +321,21 @@ struct NodeAttributesUnion {
     return type == NodeAttributes::RMSNormAttributes ?
       reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value) : nullptr;
   }
-  hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *AsBlockScaleQuantizeAttributes() {
-    return type == NodeAttributes::BlockScaleQuantizeAttributes ?
-      reinterpret_cast<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *>(value) : nullptr;
+  hipdnn_data_sdk::data_objects::LayernormAttributesT *AsLayernormAttributes() {
+    return type == NodeAttributes::LayernormAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value) : nullptr;
   }
-  const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *AsBlockScaleQuantizeAttributes() const {
-    return type == NodeAttributes::BlockScaleQuantizeAttributes ?
-      reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *>(value) : nullptr;
+  const hipdnn_data_sdk::data_objects::LayernormAttributesT *AsLayernormAttributes() const {
+    return type == NodeAttributes::LayernormAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value) : nullptr;
+  }
+  hipdnn_data_sdk::data_objects::SdpaAttributesT *AsSdpaAttributes() {
+    return type == NodeAttributes::SdpaAttributes ?
+      reinterpret_cast<hipdnn_data_sdk::data_objects::SdpaAttributesT *>(value) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::SdpaAttributesT *AsSdpaAttributes() const {
+    return type == NodeAttributes::SdpaAttributes ?
+      reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributesT *>(value) : nullptr;
   }
 };
 
@@ -382,17 +382,17 @@ inline bool operator==(const NodeAttributesUnion &lhs, const NodeAttributesUnion
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(rhs.value));
     }
-    case NodeAttributes::LayernormAttributes: {
-      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(lhs.value)) ==
-             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(rhs.value));
-    }
     case NodeAttributes::RMSNormAttributes: {
       return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(lhs.value)) ==
              *(reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(rhs.value));
     }
-    case NodeAttributes::BlockScaleQuantizeAttributes: {
-      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *>(lhs.value)) ==
-             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *>(rhs.value));
+    case NodeAttributes::LayernormAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(rhs.value));
+    }
+    case NodeAttributes::SdpaAttributes: {
+      return *(reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributesT *>(lhs.value)) ==
+             *(reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributesT *>(rhs.value));
     }
     default: {
       return false;
@@ -469,14 +469,14 @@ struct Node FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const hipdnn_data_sdk::data_objects::MatmulAttributes *attributes_as_MatmulAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes ? static_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(attributes()) : nullptr;
   }
-  const hipdnn_data_sdk::data_objects::LayernormAttributes *attributes_as_LayernormAttributes() const {
-    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(attributes()) : nullptr;
-  }
   const hipdnn_data_sdk::data_objects::RMSNormAttributes *attributes_as_RMSNormAttributes() const {
     return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(attributes()) : nullptr;
   }
-  const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes *attributes_as_BlockScaleQuantizeAttributes() const {
-    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes ? static_cast<const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes *>(attributes()) : nullptr;
+  const hipdnn_data_sdk::data_objects::LayernormAttributes *attributes_as_LayernormAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes ? static_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(attributes()) : nullptr;
+  }
+  const hipdnn_data_sdk::data_objects::SdpaAttributes *attributes_as_SdpaAttributes() const {
+    return attributes_type() == hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes ? static_cast<const hipdnn_data_sdk::data_objects::SdpaAttributes *>(attributes()) : nullptr;
   }
   void *mutable_attributes() {
     return GetPointer<void *>(VT_ATTRIBUTES);
@@ -532,16 +532,16 @@ template<> inline const hipdnn_data_sdk::data_objects::MatmulAttributes *Node::a
   return attributes_as_MatmulAttributes();
 }
 
-template<> inline const hipdnn_data_sdk::data_objects::LayernormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::LayernormAttributes>() const {
-  return attributes_as_LayernormAttributes();
-}
-
 template<> inline const hipdnn_data_sdk::data_objects::RMSNormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::RMSNormAttributes>() const {
   return attributes_as_RMSNormAttributes();
 }
 
-template<> inline const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes>() const {
-  return attributes_as_BlockScaleQuantizeAttributes();
+template<> inline const hipdnn_data_sdk::data_objects::LayernormAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::LayernormAttributes>() const {
+  return attributes_as_LayernormAttributes();
+}
+
+template<> inline const hipdnn_data_sdk::data_objects::SdpaAttributes *Node::attributes_as<hipdnn_data_sdk::data_objects::SdpaAttributes>() const {
+  return attributes_as_SdpaAttributes();
 }
 
 struct NodeBuilder {
@@ -946,16 +946,16 @@ inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case NodeAttributes::LayernormAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(obj);
-      return verifier.VerifyTable(ptr);
-    }
     case NodeAttributes::RMSNormAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case NodeAttributes::BlockScaleQuantizeAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes *>(obj);
+    case NodeAttributes::LayernormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case NodeAttributes::SdpaAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributes *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;
@@ -1013,16 +1013,16 @@ inline void *NodeAttributesUnion::UnPack(const void *obj, NodeAttributes type, c
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
-    case NodeAttributes::LayernormAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(obj);
-      return ptr->UnPack(resolver);
-    }
     case NodeAttributes::RMSNormAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
-    case NodeAttributes::BlockScaleQuantizeAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes *>(obj);
+    case NodeAttributes::LayernormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributes *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case NodeAttributes::SdpaAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributes *>(obj);
       return ptr->UnPack(resolver);
     }
     default: return nullptr;
@@ -1068,17 +1068,17 @@ inline ::flatbuffers::Offset<void> NodeAttributesUnion::Pack(::flatbuffers::Flat
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::MatmulAttributesT *>(value);
       return CreateMatmulAttributes(_fbb, ptr, _rehasher).Union();
     }
-    case NodeAttributes::LayernormAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value);
-      return CreateLayernormAttributes(_fbb, ptr, _rehasher).Union();
-    }
     case NodeAttributes::RMSNormAttributes: {
       auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value);
       return CreateRMSNormAttributes(_fbb, ptr, _rehasher).Union();
     }
-    case NodeAttributes::BlockScaleQuantizeAttributes: {
-      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *>(value);
-      return CreateBlockScaleQuantizeAttributes(_fbb, ptr, _rehasher).Union();
+    case NodeAttributes::LayernormAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value);
+      return CreateLayernormAttributes(_fbb, ptr, _rehasher).Union();
+    }
+    case NodeAttributes::SdpaAttributes: {
+      auto ptr = reinterpret_cast<const hipdnn_data_sdk::data_objects::SdpaAttributesT *>(value);
+      return CreateSdpaAttributes(_fbb, ptr, _rehasher).Union();
     }
     default: return 0;
   }
@@ -1122,16 +1122,16 @@ inline NodeAttributesUnion::NodeAttributesUnion(const NodeAttributesUnion &u) : 
       value = new hipdnn_data_sdk::data_objects::MatmulAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::MatmulAttributesT *>(u.value));
       break;
     }
-    case NodeAttributes::LayernormAttributes: {
-      value = new hipdnn_data_sdk::data_objects::LayernormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(u.value));
-      break;
-    }
     case NodeAttributes::RMSNormAttributes: {
       value = new hipdnn_data_sdk::data_objects::RMSNormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(u.value));
       break;
     }
-    case NodeAttributes::BlockScaleQuantizeAttributes: {
-      value = new hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *>(u.value));
+    case NodeAttributes::LayernormAttributes: {
+      value = new hipdnn_data_sdk::data_objects::LayernormAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(u.value));
+      break;
+    }
+    case NodeAttributes::SdpaAttributes: {
+      value = new hipdnn_data_sdk::data_objects::SdpaAttributesT(*reinterpret_cast<hipdnn_data_sdk::data_objects::SdpaAttributesT *>(u.value));
       break;
     }
     default:
@@ -1186,18 +1186,18 @@ inline void NodeAttributesUnion::Reset() {
       delete ptr;
       break;
     }
-    case NodeAttributes::LayernormAttributes: {
-      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value);
-      delete ptr;
-      break;
-    }
     case NodeAttributes::RMSNormAttributes: {
       auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::RMSNormAttributesT *>(value);
       delete ptr;
       break;
     }
-    case NodeAttributes::BlockScaleQuantizeAttributes: {
-      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT *>(value);
+    case NodeAttributes::LayernormAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::LayernormAttributesT *>(value);
+      delete ptr;
+      break;
+    }
+    case NodeAttributes::SdpaAttributes: {
+      auto ptr = reinterpret_cast<hipdnn_data_sdk::data_objects::SdpaAttributesT *>(value);
       delete ptr;
       break;
     }
