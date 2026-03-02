@@ -73,14 +73,15 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             typename GridwiseGemm::EpilogueCShuffle>();
         __shared__ char p_shared[LDS_size];
 
-        auto epilogue_args = typename GridwiseGemm::EpilogueCShuffle{};
+        const auto block_2_ctile_map_ = typename GridwiseGemm::Block2CTileMap{karg.M, karg.N, 4};
+        auto epilogue_args            = typename GridwiseGemm::EpilogueCShuffle{};
 
         GridwiseGemm::template Run<GridwiseGemm::ConvRegime::BWD_WEIGHT,
                                    AGridDesc_AK0_M_K1,
                                    BGridDesc_BK0_N_K1,
                                    ck::Tuple<>, // Empty tuple
                                    CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                   typename GridwiseGemm::Block2CTileMap,
+                                   decltype(block_2_ctile_map_),
                                    ComputePtrOffsetOfBatch,
                                    ComputePtrOffsetOfBatch, // placeholder
                                    NumGroupsToMerge,
@@ -94,7 +95,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             b_grid_desc_bk0_n_bk1,
             ck::Tuple<>(), // placeholder
             c_grid_desc_mblock_mperblock_nblock_nperblock,
-            GridwiseGemm::DefaultBlock2CTileMap(1, 1), // placeholder
+            block_2_ctile_map_,
             compute_ptr_offset_of_batch,
             ComputePtrOffsetOfBatch{}, // placeholder
             num_k_per_block,

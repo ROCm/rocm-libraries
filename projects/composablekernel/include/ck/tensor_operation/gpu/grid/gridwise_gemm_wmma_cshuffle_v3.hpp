@@ -876,7 +876,7 @@ struct GridwiseGemm_wmma_cshuffle_v3
                                    ds_grid_desc_mblock_mperblock_nblock_nperblock_,
                                const CEGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
                                    ce_grid_desc_mblock_mperblock_nblock_nperblock,
-                               const Block2CTileMapExt& block_2_ctile_map_,
+                               const Block2CTileMapExt& block_2_ctile_map,
                                const ComputePtrOffsetOfBatch& compute_ptr_offset_of_batch,
                                const ComputePtrOffsetOfN& compute_ptr_offset_of_n,
                                const index_t num_k_per_block,
@@ -923,12 +923,10 @@ struct GridwiseGemm_wmma_cshuffle_v3
 
         // ======== Offset ========
 
-        // a_batch_offset
         const long_index_t a_batch_offset =
             CTranspose ? amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetBPtrOffset(g_idx))
                        : amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetAPtrOffset(g_idx));
 
-        // b_batch_offset
         const long_index_t b_batch_offset =
             CTranspose ? amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetAPtrOffset(g_idx))
                        : amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetBPtrOffset(g_idx));
@@ -936,28 +934,11 @@ struct GridwiseGemm_wmma_cshuffle_v3
         const long_index_t e_batch_offset =
             amd_wave_read_first_lane(compute_ptr_offset_of_batch.GetEPtrOffset(g_idx));
 
-        // ds_batch_offset
-        const auto ds_batch_offset = [&]() {
-            if constexpr(is_bwd_data || is_fwd)
-            {
-                return compute_ptr_offset_of_batch.GetDsPtrOffset(g_idx);
-            }
-            else
-            {
-                return 0;
-            }
-        }();
+        const auto ds_batch_offset = compute_ptr_offset_of_batch.GetDsPtrOffset(g_idx);
 
-        const auto a_n_offset = [&]() -> long_index_t {
-            if constexpr((is_bwd_data && !CTranspose) || is_fwd)
-            {
-                return amd_wave_read_first_lane(compute_ptr_offset_of_n.GetAPtrOffset(n_idx));
-            }
-            else
-            {
-                return 0;
-            }
-        }();
+        const long_index_t a_n_offset =
+            (!CTranspose) ? amd_wave_read_first_lane(compute_ptr_offset_of_n.GetAPtrOffset(n_idx))
+                          : 0;
 
         // b_n_offset
         const auto b_n_offset = [&]() -> long_index_t {
@@ -977,28 +958,10 @@ struct GridwiseGemm_wmma_cshuffle_v3
             }
         }();
 
-        const auto e_n_offset = [&]() {
-            if constexpr(is_bwd_data || is_fwd)
-            {
-                return amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
-            }
-            else
-            {
-                return 0;
-            }
-        }();
+        const auto e_n_offset =
+            amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
 
-        // ds_n_offset
-        const auto ds_n_offset = [&]() {
-            if constexpr(is_fwd)
-            {
-                return compute_ptr_offset_of_n.GetDsPtrOffset(n_idx);
-            }
-            else
-            {
-                return 0;
-            }
-        }();
+        const auto ds_n_offset = compute_ptr_offset_of_n.GetDsPtrOffset(n_idx);
 
         // ======== Grid pointers ======== //
 
@@ -1062,17 +1025,6 @@ struct GridwiseGemm_wmma_cshuffle_v3
 
         // ======== Tiling ======== //
 
-        const auto block_2_ctile_map = [&]() {
-            if constexpr(is_bwd_data)
-            {
-                return block_2_ctile_map_;
-            }
-            else
-            {
-                return Block2CTileMap{karg.M, karg.N, 4};
-            }
-        }();
-
         const auto block_work_idx =
             block_2_ctile_map.CalculateBottomIndex(make_multi_index(get_block_1d_id()));
 
@@ -1103,8 +1055,8 @@ struct GridwiseGemm_wmma_cshuffle_v3
         const auto p_e_grid_ = karg.p_e_grid + e_batch_offset + e_n_offset;
 
         // Final arguments
-        const index_t A_k_id  = (is_bwd_data || is_bwd_weight) ? k_idx : 0;
-        const index_t B_k_id  = (is_bwd_data || is_bwd_weight) ? k_idx : 0;
+        const index_t A_k_id  = k_idx;
+        const index_t B_k_id  = k_idx;
         const index_t k_batch = (is_bwd_data || is_bwd_weight) ? karg.KBatch : 1;
 
         // ======= Call the Run() function ======== //

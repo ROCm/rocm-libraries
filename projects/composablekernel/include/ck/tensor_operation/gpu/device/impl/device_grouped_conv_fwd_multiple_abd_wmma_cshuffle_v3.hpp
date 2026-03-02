@@ -100,12 +100,14 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
         const auto b_grid_desc_bk0_n_bk1 =
             GridwiseGemm::MakeBGridDescriptor_BK0_N_BK1(b_grid_desc_n_k);
 
+        const auto block_2_ctile_map_ = typename GridwiseGemm::Block2CTileMap{karg.M, karg.N, 4};
+
         GridwiseGemm::template Run<GridwiseGemm::ConvRegime::FORWARD,
                                    decltype(a_grid_desc_ak0_m_ak1),
                                    decltype(b_grid_desc_bk0_n_bk1),
                                    DsGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock,
                                    EGridDesc_MBlock_MPerBlock_NBlock_NPerBlock,
-                                   typename GridwiseGemm::Block2CTileMap,
+                                   decltype(block_2_ctile_map_),
                                    ComputePtrOffset,
                                    ComputePtrOffset,
                                    0,
@@ -119,7 +121,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
             b_grid_desc_bk0_n_bk1,
             ds_grid_desc_mblock_mperblock_nblock_nperblock,
             e_grid_desc_mblock_mperblock_nblock_nperblock,
-            GridwiseGemm::DefaultBlock2CTileMap(1, 1), // placeholder
+            block_2_ctile_map_,
             compute_ptr_offset_of_batch,
             compute_ptr_offset_of_n,
             num_k_per_block,
