@@ -41,12 +41,18 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
     auto desc = wrapper->asDescriptor<ConvolutionWrwOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &dyDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DW, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &dwDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &dyDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &dwDesc);
 
     std::vector<int64_t> prePadding = {1, 1};
     desc->setAttribute(

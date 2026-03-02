@@ -158,6 +158,6 @@ typedef enum
      * output gradient (DY), and weight gradient (DW) tensors plus
      * convolution parameters.
      */
-    HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR,
+    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
 
 } hipdnnBackendDescriptorType_t;

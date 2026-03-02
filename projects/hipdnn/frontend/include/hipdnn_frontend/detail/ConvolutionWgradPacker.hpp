@@ -17,7 +17,8 @@ inline Error createConvWgradOperation(
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR);
+    ScopedHipdnnBackendDescriptor opDesc(
+        HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -26,17 +27,17 @@ inline Error createConvWgradOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_X,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
                                              attributes.get_x(),
                                              tensorDescs,
                                              "convolutionwrw X"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DY,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
                                              attributes.get_dy(),
                                              tensorDescs,
                                              "convolutionwrw DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DW,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
                                              attributes.get_dw(),
                                              tensorDescs,
                                              "convolutionwrw DW"));

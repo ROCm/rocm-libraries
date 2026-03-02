@@ -59,7 +59,7 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_X:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X:
         setTensorDescriptor(_xDesc,
                             _data.x_tensor_uid,
                             attributeType,
@@ -67,7 +67,7 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DY:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY:
         setTensorDescriptor(_dyDesc,
                             _data.dy_tensor_uid,
                             attributeType,
@@ -75,7 +75,7 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DW:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW:
         setTensorDescriptor(_dwDesc,
                             _data.dw_tensor_uid,
                             attributeType,
@@ -148,7 +148,7 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_X:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X:
         getTensorDescriptor(_xDesc,
                             attributeType,
                             requestedElementCount,
@@ -156,7 +156,7 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DY:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY:
         getTensorDescriptor(_dyDesc,
                             attributeType,
                             requestedElementCount,
@@ -164,7 +164,7 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DW:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW:
         getTensorDescriptor(_dwDesc,
                             attributeType,
                             requestedElementCount,
@@ -248,7 +248,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t ConvolutionWrwOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR;
+    return HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR;
 }
 
 std::string ConvolutionWrwOperationDescriptor::toString() const

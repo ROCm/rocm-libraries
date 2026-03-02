@@ -367,19 +367,19 @@ typedef enum
     /** @} */
 
     /**
-     * @name Convolution WRW Operation Attributes (1600-1699)
-     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR
+     * @name Convolution Backward Filter Operation Attributes (1600-1699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR
      * @{
      */
 
     /** @brief Input tensor for backward weight convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_X = 1600,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X = 1600,
 
     /** @brief Output gradient tensor for backward weight convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DY = 1601,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY = 1601,
 
     /** @brief Weight gradient tensor for backward weight convolution */
-    HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW_DW = 1602,
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW = 1602,
 
     /** @} */
 

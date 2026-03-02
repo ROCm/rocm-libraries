@@ -2000,8 +2000,9 @@ TEST_F(TestConvolutionWgradNodeCreateOperation, PropagatesBackendError)
 {
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, _))
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend,
-                backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR, _))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, _))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
@@ -2024,8 +2025,9 @@ TEST_F(TestConvolutionWgradNodeCreateOperation, SuccessCreatesThreeTensorsAndOne
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, _))
         .Times(3)
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend,
-                backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR, _))
+    EXPECT_CALL(
+        *_mockBackend,
+        backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, _))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
     EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
         .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
