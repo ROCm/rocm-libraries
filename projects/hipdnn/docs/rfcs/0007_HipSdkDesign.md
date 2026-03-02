@@ -1,9 +1,56 @@
-# HIP SDK RFC
+# RFC 0007: HIP Compilation SDK Design
 
-## Overview
+## Table of Contents
 
-High level plan for a new HipDNN SDK that defines common components that can be used for development of plugins that use HIP kernels directly.
-Once implementation/refactoring from the new plugin into an SDK actually starts then this design may change,
+1. [Executive Summary](executive-summary)
+2. [Problem Statement](problem-statement)
+3. [Current System Overview](current-system-overview)
+4. [Proposed Design](proposed-design)
+5. [Key Design Decisions](key-design-decisions)
+6. [Risks](risks)
+7. [Execution Plan](execution-plan)
+8. [Testing Plan](testing-plan)
+9. [Future Considerations](future-considerations)
+
+## Executive Summary
+
+This RFC a new hipDNN SDK that defines common components that can be used for development of plugins that use HIP kernels
+directly. It defines classes for kernel and program objects which are owned by a `HipHandle` class to manage their lifetimes
+and wrap common HIP operations, such as executing those objects.
+
+## Problem Statement
+
+The nature of a plugin that defines it's own HIP kernels to implement graph operations is that the plugin needs mechanisms
+to compile and execute those kernels. In order for the direct HIP plugin to be performant and portable there are the
+following requirements:
+
+* Just In Time (JIT) compilation - Plugin must be able to compile HIP kernels from source strings during program execution
+  using [hipRTC](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html).
+* Ahead Of Time (AOT) compilation - Plugin must be able to consume HIP kernels compiled prior to application execution,
+  i.e. using `hipcc`.
+* Device-less compilation - There must be a mechanism to compile the HIP kernels the plugin defines on a machine without
+  a GPU (or non-matching GPU) based on a target device description.
+* Caching - The HIP `hipFunction_t` kernels handles already created during the course of plugin execution should be cached so that they
+  can be reused without having to fallback to loading the binary object again, i.e. `hipModuleLoadData().`
+* Serialization - A plugin should be able to serialize and deserialize compiled kernel binaries. That is, save the
+  binary blob to a file, and load an executable binary blob from a file. This should be combined wit the device less compilation
+  requirement to enable shipping of serialized blobs for a variety of supported GPUs for users to deserialize and run.
+
+## Current System Overview
+
+The plugin SDK defines an `ICompilablePlan` interface for device specific compilation of an execution plan. This should be used
+by plugins as part of plan creation in the `hipdnnEnginePluginCreateExecutionContext` call by the hipDNN backend. Resulting in
+a compiled binary that is ready to execute when the hipDNN backend calls `hipdnnEnginePluginExecuteOpGraph`. To achieve this
+the compiled binary will be embedded in the execution plan handle that the plugin returns, such that if the hipDNN backend
+performs caching of the creating execution plans, then that will implicitly also cache the compiled binary blobs.
+
+## Proposed Design
+
+> TODO - Iterate on to address feedback.
+
+### Overview
+
+High level plan for Once implementation/refactoring from the new plugin into an SDK actually starts then this design may change,
 it is primarily intended as a starting point to make that work easier by reducing initial design work.
 
 Objects are defined in the following namespace and use C++ exceptions for error handling.
@@ -16,17 +63,17 @@ Diagram showing first usage of a kernel when all caches are cold.
 
 ![HIP SDK Flow](../images/hipdnn_hip_sdk.png)
 
-## CMake
+### CMake
 
 * Requires hipRTC to build
 * Checks for presence of SQLite database
 * CMake variable to build without caching, primarily for developers. See `MIOPEN_DEV` CMake variable.
 
-## Handle
+### Handle
 
 A Hip handle provides an object for interfacing with the HIP runtime, and managing the currently active HIP stream/device.
 See `miopen::Handle` as reference. It also owns the objects allocated by the user, and manages when they are freed.
-Either at the request of the user or when the HIPHandle is destroyed.
+Either at the request of the user or when the `HIPHandle` is destroyed.
 
 Initial version can be whatever is required for the MVP hip kernel plugin, but it can be extended over time.
 
@@ -118,7 +165,7 @@ private:
 };
 ```
 
-## Binary cache DB
+### Binary cache DB
 
 Manages access to SQLite cache, see MIOpen `binary_cache.cpp`, `db.cpp`, and `sqlite_db.hpp`
 
@@ -165,11 +212,11 @@ class BinaryCacheDBImpl {
 };
 ```
 
-## Program / Kernels
+### Program / Kernels
 
 Define classes for working with HIP program & kernel objects JITed from source using HIP RTC or loaded from a cache.
 
-### Program classes
+#### Program classes
 
 See `hipoc_program.cpp` in MIOpen
 
@@ -205,7 +252,7 @@ public:
 };
 ```
 
-### Kernel classes
+#### Kernel classes
 
 See `hipoc_kernel.cpp` in MIOpen
 
@@ -245,3 +292,52 @@ public:
    void Launch(hipStream_t stream, Args&&... args);
 };
 ```
+
+## Risks
+
+- **Single User**: There is only a single plugin that will stress the SDK design, this may bias the design towards that
+  single plugins use-case.
+- **Ecosystem**: The SDK exists as part enabling a larger software stack, where each component of the stack will have
+  it's own owners and requirements. This design is focused on the needs of the hipDNN backend and direct hip plugin
+  however the requirements is other stakeholders in the stack can have implications too.
+- **Development Pace**: The hipDNN plugin mechanism and associated SDKs is developing at a rapid pace. This introduces
+  the risk of git conflicts during coding but also increases the burden of communication and work synchronization
+  between engineers to ensure efficient development.
+- **MIOpen Tech Debt**: The work of the direct HIP plugin and SDK uses the MIOpen project as a reference due to it's
+  use of HIP defined kernels with JIT compilation and caching. This introduces the risk of copying designs
+  without understanding the implications, and either copying over technical debt or introducing tech debt from
+  a suboptimal design.
+
+## Execution Plan
+
+### Prerequisite Work
+
+The need for a HIP compilation SDK is predicated on the existence of a plugin that defines and executes it's own
+HIP kernels. The development of the plugin is already underway as the `hip-kernel-provider` plugin and will begin
+with batchnorm operation support. These kernels will be JIT compiled for the current GPU using code that lives
+within the plugin itself.
+
+### Refactor
+
+Once the batchnorm operations are established in the direct plugin we will be able to begin on the implementation
+work of the HIP compilation SDK defined by this RFC. In this initial step the compilation code can be refactored
+out of the plugin into the SDK into the program and kernel SDK classes for the plugin code to use.
+
+### Enhance
+
+The initially refactoring work won't implement the functionality the SDK enables for device-less AOT compilation
+and serialization/deserialization. This will be done afterwards as follow-on work based on priority and may also
+involve integration into the hipDNN backend.
+
+## Testing Plan
+
+A new test suite will be created along with the SDK that will stress functionality as it is implemented in the SDK.
+
+Additionally as the SDK API is adopted by the direct HIP plugin testing will be run on the plugin to
+ensure that it's functionality hasn't regressed.
+
+## Future Considerations
+
+This RFC design is primarily intended as a starting point for implementation work, as well as a focal point for
+discussion between stakeholders to make sure requirements are understood. Therefore the proposed design may not
+survive unmodified from the final SDK API once implementation work is underway.
