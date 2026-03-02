@@ -30,12 +30,13 @@
 #include <cstdlib>
 #include <string>
 
+#include <hiptensor/hiptensor.h>
 #include "hiptensor_ostream.hpp"
 #include "singleton.hpp"
 
 namespace hiptensor
 {
-    struct HiptensorOptions : public LazySingleton<HiptensorOptions>
+    struct HIPTENSOR_EXPORT HiptensorOptions : public LazySingleton<HiptensorOptions>
     {
         // For static initialization
         friend std::unique_ptr<HiptensorOptions> std::make_unique<HiptensorOptions>();

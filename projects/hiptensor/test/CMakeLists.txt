@@ -104,8 +104,8 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
-    # Use static library for tests to access internal symbols.
-    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor_static hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
+    # Use shared library with exported internal symbols for tests.
+    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
 
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
@@ -169,8 +169,8 @@ function(add_hiptensor_unit_test)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
-    # Use static library for tests on all platforms to access internal symbols and avoid library path issues
-    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor_static hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
+    # Use shared library with exported internal symbols for tests.
+    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIPTENSOR_CLANG_ROOT}/lib")
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
                                ${composable_kernel_INCLUDES}

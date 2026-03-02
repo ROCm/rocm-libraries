@@ -27,16 +27,17 @@
 #pragma once
 
 #include "singleton.hpp"
+#include <hiptensor/hiptensor.h>
 
 #include <cstdio>
 #include <mutex>
 
 // Cross-platform safe file opening function
-FILE* safeFopen(const char* filename, const char* mode);
+HIPTENSOR_EXPORT FILE* safeFopen(const char* filename, const char* mode);
 
 namespace hiptensor
 {
-    class Logger : public LazySingleton<Logger>
+    class HIPTENSOR_EXPORT Logger : public LazySingleton<Logger>
     {
     private:
         using Callback_t = void (*)(int32_t logLevel, const char* funcName, const char* msg);

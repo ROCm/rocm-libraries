@@ -213,9 +213,10 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # Create static library target for tests to access internal symbols
-if(HIPTENSOR_BUILD_TESTS)
-    create_hiptensor_static_library()
-endif()
+# Commented out while testing HIPTENSOR_EXPORT approach
+# if(HIPTENSOR_BUILD_TESTS)
+#     create_hiptensor_static_library()
+# endif()
 
 
 rocm_install_targets(

@@ -31,7 +31,7 @@
 
 #include <hiptensor/hiptensor.h>
 
-hiptensorStatus_t hiptensorReductionReference(const void*                       alpha,
+HIPTENSOR_EXPORT hiptensorStatus_t hiptensorReductionReference(const void*                       alpha,
                                               const void*                       A,
                                               const hiptensorTensorDescriptor_t descA,
                                               const int32_t                     modeA[],

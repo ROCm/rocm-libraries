@@ -31,7 +31,7 @@
 
 #include <hiptensor/hiptensor.h>
 
-hiptensorStatus_t hiptensorElementwisePermuteReference(const void*                       alpha,
+HIPTENSOR_EXPORT hiptensorStatus_t hiptensorElementwisePermuteReference(const void*                       alpha,
                                                        const void*                       A,
                                                        const hiptensorTensorDescriptor_t descA,
                                                        const int32_t                     modeA[],
@@ -42,7 +42,7 @@ hiptensorStatus_t hiptensorElementwisePermuteReference(const void*              
                                                        const hiptensorDataType_t         typeScalar,
                                                        const hipStream_t                 stream);
 
-hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*                       alpha,
+HIPTENSOR_EXPORT hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*                       alpha,
                                                         const void*                       A,
                                                         const hiptensorTensorDescriptor_t descA,
                                                         const int32_t                     modeA[],
@@ -58,7 +58,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*             
                                                         hiptensorOperator_t               opAC,
                                                         hiptensorDataType_t typeScalar,
                                                         hipStream_t         stream);
-hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*                       alpha,
+HIPTENSOR_EXPORT hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*                       alpha,
                                                          const void*                       A,
                                                          const hiptensorTensorDescriptor_t descA,
                                                          const int32_t                     modeA[],
