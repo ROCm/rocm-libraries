@@ -184,6 +184,13 @@ endif()
 add_subdirectory(library)
 
 if(HIPSPARSELT_ENABLE_CLIENT)
+    if(NOT HIPSPARSELT_ENABLE_THEROCK)
+        if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+            set(CMAKE_Fortran_COMPILER "gfortran")
+        endif()
+        enable_language(Fortran)
+        find_package(LAPACK REQUIRED)
+    endif()
     add_subdirectory(clients)
 endif()
 

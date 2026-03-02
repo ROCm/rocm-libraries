@@ -14,17 +14,6 @@ elseif(HIPSPARSELT_ENABLE_BLIS)
     find_package(BLIS REQUIRED)
 endif()
 
-
-# hipblaslt-style: clients require a linkable LAPACK (and LAPACK implies BLAS).
-# Enable Fortran so CMake's FindLAPACK can do its usual compile/link checks.
-if(NOT HIPSPARSELT_ENABLE_THEROCK)
-    if (NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-        set(CMAKE_Fortran_COMPILER "gfortran")
-    endif()
-    enable_language(Fortran)
-    find_package(LAPACK REQUIRED)
-endif()
-
 add_library(hipsparselt-clients-common OBJECT)
 
 target_compile_features(hipsparselt-clients-common PRIVATE cxx_std_17)
