@@ -55,6 +55,22 @@ public:
         if(detail::areTensorDimensionsSet(x))
         {
             HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 1, "Input tensor (x)"));
+
+            // Validate axis is within tensor rank
+            auto axis = attributes.get_axis();
+            if(axis.has_value())
+            {
+                HIPDNN_RETURN_IF_FALSE(axis.value() >= 0,
+                                       ErrorCode::INVALID_VALUE,
+                                       "BlockScaleQuantizeNode axis must be non-negative, got "
+                                           + std::to_string(axis.value()));
+
+                HIPDNN_RETURN_IF_FALSE(static_cast<size_t>(axis.value()) < x->get_dim().size(),
+                                       ErrorCode::INVALID_VALUE,
+                                       "BlockScaleQuantizeNode axis " + std::to_string(axis.value())
+                                           + " exceeds input tensor rank "
+                                           + std::to_string(x->get_dim().size()));
+            }
         }
 
         // Quantize preserves shape -- output dims must match input if set
