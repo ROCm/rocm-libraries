@@ -146,7 +146,7 @@ void run_benchmark(benchmark::State& state, const size_t size, const hipStream_t
                                             d_input,
                                             d_output,
                                             size,
-                                            hipcub::Sum{},
+                                            benchmark_utils::plus{},
                                             stream);
     };
     HIP_CHECK(launch());

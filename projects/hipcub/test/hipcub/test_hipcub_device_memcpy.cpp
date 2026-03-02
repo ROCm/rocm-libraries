@@ -272,12 +272,12 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
                                         h_buffer_num_elements.end(),
                                         0,
                                         src_offsets.begin(),
-                                        hipcub::Sum{});
+                                        test_utils::plus{});
         test_utils::host_exclusive_scan(h_buffer_num_elements.begin(),
                                         h_buffer_num_elements.end(),
                                         0,
                                         dst_offsets.begin(),
-                                        hipcub::Sum{});
+                                        test_utils::plus{});
     }
 
     // Generate the source and destination pointers.

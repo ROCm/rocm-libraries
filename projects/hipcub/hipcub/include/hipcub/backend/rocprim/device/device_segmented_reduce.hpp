@@ -266,7 +266,7 @@ struct DeviceSegmentedReduce
                       num_segments,
                       d_begin_offsets,
                       d_end_offsets,
-                      ::hipcub::Sum(),
+                      _HIPCUB_STD::plus<>{},
                       input_type(),
                       stream);
     }

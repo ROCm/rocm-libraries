@@ -61,7 +61,7 @@ struct reduce
         _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            reduced_value = breduce_t(storage).Reduce(values, hipcub::Sum());
+            reduced_value = breduce_t(storage).Reduce(values, benchmark_utils::plus{});
             values[0]     = reduced_value;
         }
 

@@ -40,7 +40,7 @@ __device__ auto warp_reduce_benchmark(const T* d_input, T* d_output)
 
     using wreduce_t = hipcub::WarpReduce<T, WarpSize>;
     __shared__ typename wreduce_t::TempStorage storage;
-    auto                                       reduce_op = hipcub::Sum();
+    auto                                       reduce_op = benchmark_utils::plus{};
     _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {

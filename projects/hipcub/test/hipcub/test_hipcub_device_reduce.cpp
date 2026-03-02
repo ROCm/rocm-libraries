@@ -120,11 +120,12 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Calculate expected results on host using the same accumulator type than on device
-            using Sum =
-                typename AlgebraicSelector<hipcub::Sum, T, U>::type; // For custom_type_test tests
+            using Sum = typename AlgebraicSelector<test_utils::plus, T, U>::
+                type; // For custom_type_test tests
             using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
             Sum    sum_op;
-            AccumT tmp_result = AccumT(0.0f); // hipcub::Sum uses as initial type the output type
+            AccumT tmp_result
+                = AccumT(0.0f); // test_utils::plus uses as initial type the output type
             for(unsigned int i = 0; i < input.size(); i++)
             {
                 tmp_result = sum_op(tmp_result, input[i]);
@@ -143,7 +144,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
                                                        d_input,
                                                        d_output,
                                                        input.size(),
-                                                       ExtendedFloatBinOp<hipcub::Sum>(),
+                                                       ExtendedFloatBinOp<test_utils::plus>(),
                                                        U(0.f),
                                                        stream));
             }
@@ -177,7 +178,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
                                                        d_input,
                                                        d_output,
                                                        input.size(),
-                                                       ExtendedFloatBinOp<hipcub::Sum>(),
+                                                       ExtendedFloatBinOp<test_utils::plus>(),
                                                        U(0.f),
                                                        stream));
             }
@@ -1051,14 +1052,14 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
                 hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
 
             // Calculate expected results on host using the same accumulator type than on device
-            using Sum =
-                typename AlgebraicSelector<hipcub::Sum, T, U>::type; // For custom_type_test tests
+            using Sum = typename AlgebraicSelector<test_utils::plus, T, U>::
+                type; // For custom_type_test tests
             using AccumT = hipcub::detail::accumulator_t<Sum, T, U>;
 
             Sum             reduction_op;
             TestTransformOp transform_op;
             const U         init(10);
-            AccumT          tmp_result = init; // hipcub::Sum uses as initial type the output type
+            AccumT tmp_result = init; // test_utils::plus uses as initial type the output type
             for(size_t i = 0; i < input.size(); ++i)
             {
                 tmp_result = reduction_op(tmp_result, transform_op(input[i]));

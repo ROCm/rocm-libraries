@@ -60,7 +60,7 @@ public:
                              temp_storage_bytes,
                              d_in,
                              d_out,
-                             ::hipcub::Sum(),
+                             _HIPCUB_STD::plus<>{},
                              num_items,
                              stream);
     }
@@ -237,7 +237,7 @@ public:
                              temp_storage_bytes,
                              d_in,
                              d_out,
-                             ::hipcub::Sum(),
+                             _HIPCUB_STD::plus<>{},
                              T(0),
                              num_items,
                              stream);
@@ -513,7 +513,7 @@ public:
                                   d_keys_in,
                                   d_values_in,
                                   d_values_out,
-                                  ::hipcub::Sum(),
+                                  _HIPCUB_STD::plus<>{},
                                   static_cast<in_value_type>(0),
                                   num_items,
                                   equality_op,
@@ -641,7 +641,7 @@ public:
                                   d_keys_in,
                                   d_values_in,
                                   d_values_out,
-                                  ::hipcub::Sum(),
+                                  _HIPCUB_STD::plus<>{},
                                   num_items,
                                   equality_op,
                                   stream);

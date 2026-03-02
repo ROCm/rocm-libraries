@@ -32,7 +32,7 @@
 
 template<class Input,
          class Output,
-         class ReduceOp = hipcub::Sum,
+         class ReduceOp = test_utils::plus,
          int Init
          = 0, // as only integral types supported, int is used here even for floating point inputs
          unsigned int MinSegmentLength = 0,
@@ -57,16 +57,16 @@ public:
 };
 
 using Params1 = ::testing::Types<
-    params1<unsigned int, unsigned int, hipcub::Sum>,
-    params1<int, int, hipcub::Sum, -100, 0, 10000>,
+    params1<unsigned int, unsigned int, test_utils::plus>,
+    params1<int, int, test_utils::plus, -100, 0, 10000>,
     params1<double, double, test_utils::minimum, 1000, 0, 10000>,
     params1<int, short, test_utils::maximum, 10, 1000, 10000>,
-    params1<short, double, hipcub::Sum, 5, 1, 1000>,
+    params1<short, double, test_utils::plus, 5, 1, 1000>,
     params1<float, double, test_utils::maximum, 50, 2, 10>,
-    params1<float, float, hipcub::Sum, 123, 100, 200>,
+    params1<float, float, test_utils::plus, 123, 100, 200>,
     params1<test_utils::half, test_utils::half, test_utils::maximum, 50, 2, 10>,
     params1<test_utils::bfloat16, test_utils::bfloat16, test_utils::maximum, 50, 2, 10>,
-    params1<unsigned int, unsigned int, hipcub::Sum, 0, 1000, true>>;
+    params1<unsigned int, unsigned int, test_utils::plus, 0, 1000, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceSegmentedReduceOp, Params1);
 
@@ -278,7 +278,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
 
     using input_type     = typename TestFixture::params::input_type;
     using output_type    = typename TestFixture::params::output_type;
-    using reduce_op_type = typename hipcub::Sum;
+    using reduce_op_type = typename test_utils::plus;
     using result_type    = output_type;
     using offset_type    = unsigned int;
 
@@ -1145,7 +1145,7 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
     using input_type     = T;
     using output_type    = T;
     using IteratorType   = test_utils::counting_iterator<input_type>;
-    using reduce_op_type = typename hipcub::Sum;
+    using reduce_op_type = typename test_utils::plus;
     using offset_type    = T;
 
     const input_type init = input_type(0);

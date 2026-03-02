@@ -34,7 +34,7 @@
 #include <cstdint>
 #include <numeric>
 
-template<typename K, typename V, typename OpK = hipcub::Sum, typename OpV = hipcub::Sum>
+template<typename K, typename V, typename OpK = test_utils::plus, typename OpV = test_utils::plus>
 struct custom_key_value_pair_op
 {
     using type = hipcub::KeyValuePair<K, V>;
@@ -135,7 +135,7 @@ static void PrefixKernel(TileState tile_state, T* d_input, T* d_output)
 template<typename T,
          typename TileState = hipcub::ScanTileState<T>,
          int BlockSize      = 64,
-         typename ScanOp    = hipcub::Sum>
+         typename ScanOp    = test_utils::plus>
 struct SinglePassScanRunner
 {
     void run(int num_items, T* d_input, T* d_output)
@@ -166,7 +166,7 @@ struct custom_scan_tile_state : hipcub::ScanTileState<T>
 
 template<typename T,
          typename ScanTileState = hipcub::ScanTileState<T>,
-         typename ScanOp        = hipcub::Sum>
+         typename ScanOp        = test_utils::plus>
 struct SinglePassScanParams
 {
     using type            = T;
@@ -281,7 +281,7 @@ static void RunningPrefixKernel(T* d_input, T* d_output)
     }
 }
 
-template<typename T, int NumItems, typename ScanOp = hipcub::Sum>
+template<typename T, int NumItems, typename ScanOp = test_utils::plus>
 struct RunningPrefixRunner
 {
     void run(T* d_input, T* d_output)
