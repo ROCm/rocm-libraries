@@ -1,12 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-/// @file PortableFloatTypes.cpp
-/// @brief Consolidated typed tests for all portable floating-point types.
+/// @file TestPortableTypes.cpp
+/// @brief Typed tests for portable floating-point types.
 ///
-/// This file uses TYPED_TEST to run common test cases across all portable types:
-/// bfloat16, half, fp8_e4m3, and fp8_e5m2. Type-specific tests that cannot be
-/// generalized remain in their individual test files.
+/// This file contains two test fixtures:
+/// - PortableFloatTypes: Full arithmetic and math tests for bfloat16 and half
+/// - StorageFloatTypes: Basic storage and conversion tests for fp8_e4m3 and fp8_e5m2
+/// Type-specific tests that cannot be generalized remain in their individual test files.
 
 #include <gtest/gtest.h>
 
