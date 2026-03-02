@@ -64,10 +64,16 @@ inline Error createConvFpropOperation(
                                             "conv dilation"));
 
     // Set conv mode and compute data type
-    auto convMode
-        = static_cast<int64_t>(hipdnn_frontend::toSdkType(attributes.get_convolution_mode()));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(
-        opDesc.get(), HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, convMode, "conv mode"));
+    auto convMode = hipdnn_frontend::toBackendConvMode(attributes.get_convolution_mode());
+    if(!convMode.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported convolution mode"};
+    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
+                                               HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                                               HIPDNN_TYPE_CONVOLUTION_MODE,
+                                               *convMode,
+                                               "conv mode"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,

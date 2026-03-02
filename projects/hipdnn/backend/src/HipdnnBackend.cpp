@@ -6,6 +6,7 @@
 #include "HipdnnException.hpp"
 #include "descriptors/BackendDescriptor.hpp"
 #include "descriptors/DescriptorFactory.hpp"
+#include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/Handle.hpp"
 #include "handle/HandleFactory.hpp"
@@ -15,6 +16,8 @@
 
 #include <hipdnn_backend/version.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
+#include <cstring>
 
 using namespace hipdnn_backend;
 
@@ -241,6 +244,43 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
             descriptor, serializedGraph, graphByteSize);
 
         LOG_API_SUCCESS(apiName, "created_descriptor={}", logPtr(*descriptor));
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedBinaryGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                              size_t requestedByteSize,
+                                              size_t* graphByteSize,
+                                              uint8_t* serializedGraph)
+{
+    LOG_API_ENTRY("descriptor={}, requestedByteSize={}, graphByteSize_ptr={:p}, "
+                  "serializedGraph_ptr={:p}",
+                  logPtr(descriptor),
+                  requestedByteSize,
+                  static_cast<void*>(graphByteSize),
+                  static_cast<void*>(serializedGraph));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfInvalidDescriptor(descriptor);
+        throwIfNull(graphByteSize);
+
+        auto graphDesc = descriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+        auto data = graphDesc->getSerializedGraph();
+
+        *graphByteSize = data.size;
+
+        if(serializedGraph != nullptr)
+        {
+            THROW_IF_LT(requestedByteSize,
+                        data.size,
+                        HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
+                        "Requested buffer size (" + std::to_string(requestedByteSize)
+                            + ") is smaller than the serialized graph size ("
+                            + std::to_string(data.size) + ")");
+            std::memcpy(serializedGraph, data.ptr, data.size);
+        }
+
+        LOG_API_SUCCESS(apiName, "graphByteSize={}", *graphByteSize);
     });
 }
 
