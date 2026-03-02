@@ -294,5 +294,5 @@ public:
         return attr;
     }
 };
-typedef ConvFpropAttributes Conv_fprop_attributes; ///< @brief cuDNN compatibility alias
+typedef ConvFpropAttributes Conv_fprop_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph
