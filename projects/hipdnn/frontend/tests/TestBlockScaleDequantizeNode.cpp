@@ -92,6 +92,170 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeMissingBlockSize)
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeYShapeMismatch)
+{
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32});
+    attrs.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({2, 2, 32, 32});
+    attrs.set_scale(scaleTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({2, 64, 16, 16}); // Mismatched dims
+    attrs.set_y(yTensor);
+
+    attrs.set_block_size(std::vector<int32_t>{32});
+
+    GraphAttributes graphAttributes;
+    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeYRankMismatch)
+{
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32});
+    attrs.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    attrs.set_scale(scaleTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_dim({2, 64, 32}); // Different rank
+    attrs.set_y(yTensor);
+
+    attrs.set_block_size(std::vector<int32_t>{32});
+
+    GraphAttributes graphAttributes;
+    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeYDimsNotSetPassesValidation)
+{
+    // When Y dims are not set, shape match is skipped (will be inferred later)
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32});
+    attrs.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    attrs.set_scale(scaleTensor);
+
+    attrs.set_y(std::make_shared<TensorAttributes>()); // No dims set
+    attrs.set_block_size(std::vector<int32_t>{32});
+
+    GraphAttributes graphAttributes;
+    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeBlockSizeZero)
+{
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32});
+    attrs.set_x(xTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(std::vector<int32_t>{0});
+
+    GraphAttributes graphAttributes;
+    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeBlockSizeNegative)
+{
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32});
+    attrs.set_x(xTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(std::vector<int32_t>{32, -1});
+
+    GraphAttributes graphAttributes;
+    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeBlockSizeExceedsRank)
+{
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64}); // rank 2
+    attrs.set_x(xTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(std::vector<int32_t>{32, 16, 8}); // 3 entries > rank 2
+
+    GraphAttributes graphAttributes;
+    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeBlockSizeMatchesRank)
+{
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32});
+    attrs.set_x(xTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(std::vector<int32_t>{2, 64, 32, 32}); // exactly matches rank
+
+    GraphAttributes graphAttributes;
+    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeXDimsNotSetSkipsDimChecks)
+{
+    // When X dims are not set, dimension-dependent checks are skipped
+    BlockScaleDequantizeAttributes attrs;
+
+    attrs.set_x(std::make_shared<TensorAttributes>()); // No dims
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(std::vector<int32_t>{32, 16, 8}); // Would fail if X had rank < 3
+
+    GraphAttributes graphAttributes;
+    BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
 TEST(TestBlockScaleDequantizeNode, InferPropertiesNode)
 {
     BlockScaleDequantizeAttributes attrs;

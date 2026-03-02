@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -24,12 +25,7 @@ public:
 
     Error pre_validate_node() const override
     {
-        // ====================================================================
-        // BLOCK SCALE DEQUANTIZE VALIDATION
-        // Dequantizes blocked low-precision data using per-block scales.
-        // ====================================================================
-
-        // SECTION 1: Validate Required Tensor Pointers
+        // SECTION 1: Validate required tensor pointers
         HIPDNN_RETURN_IF_FALSE(attributes.get_x(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BlockScaleDequantizeNode missing x for pre-validation");
@@ -42,10 +38,47 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BlockScaleDequantizeNode missing y for pre-validation");
 
-        // SECTION 2: Validate block_size is not empty
         HIPDNN_RETURN_IF_FALSE(!attributes.get_block_size().empty(),
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BlockScaleDequantizeNode block_size must not be empty");
+
+        // SECTION 2: Validate tensor dimensions (when set)
+        auto x = attributes.get_x();
+        auto y = attributes.get_y();
+
+        if(detail::areTensorDimensionsSet(x))
+        {
+            HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 1, "Input tensor (x)"));
+        }
+
+        // Dequantize preserves shape — output dims must match input if set
+        if(detail::areTensorDimensionsSet(x) && detail::areTensorDimensionsSet(y))
+        {
+            HIPDNN_CHECK_ERROR(
+                detail::validateTensorShapesMatch(x, y, "Input tensor (x)", "Output tensor (y)"));
+        }
+
+        // SECTION 3: Validate block_size values
+        const auto& blockSize = attributes.get_block_size();
+
+        for(size_t i = 0; i < blockSize.size(); ++i)
+        {
+            HIPDNN_RETURN_IF_FALSE(blockSize[i] > 0,
+                                   ErrorCode::INVALID_VALUE,
+                                   "BlockScaleDequantizeNode block_size[" + std::to_string(i)
+                                       + "] must be positive, got " + std::to_string(blockSize[i]));
+        }
+
+        // block_size cannot have more entries than tensor dimensions
+        if(detail::areTensorDimensionsSet(x))
+        {
+            HIPDNN_RETURN_IF_FALSE(blockSize.size() <= x->get_dim().size(),
+                                   ErrorCode::INVALID_VALUE,
+                                   "BlockScaleDequantizeNode block_size has "
+                                       + std::to_string(blockSize.size())
+                                       + " entries but input tensor has only "
+                                       + std::to_string(x->get_dim().size()) + " dimensions");
+        }
 
         return {ErrorCode::OK, ""};
     }
