@@ -93,6 +93,12 @@ public:
             return typeid(hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
             return typeid(hipdnn_data_sdk::data_objects::MatmulAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::LayernormAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::RMSNormAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes);
         default:
             throw std::invalid_argument("Node attributes type is not recognized");
         }
