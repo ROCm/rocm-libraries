@@ -22,12 +22,16 @@
  * ************************************************************************ */
 #pragma once
 
+#include <any>
 #include <functional>
 #include <iosfwd>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -112,6 +116,7 @@ class STINKYTOFU_EXPORT PassContext {
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
     uint32_t wavefrontSize = 0;  ///< Computed from gemmConfig.arch
+    std::unordered_map<std::string, std::any> passResults;
 
     // Global BasicBlock filter applied to all StinkyInstPass instances.
     // By default, all BasicBlocks are processed.
@@ -156,6 +161,30 @@ class STINKYTOFU_EXPORT PassContext {
     /// Check if a BasicBlock should be processed according to the global filter.
     bool shouldProcessBasicBlock(const BasicBlock& bb) const {
         return globalBBFilter(bb);
+    }
+
+    /// Store an arbitrary pass result by key.
+    template <typename T>
+    void setResult(std::string key, T value) {
+        passResults[std::move(key)] = std::make_any<T>(std::move(value));
+    }
+
+    /// Retrieve a typed pass result by key.
+    /// Returns std::nullopt when key is missing or type mismatches.
+    template <typename T>
+    std::optional<T> getResult(const std::string& key) const {
+        auto it = passResults.find(key);
+        if (it == passResults.end()) return std::nullopt;
+        if (const T* value = std::any_cast<T>(&it->second)) return *value;
+        return std::nullopt;
+    }
+
+    bool hasResult(const std::string& key) const {
+        return passResults.find(key) != passResults.end();
+    }
+
+    void clearResults() {
+        passResults.clear();
     }
 };
 

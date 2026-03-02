@@ -116,6 +116,7 @@ std::ostream& PassManagerDebugConfig::getOutputStreamInAfter() const {
 void PassManager::run(Function& F) {
     F.setGemmTileConfig(passCtx.getGemmTileConfig());
     analysisManager.clear();
+    passCtx.clearResults();
 
     for (auto& inst : instrumentations) inst->runBegin(F, passCtx);
 

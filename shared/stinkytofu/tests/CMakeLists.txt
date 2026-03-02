@@ -40,6 +40,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
+    unit/asm/EstimateAsmCyclesTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
@@ -99,6 +100,8 @@ target_link_libraries(unit_tests PRIVATE stinkytofu-warnings)
 target_link_libraries(unit_tests PUBLIC ${TEST_LINK_LIBS})
 target_include_directories(unit_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(unit_tests tablegen_generated)
+# Copy loop.stir to build dir for Gfx950LocalReadAndLoopBody test (loop body from loop.s)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/unit/asm")
 
 gtest_discover_tests(unit_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
