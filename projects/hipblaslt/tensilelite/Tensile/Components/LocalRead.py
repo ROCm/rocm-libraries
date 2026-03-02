@@ -551,7 +551,7 @@ class LocalReadMFMA(LocalRead):
 
                 for oIdx in range(0,numOffsetsPerLoad):
                     if blocksPerTGroupSMFMA > 1 and oIdx % blocksPerTGroupSMFMA == 0:
-                        offset_val += (kernel["MacroTile%s"%tc] * blockOffsetSMFMA) * tP["bpeDS"] * (oIdx // blocksPerTGroupSMFMA)
+                        offset_val += int((kernel["MacroTile%s"%tc] * blockOffsetSMFMA) * tP["bpeDS"] * (oIdx // blocksPerTGroupSMFMA))
 
                     offset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset_val)
                     offset = applyPad(offset)
@@ -1089,13 +1089,14 @@ class LocalReadMFMA(LocalRead):
 
                                 if kernel["ProblemType"]["Sparse"] != 0:
                                     if blocksPerTGroupSMFMA > 1:
-                                        blockId = (gIdx * numElementPerGroup + rIdx * numElementPerRead) // elementsPerBlockSMFMA  #block 0 or block 1
+                                        #blockId = (gIdx * numElementPerGroup + rIdx * numElementPerRead) // elementsPerBlockSMFMA  #block 0 or block 1
+                                        blockId = (grIdx * numElementPerRead) // elementsPerBlockSMFMA  #block 0 or block 1
                                         if kernel["UnrollMajorLDS%s"%(tc)]:
                                             offset_val = offset_val + (blockOffsetSMFMA * blockId)
                                         else:
                                             offset_val = offset_val + (blockOffsetSMFMA * blockId) * UnrollStride
                                     #offset_val = (rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
-                                    offset_val = int(((gIdx * numElementPerGroup + rIdx * numElementPerRead) * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
+                                    offset_val = int(((grIdx * numElementPerRead) * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
                                 # Bugfixed for the wrong additional offset calculation in MX feature -TODO: need tensilelite expert to confirm this.
                                 # elif kernel["ProblemType"]["MacDataTypeA"].is8bitFloat() and kernel["MatrixInstK"] > 32 and tc in ("A", "B"):
                                 #     # Note: This special offset logic only applies to A/B tensors, not MXSA/MXSB scale data

@@ -4122,7 +4122,7 @@ class KernelWriterAssembly(KernelWriter):
         wave_id    = self.vgprPool.checkOut(1) # quotient
         # constant
         lsu         = kernel["LocalSplitU"]
-        du          = kernel["_DepthU%s"%tc]
+        du          = kernel["_DepthU%s"%tc] if tc in ["MXSA", "MXSB"] else kernel["_DepthU"]
         lsuStride   = du // lsu
         numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         # generate instruction
@@ -4402,7 +4402,7 @@ class KernelWriterAssembly(KernelWriter):
       mtAddPad    = kernel["MacroTile%u" % tile01] + LdsPad
       umlds       = kernel["UnrollMajorLDS%s" % tc]
       lsu         = kernel["LocalSplitU"]
-      du          = kernel["_DepthU%s"%tc]
+      du          = kernel["_DepthU%s"%tc] if tc in ["MXSA", "MXSB"] else kernel["_DepthU"]
       lsuStride   = du // lsu
       numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
 
@@ -10660,7 +10660,12 @@ class KernelWriterAssembly(KernelWriter):
               sparseA = kernel["ProblemType"]["Sparse"] == 1
               lrvw = kernel["LocalReadVectorWidth%s"%tc] // (2 if sparseA else 1)
               wlr = max(lrvw//kernel["MIInputPerThreadA"], 1)
-              if self.states.localReadDoCntA % wlr:
+              if kernel["ProblemType"]["Sparse"] and lrvw < kernel["MIInputPerThreadA"]:
+                if not sparseA:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
+                else:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadA"])
+              elif self.states.localReadDoCntA % wlr:
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadA"]
               else:
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * ((matrixInstK * wlr) - (kernel["MIInputPerThreadA"] * (wlr - 1)))
@@ -10685,7 +10690,12 @@ class KernelWriterAssembly(KernelWriter):
               sparseB = kernel["ProblemType"]["Sparse"] == 2
               lrvw = kernel["LocalReadVectorWidth%s"%tc] // (2 if sparseB else 1)
               wlr = max(lrvw//kernel["MIInputPerThreadB"], 1)
-              if self.states.localReadDoCntB % wlr:
+              if kernel["ProblemType"]["Sparse"] and lrvw < kernel["MIInputPerThreadB"]:
+                if not sparseB:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
+                else:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadB"])
+              elif self.states.localReadDoCntB % wlr:
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadB"]
               else:
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"] * wlr - (kernel["MIInputPerThreadB"] * (wlr - 1)))

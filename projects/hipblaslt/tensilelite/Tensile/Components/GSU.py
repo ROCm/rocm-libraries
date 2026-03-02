@@ -345,7 +345,7 @@ class GSUOn(GSU):
 
         tc = tP["tensorChar"]
         depthU = kernel["DepthU"]
-        _DepthU = kernel["_DepthU%s" % tc]
+        _DepthU = kernel["_DepthU%s"%tc] if tc in ["MXSA", "MXSB"] else kernel["_DepthU"]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
             _DepthU = (_DepthU * 16)
@@ -361,7 +361,7 @@ class GSUOn(GSU):
             elif tP["isM"]:
                 divider = 8
             if divider != 1:
-                depthUDiv = depthU // divider
+                _DepthU = depthU // divider
                 gsuOffsetStr = "gsuOffset = DepthU/%s*bpeGR*GSUSumIdx"%(divider)
         gsucLabelStr = "GSUC_%s"%( "A" if tP["isA"] else "B" if tP["isB"] else "M" )
         gsucLabel    = Label(label=writer.labels.getNameInc(gsucLabelStr), comment="")
@@ -435,7 +435,8 @@ class GSUOn(GSU):
                 elif tc == "B" and kernel["ProblemType"]["SwizzleTensorB"]:
                     mult_MI_Dim = mult_MI_Dim * 16 # MI_N = 16
 
-                duBpe = int(kernel["_DepthU%s" % tc] * tP["bpeGR"] * mult_MI_Dim)
+                _DepthU = kernel["_DepthU%s"%tc] if tc in ["MXSA", "MXSB"] else kernel["_DepthU"]
+                duBpe = int(_DepthU * tP["bpeGR"] * mult_MI_Dim)
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
                 module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=duBpe, comment="GSU*DepthU*BpeGR*MI_M"))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
@@ -452,6 +453,12 @@ class GSUOn(GSU):
                 else:
                     module.add(SCMovB32(dst=m, src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
                     module.add(SMulI32(dst=incr, src0=m, src1=stride, comment="incr%s unrollIdx)"%(tc) ))
+
+                if kernel["ProblemType"]["Sparse"]:
+                    if tP["is_sparse"]:
+                        module.add(SLShiftRightB32(dst=incr, shiftHex=hex(log2(2)), src=incr))
+                    elif tP["isM"]:
+                        module.add(SLShiftRightB32(dst=incr, shiftHex=hex(log2(8)), src=incr))
 
         return module
 
