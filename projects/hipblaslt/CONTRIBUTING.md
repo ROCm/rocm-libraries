@@ -110,7 +110,7 @@ cd build/clients && ./hipblaslt-test
 
 It is **generated at build time**, not checked in. A CMake step runs `clients/tests/hipblaslt_gentest.py` (needs PyYAML) to turn YAML in `clients/tests/data/*.yaml` into `build/clients/hipblaslt_gtest.data`. Building `hipblaslt-test` (or `hipblaslt-test-data`) runs that step.
 
-**Run from the directory that contains both the test binary and the data file.** The executable looks for `hipblaslt_gtest.data` next to itself (e.g. `build/clients/`):
+**Run from the directory that contains both the test binary and the data file.** The executable looks for `hipblaslt_gtest.data` in the same directory (e.g. `build/clients/`):
 
 ```bash
 cd projects/hipblaslt/build/clients
