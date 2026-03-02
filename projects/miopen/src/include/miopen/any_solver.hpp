@@ -247,11 +247,12 @@ struct AnySolver
         struct LegacySolver
         {
             template <typename U>
-            static constexpr auto Test(U*) -> typename std::is_same<
-                LegacyPerformanceConfig,
-                decltype(std::declval<U>().GetDefaultPerformanceConfig(
-                    std::declval<const ExecutionContext&>(),
-                    std::declval<const miopen::conv::ProblemDescription&>()))>::type;
+            static constexpr auto Test(U*) ->
+                typename std::is_same<
+                    LegacyPerformanceConfig,
+                    decltype(std::declval<U>().GetDefaultPerformanceConfig(
+                        std::declval<const ExecutionContext&>(),
+                        std::declval<const miopen::conv::ProblemDescription&>()))>::type;
 
             template <typename U>
             static constexpr std::false_type Test(...);

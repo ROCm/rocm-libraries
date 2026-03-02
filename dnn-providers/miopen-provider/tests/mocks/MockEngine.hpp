@@ -8,36 +8,44 @@
 #include <gmock/gmock.h>
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
-#include "engines/EngineInterface.hpp"
+#include "HipdnnMiopenContext.hpp"
+#include "HipdnnMiopenHandle.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
-class MockEngine : public IEngine
+class MockEngine : public hipdnn_plugin_sdk::
+                       IEngine<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
 {
 public:
     MOCK_METHOD(int64_t, id, (), (const, override));
     MOCK_METHOD(bool,
                 isApplicable,
-                (HipdnnEnginePluginHandle & handle, const hipdnn_plugin_sdk::IGraph& opGraph),
+                (HipdnnMiopenHandle & handle,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph),
                 (const, override));
     MOCK_METHOD(void,
                 getDetails,
-                (HipdnnEnginePluginHandle & handle, hipdnnPluginConstData_t& detailsOut),
+                (HipdnnMiopenHandle & handle,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 hipdnnPluginConstData_t& detailsOut),
                 (const, override));
     MOCK_METHOD(size_t,
-                getWorkspaceSize,
-                (const HipdnnEnginePluginHandle& handle, const hipdnn_plugin_sdk::IGraph& opGraph),
+                getMaxWorkspaceSize,
+                (const HipdnnMiopenHandle& handle,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig),
                 (const, override));
 
     MOCK_METHOD(void,
                 initializeExecutionContext,
-                (const HipdnnEnginePluginHandle& handle,
-                 const hipdnn_plugin_sdk::IGraph& opGraph,
-                 const hipdnn_plugin_sdk::IEngineConfig& engineConfig,
-                 HipdnnEnginePluginExecutionContext& executionContext),
+                (const HipdnnMiopenHandle& handle,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                 const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+                 HipdnnMiopenContext& executionContext),
                 (const, override));
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

@@ -1,29 +1,5 @@
-/*! \file */
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -90,6 +66,7 @@ struct SolutionIndexParameters
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
     bool              streamK;
+    bool              tailLoops = true;
 
     auto operator<=>(const SolutionIndexParameters& other) const = default;
 };
@@ -152,16 +129,24 @@ inline MachineInstructionSize pickMI(rocRoller::DataType typeA,
     }
 }
 
-constexpr int
-    preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt)
+constexpr int preferredUnrolling(rocRoller::DataType typeA,
+                                  rocRoller::DataType typeB,
+                                  WorkGroupTileSize   wgt,
+                                  bool hasPreSwizzle,
+                                  bool hasPreTile)
 {
     // Other datatypes run out of registers when prefetchInFlight is too
     // large.
     // There is an error with smaller tile sizes and larger prefetchInFlight.
-    // Unroll is 2 when wgt.k is greater or equal to 256, otherwise 4
+    // For 256x256x256 tile with FP4, use unroll=2 to reduce register pressure
     if(typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32
        && wgt.n > 32)
+    {
+        // When hasPreSwizzle and hasPreTile are true, use unroll=2
+        if(hasPreSwizzle && hasPreTile)
+            return 2;
         return 4;
+    }
     else
         return 2;
 }

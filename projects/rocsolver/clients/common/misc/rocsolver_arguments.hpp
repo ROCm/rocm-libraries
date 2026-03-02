@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -315,6 +315,18 @@ public:
 
         char mode = val->second.as<char>();
         if(mode != '1' && mode != '2')
+            throw std::invalid_argument("Invalid value for " + name);
+    }
+
+    void validate_norm_type(const std::string name) const
+    {
+        auto val = find(name);
+        if(val == end())
+            return;
+
+        char norm_type = std::toupper(val->second.as<char>());
+        if(norm_type != 'O' && norm_type != '1' && norm_type != 'F' && norm_type != 'I'
+           && norm_type != 'M')
             throw std::invalid_argument("Invalid value for " + name);
     }
 

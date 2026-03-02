@@ -6,13 +6,13 @@
 import pytest
 import origami
 import csv
-from .conftest import create_config_list
+from helpers import create_config_list
 
 
 @pytest.mark.integration
-def test_select_config_basic(hardware, mat_inst):
+def test_select_config_basic(hardware):
     """Test basic configuration selection."""
-    configs = create_config_list("gfx950", "f16", mat_inst)
+    configs = create_config_list(hardware, "f16")
     assert len(configs) > 0
 
     problem = origami.problem_t()
@@ -37,9 +37,9 @@ def test_select_config_basic(hardware, mat_inst):
 
 
 @pytest.mark.integration
-def test_rank_configs(hardware, mat_inst):
+def test_rank_configs(hardware):
     """Test ranking multiple configurations."""
-    configs = create_config_list("gfx950", "f16", mat_inst)
+    configs = create_config_list(hardware, "f16")
     assert len(configs) > 0
 
     problem = origami.problem_t()
@@ -63,9 +63,9 @@ def test_rank_configs(hardware, mat_inst):
 
 
 @pytest.mark.integration
-def test_select_config_mnk(hardware, mat_inst):
+def test_select_config_mnk(hardware):
     """Test select_config_mnk function."""
-    configs = create_config_list("gfx950", "f16", mat_inst)
+    configs = create_config_list(hardware, "f16")
     assert len(configs) > 0
 
     result = origami.select_config_mnk(2048, 2048, 2048, hardware, configs)
@@ -74,9 +74,9 @@ def test_select_config_mnk(hardware, mat_inst):
 
 
 @pytest.mark.integration
-def test_select_topk_configs(hardware, mat_inst):
+def test_select_topk_configs(hardware):
     """Test select_topk_configs function."""
-    configs = create_config_list("gfx950", "f16", mat_inst)
+    configs = create_config_list(hardware, "f16")
     assert len(configs) > 0
 
     problem = origami.problem_t()
@@ -102,7 +102,7 @@ def test_select_topk_configs(hardware, mat_inst):
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_select_config_with_csv(tmp_path, hardware, mat_inst):
+def test_select_config_with_csv(tmp_path, hardware):
     """Test configuration selection with CSV input file."""
     # Create a test CSV file
     csv_file = tmp_path / "test_sizes.csv"
@@ -111,7 +111,7 @@ def test_select_config_with_csv(tmp_path, hardware, mat_inst):
         writer.writerow([2048, 2048, 1, 2048])
         writer.writerow([4096, 4096, 1, 4096])
 
-    configs = create_config_list("gfx950", "f16", mat_inst)
+    configs = create_config_list(hardware, "f16")
 
     with open(csv_file, "r") as csvfile:
         csv_reader = csv.reader(csvfile)
@@ -145,9 +145,9 @@ def test_hardware_print(hardware):
 
 
 @pytest.mark.integration
-def test_compute_perf_gflops(hardware, mat_inst):
+def test_compute_perf_gflops(hardware):
     """Test compute_perf_gflops function."""
-    configs = create_config_list("gfx950", "f16", mat_inst)
+    configs = create_config_list(hardware, "f16")
     problem = origami.problem_t()
     problem.size = origami.dim3_t(2048, 2048, 2048)
     problem.batch = 1
@@ -287,6 +287,32 @@ def test_select_workgroup_mapping(hardware):
 
     sk_grid = 100
     result = origami.select_workgroup_mapping(problem, hardware, config, sk_grid)
-    assert isinstance(result, tuple)
-    assert len(result) == 3
+    assert isinstance(result, origami.workgroup_mapping_t)
 
+
+@pytest.mark.integration
+def test_gfx950_bfloat16_recommended_matrix_instruction():
+    """Test that gfx950 recommends 16x16x32 matrix instruction for bfloat16."""
+    # Create hardware object for gfx950
+    hardware = origami.hardware_t(
+        origami.architecture_t.gfx950,
+        304,    # N_CU
+        65536,  # lds_capacity
+        12,     # NUM_XCD
+        1.0,    # mem1_perf_ratio
+        1.0,    # mem2_perf_ratio
+        1.0,    # mem3_perf_ratio
+        25165824,  # L2_capacity
+        2.1,    # compute_clock_ghz
+        4,      # parallel_mi_cu
+        (1.0, 1.0, 1.0)  # mem_bw_per_wg_coefficients
+    )
+    
+    # Get recommended matrix instruction for bfloat16
+    bfloat16_dtype = origami.data_type_t.BFloat16
+    recommended_mi = hardware.get_recommended_matrix_instruction(bfloat16_dtype)
+    
+    # Verify it's 16x16x32
+    assert recommended_mi.m == 16, f"Expected m=16, got {recommended_mi.m}"
+    assert recommended_mi.n == 16, f"Expected n=16, got {recommended_mi.n}"
+    assert recommended_mi.k == 32, f"Expected k=32, got {recommended_mi.k}"

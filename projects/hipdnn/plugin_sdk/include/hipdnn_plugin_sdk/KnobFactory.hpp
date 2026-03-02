@@ -24,7 +24,8 @@ public:
                       int64_t min,
                       int64_t max,
                       int64_t step,
-                      const std::vector<int64_t>& options)
+                      const std::vector<int64_t>& options,
+                      bool deprecated = false)
     {
         auto knobIdStr = builder.CreateString(name);
         auto descStr = builder.CreateString(description);
@@ -42,7 +43,7 @@ public:
             defaultValOffset.Union(),
             hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint,
             constraintOffset.Union(),
-            false);
+            deprecated);
     }
 
     static flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>
@@ -51,7 +52,8 @@ public:
                         const std::string& description,
                         float defaultValue,
                         float min,
-                        float max)
+                        float max,
+                        bool deprecated = false)
     {
         auto knobIdStr = builder.CreateString(name);
         auto descStr = builder.CreateString(description);
@@ -68,7 +70,7 @@ public:
             defaultValOffset.Union(),
             hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint,
             constraintOffset.Union(),
-            false);
+            deprecated);
     }
 
     static flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>
@@ -76,7 +78,8 @@ public:
                          const std::string& name,
                          const std::string& description,
                          const std::string& defaultValue,
-                         const std::vector<std::string>& options)
+                         const std::vector<std::string>& options,
+                         bool deprecated = false)
     {
         auto knobIdStr = builder.CreateString(name);
         auto descStr = builder.CreateString(description);
@@ -102,7 +105,7 @@ public:
             defaultValOffset.Union(),
             hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint,
             constraintOffset.Union(),
-            false);
+            deprecated);
     }
 };
 

@@ -33,8 +33,6 @@
 #include <hip/hip_runtime.h>
 #include <limits>
 
-static const unsigned int DATA_GEN_GRID_Y_MAX = 64;
-
 template <typename Tcomplex>
 __device__ static void conjugate(const size_t pos, const size_t cpos, Tcomplex* x)
 {
@@ -444,11 +442,6 @@ __global__ static void impose_hermitian_symmetry_planar_3D_kernel(Tfloat*      x
     }
 }
 
-#ifdef USE_HIPRAND
-
-#include <hiprand/hiprand.h>
-#include <hiprand/hiprand_kernel.h>
-
 template <typename T>
 struct input_val_1D
 {
@@ -612,6 +605,11 @@ __device__ static size_t get_batch(const size_t i, const input_val_3D<T>& length
     return widx;
 }
 
+#ifdef USE_HIPRAND
+
+#include <hiprand/hiprand.h>
+#include <hiprand/hiprand_kernel.h>
+
 __device__ static double make_random_val(hiprandStatePhilox4_32_10* gen_state, double offset)
 {
     return hiprand_uniform_double(gen_state) + offset;
@@ -667,37 +665,6 @@ __global__ static void __launch_bounds__(DATA_GEN_THREADS)
 
 template <typename Tint, typename Treal>
 __global__ static void __launch_bounds__(DATA_GEN_THREADS)
-    generate_interleaved_data_kernel(const Tint             whole_length,
-                                     const size_t           idist,
-                                     const size_t           isize,
-                                     const Tint             istride,
-                                     const Tint             ustride,
-                                     const Treal            inv_scale,
-                                     rocfft_complex<Treal>* data)
-{
-    auto const i = static_cast<size_t>(threadIdx.x) + blockIdx.x * blockDim.x
-                   + blockIdx.y * gridDim.x * DATA_GEN_THREADS;
-    static_assert(sizeof(i) >= sizeof(isize));
-    if(i < isize)
-    {
-        const auto i_length = get_length(i, whole_length);
-        const auto i_batch  = get_batch(i, whole_length);
-        const auto i_base   = i_batch * idist;
-
-        const auto val = static_cast<Treal>(-0.5)
-                         + static_cast<Treal>(
-                               static_cast<unsigned long long>(compute_index(i_length, ustride, 0)))
-                               * inv_scale;
-
-        const auto idx = compute_index(i_length, istride, i_base);
-
-        data[idx].x = val;
-        data[idx].y = val;
-    }
-}
-
-template <typename Tint, typename Treal>
-__global__ static void __launch_bounds__(DATA_GEN_THREADS)
     generate_random_planar_data_kernel(const Tint   whole_length,
                                        const Tint   zero_length,
                                        const size_t idist,
@@ -731,38 +698,6 @@ __global__ static void __launch_bounds__(DATA_GEN_THREADS)
 
         real_data[write_idx] = make_random_val(&gen_state, static_cast<Treal>(-0.5));
         imag_data[write_idx] = make_random_val(&gen_state, static_cast<Treal>(-0.5));
-    }
-}
-
-template <typename Tint, typename Treal>
-__global__ static void __launch_bounds__(DATA_GEN_THREADS)
-    generate_planar_data_kernel(const Tint   whole_length,
-                                const size_t idist,
-                                const size_t isize,
-                                const Tint   istride,
-                                const Tint   ustride,
-                                const Treal  inv_scale,
-                                Treal*       real_data,
-                                Treal*       imag_data)
-{
-    auto const i = static_cast<size_t>(threadIdx.x) + blockIdx.x * blockDim.x
-                   + blockIdx.y * gridDim.x * DATA_GEN_THREADS;
-    static_assert(sizeof(i) >= sizeof(isize));
-    if(i < isize)
-    {
-        const auto i_length = get_length(i, whole_length);
-        const auto i_batch  = get_batch(i, whole_length);
-        const auto i_base   = i_batch * idist;
-
-        const auto val = static_cast<Treal>(-0.5)
-                         + static_cast<Treal>(
-                               static_cast<unsigned long long>(compute_index(i_length, ustride, 0)))
-                               * inv_scale;
-
-        const auto idx = compute_index(i_length, istride, i_base);
-
-        real_data[idx] = val;
-        imag_data[idx] = val;
     }
 }
 
@@ -802,6 +737,71 @@ __global__ static void __launch_bounds__(DATA_GEN_THREADS)
     }
 }
 
+#endif // USE_HIPRAND
+
+template <typename Tint, typename Treal>
+__global__ static void __launch_bounds__(DATA_GEN_THREADS)
+    generate_interleaved_data_kernel(const Tint             whole_length,
+                                     const size_t           idist,
+                                     const size_t           isize,
+                                     const Tint             istride,
+                                     const Tint             ustride,
+                                     const Treal            inv_scale,
+                                     rocfft_complex<Treal>* data)
+{
+    auto const i = static_cast<size_t>(threadIdx.x) + blockIdx.x * blockDim.x
+                   + blockIdx.y * gridDim.x * DATA_GEN_THREADS;
+    static_assert(sizeof(i) >= sizeof(isize));
+    if(i < isize)
+    {
+        const auto i_length = get_length(i, whole_length);
+        const auto i_batch  = get_batch(i, whole_length);
+        const auto i_base   = i_batch * idist;
+
+        const auto val = static_cast<Treal>(-0.5)
+                         + static_cast<Treal>(
+                               static_cast<unsigned long long>(compute_index(i_length, ustride, 0)))
+                               * inv_scale;
+
+        const auto idx = compute_index(i_length, istride, i_base);
+
+        data[idx].x = val;
+        data[idx].y = val;
+    }
+}
+
+template <typename Tint, typename Treal>
+__global__ static void __launch_bounds__(DATA_GEN_THREADS)
+    generate_planar_data_kernel(const Tint   whole_length,
+                                const size_t idist,
+                                const size_t isize,
+                                const Tint   istride,
+                                const Tint   ustride,
+                                const Treal  inv_scale,
+                                Treal*       real_data,
+                                Treal*       imag_data)
+{
+    auto const i = static_cast<size_t>(threadIdx.x) + blockIdx.x * blockDim.x
+                   + blockIdx.y * gridDim.x * DATA_GEN_THREADS;
+    static_assert(sizeof(i) >= sizeof(isize));
+    if(i < isize)
+    {
+        const auto i_length = get_length(i, whole_length);
+        const auto i_batch  = get_batch(i, whole_length);
+        const auto i_base   = i_batch * idist;
+
+        const auto val = static_cast<Treal>(-0.5)
+                         + static_cast<Treal>(
+                               static_cast<unsigned long long>(compute_index(i_length, ustride, 0)))
+                               * inv_scale;
+
+        const auto idx = compute_index(i_length, istride, i_base);
+
+        real_data[idx] = val;
+        imag_data[idx] = val;
+    }
+}
+
 template <typename Tint, typename Treal>
 __global__ static void __launch_bounds__(DATA_GEN_THREADS)
     generate_real_data_kernel(const Tint   whole_length,
@@ -836,6 +836,8 @@ __global__ static void __launch_bounds__(DATA_GEN_THREADS)
     }
 }
 
+static const unsigned int DATA_GEN_GRID_Y_MAX = 64;
+
 // get grid dimensions for data gen kernel
 static dim3 generate_data_gridDim(const size_t isize)
 {
@@ -855,64 +857,7 @@ static dim3 generate_data_gridDim(const size_t isize)
     return {gridDim_x, gridDim_y};
 }
 
-// get grid dimensions for hermitian symmetrizer kernel
-static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
-                                       const size_t               batch,
-                                       const size_t               blockSize)
-{
-    dim3 gridDim;
-
-    if(!length.empty() && std::count(length.begin(), length.end() - 1, static_cast<size_t>(0)) > 0)
-        throw std::runtime_error("Invalid zero length for impose_hermitian_symmetry");
-
-    if(batch == 0)
-        throw std::runtime_error("Invalid zero batch for impose_hermitian_symmetry");
-
-    const auto x_total = (length[0] + 1) / 2 - 1;
-    const auto y_total = length[1] - 1;
-
-    switch(length.size())
-    {
-    case 1:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize));
-        break;
-    case 2:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
-                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize));
-        break;
-    case 3:
-        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
-                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize),
-                       DivRoundingUp<size_t>((y_total == 0 ? 1 : y_total), blockSize));
-        break;
-    default:
-        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
-    }
-
-    return gridDim;
-}
-
-static dim3 generate_blockDim(const std::vector<size_t>& length, const size_t blockSize)
-{
-    dim3 blockDim;
-
-    switch(length.size())
-    {
-    case 1:
-        blockDim = dim3(blockSize);
-        break;
-    case 2:
-        blockDim = dim3(blockSize, blockSize);
-        break;
-    case 3:
-        blockDim = dim3(blockSize, blockSize, blockSize);
-        break;
-    default:
-        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
-    }
-
-    return blockDim;
-}
+#ifdef USE_HIPRAND
 
 template <typename Tint, typename Treal>
 void generate_random_interleaved_data(const Tint&            whole_length,
@@ -954,47 +899,6 @@ void generate_random_interleaved_data(const Tint&            whole_length,
     auto err = hipGetLastError();
     if(err != hipSuccess)
         throw std::runtime_error("generate_random_interleaved_data_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
-
-template <typename Tint, typename Treal>
-void generate_interleaved_data(const Tint&            whole_length,
-                               const size_t           idist,
-                               const size_t           isize,
-                               const Tint&            whole_stride,
-                               const size_t           nbatch,
-                               rocfft_complex<Treal>* input_data,
-                               const hipDeviceProp_t& deviceProp)
-{
-    const auto input_length = get_input_val(whole_length);
-    const auto input_stride = get_input_val(whole_stride);
-    const auto unit_stride  = make_unit_stride(input_length);
-
-    const auto inv_scale
-        = static_cast<Treal>(1.0)
-          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
-
-    dim3 gridDim = generate_data_gridDim(isize);
-    dim3 blockDim{DATA_GEN_THREADS};
-
-    launch_limits_check("generate_interleaved_data_kernel", gridDim, blockDim, deviceProp);
-
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(generate_interleaved_data_kernel<decltype(input_length), Treal>),
-        gridDim,
-        blockDim,
-        0, // sharedMemBytes
-        0, // stream
-        input_length,
-        idist,
-        isize,
-        input_stride,
-        unit_stride,
-        inv_scale,
-        input_data);
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("generate_interleaved_data_kernel launch failure: "
                                  + std::string(hipGetErrorName(err)));
 }
 
@@ -1044,48 +948,6 @@ void generate_random_planar_data(const Tint&            whole_length,
 }
 
 template <typename Tint, typename Treal>
-void generate_planar_data(const Tint&            whole_length,
-                          const size_t           idist,
-                          const size_t           isize,
-                          const Tint&            whole_stride,
-                          const size_t           nbatch,
-                          Treal*                 real_data,
-                          Treal*                 imag_data,
-                          const hipDeviceProp_t& deviceProp)
-{
-    const auto input_length = get_input_val(whole_length);
-    const auto input_stride = get_input_val(whole_stride);
-    const auto unit_stride  = make_unit_stride(input_length);
-
-    const auto inv_scale
-        = static_cast<Treal>(1.0)
-          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
-
-    dim3 gridDim = generate_data_gridDim(isize);
-    dim3 blockDim{DATA_GEN_THREADS};
-
-    launch_limits_check("generate_planar_data_kernel", gridDim, blockDim, deviceProp);
-
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(generate_planar_data_kernel<decltype(input_length), Treal>),
-                       gridDim,
-                       blockDim,
-                       0, // sharedMemBytes
-                       0, // stream
-                       input_length,
-                       idist,
-                       isize,
-                       input_stride,
-                       unit_stride,
-                       inv_scale,
-                       real_data,
-                       imag_data);
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("generate_planar_data_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
-
-template <typename Tint, typename Treal>
 void generate_random_real_data(const Tint&            whole_length,
                                const size_t           idist,
                                const size_t           isize,
@@ -1125,6 +987,91 @@ void generate_random_real_data(const Tint&            whole_length,
     auto err = hipGetLastError();
     if(err != hipSuccess)
         throw std::runtime_error("generate_random_real_data_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
+}
+
+#endif // USE_HIPRAND
+
+template <typename Tint, typename Treal>
+void generate_interleaved_data(const Tint&            whole_length,
+                               const size_t           idist,
+                               const size_t           isize,
+                               const Tint&            whole_stride,
+                               const size_t           nbatch,
+                               rocfft_complex<Treal>* input_data,
+                               const hipDeviceProp_t& deviceProp)
+{
+    const auto input_length = get_input_val(whole_length);
+    const auto input_stride = get_input_val(whole_stride);
+    const auto unit_stride  = make_unit_stride(input_length);
+
+    const auto inv_scale
+        = static_cast<Treal>(1.0)
+          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
+
+    dim3 gridDim = generate_data_gridDim(isize);
+    dim3 blockDim{DATA_GEN_THREADS};
+
+    launch_limits_check("generate_interleaved_data_kernel", gridDim, blockDim, deviceProp);
+
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(generate_interleaved_data_kernel<decltype(input_length), Treal>),
+        gridDim,
+        blockDim,
+        0, // sharedMemBytes
+        0, // stream
+        input_length,
+        idist,
+        isize,
+        input_stride,
+        unit_stride,
+        inv_scale,
+        input_data);
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("generate_interleaved_data_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
+}
+
+template <typename Tint, typename Treal>
+void generate_planar_data(const Tint&            whole_length,
+                          const size_t           idist,
+                          const size_t           isize,
+                          const Tint&            whole_stride,
+                          const size_t           nbatch,
+                          Treal*                 real_data,
+                          Treal*                 imag_data,
+                          const hipDeviceProp_t& deviceProp)
+{
+    const auto input_length = get_input_val(whole_length);
+    const auto input_stride = get_input_val(whole_stride);
+    const auto unit_stride  = make_unit_stride(input_length);
+
+    const auto inv_scale
+        = static_cast<Treal>(1.0)
+          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
+
+    dim3 gridDim = generate_data_gridDim(isize);
+    dim3 blockDim{DATA_GEN_THREADS};
+
+    launch_limits_check("generate_planar_data_kernel", gridDim, blockDim, deviceProp);
+
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(generate_planar_data_kernel<decltype(input_length), Treal>),
+                       gridDim,
+                       blockDim,
+                       0, // sharedMemBytes
+                       0, // stream
+                       input_length,
+                       idist,
+                       isize,
+                       input_stride,
+                       unit_stride,
+                       inv_scale,
+                       real_data,
+                       imag_data);
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("generate_planar_data_kernel launch failure: "
                                  + std::string(hipGetErrorName(err)));
 }
 
@@ -1172,6 +1119,7 @@ void generate_real_data(const Tint&            whole_length,
 typedef std::tuple<size_t, size_t>         idx_2D_t;
 typedef std::tuple<size_t, size_t, size_t> idx_3D_t;
 
+#ifdef USE_HIPRAND
 // Instantiate data gen functions for an index type and precision
 #define INSTANTIATE_DATA_GEN(INDEX, DATATYPE)                                                        \
     template void generate_random_interleaved_data<INDEX, DATATYPE>(                                 \
@@ -1243,8 +1191,104 @@ INSTANTIATE_DATA_GEN(idx_3D_t, float);
 INSTANTIATE_DATA_GEN(size_t, double);
 INSTANTIATE_DATA_GEN(idx_2D_t, double);
 INSTANTIATE_DATA_GEN(idx_3D_t, double);
+#else
+// Instantiate data gen functions for an index type and precision
+#define INSTANTIATE_DATA_GEN(INDEX, DATATYPE)                                                        \
+    template void generate_interleaved_data<INDEX, DATATYPE>(const INDEX&              whole_length, \
+                                                             const size_t              idist,        \
+                                                             const size_t              isize,        \
+                                                             const INDEX&              whole_stride, \
+                                                             const size_t              nbatch,       \
+                                                             rocfft_complex<DATATYPE>* input_data,   \
+                                                             const hipDeviceProp_t&    deviceProp);     \
+                                                                                                     \
+    template void generate_planar_data<INDEX, DATATYPE>(const INDEX&           whole_length,         \
+                                                        const size_t           idist,                \
+                                                        const size_t           isize,                \
+                                                        const INDEX&           whole_stride,         \
+                                                        const size_t           nbatch,               \
+                                                        DATATYPE*              real_data,            \
+                                                        DATATYPE*              imag_data,            \
+                                                        const hipDeviceProp_t& deviceProp);          \
+                                                                                                     \
+    template void generate_real_data<INDEX, DATATYPE>(const INDEX&           whole_length,           \
+                                                      const size_t           idist,                  \
+                                                      const size_t           isize,                  \
+                                                      const INDEX&           whole_stride,           \
+                                                      const size_t           nbatch,                 \
+                                                      DATATYPE*              input_data,             \
+                                                      const hipDeviceProp_t& deviceProp)
 
-#endif
+INSTANTIATE_DATA_GEN(size_t, rocfft_fp16);
+INSTANTIATE_DATA_GEN(idx_2D_t, rocfft_fp16);
+INSTANTIATE_DATA_GEN(idx_3D_t, rocfft_fp16);
+INSTANTIATE_DATA_GEN(size_t, float);
+INSTANTIATE_DATA_GEN(idx_2D_t, float);
+INSTANTIATE_DATA_GEN(idx_3D_t, float);
+INSTANTIATE_DATA_GEN(size_t, double);
+INSTANTIATE_DATA_GEN(idx_2D_t, double);
+INSTANTIATE_DATA_GEN(idx_3D_t, double);
+#endif // USE_HIPRAND
+
+// get block dimensions for hermitian symmetrizer kernel
+static dim3 generate_blockDim(const std::vector<size_t>& length, const size_t blockSize)
+{
+    dim3 blockDim;
+
+    switch(length.size())
+    {
+    case 1:
+        blockDim = dim3(blockSize);
+        break;
+    case 2:
+        blockDim = dim3(blockSize, blockSize);
+        break;
+    case 3:
+        blockDim = dim3(blockSize, blockSize, blockSize);
+        break;
+    default:
+        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
+    }
+
+    return blockDim;
+}
+
+// get grid dimensions for hermitian symmetrizer kernel
+static dim3 generate_hermitian_gridDim(const std::vector<size_t>& length,
+                                       const size_t               batch,
+                                       const size_t               blockSize)
+{
+    dim3 gridDim;
+
+    if(!length.empty() && std::count(length.begin(), length.end() - 1, static_cast<size_t>(0)) > 0)
+        throw std::runtime_error("Invalid zero length for impose_hermitian_symmetry");
+
+    if(batch == 0)
+        throw std::runtime_error("Invalid zero batch for impose_hermitian_symmetry");
+
+    const auto x_total = (length[0] + 1) / 2 - 1;
+    const auto y_total = length[1] - 1;
+
+    switch(length.size())
+    {
+    case 1:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize));
+        break;
+    case 2:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
+                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize));
+        break;
+    case 3:
+        gridDim = dim3(DivRoundingUp<size_t>(batch, blockSize),
+                       DivRoundingUp<size_t>(x_total == 0 ? 1 : x_total, blockSize),
+                       DivRoundingUp<size_t>((y_total == 0 ? 1 : y_total), blockSize));
+        break;
+    default:
+        throw std::runtime_error("Invalid dimension for impose_hermitian_symmetry");
+    }
+
+    return gridDim;
+}
 
 template <typename Tcomplex>
 void impose_hermitian_symmetry_interleaved(const std::vector<size_t>& length,

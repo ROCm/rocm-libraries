@@ -2368,11 +2368,13 @@ rocsparse_status rocsparse::bsrgemm_calc_template_dispatch(rocsparse_handle    h
                                                                          d_perm,
                                                                          workspace2));
         return rocsparse_status_success;
+        // LCOV_EXCL_START
     }
     else
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
+    // LCOV_EXCL_STOP
 }
 
 #define INSTANTIATE(I, J, T)                                             \
