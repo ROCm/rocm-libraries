@@ -473,16 +473,12 @@ class LocalReadMFMA(LocalRead):
         numElementPerGroup = (writer.states.kernel["WavefrontSize"] // kernel["MatrixInstM"]) * miInputPerGroup
         inputPerThread   = kernel["LocalReadVectorWidth"] if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
 
-        if tc == 'A':
+        if tc == 'A' or tc == 'MXSA' or (tc == 'Metadata' and tP["tensorIdx"] == 0):
             abmatrixinfo = writer.states.a
-        elif tc == 'MXSA':
-            abmatrixinfo = writer.states.mxsa
-        elif tc == 'B':
+        elif tc == 'B' or tc == 'MXSB' or (tc == 'Metadata' and tP["tensorIdx"] != 0):
             abmatrixinfo = writer.states.b
-        elif tc == 'MXSB':
-            abmatrixinfo = writer.states.mxsb
         else:
-            raise Exception(f"unsupport tc %s{tc}")
+            raise Exception(f"unsupport tc {tc}")
         perpStride   = abmatrixinfo.gNLCPerpStride
 
         # pack register
