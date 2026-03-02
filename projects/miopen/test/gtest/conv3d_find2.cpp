@@ -41,21 +41,22 @@ auto GetDataset()
 {
     std::vector<miopen::test::conv::conv_test_input> cases{};
 
-    auto batch_sizes      = generate_data(std::vector<std::size_t>{1, 8});
-    auto input_channels   = generate_data(std::vector<std::size_t>{16, 32});
-    auto output_channels  = generate_data(std::vector<std::size_t>{32, 64});
-    auto spatial_dim_elements =
-        generate_data(std::vector<std::vector<std::size_t>>{{3, 4, 4}});
-    auto filter_dims =
-        generate_data(std::vector<std::vector<std::size_t>>{{3, 5, 5}, {3, 7, 7}});
-    auto pads_strides_dilations = generate_data(std::vector<std::vector<int>>{
-        {0, 0, 0, 1, 1, 1, 1, 1, 1},
-        {0, 0, 0, 2, 2, 2, 1, 1, 1},
-        {1, 1, 1, 1, 1, 1, 1, 1, 1},
-        {1, 1, 1, 2, 2, 2, 1, 1, 1},
-    });
-    auto trans_output_pads = generate_data(std::vector<std::vector<int>>{{0, 0, 0}});
-    auto pad_modes         = generate_data(std::vector<std::string>{"valid"});
+    auto batch_sizes =
+        generate_data_limited(miopen::test::conv::get_batch_sizes(), 1, std::size_t{8});
+    auto input_channels =
+        generate_data_limited(miopen::test::conv::get_input_channels(), 1, std::size_t{32});
+    auto output_channels =
+        generate_data_limited(miopen::test::conv::get_output_channels(), 1, std::size_t{32});
+    auto spatial_dim_elements = generate_data_limited(
+        miopen::test::conv::get_3d_spatial_dims(), 1, std::vector<std::size_t>{16, 16, 16});
+    auto filter_dims = generate_data_limited(
+        miopen::test::conv::get_3d_filter_dims(), 2, std::vector<std::size_t>{3, 3, 3});
+    auto pads_strides_dilations = generate_data_limited(miopen::test::conv::get_3d_pads_strides_dilations(),
+                                                         2,
+                                                         std::vector<int>{1, 1, 1, 1, 1, 1, 1, 1, 1});
+    auto trans_output_pads = generate_data_limited(
+        miopen::test::conv::get_3d_trans_output_pads(), 1, std::vector<int>{0, 0, 0});
+    auto pad_modes         = generate_data(std::vector<std::string>{"default"});
     auto in_layouts        = generate_data(std::vector<std::string>{"NCDHW"});
     auto fil_layouts       = generate_data(std::vector<std::string>{"NCDHW"});
     auto out_layouts       = generate_data(std::vector<std::string>{"NCDHW"});
@@ -116,14 +117,8 @@ auto GetDataset()
 } // namespace
 
 template <class T>
-struct conv3d_find2_test : miopen::test::conv::conv_test_base<T>
+struct conv3d_find2_test : miopen::test::conv::conv_test_base<T, ConvApi::Find_2_0>
 {
-    void SetUp() override
-    {
-        miopen::test::conv::conv_test_base<T>::SetUp();
-        // Force Find 2.0
-        setenv("MIOPEN_FIND_ENFORCE", "4", 1);
-    }
 };
 
 using GPU_conv_3d_find2_FP32 = conv3d_find2_test<float>;

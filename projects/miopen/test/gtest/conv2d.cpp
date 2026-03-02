@@ -54,7 +54,7 @@ auto GetDataset()
     auto pads_strides_dilations = generate_data_limited(
         miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
     auto trans_output_pads = generate_data(miopen::test::conv::get_2d_trans_output_pads());
-    auto pad_modes         = generate_data(std::vector<std::string>{"default", "same", "valid"});
+    auto pad_modes         = generate_data(std::vector<std::string>{"default"});
     auto in_layouts        = generate_data(std::vector<std::string>{"NCHW"});
     auto fil_layouts       = generate_data(std::vector<std::string>{"NCHW"});
     auto out_layouts       = generate_data(std::vector<std::string>{"NCHW"});

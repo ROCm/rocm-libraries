@@ -2,128 +2,107 @@
 // SPDX-License-Identifier:  MIT
 
 #include "conv_common_gtest.hpp"
+#include <array>
 
 namespace {
 
-template <typename T>
-std::vector<T> generate_data_limited(const std::vector<T>& dims, int limit_multiplier, T single)
+struct group_conv_case
 {
-    const bool full_set = true;
-    const int limit_set = 2;
+    std::array<std::size_t, 4> input;
+    std::array<std::size_t, 4> weights;
+    std::array<int, 6> pads_strides_dilations;
+    int group_count;
+    bool disable_backward_weights = false;
+};
 
-    if(full_set)
-    {
-        if(limit_set > 0)
-        {
-            auto endpoint = std::min(static_cast<int>(dims.size()), limit_set * limit_multiplier);
-            return std::vector<T>(dims.cbegin(), dims.cbegin() + endpoint);
-        }
-        else
-            return dims;
-    }
-    else
-    {
-        return {single};
-    }
-}
-
-template <typename T>
-std::vector<T> generate_data(const std::vector<T>& dims)
+const std::vector<group_conv_case>& GetCuratedCases()
 {
-    const bool full_set = true;
-    if(full_set)
-        return dims;
-    else
-        return {dims.front()};
+    static const std::vector<group_conv_case> cases = {
+        {{16, 128, 56, 56}, {256, 4, 3, 3}, {1, 1, 1, 1, 1, 1}, 32, false},
+        {{16, 256, 56, 56}, {512, 8, 3, 3}, {1, 1, 2, 2, 1, 1}, 32, false},
+        {{16, 256, 28, 28}, {512, 8, 3, 3}, {1, 1, 1, 1, 1, 1}, 32, false},
+        {{16, 512, 28, 28}, {1024, 16, 3, 3}, {1, 1, 2, 2, 1, 1}, 32, false},
+        {{16, 512, 14, 14}, {1024, 16, 3, 3}, {1, 1, 1, 1, 1, 1}, 32, false},
+        {{16, 1024, 14, 14}, {2048, 32, 3, 3}, {1, 1, 2, 2, 1, 1}, 32, false},
+        {{16, 1024, 7, 7}, {2048, 32, 3, 3}, {1, 1, 1, 1, 1, 1}, 32, false},
+        {{32, 128, 56, 56}, {256, 4, 3, 3}, {1, 1, 1, 1, 1, 1}, 32, false},
+        {{32, 256, 56, 56}, {512, 8, 3, 3}, {1, 1, 2, 2, 1, 1}, 32, false},
+        {{32, 256, 28, 28}, {512, 8, 3, 3}, {1, 1, 1, 1, 1, 1}, 32, true},
+        {{32, 512, 28, 28}, {1024, 16, 3, 3}, {1, 1, 2, 2, 1, 1}, 32, false},
+        {{32, 512, 14, 14}, {1024, 16, 3, 3}, {1, 1, 1, 1, 1, 1}, 32, false},
+        {{32, 1024, 14, 14}, {2048, 32, 3, 3}, {1, 1, 2, 2, 1, 1}, 32, false},
+        {{32, 1024, 7, 7}, {2048, 32, 3, 3}, {1, 1, 1, 1, 1, 1}, 32, false},
+        {{4, 4, 161, 700}, {32, 1, 5, 20}, {0, 0, 2, 2, 1, 1}, 4, false},
+        {{8, 2, 161, 700}, {32, 1, 5, 20}, {0, 0, 2, 2, 1, 1}, 2, false},
+        {{16, 4, 161, 700}, {32, 1, 5, 20}, {0, 0, 2, 2, 1, 1}, 4, false},
+        {{32, 2, 161, 700}, {32, 1, 5, 20}, {0, 0, 2, 2, 1, 1}, 2, false},
+        {{4, 32, 79, 341}, {32, 16, 5, 10}, {0, 0, 2, 2, 1, 1}, 2, false},
+        {{8, 32, 79, 341}, {32, 16, 5, 10}, {0, 0, 2, 2, 1, 1}, 2, false},
+        {{16, 32, 79, 341}, {32, 16, 5, 10}, {0, 0, 2, 2, 1, 1}, 2, false},
+        {{32, 32, 79, 341}, {32, 16, 5, 10}, {0, 0, 2, 2, 1, 1}, 2, false},
+        {{16, 4, 48, 480}, {16, 1, 3, 3}, {1, 1, 1, 1, 1, 1}, 4, false},
+        {{16, 16, 24, 240}, {32, 1, 3, 3}, {1, 1, 1, 1, 1, 1}, 16, false},
+        {{16, 32, 12, 120}, {64, 8, 3, 3}, {1, 1, 1, 1, 1, 1}, 4, false},
+        {{16, 64, 6, 60}, {128, 16, 3, 3}, {1, 1, 1, 1, 1, 1}, 4, false},
+        {{8, 3, 108, 108}, {63, 1, 3, 3}, {1, 1, 2, 2, 1, 1}, 3, false},
+        {{8, 64, 54, 54}, {64, 8, 3, 3}, {1, 1, 1, 1, 1, 1}, 8, false},
+        {{8, 128, 27, 27}, {128, 16, 3, 3}, {1, 1, 1, 1, 1, 1}, 8, false},
+        {{8, 3, 224, 224}, {63, 1, 3, 3}, {1, 1, 1, 1, 1, 1}, 3, false},
+        {{8, 64, 112, 112}, {128, 32, 3, 3}, {1, 1, 1, 1, 1, 1}, 2, false},
+        {{16, 9, 224, 224}, {63, 3, 3, 3}, {1, 1, 1, 1, 1, 1}, 3, false},
+        {{16, 64, 112, 112}, {128, 16, 3, 3}, {1, 1, 1, 1, 1, 1}, 4, true},
+        {{16, 3, 224, 224}, {63, 1, 7, 7}, {3, 3, 2, 2, 1, 1}, 3, false},
+        {{16, 192, 28, 28}, {32, 12, 5, 5}, {2, 2, 1, 1, 1, 1}, 16, false},
+        {{16, 832, 7, 7}, {128, 52, 5, 5}, {2, 2, 1, 1, 1, 1}, 16, false},
+        {{16, 192, 28, 28}, {32, 24, 1, 1}, {0, 0, 1, 1, 1, 1}, 8, false},
+        {{16, 832, 7, 7}, {128, 104, 1, 1}, {0, 0, 1, 1, 1, 1}, 8, false},
+        {{11, 23, 161, 700}, {46, 1, 7, 7}, {1, 1, 2, 2, 1, 1}, 23, false},
+        {{8, 7, 224, 224}, {63, 1, 3, 3}, {1, 1, 1, 1, 1, 1}, 7, false},
+        {{8, 7, 224, 224}, {63, 1, 3, 3}, {0, 0, 1, 1, 1, 1}, 7, false},
+        {{8, 7, 224, 224}, {63, 1, 3, 3}, {0, 0, 2, 2, 1, 1}, 7, false},
+        {{8, 7, 224, 224}, {63, 1, 3, 3}, {1, 1, 2, 2, 1, 1}, 7, false},
+        {{8, 7, 224, 224}, {63, 1, 3, 3}, {2, 2, 2, 2, 1, 1}, 7, false},
+        {{8, 3, 108, 108}, {63, 1, 3, 3}, {1, 1, 1, 1, 1, 1}, 3, false},
+        {{8, 3, 108, 108}, {63, 1, 3, 3}, {0, 0, 1, 1, 1, 1}, 3, false},
+        {{8, 3, 108, 108}, {63, 1, 3, 3}, {0, 0, 2, 2, 1, 1}, 3, false},
+        {{8, 3, 108, 108}, {63, 1, 3, 3}, {1, 1, 2, 2, 1, 1}, 3, false},
+        {{8, 3, 108, 108}, {63, 1, 3, 3}, {2, 2, 2, 2, 1, 1}, 3, false},
+    };
+    return cases;
 }
 
 auto GetDataset()
 {
     std::vector<miopen::test::conv::conv_test_input> cases{};
 
-    auto batch_sizes =
-        generate_data_limited(miopen::test::conv::get_batch_sizes(), 1, std::size_t{1});
-    auto input_channels =
-        generate_data_limited(miopen::test::conv::get_input_channels(), 1, std::size_t{32});
-    auto output_channels =
-        generate_data_limited(miopen::test::conv::get_output_channels(), 1, std::size_t{64});
-    auto spatial_dim_elements = generate_data_limited(
-        miopen::test::conv::get_2d_spatial_dims(), 1, std::vector<std::size_t>{28, 28});
-    auto filter_dims = generate_data_limited(
-        miopen::test::conv::get_2d_filter_dims(), 2, std::vector<std::size_t>{3, 3});
-    auto pads_strides_dilations = generate_data_limited(
-        miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
-    auto trans_output_pads = generate_data(miopen::test::conv::get_2d_trans_output_pads());
-    auto pad_modes         = generate_data(std::vector<std::string>{"default", "same", "valid"});
-    auto in_layouts        = generate_data(std::vector<std::string>{"NCHW"});
-    auto fil_layouts       = generate_data(std::vector<std::string>{"NCHW"});
-    auto out_layouts       = generate_data(std::vector<std::string>{"NCHW"});
-    auto deterministics    = generate_data(std::vector<bool>{false});
-    auto tensor_vects      = generate_data(std::vector<std::size_t>{0});
-    auto vector_lengths    = generate_data(std::vector<std::size_t>{1});
-    // Only valid for int8 input and weights
-    auto output_types    = generate_data(std::vector<std::string>{"int32"});
-    auto int8_vectorizes = generate_data(std::vector<bool>{false});
-    auto group_counts =
-        generate_data(std::vector<int>{2, 4, 8}); // Standard group counts for test_conv_group
+    for(const auto& c : GetCuratedCases())
+    {
+        miopen::test::conv::conv_test_input input{};
+        input.batch_size           = c.input[0];
+        input.input_channels       = c.input[1];
+        input.spatial_dim_elements = {c.input[2], c.input[3]};
+        input.output_channels      = c.weights[0];
+        input.filter_dims          = {c.weights[2], c.weights[3]};
+        input.pads_strides_dilations.assign(
+            c.pads_strides_dilations.begin(), c.pads_strides_dilations.end());
+        input.trans_output_pads = {0, 0};
+        input.in_layout         = "NCHW";
+        input.fil_layout        = "NCHW";
+        input.out_layout        = "NCHW";
+        input.pad_mode          = "default";
+        input.deterministic     = false;
+        input.tensor_vect       = 0;
+        input.vector_length     = 1;
+        input.output_type       = "int32";
+        input.int8_vectorize    = false;
+        input.groupCount        = c.group_count;
+        input.do_forward        = true;
+        input.do_backward_data  = true;
+        input.do_backward_weights = !c.disable_backward_weights;
 
-    for(auto b : batch_sizes)
-        for(auto ic : input_channels)
-            for(auto oc : output_channels)
-                for(auto s : spatial_dim_elements)
-                    for(auto f : filter_dims)
-                        for(auto p : pads_strides_dilations)
-                            for(auto pm : pad_modes)
-                                for(auto tp : trans_output_pads)
-                                    for(auto il : in_layouts)
-                                        for(auto fl : fil_layouts)
-                                            for(auto ol : out_layouts)
-                                                for(auto d : deterministics)
-                                                    for(auto tv : tensor_vects)
-                                                        for(auto vl : vector_lengths)
-                                                            for(auto ot : output_types)
-                                                                for(auto iv : int8_vectorizes)
-                                                                    for(auto gc : group_counts)
-                                                                    {
-                                                                        // Group count must divide
-                                                                        // input and output channels
-                                                                        if(ic % gc != 0 ||
-                                                                           oc % gc != 0)
-                                                                            continue;
-
-                                                                        miopen::test::conv::
-                                                                            conv_test_input input{};
-                                                                        input.batch_size      = b;
-                                                                        input.input_channels  = ic;
-                                                                        input.output_channels = oc;
-                                                                        input.spatial_dim_elements =
-                                                                            s;
-                                                                        input.filter_dims = f;
-                                                                        input
-                                                                            .pads_strides_dilations =
-                                                                            p;
-                                                                        input.trans_output_pads =
-                                                                            tp;
-                                                                        input.in_layout      = il;
-                                                                        input.fil_layout     = fl;
-                                                                        input.out_layout     = ol;
-                                                                        input.pad_mode       = pm;
-                                                                        input.deterministic  = d;
-                                                                        input.tensor_vect    = tv;
-                                                                        input.vector_length  = vl;
-                                                                        input.output_type    = ot;
-                                                                        input.int8_vectorize = iv;
-                                                                        input.groupCount     = gc;
-                                                                        input.do_forward     = true;
-                                                                        input.do_backward_data =
-                                                                            true;
-                                                                        input.do_backward_weights =
-                                                                            true;
-                                                                        if(miopen::test::conv::
-                                                                               IsValidCtestStyleConfig(
-                                                                                   input))
-                                                                            cases.push_back(input);
-                                                                    }
+        if(miopen::test::conv::IsValidCtestStyleConfig(input))
+            cases.push_back(input);
+    }
     return cases;
 }
 

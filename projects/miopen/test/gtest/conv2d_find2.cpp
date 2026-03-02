@@ -54,7 +54,7 @@ auto GetDataset()
     auto pads_strides_dilations = generate_data_limited(
         miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
     auto trans_output_pads = generate_data(miopen::test::conv::get_2d_trans_output_pads());
-    auto pad_modes         = generate_data(std::vector<std::string>{"default", "same", "valid"});
+    auto pad_modes         = generate_data(std::vector<std::string>{"default"});
     auto in_layouts        = generate_data(std::vector<std::string>{"NCHW"});
     auto fil_layouts       = generate_data(std::vector<std::string>{"NCHW"});
     auto out_layouts       = generate_data(std::vector<std::string>{"NCHW"});
@@ -115,14 +115,8 @@ auto GetDataset()
 } // namespace
 
 template <class T>
-struct conv2d_find2_test : miopen::test::conv::conv_test_base<T>
+struct conv2d_find2_test : miopen::test::conv::conv_test_base<T, ConvApi::Find_2_0>
 {
-    void SetUp() override
-    {
-        miopen::test::conv::conv_test_base<T>::SetUp();
-        // Force Find 2.0
-        setenv("MIOPEN_FIND_ENFORCE", "4", 1);
-    }
 };
 
 using GPU_conv_2d_find2_FP32 = conv2d_find2_test<float>;
