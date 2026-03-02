@@ -43,16 +43,14 @@ subtrees:
     - entries:
       - file: how-to/build-execute-hipdnn.rst
         title: Build and execute operation graphs
-  - file: reference/how-to-plugin.rst
-    title: For plugin developers
-    subtrees:
-    - entries:
       - file: how-to/migrate-cudnn.rst
         title: Migrate a cuDNN project to hipDNN
       - file: how-to/get-set-engine-knob.rst
         title: Get/set engine knob configurations
-      - file: how-to/extend-hipdnn.rst
-        title: Extend hipDNN functionality
+  - file: reference/how-to-plugin.rst
+    title: For plugin developers
+    subtrees:
+    - entries:
       - file: how-to/develop-plugins.rst
         title: Develop plugins for hipDNN
 
