@@ -7,22 +7,34 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
+#include "fake_backend/BackendTestMatchers.hpp"
 #include "fake_backend/MockHipdnnBackend.hpp"
+
+#include <algorithm>
+#include <cstring>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_frontend::test;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 using namespace ::testing;
 
 namespace hipdnn_frontend
 {
 
-// Utility class to access private members of Graph for testing purposes
+// Utility class to access private/protected members of Graph for testing purposes
 class GraphTestUtils : public Graph
 {
 public:
     GraphTestUtils() = default;
+
+    using Graph::build_operation_graph_via_descriptors;
 
     std::vector<std::shared_ptr<INode>>& getPrivateGraphSubnodes()
     {
@@ -1446,6 +1458,288 @@ TEST_F(TestGraph, BuildAndSerializeMatmulGraph)
     EXPECT_EQ(deserializedMatmulAttributes->c_tensor_uid, c->get_uid());
 }
 
+TEST_F(TestGraph, LayernormNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 6, 4}).set_stride({24, 4, 1}).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_name("Epsilon").set_value(1e-5f);
+
+    LayernormAttributes attributes;
+    attributes.set_name("LayerNormNode");
+    attributes.set_forward_phase(NormFwdPhase::INFERENCE);
+    attributes.set_epsilon(epsilon);
+
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
+
+    EXPECT_EQ(y->get_name(), "LayerNormNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    // In inference mode, mean and inv_variance are not created
+    EXPECT_EQ(mean, nullptr);
+    EXPECT_EQ(invVariance, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, RMSNormNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 64, 1, 1}).set_stride({64, 1, 1, 1}).set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+
+    RMSNormAttributes rmsnormAttrs;
+    rmsnormAttrs.set_name("RMSNormNode");
+    rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+
+    auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
+
+    EXPECT_EQ(y->get_name(), "RMSNormNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    EXPECT_EQ(invRms->get_name(), "RMSNormNode::INV_RMS");
+    EXPECT_TRUE(invRms->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, RMSNormNodeCreationWithBias)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 64, 1, 1}).set_stride({64, 1, 1, 1}).set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({1, 64, 1, 1}).set_stride({64, 1, 1, 1}).set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+
+    RMSNormAttributes rmsnormAttrs;
+    rmsnormAttrs.set_name("RMSNormWithBias");
+    rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_bias(bias);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+
+    auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
+
+    EXPECT_EQ(y->get_name(), "RMSNormWithBias::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 6, 4}).set_stride({24, 4, 1}).set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_dim({6, 4}).set_stride({4, 1}).set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_name("Epsilon").set_value(1e-5f);
+
+    LayernormAttributes attributes;
+    attributes.set_name("LayernormNodeTraining");
+    attributes.set_forward_phase(NormFwdPhase::TRAINING);
+    attributes.set_epsilon(epsilon);
+
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, attributes);
+
+    EXPECT_EQ(y->get_name(), "LayernormNodeTraining::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    // In training mode, mean and inv_variance should be created
+    ASSERT_NE(mean, nullptr);
+    EXPECT_EQ(mean->get_name(), "LayernormNodeTraining::MEAN");
+    ASSERT_NE(invVariance, nullptr);
+    EXPECT_EQ(invVariance->get_name(), "LayernormNodeTraining::INV_VARIANCE");
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, BuildAndSerializeLayernormGraph)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+
+    graph.set_name("SerializedLayernormGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({2, 6, 4})
+        .set_stride({24, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2)
+        .set_name("Scale")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({6, 4})
+        .set_stride({4, 1});
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3)
+        .set_name("Bias")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({6, 4})
+        .set_stride({4, 1});
+
+    auto epsilon = std::make_shared<TensorAttributes>();
+    epsilon->set_uid(4).set_name("Epsilon").set_value(1e-5f);
+
+    LayernormAttributes layernormAttributes;
+    layernormAttributes.set_name("LayerNormNode");
+    layernormAttributes.set_forward_phase(NormFwdPhase::INFERENCE);
+    layernormAttributes.set_epsilon(epsilon);
+
+    auto [y, mean, invVariance] = graph.layernorm(x, scale, bias, layernormAttributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedLayernormGraph");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->intermediate_data_type,
+              hipdnn_data_sdk::data_objects::DataType::HALF);
+    EXPECT_EQ(deserializedGraph->io_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 5u);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1u);
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*x, tensorLookup[x->get_uid()]);
+    validateTensor(*scale, tensorLookup[scale->get_uid()]);
+    validateTensor(*bias, tensorLookup[bias->get_uid()]);
+    validateTensor(*epsilon, tensorLookup[epsilon->get_uid()]);
+    validateTensor(*y, tensorLookup[y->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "LayerNormNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes);
+    auto deserializedLayernormAttributes
+        = deserializedGraph->nodes[0]->attributes.AsLayernormAttributes();
+    ASSERT_NE(deserializedLayernormAttributes, nullptr);
+    EXPECT_EQ(deserializedLayernormAttributes->x_tensor_uid, x->get_uid());
+    EXPECT_EQ(deserializedLayernormAttributes->scale_tensor_uid, scale->get_uid());
+    EXPECT_EQ(deserializedLayernormAttributes->bias_tensor_uid, bias->get_uid());
+    EXPECT_EQ(deserializedLayernormAttributes->epsilon_tensor_uid, epsilon->get_uid());
+    EXPECT_EQ(deserializedLayernormAttributes->y_tensor_uid, y->get_uid());
+}
+
+TEST_F(TestGraph, BuildAndSerializeRMSNormGraph)
+{
+    Graph graph;
+
+    graph.set_name("SerializedRMSNormGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2)
+        .set_name("Scale")
+        .set_dim({1, 64, 1, 1})
+        .set_stride({64, 1, 1, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(3).set_name("Epsilon");
+
+    RMSNormAttributes rmsnormAttrs;
+    rmsnormAttrs.set_name("RMSNormNode");
+    rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+
+    auto [y, invRms] = graph.rmsnorm(x, scale, rmsnormAttrs);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedRMSNormGraph");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    EXPECT_EQ(deserializedGraph->tensors.size(), 5); // x, scale, epsilon, y, inv_rms
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "RMSNormNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes);
+    auto deserializedRMSNormAttributes
+        = deserializedGraph->nodes[0]->attributes.AsRMSNormAttributes();
+    ASSERT_NE(deserializedRMSNormAttributes, nullptr);
+    EXPECT_EQ(deserializedRMSNormAttributes->x_tensor_uid, x->get_uid());
+    EXPECT_EQ(deserializedRMSNormAttributes->scale_tensor_uid, scale->get_uid());
+    EXPECT_EQ(deserializedRMSNormAttributes->epsilon_tensor_uid, epsilon->get_uid());
+    EXPECT_EQ(deserializedRMSNormAttributes->y_tensor_uid, y->get_uid());
+    EXPECT_EQ(deserializedRMSNormAttributes->forward_phase,
+              hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING);
+}
+
 TEST_F(TestGraph, BuildAndSerializeConvolutionDgradGraph)
 {
     Graph graph;
@@ -1711,6 +2005,110 @@ TEST_F(TestGraph, WillCorrectlyBuildOperationGraphDescriptor)
 
     auto result = graph.build_operation_graph(_handle);
     EXPECT_TRUE(result.is_good());
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenNodeFails)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.set_name("FailTest").set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_TENSOR_X_UID)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_X_DIMS))
+        .set_stride(toVec(K_TENSOR_X_STRIDES));
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(K_TENSOR_W_UID)
+        .set_name("W")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_W_DIMS))
+        .set_stride(toVec(K_TENSOR_W_STRIDES));
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_x(x);
+    convAttrs.set_w(w);
+    convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+
+    graph.conv_fprop(x, w, convAttrs);
+
+    // All descriptor creation fails
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenGraphCreateFails)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.set_name("GraphCreateFail")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_TENSOR_X_UID)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_X_DIMS))
+        .set_stride(toVec(K_TENSOR_X_STRIDES));
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(K_TENSOR_W_UID)
+        .set_name("W")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_W_DIMS))
+        .set_stride(toVec(K_TENSOR_W_STRIDES));
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_x(x);
+    convAttrs.set_w(w);
+    convAttrs.set_compute_data_type(DataType::FLOAT);
+    convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+
+    graph.conv_fprop(x, w, convAttrs);
+
+    // Validate graph to propagate graph-level attributes (e.g. io_data_type)
+    // to node/tensor attributes, matching the real build() flow
+    ASSERT_TRUE(graph.validate().is_good());
+
+    // Tensor/operation descriptors succeed, but graph descriptor creation fails
+    EXPECT_CALL(*_mockBackend,
+                backendCreateDescriptor(Ne(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR), _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsOnEmptyGraph)
+{
+    GraphTestUtils graph;
+    graph.set_name("EmptyGraph").set_compute_data_type(DataType::FLOAT);
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST_F(TestGraph, CreatingExecutionPlansFailsWithNoGraph)
@@ -5818,4 +6216,132 @@ TEST_F(TestGraph, GetRankedEngineIdsFailsWhenHeuristicCreationFails)
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_NE(result.get_message().find("Failed to finalize engine heuristic descriptor"),
               std::string::npos);
+}
+
+// ── Engine Override Config integration ───────────────────────────────────────
+
+// Helper: build a conv_fprop graph with fixed tensor dims (x={1,3,32,32}, w={64,3,3,3})
+// and return (x, w) so callers can use them for matching assertions.
+static std::pair<std::shared_ptr<TensorAttributes>, std::shared_ptr<TensorAttributes>>
+    buildConvFpropGraph(Graph& graph)
+{
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_dim({1, 3, 32, 32})
+        .set_stride({3072, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(2).set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    ConvFpropAttributes convAttr;
+    convAttr.set_name("EngineOverrideConv")
+        .set_pre_padding({1, 1})
+        .set_post_padding({1, 1})
+        .set_stride({1, 1})
+        .set_dilation({1, 1});
+
+    graph.conv_fprop(x, w, convAttr);
+    return {x, w};
+}
+
+// Test 1: an explicitly set engine ID must survive build_operation_graph.
+// applyEngineOverride() is gated on !_preferredEngineId.has_value(), so any
+// value the user sets before build must be left intact.
+TEST_F(TestGraph, EngineOverrideDoesNotReplaceExplicitlySetEngineId)
+{
+    Graph graph;
+    buildConvFpropGraph(graph);
+
+    constexpr int64_t EXPLICIT_ENGINE_ID = 42;
+    graph.set_preferred_engine_id_ext(EXPLICIT_ENGINE_ID);
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    ASSERT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), EXPLICIT_ENGINE_ID);
+}
+
+// Test 2: EngineOverrideConfig::matchOperation identifies conv_fprop tensors
+// with the same dims that getPreferredIdFromOverrideConfig() would pass to
+// checkEngineOverride() at build time.
+TEST_F(TestGraph, EngineOverrideConfigMatchesConvFpropTensors)
+{
+    using namespace hipdnn_frontend::engine_override;
+
+    // Tensors with the same dims used by buildConvFpropGraph
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    // Exact rule for this shape
+    OperationRule exactRule;
+    exactRule.op = "conv_fprop";
+    exactRule.engineName = hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME;
+    exactRule.tensors = {TensorPattern{{1, 3, 32, 32}, {}}, TensorPattern{{64, 3, 3, 3}, {}}};
+
+    EngineOverrideConfig config({std::move(exactRule)});
+
+    auto result = config.matchOperation("conv_fprop", {x, w});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID);
+
+    // Wrong op must not match
+    EXPECT_FALSE(config.matchOperation("conv_dgrad", {x, w}).has_value());
+
+    // Different batch size must not match (no wildcard in rule)
+    auto x8 = std::make_shared<TensorAttributes>();
+    x8->set_dim({8, 3, 32, 32}).set_data_type(DataType::FLOAT);
+    EXPECT_FALSE(config.matchOperation("conv_fprop", {x8, w}).has_value());
+}
+
+// Test 3: loading a JSON config from an in-memory string and matching against
+// conv_fprop tensors.  This exercises the full loadFromContent() → matchOperation()
+// path with the same shapes that the graph presents during build_operation_graph().
+TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
+{
+    using namespace hipdnn_frontend::engine_override;
+
+    const int64_t kEngine = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    const std::string kJson = R"({
+  "engine_overrides": [
+    {
+      "op": "conv_fprop",
+      "engine_name": "MIOPEN_ENGINE",
+      "tensors": [
+        { "dim": [1, 3, 32, 32] },
+        { "dim": [64, 3, 3, 3] }
+      ]
+    }
+  ]
+})";
+
+    auto config = EngineOverrideConfig::loadFromContent(kJson);
+    ASSERT_TRUE(config.has_value());
+
+    // Same tensor dims as buildConvFpropGraph
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    auto result = config->matchOperation("conv_fprop", {x, w});
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, kEngine);
+
+    // A different batch size must not match the exact rule
+    auto x8 = std::make_shared<TensorAttributes>();
+    x8->set_dim({8, 3, 32, 32}).set_data_type(DataType::FLOAT);
+    EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
 }
