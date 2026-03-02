@@ -1561,7 +1561,8 @@ private:
         first = true;
         add_bool("unified_addressing", dev_prop.unifiedAddressing);
         add_bool("has_memory_pools", dev_prop.memoryPoolsSupported);
-        add_bool("can_use_host_pointer_for_registered_mem", dev_prop.canUseHostPointerForRegisteredMem);
+        add_bool("can_use_host_pointer_for_registered_mem",
+                 dev_prop.canUseHostPointerForRegisteredMem);
 
         ss << ",\"global\":{";
         first = true;
