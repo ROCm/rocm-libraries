@@ -313,7 +313,7 @@ def parse_bwd_weight_instances(instances, problem_name):
             blk_gemm_pipeline_version = args[7]
 
             # TODO: Double buffer pipeline does not currently compile for explicit GEMM.
-            if blk_gemm_pipeline_version == "v4" or blk_gemm_pipeline_version == "v5":
+            if blk_gemm_pipeline_version == "v4":
                 raise RuntimeError(
                     f"Block GEMM pipeline version {blk_gemm_pipeline_version} is not supported for instance {instance_id} with device op {device_op_name}."
                 )
@@ -374,8 +374,8 @@ def parse_bwd_weight_instances(instances, problem_name):
         pipeline_version = blk_gemm_pipeline_version.upper()
 
         # OLd CK pipeline version V5 maps to V6 for CK Tile
-        if pipeline_version == "v5":
-            pipeline_version = "v6"
+        if pipeline_version == "V5":
+            pipeline_version = "V6"
 
         m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
         n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
