@@ -109,10 +109,8 @@ if(BUILD_THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN")
     # Add compile definition for conditional compilation
     add_compile_definitions(THREAD_SANITIZER)
 
-    # Set environment variables for Thread Sanitizer.
     # Both standalone (-fsanitize=thread) and TheRock builds link the TSAN runtime directly into
     # binaries, so LD_PRELOAD is not needed. Using LD_PRELOAD would double-load the runtime and
     # cause a segfault.
-    set(TEST_ENVIRONMENT "TSAN_OPTIONS=detect_leaks=0")
 
 endif()
