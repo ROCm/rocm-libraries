@@ -5168,11 +5168,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
-    if globalParameters["UseStinkyTofu"] and rocisa.isSupportedByStinkyTofu(self.states.version):
-
+    if globalParameters["StinkyTofuOptLevel"] is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
       print(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
 
       moduleKernelBody.body.setParent()
+
+      # convert globalParameters["StinkyTofuOptLevel"] to int, if fail set to 0
+      try:
+        stinky_opt_level = int(globalParameters["StinkyTofuOptLevel"])
+      except:
+        stinky_opt_level = 0
+
+      # Set StinkyTofu module options
+      stinky_module_options = {"OptLevel": stinky_opt_level,
+                               "dumpIRBetweenPasses": False,
+                               "TileA0": kernel["ThreadTile0"],
+                               "TileB0": kernel["ThreadTile1"],
+                               "TileM0": kernel["MacroTile0"],
+                               "wavefrontSize": kernel["WavefrontSize"],
+                               "SubGroup0": kernel["SubGroup0"],
+                               "SubGroup1": kernel["SubGroup1"],
+                               "VectorWidthA": kernel["VectorWidthA"],
+                               "VectorWidthB": kernel["VectorWidthB"],
+                               "GlobalReadVectorWidthA": kernel["GlobalReadVectorWidthA"],
+                               "GlobalReadVectorWidthB": kernel["GlobalReadVectorWidthB"],
+                               "DirectToLdsA": bool(kernel["DirectToLdsA"]),
+                               "DirectToLdsB": bool(kernel["DirectToLdsB"]),
+                               "UseSgprForGRO": kernel["_UseSgprForGRO"],
+                              }
+
+      print(f"StinkyTofu module options: {stinky_module_options}")
       # Convert rocisa module to stinkytofu with signature
       # Returns a KernelBody wrapper that includes signature and instruction module
       # - runOptimizationPipeline() optimizes the instruction body
@@ -5180,30 +5205,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
       t1a_start = time.perf_counter()
       stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
                                            signature=fs,
-                                           wavefrontSize=kernel["WavefrontSize"],
-                                           tt=[kernel["ThreadTile0"], kernel["ThreadTile1"]],
-                                           sg=[kernel["SubGroup0"], kernel["SubGroup1"]],
-                                           vwA=kernel["VectorWidthA"],
-                                           vwB=kernel["VectorWidthB"],
-                                           glvwA=kernel["GlobalReadVectorWidthA"],
-                                           glvwB=kernel["GlobalReadVectorWidthB"],
-                                           d2lA=bool(kernel["DirectToLdsA"]),
-                                           d2lB=bool(kernel["DirectToLdsB"]),
-                                           useSgprForGRO=kernel["_UseSgprForGRO"])
+                                           options=stinky_module_options)
       t1a_end = time.perf_counter()
       print(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
 
       # Run optimizations on the instruction body
-      t1b_start = time.perf_counter()
-      stModule.runOptimizationPipeline()
-      t1b_end = time.perf_counter()
-      print(f"StinkyTofu (1b) runOptimizationPipeline: {t1b_end - t1b_start:.4f}s")
+      if stinky_opt_level > 0:
+        t1b_start = time.perf_counter()
+        stModule.runOptimizationPipeline()
+        t1b_end = time.perf_counter()
+        print(f"StinkyTofu (1b) runOptimizationPipeline: {t1b_end - t1b_start:.4f}s")
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
     # Check if StinkyTofu assembly output should be used
-    if globalParameters["UseStinkyTofu"] and stModule is not None:
+    if stModule is not None:
       t2_start = time.perf_counter()
       st_asm = stModule.emitAssembly()
       t2_end = time.perf_counter()

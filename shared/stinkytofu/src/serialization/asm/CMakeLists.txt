@@ -7,5 +7,5 @@ target_sources(stinkytofu PRIVATE
     IRLexer.cpp
     IRParser.cpp
     IRConverter.cpp
-    PatternParser.cpp
-)
+    ModifierSerializer.cpp
+    PatternParser.cpp)

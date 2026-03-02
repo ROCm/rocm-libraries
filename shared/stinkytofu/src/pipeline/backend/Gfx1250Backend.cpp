@@ -26,6 +26,7 @@
 /// When this translation unit is linked, the gfx1250 pipelines are registered globally
 /// so that Backend(module) automatically picks them up for modules with arch {12, 5, 0}.
 
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace stinkytofu
@@ -36,10 +37,9 @@ namespace stinkytofu
 
         // Will enable after milestone 1
         PipelineConfig createDefaultPipeline(const StinkyAsmModule& module,
-                                             BasicBlockFilter       bbFilter)
+                                             BasicBlockFilter       bbFilter,
+                                             const std::string&     groupName)
         {
-            (void)module;
-
             // Create pipeline configuration with full scheduling and optimization
             auto config = stinkytofu::PipelineConfig::fromProfile(
                 stinkytofu::PipelineProfile::FullPipeline, stinkytofu::OptLevel::O3);
@@ -48,7 +48,15 @@ namespace stinkytofu
             config.enableWaitCnt = false;
 
             // Configure GEMM-specific tile parameters
-            config.withGemmTileConfig(GFX1250_ARCH, 0, 0, 0, 0, 0, 0, 1);
+            const auto& moduleOptions = module.getModuleOptions();
+            config.withGemmTileConfig(GFX1250_ARCH,
+                                      moduleOptions.TileA0,
+                                      moduleOptions.TileB0,
+                                      moduleOptions.TileM0,
+                                      moduleOptions.NumGRA,
+                                      moduleOptions.NumGRB,
+                                      moduleOptions.NumGRM,
+                                      moduleOptions.wavefrontSize);
 
             // Configure pass features (GEMM-specific optimizations)
             config
@@ -61,59 +69,38 @@ namespace stinkytofu
             // Configure basic block filter
             config.basicBlockFilter = bbFilter;
 
+            // Enable to print the IR after each pass
+            if(moduleOptions.dumpIRBetweenPasses)
+            {
+                config.debugConfig = std::make_unique<stinkytofu::PassManagerDebugConfig>();
+                config.debugConfig->setPrintAfterAll(true);
+                config.debugConfig->setDumpToFileInAfter(groupName + "-after_passes.txt");
+            }
+
             return config;
         }
 
-        PipelineConfig createNonOptPipe(const StinkyAsmModule& module, BasicBlockFilter bbFilter)
+        void addPipeline(BasicBlockFilter bbFilter, const std::string& groupName)
         {
-            (void)module;
-
-            // Will enable after milestone 1
-            // Create pipeline configuration with full scheduling and optimization
-            auto config = stinkytofu::PipelineConfig::fromProfile(
-                stinkytofu::PipelineProfile::NoOptimization, stinkytofu::OptLevel::O3);
-
-            // TODO: Disable waitcnt for now
-            config.enableWaitCnt = false;
-
-            // Configure GEMM-specific tile parameters
-            config.withGemmTileConfig(GFX1250_ARCH, 0, 0, 0, 0, 0, 0, 1);
-
-            return config;
+            BackendRegistry::addArchPipeline(
+                GFX1250_ARCH,
+                [bbFilter, groupName](const StinkyAsmModule& module) {
+                    return createDefaultPipeline(module, bbFilter, groupName);
+                },
+                groupName);
         }
 
         struct Gfx1250BackendRegistrar
         {
             Gfx1250BackendRegistrar()
             {
-#if 0
-                BackendRegistry::addArchPipeline(
-                    /* arch */ GFX1250_ARCH,
-                    /* builder */
-                    [](const StinkyAsmModule& module) {
-                        return createDefaultPipeline(
-                            module,
-                            stinkytofu::BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin"));
-                    },
+                addPipeline(
+                    /* bbFilter */ stinkytofu::BasicBlockFilterBuilder::byLabelPrefix(
+                        "label_LoopBegin"),
                     /* groupName */ "loopWithPrefetch");
-
-                BackendRegistry::addArchPipeline(
-                    /* arch */ GFX1250_ARCH,
-                    /* builder */
-                    [](const StinkyAsmModule& module) {
-                        return createDefaultPipeline(module,
-                                                     stinkytofu::BasicBlockFilterBuilder::all());
-                    },
+                addPipeline(
+                    /* bbFilter */ stinkytofu::BasicBlockFilterBuilder::all(),
                     /* groupName */ "noLoadLoopBody");
-#else
-                BackendRegistry::addArchPipeline(
-                    /* arch */ GFX1250_ARCH,
-                    /* builder */
-                    [](const StinkyAsmModule& module) {
-                        return createNonOptPipe(module, stinkytofu::BasicBlockFilterBuilder::all());
-                    },
-                    /* groupName */ "");
-#endif
             }
         };
         static Gfx1250BackendRegistrar s_gfx1250BackendRegistrar;

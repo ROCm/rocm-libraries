@@ -39,7 +39,7 @@ namespace stinkytofu
     void StinkyRegister::dump(std::ostream& out, const std::string& prefix) const
     {
         out << prefix;
-        RegisterPrinter printer(out);
+        AsmPrinter printer(out, AsmPrinterOptions());
         printer.print(*this);
     }
 
@@ -75,7 +75,7 @@ namespace stinkytofu
             GFX::LABEL, GFX::LABEL, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
 
         StinkyInstruction* labelInst = create(&labelMCID);
-        labelInst->addModifier<LabelData>(LabelData{Modifier::Type::LABEL_NAME, label, alignment});
+        labelInst->addModifier<LabelData>(LabelData{label, alignment});
         return labelInst;
     }
 

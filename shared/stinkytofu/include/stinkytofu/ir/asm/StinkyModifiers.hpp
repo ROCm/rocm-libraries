@@ -75,14 +75,39 @@ namespace stinkytofu
             return type;
         }
 
+        /// For isa<> / dyn_cast<> (see stinkytofu/support/Casting.hpp).
+        static bool classof(const Modifier* m)
+        {
+            return m != nullptr;
+        }
+
     private:
         Type type;
     };
 
-    struct DSModifiers : public Modifier
+    /// CRTP base: provides classof for isa<>/dyn_cast<> without repeating it in each modifier type.
+    /// Derived must define: static constexpr Modifier::Type Type = Modifier::Type::...;
+    template <typename Derived>
+    struct TypedModifier : public Modifier
     {
+        static bool classof(const Modifier* m)
+        {
+            return m && m->getType() == Derived::Type;
+        }
+
+    protected:
+        explicit TypedModifier()
+            : Modifier(Derived::Type)
+        {
+        }
+    };
+
+    struct DSModifiers : public TypedModifier<DSModifiers>
+    {
+        static constexpr Modifier::Type Type = Modifier::Type::DS;
+
         DSModifiers(int na = 1, int offset = 0, int offset0 = 0, int offset1 = 0, bool gds = false)
-            : Modifier(Type::DS)
+            : TypedModifier<DSModifiers>()
             , na(na)
             , offset(offset)
             , offset0(offset0)
@@ -98,14 +123,16 @@ namespace stinkytofu
         bool gds;
     };
 
-    struct FLATModifiers : public Modifier
+    struct FLATModifiers : public TypedModifier<FLATModifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::FLAT;
+
         FLATModifiers(int  offset12 = 0,
                       bool glc      = false,
                       bool slc      = false,
                       bool lds      = false,
                       bool isStore  = false)
-            : Modifier(Type::FLAT)
+            : TypedModifier<FLATModifiers>()
             , offset12(offset12)
             , glc(glc)
             , slc(slc)
@@ -121,10 +148,12 @@ namespace stinkytofu
         uint32_t isStore : 1;
     };
 
-    struct GLOBALModifiers : public Modifier
+    struct GLOBALModifiers : public TypedModifier<GLOBALModifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::GLOBAL;
+
         GLOBALModifiers(int offset = 0)
-            : Modifier(Type::GLOBAL)
+            : TypedModifier<GLOBALModifiers>()
             , offset(offset)
         {
         }
@@ -132,8 +161,10 @@ namespace stinkytofu
         int offset;
     };
 
-    struct MUBUFModifiers : public Modifier
+    struct MUBUFModifiers : public TypedModifier<MUBUFModifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::MUBUF;
+
         MUBUFModifiers(bool offen    = false,
                        int  offset12 = 0,
                        bool glc      = false,
@@ -141,7 +172,7 @@ namespace stinkytofu
                        bool nt       = false,
                        bool lds      = false,
                        bool isStore  = false)
-            : Modifier(Type::MUBUF)
+            : TypedModifier<MUBUFModifiers>()
             , offset12(offset12)
             , offen(offen)
             , glc(glc)
@@ -161,10 +192,12 @@ namespace stinkytofu
         uint32_t isStore : 1;
     };
 
-    struct SMEMModifiers : public Modifier
+    struct SMEMModifiers : public TypedModifier<SMEMModifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::SMEM;
+
         SMEMModifiers(bool glc = false, bool nv = false, int offset = 0)
-            : Modifier(Type::SMEM)
+            : TypedModifier<SMEMModifiers>()
             , glc(glc)
             , nv(nv)
             , offset(offset) // 20u 21s shaes the same
@@ -176,8 +209,10 @@ namespace stinkytofu
         int      offset;
     };
 
-    struct SDWAModifiers : public Modifier
+    struct SDWAModifiers : public TypedModifier<SDWAModifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::SDWA;
+
         enum class SelectBit : uint8_t
         {
             SEL_NONE = 0,
@@ -202,7 +237,7 @@ namespace stinkytofu
                       UnusedBit dst_unused = UnusedBit::UNUSED_NONE,
                       SelectBit src0_sel   = SelectBit::SEL_NONE,
                       SelectBit src1_sel   = SelectBit::SEL_NONE)
-            : Modifier(Type::SDWA)
+            : TypedModifier<SDWAModifiers>()
             , dst_sel(dst_sel)
             , dst_unused(dst_unused)
             , src0_sel(src0_sel)
@@ -217,14 +252,16 @@ namespace stinkytofu
     };
 
     // dot2: for WaveSplitK reduction. Only a subset of DPP modifiers are used here
-    struct DPPModifiers : public Modifier
+    struct DPPModifiers : public TypedModifier<DPPModifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::DPP;
+
         int row_shr;
         int row_bcast;
         int bound_ctrl;
 
         DPPModifiers(int row_shr = -1, int row_bcast = -1, int bound_ctrl = -1)
-            : Modifier(Type::DPP)
+            : TypedModifier<DPPModifiers>()
             , row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
@@ -232,8 +269,10 @@ namespace stinkytofu
         }
     };
 
-    struct VOP3Modifiers : public Modifier
+    struct VOP3Modifiers : public TypedModifier<VOP3Modifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::VOP3;
+
         VOP3Modifiers(bool neg_src0 = false,
                       bool neg_src1 = false,
                       bool neg_src2 = false,
@@ -242,7 +281,7 @@ namespace stinkytofu
                       bool abs_src2 = false,
                       bool clamp    = false,
                       int  omod     = 0)
-            : Modifier(Type::VOP3)
+            : TypedModifier<VOP3Modifiers>()
             , neg_src0(neg_src0)
             , neg_src1(neg_src1)
             , neg_src2(neg_src2)
@@ -264,12 +303,14 @@ namespace stinkytofu
         int  omod; // Output modifier: 0=*1, 1=*2, 2=*4, 3=*0.5
     };
 
-    struct VOP3PModifiers : public Modifier
+    struct VOP3PModifiers : public TypedModifier<VOP3PModifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::VOP3P;
+
         VOP3PModifiers(const std::vector<int>& op_sel    = {},
                        const std::vector<int>& op_sel_hi = {},
                        const std::vector<int>& byte_sel  = {})
-            : Modifier(Type::VOP3P)
+            : TypedModifier<VOP3PModifiers>()
             , op_sel(op_sel)
             , op_sel_hi(op_sel_hi)
             , byte_sel(byte_sel)
@@ -281,13 +322,15 @@ namespace stinkytofu
         std::vector<int> byte_sel;
     };
 
-    struct True16Modifiers : public Modifier
+    struct True16Modifiers : public TypedModifier<True16Modifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::TRUE16;
+
         // Default constructor with explicit destination and source modifiers
         True16Modifiers(HighBitSel                     dst0 = HighBitSel::NONE,
                         HighBitSel                     dst1 = HighBitSel::NONE,
                         const std::vector<HighBitSel>& srcs = {})
-            : Modifier(Type::TRUE16)
+            : TypedModifier<True16Modifiers>()
             , encoded_(0)
             , srcCount_(0)
         {
@@ -396,10 +439,12 @@ namespace stinkytofu
         }
     };
 
-    struct EXEC : public Modifier
+    struct EXEC : public TypedModifier<EXEC>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::EXEC;
+
         EXEC(bool setHi = false)
-            : Modifier(Type::EXEC)
+            : TypedModifier<EXEC>()
             , setHi(setHi)
         {
         }
@@ -407,10 +452,12 @@ namespace stinkytofu
         bool setHi;
     };
 
-    struct VCC : public Modifier
+    struct VCC : public TypedModifier<VCC>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::VCC;
+
         VCC(bool setHi = false)
-            : Modifier(Type::VCC)
+            : TypedModifier<VCC>()
             , setHi(setHi)
         {
         }
@@ -418,14 +465,16 @@ namespace stinkytofu
         bool setHi;
     };
 
-    struct SWaitCntData : public Modifier
+    struct SWaitCntData : public TypedModifier<SWaitCntData>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::SWAITCNT_DATA;
+
         SWaitCntData(int8_t vlcnt = -1,
                      int8_t vscnt = -1,
                      int8_t dlcnt = -1,
                      int8_t dscnt = -1,
                      int8_t kmcnt = -1)
-            : Modifier(Type::SWAITCNT_DATA)
+            : TypedModifier<SWaitCntData>()
             , vlcnt(vlcnt)
             , vscnt(vscnt)
             , dlcnt(dlcnt)
@@ -459,10 +508,12 @@ namespace stinkytofu
         int8_t kmcnt;
     };
 
-    struct LabelData : public Modifier
+    struct LabelData : public TypedModifier<LabelData>
     {
-        LabelData(const Modifier::Type& type, const std::string& label, uint16_t alignment = 1)
-            : Modifier(type)
+        static constexpr Modifier::Type Type = Modifier::Type::LABEL_NAME;
+
+        LabelData(const std::string& label, uint16_t alignment = 1)
+            : TypedModifier<LabelData>()
             , label(label)
             , alignment(alignment)
         {
@@ -471,10 +522,12 @@ namespace stinkytofu
         uint16_t    alignment;
     };
 
-    struct SWaitTensorCntData : public Modifier
+    struct SWaitTensorCntData : public TypedModifier<SWaitTensorCntData>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::SWAITTENSORCNT_DATA;
+
         SWaitTensorCntData(int8_t tlcnt = -1)
-            : Modifier(Type::SWAITTENSORCNT_DATA)
+            : TypedModifier<SWaitTensorCntData>()
             , tlcnt(tlcnt)
         {
         }
@@ -482,10 +535,12 @@ namespace stinkytofu
         int8_t tlcnt;
     };
 
-    struct SWaitStoreCntData : public Modifier
+    struct SWaitStoreCntData : public TypedModifier<SWaitStoreCntData>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::SWAITSTORECNT_DATA;
+
         SWaitStoreCntData(int8_t storecnt = -1)
-            : Modifier(Type::SWAITSTORECNT_DATA)
+            : TypedModifier<SWaitStoreCntData>()
             , storecnt(storecnt)
         {
         }
@@ -496,8 +551,10 @@ namespace stinkytofu
     /// Delay ALU instruction data for RDNA3/RDNA4 (gfx11xx/gfx12xx)
     /// Specifies dependencies between ALU instructions
     /// Encoding: SIMM16[3:0] = InstID0, SIMM16[6:4] = InstSkip, SIMM16[10:7] = InstID1
-    struct SDelayAluData : public Modifier
+    struct SDelayAluData : public TypedModifier<SDelayAluData>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::SDELAYALU_DATA;
+
         enum class InstType : uint8_t
         {
             VALU, ///< Vector ALU instruction
@@ -508,7 +565,7 @@ namespace stinkytofu
 
         // Constructor for single dependency (instid0 only)
         SDelayAluData(InstType type, int8_t distance = 0)
-            : Modifier(Type::SDELAYALU_DATA)
+            : TypedModifier<SDelayAluData>()
             , instid0Type(type)
             , instid0Distance(distance)
             , hasInstId1(false)
@@ -521,7 +578,7 @@ namespace stinkytofu
         // Constructor for dual dependency (instid0 and instid1)
         SDelayAluData(
             InstType id0Type, int8_t id0Distance, int8_t skip, InstType id1Type, int8_t id1Distance)
-            : Modifier(Type::SDELAYALU_DATA)
+            : TypedModifier<SDelayAluData>()
             , instid0Type(id0Type)
             , instid0Distance(id0Distance)
             , hasInstId1(true)
@@ -553,8 +610,10 @@ namespace stinkytofu
     };
 
     // SWaitAlu instruction data
-    struct SWaitAluData : public Modifier
+    struct SWaitAluData : public TypedModifier<SWaitAluData>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::SWAITALU_DATA;
+
         struct HwValue
         {
             uint16_t sa_sdst : 1; // Bit 0
@@ -601,7 +660,7 @@ namespace stinkytofu
                      int vm_vsrc_val,
                      int va_vcc_val,
                      int sa_sdst_val)
-            : Modifier(Type::SWAITALU_DATA)
+            : TypedModifier<SWaitAluData>()
         {
             auto [packed, mask] = encodeWithMask(va_vdst_val,
                                                  va_sdst_val,
@@ -676,8 +735,10 @@ namespace stinkytofu
     };
 
     // MFMA modifiers
-    struct MFMAModifiers : public Modifier
+    struct MFMAModifiers : public TypedModifier<MFMAModifiers>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::MFMA_DATA;
+
         MFMAModifiers(const std::string& inputPermute = "",
                       const std::string& scaleStr     = "",
                       const std::string& negStr       = "",
@@ -685,7 +746,7 @@ namespace stinkytofu
                       bool               reuseB       = false,
                       bool               neg_lo       = false,
                       bool               neg_hi       = false)
-            : Modifier(Type::MFMA_DATA)
+            : TypedModifier<MFMAModifiers>()
             , inputPermute(inputPermute)
             , scaleStr(scaleStr)
             , negStr(negStr)
@@ -711,7 +772,7 @@ namespace stinkytofu
                       int                mxScaleBType,
                       bool               neg_lo = false,
                       bool               neg_hi = false)
-            : Modifier(Type::MFMA_DATA)
+            : TypedModifier<MFMAModifiers>()
             , inputPermute(inputPermute)
             , scaleStr(scaleStr)
             , negStr(negStr)
@@ -741,40 +802,17 @@ namespace stinkytofu
         int  mxScaleBType; // Scale type for matrix B (rocisa::InstType)
     };
 
-    struct CommentData : public Modifier
+    struct CommentData : public TypedModifier<CommentData>
     {
+        static constexpr Modifier::Type Type = Modifier::Type::COMMENT;
+
         CommentData(const std::string& comment)
-            : Modifier(Type::COMMENT)
+            : TypedModifier<CommentData>()
             , comment(comment)
         {
         }
 
         std::string comment;
     };
-
-    // clang-format off
-    // Helper template for type mapping
-    template<typename T> constexpr Modifier::Type getModifierType();
-    template<> constexpr Modifier::Type getModifierType<DSModifiers>() { return Modifier::Type::DS; }
-    template<> constexpr Modifier::Type getModifierType<FLATModifiers>() { return Modifier::Type::FLAT; }
-    template<> constexpr Modifier::Type getModifierType<GLOBALModifiers>() { return Modifier::Type::GLOBAL; }
-    template<> constexpr Modifier::Type getModifierType<MUBUFModifiers>() { return Modifier::Type::MUBUF; }
-    template<> constexpr Modifier::Type getModifierType<SMEMModifiers>() { return Modifier::Type::SMEM; }
-    template<> constexpr Modifier::Type getModifierType<SDWAModifiers>() { return Modifier::Type::SDWA; }
-    template<> constexpr Modifier::Type getModifierType<DPPModifiers>() { return Modifier::Type::DPP; }
-    template<> constexpr Modifier::Type getModifierType<VOP3Modifiers>() { return Modifier::Type::VOP3; }
-    template<> constexpr Modifier::Type getModifierType<VOP3PModifiers>() { return Modifier::Type::VOP3P; }
-    template<> constexpr Modifier::Type getModifierType<True16Modifiers>() { return Modifier::Type::TRUE16; }
-    template<> constexpr Modifier::Type getModifierType<EXEC>() { return Modifier::Type::EXEC; }
-    template<> constexpr Modifier::Type getModifierType<VCC>() { return Modifier::Type::VCC; }
-    template<> constexpr Modifier::Type getModifierType<SWaitCntData>() { return Modifier::Type::SWAITCNT_DATA; }
-    template<> constexpr Modifier::Type getModifierType<SWaitTensorCntData>() { return Modifier::Type::SWAITTENSORCNT_DATA; }
-    template<> constexpr Modifier::Type getModifierType<SWaitStoreCntData>() { return Modifier::Type::SWAITSTORECNT_DATA; }
-    template<> constexpr Modifier::Type getModifierType<SDelayAluData>() { return Modifier::Type::SDELAYALU_DATA; }
-    template<> constexpr Modifier::Type getModifierType<LabelData>() { return Modifier::Type::LABEL_NAME; }
-    template<> constexpr Modifier::Type getModifierType<MFMAModifiers>() { return Modifier::Type::MFMA_DATA; }
-    template<> constexpr Modifier::Type getModifierType<CommentData>() { return Modifier::Type::COMMENT; }
-    template<> constexpr Modifier::Type getModifierType<SWaitAluData>() { return Modifier::Type::SWAITALU_DATA; }
-    // clang-format on
 
 } // namespace stinkytofu

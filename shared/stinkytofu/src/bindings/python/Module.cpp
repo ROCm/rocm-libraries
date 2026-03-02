@@ -27,6 +27,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
 #include <sstream>
+#include <unordered_map>
 
 namespace stinkytofu
 {
@@ -185,6 +186,16 @@ namespace stinkytofu
                 groupRange.last = IntrusiveListIterator<IRBase>(bb.rbegin().getNodePtr());
             }
         }
+    }
+
+    const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const
+    {
+        return this->moduleOptions;
+    }
+
+    void StinkyAsmModule::setModuleOptions(const ModuleOptions& moduleOptions)
+    {
+        this->moduleOptions = moduleOptions;
     }
 
 } // namespace stinkytofu

@@ -308,6 +308,12 @@ globalParameters["DisableAsmComments"] = False  # Set to True to disable assembl
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 globalParameters["UseStinkyTofu"] = True  # Enable StinkyTofu IR conversion for supported architectures
+# StinkyTofu optimization level
+# None: Disable StinkyTofu feature (set null in yaml file)
+# 0: No optimization
+# 1: Basic optimization
+# 2: Full optimization
+globalParameters["StinkyTofuOptLevel"] = 0
 
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...

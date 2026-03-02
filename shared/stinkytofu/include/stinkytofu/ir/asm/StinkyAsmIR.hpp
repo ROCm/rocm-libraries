@@ -601,9 +601,8 @@ namespace stinkytofu
         template <class ModType>
         const ModType* getModifier() const
         {
-            constexpr Modifier::Type modType = getModifierType<ModType>();
             for(const std::unique_ptr<Modifier>& mod : modifiers)
-                if(mod->getType() == modType)
+                if(mod->getType() == ModType::Type)
                     return static_cast<const ModType*>(mod.get());
             return nullptr;
         }
@@ -611,9 +610,8 @@ namespace stinkytofu
         template <class ModType>
         ModType* getModifier()
         {
-            constexpr Modifier::Type modType = getModifierType<ModType>();
             for(std::unique_ptr<Modifier>& mod : modifiers)
-                if(mod->getType() == modType)
+                if(mod->getType() == ModType::Type)
                     return static_cast<ModType*>(mod.get());
             return nullptr;
         }

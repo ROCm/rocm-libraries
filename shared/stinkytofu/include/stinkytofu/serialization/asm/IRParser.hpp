@@ -22,12 +22,12 @@
  * ************************************************************************ */
 #pragma once
 
-#include "stinkytofu/support/Diagnostic.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/Diagnostic.hpp"
 
 #include <memory>
-#include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace stinkytofu
@@ -36,6 +36,10 @@ namespace stinkytofu
     /// Parsed instruction node from IR text format.
     /// This is a lightweight structure that holds the parsed instruction data
     /// before it's converted to StinkyInstruction or used by other components.
+    /// Parsed modifier: attrKey (e.g. "mod.ds") -> field name -> value string
+    using ParsedModifierDict
+        = std::unordered_map<std::string, std::unordered_map<std::string, std::string>>;
+
     struct ParsedInstruction
     {
         std::string                 opcodeStr;
@@ -43,6 +47,7 @@ namespace stinkytofu
         std::vector<StinkyRegister> srcRegs;
         int                         issueCycles;
         int                         latencyCycles;
+        ParsedModifierDict          modifiers; // mod.X = { field = value, ... }
         bool                        isLabel; // true if this represents a label
 
         ParsedInstruction(const std::string& opcode, bool label = false)
@@ -62,11 +67,31 @@ namespace stinkytofu
         }
     };
 
+    /// Parsed basic block: blockId + instructions + successor block IDs
+    struct ParsedBlock
+    {
+        std::string                                     blockId;
+        std::vector<std::unique_ptr<ParsedInstruction>> instructions;
+        std::vector<std::string>                        successorIds; // ^blockId references
+    };
+
+    /// Parsed function: name + blocks (Function -> BasicBlock -> IRBase hierarchy)
+    struct ParsedFunction
+    {
+        std::string                               funcName;
+        std::vector<std::unique_ptr<ParsedBlock>> blocks;
+    };
+
     /// Result of parsing IR source, including instructions and diagnostics.
     struct ParseResult
     {
-        std::vector<std::unique_ptr<ParsedInstruction>> instructions;
-        std::vector<Diagnostic>                         diagnostics;
+        std::vector<Diagnostic> diagnostics;
+
+        /// Parsed function (hierarchical or flat). Flat format has a single block "entry".
+        std::unique_ptr<ParsedFunction> parsedFunction;
+
+        /// Instructions from first block (flat format). Empty if no blocks.
+        std::vector<ParsedInstruction> getInstructions() const;
 
         /// Check if any errors occurred during parsing.
         bool hasErrors() const
@@ -95,12 +120,6 @@ namespace stinkytofu
             return count;
         }
     };
-
-    /// Parses a StinkyTofu IR source string and returns a vector of parsed instructions.
-    /// @param sourceStr The IR source text to parse.
-    /// @return A vector of unique pointers to ParsedInstruction objects representing the parsed instructions.
-    /// @note This function does not expose parse errors. Use parseSourceStringWithDiagnostics() to access diagnostics.
-    std::vector<std::unique_ptr<ParsedInstruction>> parseSourceString(const std::string& sourceStr);
 
     /// Parses a StinkyTofu IR source string and returns instructions with diagnostic information.
     /// @param sourceStr The IR source text to parse.

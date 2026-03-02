@@ -59,6 +59,11 @@ namespace stinkytofu
             return name;
         }
 
+        void setName(const std::string& name)
+        {
+            this->name = name;
+        }
+
         // BasicBlock management
         BasicBlock* createBasicBlock(const std::string& label = "")
         {

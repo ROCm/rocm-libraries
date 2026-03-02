@@ -188,8 +188,7 @@ namespace
             rocisa::BranchInstruction* branchInst
                 = dynamic_cast<rocisa::BranchInstruction*>(rocisaInst);
             assert(branchInst != nullptr && "This should be a rocisa Branch.");
-            inst->addModifier<LabelData>(
-                LabelData{Modifier::Type::LABEL_NAME, branchInst->labelName});
+            inst->addModifier<LabelData>(LabelData{branchInst->labelName});
             return {nullptr, nullptr};
         }
 
@@ -1289,46 +1288,59 @@ void init_stinkytofu(nb::module_ m)
            nb::object                   arch_obj,
            const std::string&           moduleName,
            const rocisa::SignatureBase& signature,
-           int                          wavefrontSize,
-           nb::object                   tt_obj,
-           nb::object                   sg_obj,
-           int                          vwA,
-           int                          vwB,
-           int                          glvwA,
-           int                          glvwB,
-           bool                         d2lA,
-           bool                         d2lB,
-           int                          useSgprForGRO) {
+           nb::object                   options_obj) {
             // Convert architecture to std::array<int, 3> [major, minor, stepping]
             std::array<int, 3> archArray = convertArch(arch_obj);
-
-            // Convert tt and sg sequences to arrays
-            std::array<int, 2> tt = {0, 0};
-            std::array<int, 2> sg = {0, 0};
-
-            if(nb::isinstance<nb::sequence>(tt_obj))
-            {
-                auto tt_seq = nb::cast<nb::sequence>(tt_obj);
-                assert(nb::len(tt_seq) == 2 && "ThreadTile must have exactly 2 elements");
-                tt = {nb::cast<int>(tt_seq[0]), nb::cast<int>(tt_seq[1])};
-            }
-
-            if(nb::isinstance<nb::sequence>(sg_obj))
-            {
-                auto sg_seq = nb::cast<nb::sequence>(sg_obj);
-                assert(nb::len(sg_seq) == 2 && "SubGroup must have exactly 2 elements");
-                sg = {nb::cast<int>(sg_seq[0]), nb::cast<int>(sg_seq[1])};
-            }
 
             // Convert module to StinkyAsmModule
             auto stinkyModule = stinkytofu::toStinkyTofuModule(module, archArray, moduleName);
 
+            // Override with options dict if provided
+            StinkyAsmModule::ModuleOptions moduleOptions;
+            if(nb::isinstance<nb::dict>(options_obj))
+            {
+                nb::dict options = nb::cast<nb::dict>(options_obj);
+
+                bool hasSetOptions = false;
+
+            // Set stinky module options from valid options in the options dict
+#define SET_MODULE_OPTION(name, type) \
+    hasSetOptions                     \
+        |= (options.contains(#name) && nb::try_cast<type>(options[#name], moduleOptions.name));
+
+#define DEBUG_SET_MODULE_OPTION(name, type)                                               \
+    if(options.contains(#name) && nb::try_cast<type>(options[#name], moduleOptions.name)) \
+    {                                                                                     \
+        std::cout << "Setting " << #name << " to " << moduleOptions.name << std::endl;    \
+        hasSetOptions = true;                                                             \
+    }
+
+                MODULE_OPTIONS_LIST(SET_MODULE_OPTION)
+#undef SET_MODULE_OPTION
+#undef DEBUG_SET_MODULE_OPTION
+
+                if(hasSetOptions)
+                {
+                    stinkyModule->setModuleOptions(moduleOptions);
+                }
+            }
+
             // Convert signature to StinkyTofu format, using the wavefrontSize passed from Python
-            auto stinkySig = toStinkySignature(signature, archArray, wavefrontSize);
+            auto stinkySig = toStinkySignature(signature, archArray, moduleOptions.wavefrontSize);
 
             // Set optimization config
-            stinkySig->setOptimizationConfig(
-                tt, sg, vwA, vwB, glvwA, glvwB, d2lA, d2lB, useSgprForGRO);
+            std::array<int, 2> tt = {moduleOptions.TileA0, moduleOptions.TileB0};
+            std::array<int, 2> sg = {moduleOptions.SubGroup0, moduleOptions.SubGroup1};
+
+            stinkySig->setOptimizationConfig(tt,
+                                             sg,
+                                             moduleOptions.VectorWidthA,
+                                             moduleOptions.VectorWidthB,
+                                             moduleOptions.GlobalReadVectorWidthA,
+                                             moduleOptions.GlobalReadVectorWidthB,
+                                             moduleOptions.DirectToLdsA,
+                                             moduleOptions.DirectToLdsB,
+                                             moduleOptions.UseSgprForGRO);
 
             // Create and return wrapper with both
             return std::make_shared<StinkyAsmModuleWithSignature>(stinkyModule, stinkySig);
@@ -1337,16 +1349,9 @@ void init_stinkytofu(nb::module_ m)
         nb::arg("arch"),
         nb::arg("moduleName") = "",
         nb::arg("signature"),
-        nb::arg("wavefrontSize") = 64,
-        nb::arg("tt")            = nb::make_tuple(0, 0),
-        nb::arg("sg")            = nb::make_tuple(0, 0),
-        nb::arg("vwA")           = 0,
-        nb::arg("vwB")           = 0,
-        nb::arg("glvwA")         = 0,
-        nb::arg("glvwB")         = 0,
-        nb::arg("d2lA")          = false,
-        nb::arg("d2lB")          = false,
-        nb::arg("useSgprForGRO") = 0,
+        nb::arg("options") = nb::none(),
         "Convert a rocisa.Module to a StinkyTofu StinkyAsmModule with signature support. "
-        "The returned object's emitAssembly() will include both signature and instructions.");
+        "The returned object's emitAssembly() will include both signature and instructions. "
+        "Options may be passed via the 'options' dict (keys: TileA0, TileB0, TileM0, NumGRA, "
+        "NumGRB, NumGRM, wavefrontSize, etc.); dict values override individual parameters.");
 }

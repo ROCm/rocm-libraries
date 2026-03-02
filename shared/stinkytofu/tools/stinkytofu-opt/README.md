@@ -21,23 +21,7 @@
 
 ## Build
 
-To directly build the **stinkytofu** project, you need to do the workaround by modifying the `CMakeLists.txt` as below
-```diff
-diff --git a/shared/stinkytofu/CMakeLists.txt b/shared/stinkytofu/CMakeLists.txt
-index 8651cac86e..1a2b50d476 100644
---- a/shared/stinkytofu/CMakeLists.txt
-+++ b/shared/stinkytofu/CMakeLists.txt
-@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
- set(CMAKE_CXX_STANDARD_REQUIRED ON)
- set(CMAKE_CXX_EXTENSIONS OFF)
-
--add_compile_options(-fno-rtti -fno-exceptions)
-+add_compile_options(-fno-rtti)
-
- set(STINKYTOFU_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include" PARENT_SCOPE)
-```
-
-Then, navigate to the `rocm-libraries_p/shared/stinkytofu` directory:
+Then, navigate to the `rocm-libraries/shared/stinkytofu` directory:
 
 ```bash
 cmake -B build .
@@ -55,10 +39,13 @@ The binary will be located at: `build/tools/stinkytofu-opt/stinkytofu-opt`
 ./build/tools/stinkytofu-opt/stinkytofu-opt --list-passes
 
 # Parse and deserialize IR (no optimization)
-./build/tools/stinkytofu-opt/stinkytofu-opt input.txt
+./build/tools/stinkytofu-opt/stinkytofu-opt --arch gfx1250 func.arch-gfx1250.stir
 
 # Apply optimization passes
-./build/tools/stinkytofu-opt/stinkytofu-opt input.txt --StinkyDAGSchedulerPass --ScheduleFirstLRsPass
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 func.arch-gfx1250.stir \
+    --StinkyDAGSchedulerPass \
+    --ScheduleFirstLRsPass
 ```
 
 ---
@@ -76,6 +63,7 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 - `--passN`: Optional pass names to apply (use `--` prefix)
 
 **Options:**
+- `--arch <arch>`: Target GPU architecture (default: gfx942). Supported: `gfx942`, `gfx950`, `gfx1250`
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 
@@ -104,7 +92,8 @@ Available passes:
 Simply parse the IR file without applying any optimization passes:
 
 ```bash
-./build/tools/stinkytofu-opt/stinkytofu-opt tools/stinkytofu-opt/tests/stinkytofu_ir.txt
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 tools/stinkytofu-opt/tests/func.arch-gfx1250.stir
 ```
 
 This will:
@@ -116,14 +105,17 @@ This will:
 Apply the DAG scheduler to optimize instruction ordering:
 
 ```bash
-./build/tools/stinkytofu-opt/stinkytofu-opt input.txt --StinkyDAGSchedulerPass
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 tools/stinkytofu-opt/tests/func.arch-gfx1250.stir \
+    --StinkyDAGSchedulerPass
 ```
 
 #### Example 3: Multiple Passes
 Apply multiple optimization passes in sequence:
 
 ```bash
-./build/tools/stinkytofu-opt/stinkytofu-opt input.txt \
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 tools/stinkytofu-opt/tests/func.arch-gfx1250.stir \
     --StinkyClusterDSReadPass \
     --StinkyDAGSchedulerPass
 ```
@@ -247,46 +239,47 @@ void setKernelConfig(stinkytofu::PassManager& passManager)
 
 ## IR Format
 
-StinkyTofu IR uses a text-based format with the following structure:
+StinkyTofu IR uses an MLIR-style text format. Each instruction has the form:
 
 ```
-<instruction_mnemonic>
-Dest:
-    <destination_register> [optional_modifiers]
-    ...
-Src:
-    <source_operand_1> [optional_modifiers]
-    <source_operand_2> [optional_modifiers]
-    ...
-IssueCycles: <cycles>
-LatencyCycles: <cycles>
+[destRegs =] "st.<mnemonic>"(srcRegs) { issueCycles = N, latencyCycles = N [, mod.X = { ... }, ...] }
 ```
 
 ### Field Descriptions
 
-- **instruction_mnemonic**: The instruction mnemonic (e.g., `v_mfma_f32_32x32x8f16`, `ds_read_b128`)
-- **Dest**: Destination register(s) with optional modifiers
-- **Src**: Source operand(s) with optional modifiers (can be registers, immediates, or offsets)
-- **IssueCycles**: Number of cycles to issue the instruction (use `-1` for default value)
-- **LatencyCycles**: Number of cycles until the instruction completes (use `-1` for default value)
+- **destRegs** (optional): Destination register(s), e.g. `v[0]`, `v[34:37]`, `acc[0:3]`. Omit for instructions with no destination. Follow with `=`.
+- **"st.\<mnemonic>"**: Quoted operation name with `st.` namespace (e.g. `"st.ds_read_b128"`, `"st.v_mfma_f32_16x16x16_f16"`).
+- **srcRegs**: Comma-separated source operands in parentheses (registers, immediates, BARRIER[0], etc.).
+- **attributes** (in braces): Required **issueCycles** and **latencyCycles** (integer values). Optional modifier attributes: **mod.X = { field = value, ... }** for each modifier type (e.g. `mod.ds`, `mod.flat`, `mod.mfma`). Use `-1` for default cycle values when appropriate.
+
+### Modifier Attributes
+
+Modifiers are serialized as attribute keys `mod.<type>` with a dict value. Examples:
+
+- **mod.ds**: `mod.ds = { na = 1, offset = 0, offset0 = 0, offset1 = 0, gds = false }`
+- **mod.flat**: `mod.flat = { offset12 = 0, glc = false, slc = false, lds = false }`
+- **mod.mfma**: `mod.mfma = { inputPermute = "...", scaleStr = "...", negStr = "...", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false }`
+
+Other modifier types (e.g. `mod.vop3`, `mod.swaitcnt`, `mod.delayalu`) follow the same pattern. The serializer emits only fields that apply to the modifier instance.
 
 ### Example IR
 
 ```
-ds_read_b128
-  Dest: v[34:37]
-  Src : v[5]
-        BARRIER[0]
-  issueCycles: 4
-  latencyCycles: 52
+v[34:37] = "st.ds_read_b128"(v[5]) { issueCycles = 4, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
 
-v_mfma_f32_16x16x16_f16
-  Dest: acc[0:3]
-  Src : v[6:7]
-        v[22:23]
-        acc[0:3]
-  issueCycles: 4
-  latencyCycles: 16
+acc[0:3] = "st.v_mfma_f32_16x16x16_f16"(v[6:7], v[22:23], acc[0:3]) { issueCycles = 4, latencyCycles = 16 }
 ```
 
-See `tools/stinkytofu-opt/tests/stinkytofu_ir.txt` for more examples.
+Hierarchical format with functions and blocks:
+
+```
+st.func @kernel() {
+^entry:
+  v[0] = "st.v_add_f32"(v[1], v[2]) { issueCycles = 4, latencyCycles = 8 }
+Successors: ^next
+^next:
+  ...
+}
+```
+
+See `tests/unit/asm/IRParserTest.cpp` and the serialization layer (`StinkyAsmPrinter`, `IRParser`) for more examples.

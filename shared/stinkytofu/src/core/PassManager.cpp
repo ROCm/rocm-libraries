@@ -80,7 +80,18 @@ namespace stinkytofu
     {
     }
 
-    PassManagerDebugConfig::~PassManagerDebugConfig() {}
+    PassManagerDebugConfig::~PassManagerDebugConfig()
+    {
+        if(dumpStreamBefore && static_cast<std::ofstream*>(dumpStreamBefore.get())->is_open())
+        {
+            static_cast<std::ofstream*>(dumpStreamBefore.get())->close();
+        }
+
+        if(dumpStreamAfter && static_cast<std::ofstream*>(dumpStreamAfter.get())->is_open())
+        {
+            static_cast<std::ofstream*>(dumpStreamAfter.get())->close();
+        }
+    }
 
     void PassManagerDebugConfig::setPrintAfterAll(bool v)
     {
@@ -104,20 +115,12 @@ namespace stinkytofu
 
     void PassManagerDebugConfig::setDumpToFileInBefore(const std::string& filename)
     {
-        dumpStreamBefore = std::make_unique<std::ofstream>(filename, std::ofstream::out);
-        if(static_cast<std::ofstream*>(dumpStreamBefore.get())->fail())
-        {
-            std::cerr << "Error: Unable to open file " << filename << " for writing.\n";
-        }
+        dumpFileNameBefore = filename;
     }
 
     void PassManagerDebugConfig::setDumpToFileInAfter(const std::string& filename)
     {
-        dumpStreamAfter = std::make_unique<std::ofstream>(filename, std::ofstream::out);
-        if(static_cast<std::ofstream*>(dumpStreamAfter.get())->fail())
-        {
-            std::cerr << "Error: Unable to open file " << filename << " for writing.\n";
-        }
+        dumpFileNameAfter = filename;
     }
 
     bool PassManagerDebugConfig::shouldPrintBefore(const std::string& passName) const
@@ -148,6 +151,20 @@ namespace stinkytofu
         return std::cout;
     }
 
+    void PassManagerDebugConfig::prepareDumpOutputStream()
+    {
+        if(!dumpFileNameBefore.empty() && !dumpStreamBefore)
+        {
+            dumpStreamBefore
+                = std::make_unique<std::ofstream>(dumpFileNameBefore, std::ofstream::out);
+        }
+        if(!dumpFileNameAfter.empty() && !dumpStreamAfter)
+        {
+            dumpStreamAfter
+                = std::make_unique<std::ofstream>(dumpFileNameAfter, std::ofstream::out);
+        }
+    }
+
     //----------------------------------------------------------------------
     // PassManager implementation
     //----------------------------------------------------------------------
@@ -157,6 +174,11 @@ namespace stinkytofu
         // TODO: Remove this once all IR generation uses automatic builder setters
         buildUseDefChain(F);
 
+        if(dbgCfg)
+        {
+            dbgCfg->prepareDumpOutputStream();
+        }
+
         for(const auto& pass : passes)
         {
             if(dbgCfg && dbgCfg->shouldPrintBefore(pass->getName()))
@@ -164,6 +186,7 @@ namespace stinkytofu
                 dbgCfg->getOutputStreamInBefore()
                     << "\n*** Before Pass: " << pass->getName() << " ***\n";
                 F.dump(dbgCfg->getOutputStreamInBefore());
+                dbgCfg->getOutputStreamInBefore().flush();
             }
 
             pass->run(F, passCtx);
@@ -173,6 +196,7 @@ namespace stinkytofu
                 dbgCfg->getOutputStreamInAfter()
                     << "\n*** After Pass: " << pass->getName() << " ***\n";
                 F.dump(dbgCfg->getOutputStreamInAfter());
+                dbgCfg->getOutputStreamInAfter().flush();
             }
         }
     }
@@ -188,13 +212,13 @@ namespace stinkytofu
     }
 
     void PassManager::setKernelConfig(std::array<int, 3> arch,
-                                       uint32_t           ta0,
-                                       uint32_t           tb0,
-                                       uint32_t           tm0,
-                                       uint32_t           nGRA,
-                                       uint32_t           nGRB,
-                                       uint32_t           nGRM,
-                                       uint32_t           numWaves)
+                                      uint32_t           ta0,
+                                      uint32_t           tb0,
+                                      uint32_t           tm0,
+                                      uint32_t           nGRA,
+                                      uint32_t           nGRB,
+                                      uint32_t           nGRM,
+                                      uint32_t           numWaves)
     {
         GemmTileConfig config;
         config.arch     = arch;
