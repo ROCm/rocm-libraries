@@ -217,7 +217,7 @@ void latrd_forsytrd_getError(const rocblas_handle handle,
     // input data initialization
     latrd_forsytrd_initData<true, true, T>(handle, n, dA, lda, hA);
 
-    print_host_matrix(std::cout, "A in", n, n, hA[0], lda);
+    //    print_host_matrix(std::cout, "A in", n, n, hA[0], lda);
 
     // execute computations
     // GPU lapack
@@ -229,13 +229,13 @@ void latrd_forsytrd_getError(const rocblas_handle handle,
     // CPU lapack
     cpu_latrd(uplo, n, k, hA[0], lda, hE[0], hTau[0], hW[0], ldw);
 
-    print_host_matrix(std::cout, "A out GPU", n, n, hARes[0], lda);
+    /*    print_host_matrix(std::cout, "A out GPU", n, n, hARes[0], lda);
     print_host_matrix(std::cout, "A out CPU", n, n, hA[0], lda);
     print_host_matrix(std::cout, "W out GPU", n, k, hWRes[0], ldw);
     print_host_matrix(std::cout, "W out CPU", n, k, hW[0], ldw);
     print_host_matrix(std::cout, "E out", 1, n - 1, hE[0], 1);
     print_host_matrix(std::cout, "tau out", 1, n - 1, hTau[0], 1);
-
+*/
     // error is max(||hA - hARes|| / ||hA||, ||hW - hWRes|| / ||hW||)
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY
     // ISSUES. IT MIGHT BE REVISITED IN THE FUTURE) using frobenius norm
