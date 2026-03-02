@@ -472,10 +472,10 @@ struct GemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
             auto&& [a_lds_block, b_lds_block] = Base::GetABLdsTensorViews(p_smem);
 
             // Tile distribution for load from lds
-            constexpr auto a_lds_load_tile_distr =
-                make_static_tile_distribution(BlockGemm::MakeABlockDistributionEncode());
-            constexpr auto b_lds_load_tile_distr =
-                make_static_tile_distribution(BlockGemm::MakeBBlockDistributionEncode());
+            constexpr auto a_lds_load_tile_distr = make_static_tile_distribution(
+                BlockGemm::template MakeABlockDistributionEncode<is_a_load_tr_v>());
+            constexpr auto b_lds_load_tile_distr = make_static_tile_distribution(
+                BlockGemm::template MakeBBlockDistributionEncode<is_b_load_tr_v>());
 
             // A DRAM tile window for load
             // A LDS tile window for store

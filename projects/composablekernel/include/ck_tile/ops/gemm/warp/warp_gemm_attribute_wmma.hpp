@@ -174,6 +174,10 @@ template <typename WarpGemmAttributeWmmaImpl_,
 struct WarpGemmAttributeWmma
 {
     using Impl = remove_cvref_t<WarpGemmAttributeWmmaImpl_>;
+    // AttrNumAccessV is required for compatibility with the block GEMM, and is currently ignored
+    // within WarpGemmAttributeWmma
+    static constexpr auto AttrNumAccess  = WGAttrNumAccessEnum::Single;
+    static constexpr auto AttrNumAccessV = static_cast<index_t>(AttrNumAccess);
 
     // When kTransC is true and A/B types differ, we need an impl with swapped types.
     // Propagate MXTypeEnable (e.g., WmmaScale16Tag) so the transposed impl uses the
@@ -211,8 +215,27 @@ struct WarpGemmAttributeWmma
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return 1; }
 
-    using AWarpDstrEncoding = typename AWarpDstrEncodingTrait<Impl, AttrNumAccessA>::type;
-    using BWarpDstrEncoding = typename BWarpDstrEncodingTrait<Impl, AttrNumAccessB>::type;
+    template <index_t AttrNumAccessV_ = static_cast<index_t>(AttrNumAccessA)>
+    CK_TILE_HOST_DEVICE static constexpr auto get_awarp_dstr_encoding()
+    {
+        return typename AWarpDstrEncodingTrait<Impl,
+                                               static_cast<WGAttrNumAccessEnum>(
+                                                   AttrNumAccessV_)>::type{};
+    }
+
+    template <index_t AttrNumAccessV_ = static_cast<index_t>(AttrNumAccessB)>
+    CK_TILE_HOST_DEVICE static constexpr auto get_bwarp_dstr_encoding()
+    {
+        return typename BWarpDstrEncodingTrait<Impl,
+                                               static_cast<WGAttrNumAccessEnum>(
+                                                   AttrNumAccessV_)>::type{};
+    }
+
+    template <index_t AttrNumAccessV_ = static_cast<index_t>(AttrNumAccessA)>
+    using AWarpDstrEncoding = decltype(get_awarp_dstr_encoding<AttrNumAccessV_>());
+
+    template <index_t AttrNumAccessV_ = static_cast<index_t>(AttrNumAccessB)>
+    using BWarpDstrEncoding = decltype(get_bwarp_dstr_encoding<AttrNumAccessV_>());
 
     // kCM0PerLane = 1, kCMLane = 2, kCM1PerLane = 2, kCNLane = 16
     using CWarpDstrEncoding =

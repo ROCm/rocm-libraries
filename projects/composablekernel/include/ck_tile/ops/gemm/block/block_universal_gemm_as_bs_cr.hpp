@@ -138,6 +138,7 @@ struct BlockUniversalGemmAsBsCr
     using I0 = number<0>;
     using I1 = number<1>;
 
+    template <bool convert = false>
     CK_TILE_DEVICE static constexpr auto MakeABlockDistributionEncode()
     {
         constexpr index_t KPerThread     = Traits::KPerThread;
@@ -157,12 +158,28 @@ struct BlockUniversalGemmAsBsCr
                                        tuple<sequence<1, 0>>,
                                        sequence<1, 2>,
                                        sequence<0, 0>>{};
-        constexpr auto a_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-            a_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
+        if constexpr(convert)
+        {
+            using Attr = typename WarpGemm::WarpGemmAttribute;
 
-        return a_block_dstr_encode;
+            constexpr auto NumAccessA =
+                Attr::AttrNumAccessAV * sizeof(ADataType) / sizeof(AComputeDataType);
+            constexpr auto a_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                a_block_outer_dstr_encoding,
+                WarpGemm::WarpGemmAttribute::template get_awarp_dstr_encoding<NumAccessA>());
+
+            return a_block_dstr_encode;
+        }
+        else
+        {
+            constexpr auto a_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                a_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
+
+            return a_block_dstr_encode;
+        }
     }
 
+    template <bool convert = false>
     CK_TILE_DEVICE static constexpr auto MakeBBlockDistributionEncode()
     {
         constexpr index_t KPerThread     = Traits::KPerThread;
@@ -182,10 +199,24 @@ struct BlockUniversalGemmAsBsCr
                                        tuple<sequence<0, 1>>,
                                        sequence<1, 2>,
                                        sequence<0, 0>>{};
-        constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-            b_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
+        if constexpr(convert)
+        {
+            using Attr = typename WarpGemm::WarpGemmAttribute;
+            constexpr auto NumAccessB =
+                Attr::AttrNumAccessBV * sizeof(BDataType) / sizeof(BComputeDataType);
+            constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                b_block_outer_dstr_encoding,
+                WarpGemm::WarpGemmAttribute::template get_bwarp_dstr_encoding<NumAccessB>());
 
-        return b_block_dstr_encode;
+            return b_block_dstr_encode;
+        }
+        else
+        {
+            constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
+                b_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
+
+            return b_block_dstr_encode;
+        }
     }
 
     template <GemmPipelineScheduler Scheduler, typename GemmTraits>
