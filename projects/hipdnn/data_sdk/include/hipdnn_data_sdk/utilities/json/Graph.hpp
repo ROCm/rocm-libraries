@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp>
+#include <hipdnn_data_sdk/utilities/json/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp>
@@ -16,7 +17,6 @@
 #include <hipdnn_data_sdk/utilities/json/LayernormAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp>
-#include <hipdnn_data_sdk/utilities/json/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/RMSNormAttributes.hpp>
 #include <hipdnn_data_sdk/utilities/json/TensorAttributes.hpp>
 
