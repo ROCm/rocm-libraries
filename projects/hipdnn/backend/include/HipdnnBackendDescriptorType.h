@@ -152,9 +152,9 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
 
     /**
-     * @brief Convolution backward weight (WRW) operation descriptor
+     * @brief Convolution backward filter operation descriptor
      *
-     * Represents a backward weight convolution operation with input (X),
+     * Represents a backward filter convolution operation with input (X),
      * output gradient (DY), and weight gradient (DW) tensors plus
      * convolution parameters.
      */

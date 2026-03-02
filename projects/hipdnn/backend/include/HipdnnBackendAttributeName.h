@@ -372,13 +372,13 @@ typedef enum
      * @{
      */
 
-    /** @brief Input tensor for backward weight convolution */
+    /** @brief Input tensor for backward filter convolution */
     HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X = 1600,
 
-    /** @brief Output gradient tensor for backward weight convolution */
+    /** @brief Output gradient tensor for backward filter convolution */
     HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY = 1601,
 
-    /** @brief Weight gradient tensor for backward weight convolution */
+    /** @brief Weight gradient tensor for backward filter convolution */
     HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW = 1602,
 
     /** @} */
