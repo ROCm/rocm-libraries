@@ -162,7 +162,12 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         tc        = tP["tensorChar"]
         tile01    = tP["tile01Idx"]
         waveWidth = writer.states.kernel["WavefrontSize"]
-        lrvw      = kernel["LocalReadVectorWidth%s"%tc]
+
+        # If LocalReadVectorWidth{tc} does not exist, fall back to LocalReadVectorWidth
+        if f"LocalReadVectorWidth{tc}" in kernel:
+          lrvw = kernel["LocalReadVectorWidth%s"%tc]
+        else:
+          lrvw = kernel["LocalReadVectorWidth"]
 
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]):
@@ -203,17 +208,13 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                                                         dividedForWaveId = dividedForWaveId, \
                                                                         vectorWidth=vectorWidth, \
                                                                         maxKId=maxKId)
-        #abmatrixinfo = writer.states.a if tc == 'A' else writer.states.b
-        if tc == 'A':
-           abmatrixinfo = writer.states.a
-        elif tc == 'B':
-           abmatrixinfo = writer.states.b
-        elif tc == 'MXSA':
-           abmatrixinfo = writer.states.a  # MXSA uses matrix A state
-        elif tc == 'MXSB':
-           abmatrixinfo = writer.states.b  # MXSB uses matrix B state
+
+        if tc == 'A' or tc == 'MXSA' or (tc == 'Metadata' and tP["tensorIdx"] == 0):
+            abmatrixinfo = writer.states.a
+        elif tc == 'B' or tc == 'MXSB' or (tc == 'Metadata' and tP["tensorIdx"] != 0):
+            abmatrixinfo = writer.states.b
         else:
-           raise Exception(f"unsupport tc {tc}")
+            raise Exception(f"unsupport tc {tc}")
         perpStride = abmatrixinfo.gNLCPerpStride
         permBlock  = abmatrixinfo.gNLCPermBlock
 
@@ -243,13 +244,13 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         if kernel["ProblemType"]["Sparse"] != 0:
             if kernel["MIInputPerThread"] * kernel["ProblemType"]["MacDataTypeA"].numBytes() > 16:
               isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
-              strideK      = (inputPerThread if umlds else (mt + LdsPad) * inputPerThread) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  inputPerThread else 1)
-        ##special case for new F8 MFMA -TODO:
-        #elif  kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32:
-        #    if umlds:
-        #        strideK = 16
-        #    else:
-        #        strideK = (mt + LdsPad) * 16
+              strideK      = (offsetK if umlds else (mt + LdsPad) * offsetK) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  offsetK else 1)
+        #special case for new F8 MFMA -TODO:
+        elif  kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and not kernel["ProblemType"]["MXBlockA"] and not kernel["ProblemType"]["MXBlockB"]:
+            if umlds:
+                strideK = 16
+            else:
+                strideK = (mt + LdsPad) * 16
         elif kernel["UseF32XEmulation"] and not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
             if umlds:
                 strideK = 4
