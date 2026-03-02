@@ -83,21 +83,21 @@ auto GetDataset()
         input.spatial_dim_elements = {c.input[2], c.input[3]};
         input.output_channels      = c.weights[0];
         input.filter_dims          = {c.weights[2], c.weights[3]};
-        input.pads_strides_dilations.assign(
-            c.pads_strides_dilations.begin(), c.pads_strides_dilations.end());
-        input.trans_output_pads = {0, 0};
-        input.in_layout         = "NCHW";
-        input.fil_layout        = "NCHW";
-        input.out_layout        = "NCHW";
-        input.pad_mode          = "default";
-        input.deterministic     = false;
-        input.tensor_vect       = 0;
-        input.vector_length     = 1;
-        input.output_type       = "int32";
-        input.int8_vectorize    = false;
-        input.groupCount        = c.group_count;
-        input.do_forward        = true;
-        input.do_backward_data  = true;
+        input.pads_strides_dilations.assign(c.pads_strides_dilations.begin(),
+                                            c.pads_strides_dilations.end());
+        input.trans_output_pads   = {0, 0};
+        input.in_layout           = "NCHW";
+        input.fil_layout          = "NCHW";
+        input.out_layout          = "NCHW";
+        input.pad_mode            = "default";
+        input.deterministic       = false;
+        input.tensor_vect         = 0;
+        input.vector_length       = 1;
+        input.output_type         = "int32";
+        input.int8_vectorize      = false;
+        input.groupCount          = c.group_count;
+        input.do_forward          = true;
+        input.do_backward_data    = true;
         input.do_backward_weights = !c.disable_backward_weights;
 
         if(miopen::test::conv::IsValidCtestStyleConfig(input))

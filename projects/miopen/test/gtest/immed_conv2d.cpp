@@ -53,17 +53,17 @@ auto GetDataset()
         miopen::test::conv::get_2d_filter_dims(), 2, std::vector<std::size_t>{3, 3});
     auto pads_strides_dilations = generate_data_limited(
         miopen::test::conv::get_2d_pads_strides_dilations(), 2, std::vector<int>{1, 1, 1, 1, 1, 1});
-    auto trans_output_pads =
-        generate_data_limited(miopen::test::conv::get_2d_trans_output_pads(), 1, std::vector<int>{0, 0});
-    auto pad_modes         = generate_data(std::vector<std::string>{"default"});
-    auto in_layouts        = generate_data(std::vector<std::string>{"NCHW"});
-    auto fil_layouts       = generate_data(std::vector<std::string>{"NCHW"});
-    auto out_layouts       = generate_data(std::vector<std::string>{"NCHW"});
-    auto deterministics    = generate_data(std::vector<bool>{false});
-    auto tensor_vects      = generate_data(std::vector<std::size_t>{0});
-    auto vector_lengths    = generate_data(std::vector<std::size_t>{1});
-    auto output_types      = generate_data(std::vector<std::string>{"int32"});
-    auto int8_vectorizes   = generate_data(std::vector<bool>{false});
+    auto trans_output_pads = generate_data_limited(
+        miopen::test::conv::get_2d_trans_output_pads(), 1, std::vector<int>{0, 0});
+    auto pad_modes       = generate_data(std::vector<std::string>{"default"});
+    auto in_layouts      = generate_data(std::vector<std::string>{"NCHW"});
+    auto fil_layouts     = generate_data(std::vector<std::string>{"NCHW"});
+    auto out_layouts     = generate_data(std::vector<std::string>{"NCHW"});
+    auto deterministics  = generate_data(std::vector<bool>{false});
+    auto tensor_vects    = generate_data(std::vector<std::size_t>{0});
+    auto vector_lengths  = generate_data(std::vector<std::size_t>{1});
+    auto output_types    = generate_data(std::vector<std::string>{"int32"});
+    auto int8_vectorizes = generate_data(std::vector<bool>{false});
 
     for(auto b : batch_sizes)
         for(auto ic : input_channels)
