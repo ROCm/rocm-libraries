@@ -683,18 +683,19 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 {
     const bool is3d = problem.Is3d();
     const bool is2d = problem.Is2d();
+    const bool use_nd = is2d || is3d;
 
 
     // Check cache FIRST - avoids expensive model creation if we have cached results
-    auto cached_result = GetCachedPrediction(problem, device, is3d);
+    auto cached_result = GetCachedPrediction(problem, device, is3d );
     if(!cached_result.empty())
     {
         return cached_result;
     }
 
-    if(is3d)
+    if( use_nd )
     {
-        // 3D path: Use TunaNet3D model
+        // 3D or 2D path: Use TunaNetMD model
         std::unique_ptr<convnd::ModelND> model = convnd::GetNDModel(device);
         if(!model || !model->IsProblemSupported(problem, ctx))
         {
@@ -709,7 +710,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     }
     else
     {
-        // 2D path: Use original TunaNet model
+        // old 2D path: Use original TunaNet model
         std::unique_ptr<Model> model = GetModel(device);
         if(!model || !model->IsProblemSupported(problem, ctx))
         {
@@ -745,8 +746,8 @@ private:
 public:
     MetadataND metadata;
 
-    explicit TunaNetNDModel(const std::string& device)
-        : device_name(device), metadata(MetadataND(device))
+    explicit TunaNetNDModel(const std::string& device, const int& dim)
+        : device_name(device), metadata(MetadataND(device,dim))
     {
         MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name);
     }
@@ -780,11 +781,11 @@ public:
     bool IsProblemSupported(const conv::ProblemDescription& problem,
                             const ExecutionContext& /*ctx*/) const override
     {
-        if(!problem.Is3d() & false)
+        if(!problem.Is3d() && !problem.Is2d())
         {
             return false;
         }
-        MIOPEN_LOG_I2("3D problem supported by TunaNetNDModel");
+        MIOPEN_LOG_I2("3D or 2D problem supported by TunaNetNDModel");
         return true;
     }
 
@@ -794,7 +795,7 @@ protected:
         const bool isFwd = problem.GetDirection() == conv::Direction::Forward;
 
         std::vector<float> features = {};
-        if ( true ) //2d version as in the
+        if ( problem.Is2d() ) //2d version as in the
         {
             features = {
                 // Input dimensions
@@ -842,7 +843,7 @@ protected:
                 // Group count
                 static_cast<float>(problem.GetGroupCount()), // group_count
             };
-        } else {
+        } else if ( problem.Is3d() ) {
             features = {
                 // Input dimensions
                 static_cast<float>(isFwd ? problem.GetInChannels()
@@ -890,6 +891,8 @@ protected:
                 // Group count
                 static_cast<float>(problem.GetGroupCount()), // group_count
             };
+        } else {
+            MIOPEN_LOG_I2("Unsupported problem type for ND feature extraction");
         }
 
         MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
@@ -909,7 +912,7 @@ protected:
     }
 };
 
-std::unique_ptr<ModelND> GetNDModel(const std::string& device)
+std::unique_ptr<ModelND> GetNDModel(const std::string& device, const int& dim)
 {
     MIOPEN_LOG_I2("GetNDModel called for device: " << device);
 
@@ -920,7 +923,7 @@ std::unique_ptr<ModelND> GetNDModel(const std::string& device)
         try
         {
             // Pass device name to constructor - it will append "_3d" internally
-            auto model = std::make_unique<TunaNetNDModel>(device);
+            auto model = std::make_unique<TunaNetNDModel>(device, dim);
             MIOPEN_LOG_I2("Successfully created ND model for device: " << device);
             return model;
         }

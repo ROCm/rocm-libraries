@@ -145,7 +145,7 @@ namespace convnd {
 class MetadataND
 {
 private:
-    const std::string model_prefix;
+    std::string model_prefix;
     bool is_valid; // Error handling flag
 
     // Loaded data (const members like 2D pattern)
@@ -192,7 +192,7 @@ public:
      * @param device Device name (e.g., "gfx942", "gfx950") - "_3d" suffix appended internally
      * @note Does not throw - use IsValid() to check for errors
      */
-    MIOPEN_INTERNALS_EXPORT explicit MetadataND(const std::string& device);
+    MIOPEN_INTERNALS_EXPORT explicit MetadataND(const std::string& device, const int& dim);
 
     /**
      * @brief Check if metadata was loaded successfully

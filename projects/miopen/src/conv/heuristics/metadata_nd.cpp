@@ -263,9 +263,8 @@ MetadataND::LoadOutLayoutEncodings(const std::string& arch)
 
 // Constructor - loads all data immediately with error handling
 MIOPEN_INTERNALS_EXPORT
-MetadataND::MetadataND(const std::string& device)
-    : model_prefix(device + "_3d"), // Automatically append "_3d" suffix to device name
-      is_valid(false),              // Initialize to false, will be set to true if all loads succeed
+MetadataND::MetadataND(const std::string& device, const int& dim)
+    : is_valid(false),              // Initialize to false, will be set to true if all loads succeed
       features(),
       num_inputs(0),
       num_outputs(0),
@@ -279,6 +278,14 @@ MetadataND::MetadataND(const std::string& device)
       fil_layout_encodings(),
       out_layout_encodings()
 {
+    if ( dim == 2 ) {
+        model_prefix = device;
+    } else if ( dim == 3 ) {
+        model_prefix = device + "_3d";
+    } else {
+        MIOPEN_LOG_I2("Unsupported dimension " << dim << " for MetadataND, expected 2 or 3");
+        return;
+    }
     // Load all components using std::optional pattern (using full arch_name with "_3d")
     auto features_opt    = LoadFeatures(model_prefix);
     auto num_inputs_opt  = LoadNumInputs(model_prefix);
