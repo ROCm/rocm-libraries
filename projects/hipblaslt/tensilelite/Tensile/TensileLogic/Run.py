@@ -24,11 +24,15 @@
 
 
 import functools
+import sys
+import threading
+import time
+import warnings
 
 from pathlib import Path
 from typing import List, Dict, NamedTuple
 
-from Tensile.Common import ParallelMap2, print1, IsaVersion, IsaInfo, setVerbosity
+from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters
@@ -38,6 +42,7 @@ from Tensile.Toolchain.Validators import validateToolchain
 from .ParseArguments import parseArguments
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
+from .ValidWorkGroupMappingXCC import _validateWorkGroupMappingXCC, reset_reported_failures
 from .HandleCustomKernel import handleCustomKernel, hasCustomKernel
 
 
@@ -71,10 +76,10 @@ def _runChecks(
         data = readYAML(file)
         problemType = data[4]
         if check.OnlyCustomKernels and hasCustomKernel(file):
-            print1(f">> {file.relative_to(logicPath)}")
+            print2(f">> {file.relative_to(logicPath)}")
             solutions = data[5]  # Solutions are the 5th index
         elif check.All:
-            print1(f">> {file.relative_to(logicPath)}")
+            print2(f">> {file.relative_to(logicPath)}")
             solutions = data[5]  # Solutions are the 5th index
 
         for s in solutions:
@@ -87,6 +92,7 @@ def _runChecks(
                 [
                     _validateMatrixInstruction(s, isaInfoMap, file.relative_to(logicPath)),
                     _validateWorkGroup(s, file.relative_to(logicPath)),
+                    _validateWorkGroupMappingXCC(s, file.relative_to(logicPath)),
                 ]
             ):
                 keep += 1
@@ -119,28 +125,71 @@ def _setup():
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
-    print1(f"Found {len(files)} files")
+    print2(f"Found {len(files)} files")
 
     isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, str(cxxCompiler))
-    assignGlobalParameters({"PrintSolutionRejectionReason": True}, isaInfoMap)
+    # Suppress capability table unless -v 2 or higher (keep default output short)
+    if args.Verbose < 2:
+        setVerbosity(0)
+    # Only set PrintSolutionRejectionReason when verbose to avoid "unrecognised" warning in quiet mode
+    gp_config = {"PrintSolutionRejectionReason": True} if args.Verbose >= 2 else {}
+    assignGlobalParameters(gp_config, isaInfoMap)
+    if args.Verbose < 2:
+        setVerbosity(args.Verbose)
 
     return jobs, isaInfoMap, logicPath, files, check
 
 
-def main():
-    jobs, isaInfoMap, logicPath, files, check = _setup()
+def _progress_loop(stop_event: threading.Event, interval: float = 5.0) -> None:
+    """Print a periodic 'Validating... Ns elapsed' line so the user knows the run is active."""
+    start = time.time()
+    while not stop_event.wait(timeout=interval):
+        elapsed = int(time.time() - start)
+        sys.stdout.write(f"\rValidating library logic... {elapsed}s elapsed    ")
+        sys.stdout.flush()
+    # Clear the progress line so the following Total/Keep/Reject output is clean
+    sys.stdout.write("\r" + " " * 50 + "\r")
+    sys.stdout.flush()
 
-    batchSize = len(files) // min(len(files), jobs)
-    batches = (files[i : i + batchSize] for i in range(0, len(files), batchSize))
+
+def main():
+    # Suppress noisy joblib warnings (serial fallback, timeout) before any imports that pull in joblib
+    warnings.filterwarnings("ignore", message=".*will operate in serial mode.*")
+    warnings.filterwarnings("ignore", message=".*timeout.*will not be used.*")
+
+    reset_reported_failures()
+    jobs, isaInfoMap, logicPath, files, check = _setup()
+    args = parseArguments()
+
+    # Use more, smaller batches for better load balancing (workers stay busy as tasks complete)
+    num_batches_target = min(len(files), jobs * 8)
+    batchSize = max(1, len(files) // num_batches_target)
+    batches = list(
+        files[i : i + batchSize] for i in range(0, len(files), batchSize)
+    )
 
     fn = functools.partial(_runChecks, logicPath, isaInfoMap, check)
     keep, total = 0, 0
 
-    results = ParallelMap2(fn, batches, multiArg=False, procs=jobs, return_as="list")
+    # Show periodic progress when in quiet mode (no per-file output)
+    progress_stop = threading.Event()
+    progress_thread = None
+    if args.Verbose < 2:
+        progress_thread = threading.Thread(
+            target=_progress_loop, args=(progress_stop,), daemon=True
+        )
+        progress_thread.start()
 
-    for _keep, _total in results:
-        keep += _keep
-        total += _total
+    try:
+        results = ParallelMap2(fn, batches, multiArg=False, procs=jobs, return_as="list")
+
+        for _keep, _total in results:
+            keep += _keep
+            total += _total
+    finally:
+        progress_stop.set()
+        if progress_thread is not None:
+            progress_thread.join(timeout=1.5)
 
     rejects = total - keep
     print(f"Total  {total} solutions")

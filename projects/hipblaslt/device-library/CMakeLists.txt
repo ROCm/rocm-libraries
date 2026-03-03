@@ -53,6 +53,23 @@ if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
 
+# Pre-build gate: validate all library logic YAMLs (WorkGroup, MatrixInstruction,
+# WorkGroupMappingXCC vs CU count, etc.) before generating .dat files. Fails build
+# if any solution fails validation so bad logic is never compiled.
+set(TENSILELOGIC_STAMP "${CMAKE_CURRENT_BINARY_DIR}/TensileLogic.stamp")
+add_custom_command(
+    OUTPUT "${TENSILELOGIC_STAMP}"
+    COMMENT "Validating library logic (TensileLogic --check-all) ..."
+    COMMAND ${HIPBLASLT_PYTHON_COMMAND}
+        "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/bin/TensileLogic"
+        "${HIPBLASLT_LIBLOGIC_PATH}"
+        --check-all
+    COMMAND ${CMAKE_COMMAND} -E touch "${TENSILELOGIC_STAMP}"
+    DEPENDS ${HIPBLASLT_PYTHON_DEPS}
+    VERBATIM
+    USES_TERMINAL
+)
+
 set(output_stamp "${CMAKE_CURRENT_BINARY_DIR}/Tensile.stamp")
 set(TENSILE_CREATE_LIBRARY_COMMAND
     ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
@@ -67,7 +84,7 @@ add_custom_command(
     COMMENT "Building device libraries to ${HIPBLASLT_TENSILE_LIBPATH} ..."
     COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
     COMMAND ${CMAKE_COMMAND} -E touch "${output_stamp}"
-    DEPENDS  ${HIPBLASLT_PYTHON_DEPS}
+    DEPENDS ${HIPBLASLT_PYTHON_DEPS} "${TENSILELOGIC_STAMP}"
     # Because the command can contain special characters
     VERBATIM
     # Because this can be very long running and difficult to debug deadlocks

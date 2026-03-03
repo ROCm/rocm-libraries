@@ -30,7 +30,7 @@ import time
 
 from joblib import Parallel, delayed
 
-from .Utilities import tqdm
+from .Utilities import tqdm, getVerbosity, print2
 
 
 def joblibParallelSupportsGenerator():
@@ -213,9 +213,8 @@ def ParallelMap2(
 
     from .GlobalParameters import globalParameters
 
-    threadCount = procs if procs else CPUThreadCount(enable)
-
-    threadCount = CPUThreadCount(enable)
+    cpu_count = CPUThreadCount(enable)
+    threadCount = min(procs, cpu_count) if procs is not None else cpu_count
 
     if threadCount <= 1 and globalParameters["ShowProgressBar"]:
         # Provide a progress bar for single-threaded operation.
@@ -229,7 +228,8 @@ def ParallelMap2(
 
     if message != "":
         message += ": "
-    print("{0}Launching {1} threads{2}...".format(message, threadCount, countMessage))
+    if getVerbosity() >= 2:
+        print2("{0}Launching {1} threads{2}...".format(message, threadCount, countMessage))
     sys.stdout.flush()
     currentTime = time.time()
 
@@ -246,6 +246,7 @@ def ParallelMap2(
         )
 
     totalTime = time.time() - currentTime
-    print("{0}Done. ({1:.1f} secs elapsed)".format(message, totalTime))
+    if getVerbosity() >= 2:
+        print2("{0}Done. ({1:.1f} secs elapsed)".format(message, totalTime))
     sys.stdout.flush()
     return rv
