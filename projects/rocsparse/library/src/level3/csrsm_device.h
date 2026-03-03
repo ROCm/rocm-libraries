@@ -98,7 +98,7 @@ namespace rocsparse
                                                    : -1;
                 scsr_val[hipThreadIdx_x]
                     = (hipThreadIdx_x < row_end - j) ? csr_val[hipThreadIdx_x + j] : -1;
-                
+
                 // Wait for preload to finish
                 __syncthreads();
             }
