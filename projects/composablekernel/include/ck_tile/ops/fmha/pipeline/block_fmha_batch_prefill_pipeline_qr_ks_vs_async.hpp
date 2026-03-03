@@ -582,6 +582,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         auto k_coord              = k_dist.calculate_index();
         using KDstrEncode         = typename decltype(k_dist)::DstrEncode;
         constexpr index_t NRepeat = KDstrEncode::hs_lengthss_[I0][I0];
+        // kPageBlockSize >= kN0: within-page offset only (SRD rebased per page via rebase_k_window)
+        // kPageBlockSize <  kN0: global offset, must fit int32
         statically_indexed_array<index_t, NRepeat> k_offsets;
         index_t current_seq_k = seqlen_k_start;
 
@@ -782,6 +784,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSAsync
         static_assert(decltype(VPageIndexYDims)::at(0) < VDstrEncode::NDimY,
                       "V page-index Y dim must be valid");
 
+        // kPageBlockSize >= kN0: within-page offset only (SRD rebased per page via rebase_v_window)
+        // kPageBlockSize <  kN0: global offset, must fit int32
         statically_indexed_array<index_t, V_PageIdxRepeat> v_offsets;
         // V physical pages array for use with kv_offset_array_transform
         // For V_KIterOuter > 1, we need V_PageIdxRepeat elements; otherwise V_KIterInner
