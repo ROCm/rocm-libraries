@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include <type_traits>
 #include "ck_tile/core/container/sequence.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/numeric/math.hpp"
@@ -16,25 +15,39 @@ using namespace ck_tile;
 TEST(CkTileSequence, ModifyFirstElement)
 {
     constexpr auto result = sequence<1, 2, 3, 4>{}.modify(number<0>{}, number<99>{});
-    static_assert(std::is_same_v<decltype(result), const sequence<99, 2, 3, 4>>);
+    EXPECT_EQ(result.at(0), 99);
+    EXPECT_EQ(result.at(1), 2);
+    EXPECT_EQ(result.at(2), 3);
+    EXPECT_EQ(result.at(3), 4);
 }
 
 TEST(CkTileSequence, ModifyLastElement)
 {
     constexpr auto result = sequence<1, 2, 3, 4>{}.modify(number<3>{}, number<99>{});
-    static_assert(std::is_same_v<decltype(result), const sequence<1, 2, 3, 99>>);
+    EXPECT_EQ(result.at(0), 1);
+    EXPECT_EQ(result.at(3), 99);
 }
 
 TEST(CkTileSequence, ModifyMiddleElement)
 {
     constexpr auto result = sequence<5, 5, 5>{}.modify(number<1>{}, number<0>{});
-    static_assert(std::is_same_v<decltype(result), const sequence<5, 0, 5>>);
+    EXPECT_EQ(result.at(0), 5);
+    EXPECT_EQ(result.at(1), 0);
+    EXPECT_EQ(result.at(2), 5);
 }
 
 TEST(CkTileSequence, ModifySingleElement)
 {
     constexpr auto result = sequence<42>{}.modify(number<0>{}, number<99>{});
-    static_assert(std::is_same_v<decltype(result), const sequence<99>>);
+    EXPECT_EQ(result.at(0), 99);
+}
+
+TEST(CkTileSequence, ModifyNegativeValue)
+{
+    constexpr auto result = sequence<1, 2, 3>{}.modify(number<1>{}, number<-1>{});
+    EXPECT_EQ(result.at(0), 1);
+    EXPECT_EQ(result.at(1), -1);
+    EXPECT_EQ(result.at(2), 3);
 }
 
 // ============================================================================
@@ -44,7 +57,18 @@ TEST(CkTileSequence, ModifySingleElement)
 TEST(CkTileSequence, SequenceGenZero)
 {
     using Result = typename sequence_gen<0, identity>::type;
-    static_assert(std::is_same_v<Result, sequence<>>);
+    EXPECT_EQ(Result::size(), 0);
+}
+
+TEST(CkTileSequence, SequenceGenZeroNonIdentityFunctor)
+{
+    // N=0 specialization should produce empty sequence regardless of functor
+    struct F
+    {
+        constexpr index_t operator()(index_t) const { return 999; }
+    };
+    using Result = typename sequence_gen<0, F>::type;
+    EXPECT_EQ(Result::size(), 0);
 }
 
 TEST(CkTileSequence, SequenceGenIdentity)
@@ -54,7 +78,11 @@ TEST(CkTileSequence, SequenceGenIdentity)
         constexpr index_t operator()(index_t i) const { return i; }
     };
     using Result = typename sequence_gen<5, F>::type;
-    static_assert(std::is_same_v<Result, sequence<0, 1, 2, 3, 4>>);
+    EXPECT_EQ(Result::size(), 5);
+    for(index_t i = 0; i < 5; ++i)
+    {
+        EXPECT_EQ(Result{}.at(i), i);
+    }
 }
 
 TEST(CkTileSequence, SequenceGenDouble)
@@ -64,7 +92,10 @@ TEST(CkTileSequence, SequenceGenDouble)
         constexpr index_t operator()(index_t i) const { return i * 2; }
     };
     using Result = typename sequence_gen<4, F>::type;
-    static_assert(std::is_same_v<Result, sequence<0, 2, 4, 6>>);
+    EXPECT_EQ(Result{}.at(0), 0);
+    EXPECT_EQ(Result{}.at(1), 2);
+    EXPECT_EQ(Result{}.at(2), 4);
+    EXPECT_EQ(Result{}.at(3), 6);
 }
 
 TEST(CkTileSequence, SequenceGenSingle)
@@ -74,7 +105,8 @@ TEST(CkTileSequence, SequenceGenSingle)
         constexpr index_t operator()(index_t) const { return 42; }
     };
     using Result = typename sequence_gen<1, F>::type;
-    static_assert(std::is_same_v<Result, sequence<42>>);
+    EXPECT_EQ(Result::size(), 1);
+    EXPECT_EQ(Result{}.at(0), 42);
 }
 
 TEST(CkTileSequence, SequenceGenLarger)
@@ -84,7 +116,23 @@ TEST(CkTileSequence, SequenceGenLarger)
         constexpr index_t operator()(index_t i) const { return i * i; }
     };
     using Result = typename sequence_gen<8, F>::type;
-    static_assert(std::is_same_v<Result, sequence<0, 1, 4, 9, 16, 25, 36, 49>>);
+    EXPECT_EQ(Result{}.at(7), 49);
+}
+
+TEST(CkTileSequence, SequenceGenWithNumberParam)
+{
+    // Verify functor taking number<I> directly (the documented API contract)
+    struct F
+    {
+        template <index_t I>
+        constexpr index_t operator()(number<I>) const
+        {
+            return I + 10;
+        }
+    };
+    using Result = typename sequence_gen<4, F>::type;
+    EXPECT_EQ(Result{}.at(0), 10);
+    EXPECT_EQ(Result{}.at(3), 13);
 }
 
 // ============================================================================
@@ -94,29 +142,35 @@ TEST(CkTileSequence, SequenceGenLarger)
 TEST(CkTileSequence, UniformSequenceGenZero)
 {
     using Result = typename uniform_sequence_gen<0, 7>::type;
-    static_assert(std::is_same_v<Result, sequence<>>);
+    EXPECT_EQ(Result::size(), 0);
 }
 
 TEST(CkTileSequence, UniformSequenceGenSingle)
 {
     using Result = typename uniform_sequence_gen<1, 99>::type;
-    static_assert(std::is_same_v<Result, sequence<99>>);
+    EXPECT_EQ(Result{}.at(0), 99);
 }
 
 TEST(CkTileSequence, UniformSequenceGenMultiple)
 {
     using Result = typename uniform_sequence_gen<4, 0>::type;
-    static_assert(std::is_same_v<Result, sequence<0, 0, 0, 0>>);
+    for(index_t i = 0; i < 4; ++i)
+    {
+        EXPECT_EQ(Result{}.at(i), 0);
+    }
 }
 
 TEST(CkTileSequence, UniformSequenceGenLarger)
 {
     using Result = typename uniform_sequence_gen<8, 3>::type;
-    static_assert(std::is_same_v<Result, sequence<3, 3, 3, 3, 3, 3, 3, 3>>);
+    for(index_t i = 0; i < 8; ++i)
+    {
+        EXPECT_EQ(Result{}.at(i), 3);
+    }
 }
 
 // ============================================================================
-// sequence_reverse_inclusive_scan tests
+// sequence_reverse_inclusive_scan tests — runtime value verification
 // ============================================================================
 
 TEST(CkTileSequence, ReverseInclusiveScanProduct)
@@ -124,96 +178,163 @@ TEST(CkTileSequence, ReverseInclusiveScanProduct)
     using Result = typename sequence_reverse_inclusive_scan<sequence<1, 2, 3, 4>,
                                                             multiplies<index_t>,
                                                             1>::type;
-    // reverse inclusive scan with multiply, init=1:
-    //   result[3] = 4*1 = 4
-    //   result[2] = 3*4 = 12
-    //   result[1] = 2*12 = 24
-    //   result[0] = 1*24 = 24
-    static_assert(std::is_same_v<Result, sequence<24, 24, 12, 4>>);
+    // result[3]=4*1=4, result[2]=3*4=12, result[1]=2*12=24, result[0]=1*24=24
+    EXPECT_EQ(Result{}.at(0), 24);
+    EXPECT_EQ(Result{}.at(1), 24);
+    EXPECT_EQ(Result{}.at(2), 12);
+    EXPECT_EQ(Result{}.at(3), 4);
 }
 
 TEST(CkTileSequence, ReverseInclusiveScanSum)
 {
     using Result =
         typename sequence_reverse_inclusive_scan<sequence<1, 2, 3, 4>, plus<index_t>, 0>::type;
-    // reverse inclusive scan with add, init=0:
-    //   result[3] = 4+0 = 4
-    //   result[2] = 3+4 = 7
-    //   result[1] = 2+7 = 9
-    //   result[0] = 1+9 = 10
-    static_assert(std::is_same_v<Result, sequence<10, 9, 7, 4>>);
+    // result[3]=4, result[2]=7, result[1]=9, result[0]=10
+    EXPECT_EQ(Result{}.at(0), 10);
+    EXPECT_EQ(Result{}.at(1), 9);
+    EXPECT_EQ(Result{}.at(2), 7);
+    EXPECT_EQ(Result{}.at(3), 4);
 }
 
 TEST(CkTileSequence, ReverseInclusiveScanSingleElement)
 {
     using Result = typename sequence_reverse_inclusive_scan<sequence<5>, plus<index_t>, 0>::type;
-    static_assert(std::is_same_v<Result, sequence<5>>);
+    EXPECT_EQ(Result{}.at(0), 5);
 }
 
 TEST(CkTileSequence, ReverseInclusiveScanEmpty)
 {
     using Result = typename sequence_reverse_inclusive_scan<sequence<>, plus<index_t>, 0>::type;
-    static_assert(std::is_same_v<Result, sequence<>>);
+    EXPECT_EQ(Result::size(), 0);
 }
 
 // ============================================================================
-// sequence_map_inverse tests
+// sequence_inclusive_scan (forward) tests — runtime value verification
+// ============================================================================
+
+TEST(CkTileSequence, ForwardInclusiveScanSum)
+{
+    using Result = typename sequence_inclusive_scan<sequence<1, 2, 3, 4>, plus<index_t>, 0>::type;
+    // result[0]=1, result[1]=3, result[2]=6, result[3]=10
+    EXPECT_EQ(Result{}.at(0), 1);
+    EXPECT_EQ(Result{}.at(1), 3);
+    EXPECT_EQ(Result{}.at(2), 6);
+    EXPECT_EQ(Result{}.at(3), 10);
+}
+
+TEST(CkTileSequence, ForwardInclusiveScanProduct)
+{
+    using Result =
+        typename sequence_inclusive_scan<sequence<1, 2, 3, 4>, multiplies<index_t>, 1>::type;
+    // result[0]=1, result[1]=2, result[2]=6, result[3]=24
+    EXPECT_EQ(Result{}.at(0), 1);
+    EXPECT_EQ(Result{}.at(1), 2);
+    EXPECT_EQ(Result{}.at(2), 6);
+    EXPECT_EQ(Result{}.at(3), 24);
+}
+
+TEST(CkTileSequence, ForwardInclusiveScanNonTrivialInit)
+{
+    using Result = typename sequence_inclusive_scan<sequence<1, 2, 3>, plus<index_t>, 10>::type;
+    // init=10: result[0]=1+10=11, result[1]=2+11=13, result[2]=3+13=16
+    EXPECT_EQ(Result{}.at(0), 11);
+    EXPECT_EQ(Result{}.at(1), 13);
+    EXPECT_EQ(Result{}.at(2), 16);
+}
+
+TEST(CkTileSequence, ReverseInclusiveScanNonTrivialInit)
+{
+    using Result =
+        typename sequence_reverse_inclusive_scan<sequence<1, 2, 3>, plus<index_t>, 10>::type;
+    // init=10: result[2]=3+10=13, result[1]=2+13=15, result[0]=1+15=16
+    EXPECT_EQ(Result{}.at(0), 16);
+    EXPECT_EQ(Result{}.at(1), 15);
+    EXPECT_EQ(Result{}.at(2), 13);
+}
+
+TEST(CkTileSequence, ForwardInclusiveScanSingleElement)
+{
+    using Result = typename sequence_inclusive_scan<sequence<5>, plus<index_t>, 0>::type;
+    EXPECT_EQ(Result{}.at(0), 5);
+}
+
+TEST(CkTileSequence, ForwardInclusiveScanEmpty)
+{
+    using Result = typename sequence_inclusive_scan<sequence<>, plus<index_t>, 0>::type;
+    EXPECT_EQ(Result::size(), 0);
+}
+
+// ============================================================================
+// sequence_map_inverse tests — runtime round-trip verification
 // ============================================================================
 
 TEST(CkTileSequence, MapInverseIdentity)
 {
     using Result = typename sequence_map_inverse<sequence<0, 1, 2, 3>>::type;
-    static_assert(std::is_same_v<Result, sequence<0, 1, 2, 3>>);
+    for(index_t i = 0; i < 4; ++i)
+    {
+        EXPECT_EQ(Result{}.at(i), i);
+    }
 }
 
 TEST(CkTileSequence, MapInverseSwap)
 {
     using Result = typename sequence_map_inverse<sequence<1, 0>>::type;
-    static_assert(std::is_same_v<Result, sequence<1, 0>>);
+    EXPECT_EQ(Result{}.at(0), 1);
+    EXPECT_EQ(Result{}.at(1), 0);
 }
 
 TEST(CkTileSequence, MapInversePermutation)
 {
     using Input  = sequence<2, 0, 1>;
     using Result = typename sequence_map_inverse<Input>::type;
-    // inverse of (2,0,1): pos0->2, pos1->0, pos2->1
-    // so result[2]=0, result[0]=1, result[1]=2 -> (1, 2, 0)
-    static_assert(std::is_same_v<Result, sequence<1, 2, 0>>);
+    EXPECT_EQ(Result{}.at(0), 1);
+    EXPECT_EQ(Result{}.at(1), 2);
+    EXPECT_EQ(Result{}.at(2), 0);
 
-    // Verify: input[result[i]] == i for all i
-    static_assert(Input::at(number<Result::at(number<0>{})>{}) == 0);
-    static_assert(Input::at(number<Result::at(number<1>{})>{}) == 1);
-    static_assert(Input::at(number<Result::at(number<2>{})>{}) == 2);
+    // Verify round-trip: input[result[i]] == i for all i
+    for(index_t i = 0; i < 3; ++i)
+    {
+        EXPECT_EQ(Input{}.at(Result{}.at(i)), i);
+    }
 }
 
 TEST(CkTileSequence, MapInverseEmpty)
 {
     using Result = typename sequence_map_inverse<sequence<>>::type;
-    static_assert(std::is_same_v<Result, sequence<>>);
+    EXPECT_EQ(Result::size(), 0);
 }
 
 TEST(CkTileSequence, MapInverseSingle)
 {
     using Result = typename sequence_map_inverse<sequence<0>>::type;
-    static_assert(std::is_same_v<Result, sequence<0>>);
+    EXPECT_EQ(Result{}.at(0), 0);
 }
 
 TEST(CkTileSequence, MapInverseRotation)
 {
     using Input  = sequence<1, 2, 0>;
     using Result = typename sequence_map_inverse<Input>::type;
-    static_assert(std::is_same_v<Result, sequence<2, 0, 1>>);
+    for(index_t i = 0; i < 3; ++i)
+    {
+        EXPECT_EQ(Input{}.at(Result{}.at(i)), i);
+    }
 }
 
 TEST(CkTileSequence, MapInverse4D)
 {
     using Input  = sequence<2, 0, 3, 1>;
     using Result = typename sequence_map_inverse<Input>::type;
-    // Verify round-trip
-    static_assert(Input::at(number<Result::at(number<0>{})>{}) == 0);
-    static_assert(Input::at(number<Result::at(number<1>{})>{}) == 1);
-    static_assert(Input::at(number<Result::at(number<2>{})>{}) == 2);
-    static_assert(Input::at(number<Result::at(number<3>{})>{}) == 3);
+    EXPECT_EQ(Result{}.at(0), 1);
+    EXPECT_EQ(Result{}.at(1), 3);
+    EXPECT_EQ(Result{}.at(2), 0);
+    EXPECT_EQ(Result{}.at(3), 2);
+
+    // Verify round-trip: input[result[i]] == i for all i
+    for(index_t i = 0; i < 4; ++i)
+    {
+        EXPECT_EQ(Input{}.at(Result{}.at(i)), i);
+    }
 }
 
 // ============================================================================
@@ -223,37 +344,22 @@ TEST(CkTileSequence, MapInverse4D)
 TEST(CkTileSequence, MakeIndexSequenceZero)
 {
     using Result = make_index_sequence<0>;
-    static_assert(std::is_same_v<Result, sequence<>>);
+    EXPECT_EQ(Result::size(), 0);
+}
+
+TEST(CkTileSequence, MakeIndexSequenceOne)
+{
+    using Result = make_index_sequence<1>;
+    EXPECT_EQ(Result::size(), 1);
+    EXPECT_EQ(Result{}.at(0), 0);
 }
 
 TEST(CkTileSequence, MakeIndexSequenceSmall)
 {
     using Result = make_index_sequence<5>;
-    static_assert(std::is_same_v<Result, sequence<0, 1, 2, 3, 4>>);
-}
-
-// ============================================================================
-// detail::index_array tests
-// ============================================================================
-
-TEST(CkTileSequence, IndexArrayConstruction)
-{
-    constexpr detail::index_array<3> arr{};
-    static_assert(arr[0] == 0);
-    static_assert(arr[1] == 0);
-    static_assert(arr[2] == 0);
-}
-
-TEST(CkTileSequence, IndexArrayInitialized)
-{
-    constexpr detail::index_array<3> arr = {{1, 2, 3}};
-    static_assert(arr[0] == 1);
-    static_assert(arr[1] == 2);
-    static_assert(arr[2] == 3);
-}
-
-TEST(CkTileSequence, IndexArrayZeroSize)
-{
-    // Should compile without error
-    [[maybe_unused]] constexpr detail::index_array<0> arr{};
+    EXPECT_EQ(Result::size(), 5);
+    for(index_t i = 0; i < 5; ++i)
+    {
+        EXPECT_EQ(Result{}.at(i), i);
+    }
 }

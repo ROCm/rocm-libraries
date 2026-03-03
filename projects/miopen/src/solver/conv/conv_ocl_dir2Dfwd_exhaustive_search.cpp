@@ -459,10 +459,10 @@ ConvOclDirectFwdLegacyExhaustiveSearch::SearchImpl(const ExecutionContext& ctx,
 
                         if(run_counter % report_inteval == 0)
                         {
-                            MIOPEN_LOG_W("Runs left: "
-                                         << runs_left << ", "
-                                         << "min time so far: " << min_proc_time << ", "
-                                         << "curr time: " << processing_time << ' ' << result);
+                            MIOPEN_LOG_W("Runs left: " << runs_left << ", "
+                                                       << "min time so far: " << min_proc_time
+                                                       << ", " << "curr time: " << processing_time
+                                                       << ' ' << result);
                         }
                         run_counter++;
                         if(run_counter >= GetTuningIterationsMax())
