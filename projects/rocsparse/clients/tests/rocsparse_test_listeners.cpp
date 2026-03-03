@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,10 +26,12 @@
 rocsparse_clients::configurable_event_listener::configurable_event_listener(
     testing::TestEventListener* theEventListener)
     : m_eventListener(theEventListener)
+    , m_pendingTestInfo(nullptr)
     , showTestCases(true)
     , showTestNames(true)
     , showSuccesses(true)
     , showInlineFailures(true)
+    , showSkipped(true)
     , showEnvironment(true)
     , redirectOutput(true)
 {
@@ -90,13 +92,26 @@ void rocsparse_clients::configurable_event_listener::OnTestStart(const testing::
 
     if(showTestNames)
     {
-        m_eventListener->OnTestStart(test_info);
+        if(!showSkipped)
+        {
+            // Buffer the test info - we'll print it in OnTestEnd if test didn't skip
+            m_pendingTestInfo = &test_info;
+        }
+        else
+        {
+            m_eventListener->OnTestStart(test_info);
+        }
     }
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestPartResult(
     const testing::TestPartResult& result)
 {
+    // Suppress skip messages when showSkipped is false
+    if(!showSkipped && result.skipped())
+    {
+        return;
+    }
     m_eventListener->OnTestPartResult(result);
 }
 
@@ -119,10 +134,30 @@ void rocsparse_clients::configurable_event_listener::OnTestEnd(const testing::Te
         }
     }
 
-    if(test_info.result()->Failed() ? showInlineFailures : showSuccesses)
+    bool show = false;
+    if(test_info.result()->Failed())
     {
+        show = showInlineFailures;
+    }
+    else if(test_info.result()->Skipped())
+    {
+        show = showSkipped;
+    }
+    else
+    {
+        show = showSuccesses;
+    }
+
+    if(show)
+    {
+        // Print buffered OnTestStart if we were deferring it
+        if(m_pendingTestInfo != nullptr)
+        {
+            m_eventListener->OnTestStart(*m_pendingTestInfo);
+        }
         m_eventListener->OnTestEnd(test_info);
     }
+    m_pendingTestInfo = nullptr;
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestCaseEnd(
@@ -155,7 +190,27 @@ void rocsparse_clients::configurable_event_listener::OnEnvironmentsTearDownEnd(
 void rocsparse_clients::configurable_event_listener::OnTestIterationEnd(
     const testing::UnitTest& unit_test, int iteration)
 {
-    m_eventListener->OnTestIterationEnd(unit_test, iteration);
+    if(!showSkipped)
+    {
+        // Print custom summary without listing skipped tests
+        std::cout << "[==========] " << unit_test.total_test_count() << " tests from "
+                  << unit_test.total_test_suite_count() << " test suites ran. ("
+                  << unit_test.elapsed_time() << " ms total)" << std::endl;
+        std::cout << "[  PASSED  ] " << unit_test.successful_test_count() << " tests." << std::endl;
+        if(unit_test.skipped_test_count() > 0)
+        {
+            std::cout << "[  SKIPPED ] " << unit_test.skipped_test_count() << " tests."
+                      << std::endl;
+        }
+        if(unit_test.failed_test_count() > 0)
+        {
+            std::cout << "[  FAILED  ] " << unit_test.failed_test_count() << " tests." << std::endl;
+        }
+    }
+    else
+    {
+        m_eventListener->OnTestIterationEnd(unit_test, iteration);
+    }
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestProgramEnd(

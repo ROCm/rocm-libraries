@@ -176,9 +176,13 @@ if(NOT SKIP_LIBRARY)
     set( Tensile_ARCHITECTURE "${GPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
     list_replace( Tensile_ARCHITECTURE "gfx90a" "gfx90a:xnack+\;gfx90a:xnack-")
 
-    set( TENSILE_VERSION 4.45.0 CACHE STRING "The version of Tensile to be used")
+    set( TENSILE_VERSION 4.46.0 CACHE STRING "The version of Tensile to be used")
 
     set( Tensile_NO_ENUMERATE ON CACHE BOOL "Disable enumerating GPU targets for Tensile builds" FORCE)
+    
+    # Disable Tensile client and testing: rocBLAS provides its own client and testing infrastructure
+    set( TENSILE_ENABLE_CLIENT OFF CACHE BOOL "Disable Tensile client (rocBLAS uses its own client infrastructure)" FORCE)
+    set( TENSILE_BUILD_TESTING OFF CACHE BOOL "Disable Tensile testing (rocBLAS uses its own testing infrastructure)" FORCE)
 
     if(BUILD_WITH_PIP)
       if (WIN32)
