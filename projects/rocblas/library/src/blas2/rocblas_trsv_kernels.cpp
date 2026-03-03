@@ -878,7 +878,12 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
+    // ASAN can inflate VGPR usage enough to make the 64x16 launch invalid on gfx942.
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    constexpr rocblas_int DIM_Y  = 4; // 64 * 4 = 256 threads
+#else
     constexpr rocblas_int DIM_Y  = 16;
+#endif
     rocblas_int           blocks = (n + DIM_X - 1) / DIM_X;
     dim3                  threads(DIM_X, DIM_Y, 1);
     dim3                  grid(blocks, 1, batches);
