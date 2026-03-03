@@ -40,10 +40,10 @@ namespace rocRoller
         ArgumentLoader(AssemblyKernelPtr kernel);
 
         /**
-         * Loads all arguments into a single allocation of SGPRs.  Uses the widest load
-         * instructions possible given alignment constraints.
+         * Loads all manually loaded arguments into a single allocation of SGPRs.  Uses the
+         * widest load instructions possible given alignment constraints.
          */
-        Generator<Instruction> loadAllArguments();
+        Generator<Instruction> eagerLoadArguments();
 
         /**
          * Obtain the `Value` for a given argument.  If the argument has not been loaded yet,
@@ -60,6 +60,38 @@ namespace rocRoller
         Generator<Instruction>
             loadRange(int offset, int sizeBytes, Register::ValuePtr& value) const;
 
+        /**
+         * Allocates the block of registers that will be preloaded with kernel arguments at the
+         * beginning of the kernel execution. This must be called at the correct time within 
+         * AllocateInitialRegisters as it is part of the initial register state.
+         *
+         * Returns the appropriate values for the kernel description fields
+         * kernarg_preload_offset and kernarg_preload_length through preloadOffset and
+         * preloadLength respectively.
+         */
+        Generator<Instruction> allocatePreloadedRegisters(int& preloadOffset, int& preloadLength);
+
+        bool anyPreloadedArguments() const;
+        bool anyManuallyLoadedArguments() const;
+
+        /**
+         * Decides which if any kernel arguments can be preloaded based on architecture and
+         * kernel options.
+         * 
+         * The priority is to pick the earliest arguments first, but it will pick out-of-order
+         * arguments if alignment prevents earlier arguments from being preloaded.
+         *
+         * `args` will be partitioned into preloaded and non-preloaded arguments, and then
+         * sorted descending by size.
+         */
+        void decidePreloadedKernargs(std::vector<AssemblyKernelArgument>& args);
+
+        /**
+         * Splits the block allocations of kernel arguments into individual registers and clears
+         * the block allocations so that individual kernel arguments can be deallocated individually. 
+         */
+        Generator<Instruction> splitOutArgumentRegisters();
+
     private:
         friend class rocRollerTest::ArgumentLoaderTest_loadArgExtra_Test;
 
@@ -73,7 +105,18 @@ namespace rocRoller
         /// Call the one from the AssemblyKernel instead.
         Register::ValuePtr argumentPointer() const;
 
+        Generator<Instruction> splitOutArgs(Register::ValuePtr rawRegs, int beginOffset);
+
         std::unordered_map<std::string, Register::ValuePtr> m_loadedValues;
+
+        Register::ValuePtr m_preloadedBlock;
+        Register::ValuePtr m_manuallyLoadedBlock;
+        int                m_manuallyLoadedOffset = 0;
+
+        void populateAnyArgumentsFlags() const;
+
+        mutable std::optional<bool> m_anyPreloadedArguments;
+        mutable std::optional<bool> m_anyManuallyLoadedArguments;
     };
 
     /**
