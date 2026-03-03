@@ -129,7 +129,7 @@ namespace rocRoller
 
     std::string toString(KernelOptionValues const& values)
     {
-        static_assert(sizeof(KernelOptionValues) == 80,
+        static_assert(sizeof(KernelOptionValues) == 84,
                       "Edit the toString() function when adding a kernel option!");
 
         std::string rv = "Kernel Options:\n";
@@ -139,13 +139,13 @@ namespace rocRoller
 #define ShowOption(name) Show(#name, values.name)
 #define ShowString(name) Show(#name, toString(values.name))
 
-        ShowString(dsObserver);
         ShowString(logLevel);
         ShowOption(alwaysWaitAfterLoad);
         ShowOption(alwaysWaitAfterStore);
         ShowOption(alwaysWaitBeforeBranch);
         ShowOption(alwaysWaitZeroBeforeBarrier);
-        ShowOption(preloadKernelArguments);
+        ShowOption(systemPreloadedKernelArguments);
+        ShowOption(lazyLoadKernelArguments);
         ShowOption(maxACCVGPRs);
         ShowOption(maxSGPRs);
         ShowOption(maxVGPRs);
@@ -156,12 +156,12 @@ namespace rocRoller
         ShowOption(assertWaitCntState);
         ShowOption(setNextFreeVGPRToMax);
         ShowOption(deduplicateArguments);
-        ShowOption(lazyAddArguments);
         ShowOption(minLaunchTimeExpressionComplexity);
         ShowOption(maxConcurrentSubExpressions);
         Show("maxConcurrentControlOps",
              values.maxConcurrentControlOps ? std::to_string(*values.maxConcurrentControlOps)
                                             : "none");
+        ShowString(dsObserver);
         ShowOption(enableFullDivision);
         ShowString(scaleSkipPermlane);
         ShowString(assertOpKind);

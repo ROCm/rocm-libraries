@@ -53,66 +53,62 @@ struct PerformanceConfigConvBiasActivAsm1x1U : conv::PerformanceConfigConvAsm1x1
         : PerformanceConfigConvAsm1x1U(-1, -1, -1, -1, -1, -1, -1, -1, false)
     {
     }
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const FusionContext& ctx,
-                                               const FusionDescription& problem);
-    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const FusionDescription& problem);
+    void HeuristicInit(const FusionContext& ctx, const FusionDescription& problem);
+    bool SetNextValue(const FusionDescription& problem);
     bool IsValid(const FusionContext&, const FusionDescription& problem) const
     {
         return IsValid(problem);
     }
-    MIOPEN_INTERNALS_EXPORT bool IsValid(const FusionDescription& problem) const;
+    bool IsValid(const FusionDescription& problem) const;
 };
 
-struct ConvBiasActivAsm1x1U : FusionTunableSolver<PerformanceConfigConvBiasActivAsm1x1U>
+struct MIOPEN_INTERNALS_EXPORT ConvBiasActivAsm1x1U
+    : FusionTunableSolver<PerformanceConfigConvBiasActivAsm1x1U>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<ConvBiasActivAsm1x1U>(); }
 
-    MIOPEN_INTERNALS_EXPORT bool IsApplicable(const FusionContext& context,
-                                              const FusionDescription& problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
+    bool IsApplicable(const FusionContext& context,
+                      const FusionDescription& problem) const override;
+    ConvSolution
     GetSolution(const FusionContext& context,
                 const FusionDescription& problem,
                 const PerformanceConfigConvBiasActivAsm1x1U& /*config*/) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvBiasActivAsm1x1U
+    PerformanceConfigConvBiasActivAsm1x1U
     GetDefaultPerformanceConfig(const FusionContext&, const FusionDescription&) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvBiasActivAsm1x1U
+    PerformanceConfigConvBiasActivAsm1x1U
     Search(const FusionContext& context,
            const FusionDescription& problem,
            const AnyInvokeParams& invoke_params) const override;
-    MIOPEN_INTERNALS_EXPORT bool
-    IsValidPerformanceConfig(const FusionContext&,
-                             const FusionDescription&,
-                             const PerformanceConfigConvBiasActivAsm1x1U&) const override;
-    MIOPEN_INTERNALS_EXPORT float GetWti(const FusionContext&,
-                                         const FusionDescription&) const override;
+    bool IsValidPerformanceConfig(const FusionContext&,
+                                  const FusionDescription&,
+                                  const PerformanceConfigConvBiasActivAsm1x1U&) const override;
+    float GetWti(const FusionContext&, const FusionDescription&) const override;
 };
 
 using PerformanceConfigConvOclDirectFwdFused = LegacyPerformanceConfig;
-struct ConvOclDirectFwdFused final : FusionTunableSolver<LegacyPerformanceConfig>
+struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdFused final
+    : FusionTunableSolver<LegacyPerformanceConfig>
 {
     const std::string& SolverDbId() const override
     {
         return GetSolverDbId<ConvOclDirectFwdFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT bool IsApplicable(const FusionContext& context,
-                                              const FusionDescription& problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
-    GetSolution(const FusionContext& context,
-                const FusionDescription& problem,
-                const PerformanceConfigConvOclDirectFwdFused&) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvOclDirectFwdFused
+    bool IsApplicable(const FusionContext& context,
+                      const FusionDescription& problem) const override;
+    ConvSolution GetSolution(const FusionContext& context,
+                             const FusionDescription& problem,
+                             const PerformanceConfigConvOclDirectFwdFused&) const override;
+    PerformanceConfigConvOclDirectFwdFused
     GetDefaultPerformanceConfig(const FusionContext&, const FusionDescription&) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvOclDirectFwdFused
+    PerformanceConfigConvOclDirectFwdFused
     Search(const FusionContext&,
            const FusionDescription&,
            const AnyInvokeParams& invoke_params) const override;
-    MIOPEN_INTERNALS_EXPORT bool
-    IsValidPerformanceConfig(const FusionContext&,
-                             const FusionDescription&,
-                             const PerformanceConfigConvOclDirectFwdFused&) const override;
-    MIOPEN_INTERNALS_EXPORT float GetWti(const FusionContext&,
-                                         const FusionDescription& problem) const override;
+    bool IsValidPerformanceConfig(const FusionContext&,
+                                  const FusionDescription&,
+                                  const PerformanceConfigConvOclDirectFwdFused&) const override;
+    float GetWti(const FusionContext&, const FusionDescription& problem) const override;
 };
 
 struct PerformanceConfigConvCKIgemmFwdBiasActivFused
@@ -133,19 +129,17 @@ struct PerformanceConfigConvCKIgemmFwdBiasActivFused
         : PerformanceConfigConvCKIgemmFwdBiasActivFused(0, "")
     {
     }
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const FusionDescription& fdesc_problem);
-    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const FusionDescription& fdesc_problem);
-    MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
-    MIOPEN_INTERNALS_EXPORT bool IsValid(const FusionContext&,
-                                         const FusionDescription& fdesc_problem) const;
+    void HeuristicInit(const FusionDescription& fdesc_problem);
+    bool SetNextValue(const FusionDescription& fdesc_problem);
+    bool IsValidValue() const;
+    bool IsValid(const FusionContext&, const FusionDescription& fdesc_problem) const;
 
     template <typename Self, typename F>
     static void Visit(Self&& s, F f)
     {
         f(s.kernel_id, "kernel_id");
     }
-    MIOPEN_INTERNALS_EXPORT bool
-    operator==(const PerformanceConfigConvCKIgemmFwdBiasActivFused& other) const;
+    bool operator==(const PerformanceConfigConvCKIgemmFwdBiasActivFused& other) const;
 
 private:
     template <typename DataType>
@@ -154,7 +148,7 @@ private:
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
 };
 
-struct ConvCKIgemmFwdBiasActivFused final
+struct MIOPEN_INTERNALS_EXPORT ConvCKIgemmFwdBiasActivFused final
     : FusionTunableSolver<PerformanceConfigConvCKIgemmFwdBiasActivFused>
 {
     const std::string& SolverDbId() const override
@@ -162,20 +156,20 @@ struct ConvCKIgemmFwdBiasActivFused final
         return GetSolverDbId<ConvCKIgemmFwdBiasActivFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvCKIgemmFwdBiasActivFused
+    PerformanceConfigConvCKIgemmFwdBiasActivFused
     GetDefaultPerformanceConfig(const FusionContext& ctx,
                                 const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT bool IsValidPerformanceConfig(
+    bool IsValidPerformanceConfig(
         const FusionContext& ctx,
         const FusionDescription& fdesc_problem,
         const PerformanceConfigConvCKIgemmFwdBiasActivFused& config) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvCKIgemmFwdBiasActivFused
+    PerformanceConfigConvCKIgemmFwdBiasActivFused
     Search(const FusionContext& ctx,
            const FusionDescription& fdesc_problem,
            const AnyInvokeParams& invoke_ctx) const override;
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const FusionContext& ctx, const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
+    bool IsApplicable(const FusionContext& ctx,
+                      const FusionDescription& fdesc_problem) const override;
+    ConvSolution
     GetSolution(const FusionContext& ctx,
                 const FusionDescription& fdesc_problem,
                 const PerformanceConfigConvCKIgemmFwdBiasActivFused& config) const override;
@@ -203,19 +197,17 @@ struct PerformanceConfigConvCKIgemmGrpFwdActivFused
         : PerformanceConfigConvCKIgemmGrpFwdActivFused(0, "")
     {
     }
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const FusionDescription& fdesc_problem);
-    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const FusionDescription& fdesc_problem);
-    MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
-    MIOPEN_INTERNALS_EXPORT bool IsValid(const FusionContext&,
-                                         const FusionDescription& fdesc_problem) const;
+    void HeuristicInit(const FusionDescription& fdesc_problem);
+    bool SetNextValue(const FusionDescription& fdesc_problem);
+    bool IsValidValue() const;
+    bool IsValid(const FusionContext&, const FusionDescription& fdesc_problem) const;
 
     template <typename Self, typename F>
     static void Visit(Self&& s, F f)
     {
         f(s.kernel_id, "kernel_id");
     }
-    MIOPEN_INTERNALS_EXPORT bool
-    operator==(const PerformanceConfigConvCKIgemmGrpFwdActivFused& other) const;
+    bool operator==(const PerformanceConfigConvCKIgemmGrpFwdActivFused& other) const;
 
 private:
     template <typename DataType>
@@ -224,7 +216,7 @@ private:
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
 };
 
-struct ConvCKIgemmGrpFwdActivFused final
+struct MIOPEN_INTERNALS_EXPORT ConvCKIgemmGrpFwdActivFused final
     : FusionTunableSolver<PerformanceConfigConvCKIgemmGrpFwdActivFused>
 {
     const std::string& SolverDbId() const override
@@ -232,26 +224,25 @@ struct ConvCKIgemmGrpFwdActivFused final
         return GetSolverDbId<ConvCKIgemmGrpFwdActivFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvCKIgemmGrpFwdActivFused
+    PerformanceConfigConvCKIgemmGrpFwdActivFused
     GetDefaultPerformanceConfig(const FusionContext& ctx,
                                 const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT bool IsValidPerformanceConfig(
+    bool IsValidPerformanceConfig(
         const FusionContext& ctx,
         const FusionDescription& fdesc_problem,
         const PerformanceConfigConvCKIgemmGrpFwdActivFused& config) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvCKIgemmGrpFwdActivFused
+    PerformanceConfigConvCKIgemmGrpFwdActivFused
     Search(const FusionContext& ctx,
            const FusionDescription& fdesc_problem,
            const AnyInvokeParams& invoke_ctx) const override;
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const FusionContext& ctx, const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
+    bool IsApplicable(const FusionContext& ctx,
+                      const FusionDescription& fdesc_problem) const override;
+    ConvSolution
     GetSolution(const FusionContext& ctx,
                 const FusionDescription& fdesc_problem,
                 const PerformanceConfigConvCKIgemmGrpFwdActivFused& config) const override;
     bool MayNeedWorkspace() const override { return true; }
-    MIOPEN_INTERNALS_EXPORT size_t GetWorkspaceSize(const FusionContext&,
-                                                    const FusionDescription&) const override;
+    size_t GetWorkspaceSize(const FusionContext&, const FusionDescription&) const override;
 
 private:
     template <typename DataType>
@@ -276,19 +267,17 @@ struct PerformanceConfigConvCKIgemmGrpFwdBiasActivFused
         : PerformanceConfigConvCKIgemmGrpFwdBiasActivFused(0, "")
     {
     }
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const FusionDescription& fdesc_problem);
-    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const FusionDescription& fdesc_problem);
-    MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
-    MIOPEN_INTERNALS_EXPORT bool IsValid(const FusionContext&,
-                                         const FusionDescription& fdesc_problem) const;
+    void HeuristicInit(const FusionDescription& fdesc_problem);
+    bool SetNextValue(const FusionDescription& fdesc_problem);
+    bool IsValidValue() const;
+    bool IsValid(const FusionContext&, const FusionDescription& fdesc_problem) const;
 
     template <typename Self, typename F>
     static void Visit(Self&& s, F f)
     {
         f(s.kernel_id, "kernel_id");
     }
-    MIOPEN_INTERNALS_EXPORT bool
-    operator==(const PerformanceConfigConvCKIgemmGrpFwdBiasActivFused& other) const;
+    bool operator==(const PerformanceConfigConvCKIgemmGrpFwdBiasActivFused& other) const;
 
 private:
     template <typename DataType>
@@ -297,7 +286,7 @@ private:
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
 };
 
-struct ConvCKIgemmGrpFwdBiasActivFused final
+struct MIOPEN_INTERNALS_EXPORT ConvCKIgemmGrpFwdBiasActivFused final
     : FusionTunableSolver<PerformanceConfigConvCKIgemmGrpFwdBiasActivFused>
 {
     const std::string& SolverDbId() const override
@@ -305,26 +294,25 @@ struct ConvCKIgemmGrpFwdBiasActivFused final
         return GetSolverDbId<ConvCKIgemmGrpFwdBiasActivFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvCKIgemmGrpFwdBiasActivFused
+    PerformanceConfigConvCKIgemmGrpFwdBiasActivFused
     GetDefaultPerformanceConfig(const FusionContext& ctx,
                                 const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT bool IsValidPerformanceConfig(
+    bool IsValidPerformanceConfig(
         const FusionContext& ctx,
         const FusionDescription& fdesc_problem,
         const PerformanceConfigConvCKIgemmGrpFwdBiasActivFused& config) const override;
-    MIOPEN_INTERNALS_EXPORT PerformanceConfigConvCKIgemmGrpFwdBiasActivFused
+    PerformanceConfigConvCKIgemmGrpFwdBiasActivFused
     Search(const FusionContext& ctx,
            const FusionDescription& fdesc_problem,
            const AnyInvokeParams& invoke_ctx) const override;
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const FusionContext& ctx, const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
+    bool IsApplicable(const FusionContext& ctx,
+                      const FusionDescription& fdesc_problem) const override;
+    ConvSolution
     GetSolution(const FusionContext& ctx,
                 const FusionDescription& fdesc_problem,
                 const PerformanceConfigConvCKIgemmGrpFwdBiasActivFused& config) const override;
     bool MayNeedWorkspace() const override { return true; }
-    MIOPEN_INTERNALS_EXPORT size_t GetWorkspaceSize(const FusionContext&,
-                                                    const FusionDescription&) const override;
+    size_t GetWorkspaceSize(const FusionContext&, const FusionDescription&) const override;
 
 private:
     template <typename DataType>
@@ -349,19 +337,17 @@ struct PerfConfigConvCKIgemmFwdBiasResAddActivFused
         : PerfConfigConvCKIgemmFwdBiasResAddActivFused(0, "")
     {
     }
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const FusionDescription& fdesc_problem);
-    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const FusionDescription& fdesc_problem);
-    MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
-    MIOPEN_INTERNALS_EXPORT bool IsValid(const FusionContext&,
-                                         const FusionDescription& fdesc_problem) const;
+    void HeuristicInit(const FusionDescription& fdesc_problem);
+    bool SetNextValue(const FusionDescription& fdesc_problem);
+    bool IsValidValue() const;
+    bool IsValid(const FusionContext&, const FusionDescription& fdesc_problem) const;
 
     template <typename Self, typename F>
     static void Visit(Self&& s, F f)
     {
         f(s.kernel_id, "kernel_id");
     }
-    MIOPEN_INTERNALS_EXPORT bool
-    operator==(const PerfConfigConvCKIgemmFwdBiasResAddActivFused& other) const;
+    bool operator==(const PerfConfigConvCKIgemmFwdBiasResAddActivFused& other) const;
 
 private:
     template <typename DataType, typename AccumDataType = DataType>
@@ -378,20 +364,20 @@ struct ConvCKIgemmFwdBiasResAddActivFused final
         return GetSolverDbId<ConvCKIgemmFwdBiasResAddActivFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT PerfConfigConvCKIgemmFwdBiasResAddActivFused
+    PerfConfigConvCKIgemmFwdBiasResAddActivFused
     GetDefaultPerformanceConfig(const FusionContext& ctx,
                                 const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT bool IsValidPerformanceConfig(
+    bool IsValidPerformanceConfig(
         const FusionContext& ctx,
         const FusionDescription& fdesc_problem,
         const PerfConfigConvCKIgemmFwdBiasResAddActivFused& config) const override;
-    MIOPEN_INTERNALS_EXPORT PerfConfigConvCKIgemmFwdBiasResAddActivFused
+    PerfConfigConvCKIgemmFwdBiasResAddActivFused
     Search(const FusionContext& ctx,
            const FusionDescription& fdesc_problem,
            const AnyInvokeParams& invoke_ctx) const override;
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const FusionContext& ctx, const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
+    bool IsApplicable(const FusionContext& ctx,
+                      const FusionDescription& fdesc_problem) const override;
+    ConvSolution
     GetSolution(const FusionContext& ctx,
                 const FusionDescription& fdesc_problem,
                 const PerfConfigConvCKIgemmFwdBiasResAddActivFused& config) const override;
@@ -401,35 +387,32 @@ private:
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 
-struct ConvBinWinogradRxSFused final : FusionSolverBase
+struct MIOPEN_INTERNALS_EXPORT ConvBinWinogradRxSFused final : FusionSolverBase
 {
     const std::string& SolverDbId() const override
     {
         return GetSolverDbId<ConvBinWinogradRxSFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT bool
-    IsApplicable(const FusionContext& context,
-                 const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution GetSolution(
-        const FusionContext& context, const FusionDescription& fdesc_problem) const override;
-    MIOPEN_INTERNALS_EXPORT float GetWti(const FusionContext&,
-                                         const FusionDescription&) const override;
+    bool IsApplicable(const FusionContext& context,
+                      const FusionDescription& fdesc_problem) const override;
+    ConvSolution GetSolution(const FusionContext& context,
+                             const FusionDescription& fdesc_problem) const override;
+    float GetWti(const FusionContext&, const FusionDescription&) const override;
 };
 
-struct ConvBinWinogradRxSf2x3g1Fused final : FusionSolverBase
+struct MIOPEN_INTERNALS_EXPORT ConvBinWinogradRxSf2x3g1Fused final : FusionSolverBase
 {
     const std::string& SolverDbId() const override
     {
         return GetSolverDbId<ConvBinWinogradRxSf2x3g1Fused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT bool IsApplicable(const FusionContext& context,
-                                              const FusionDescription& problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
-    GetSolution(const FusionContext& context, const FusionDescription& problem) const override;
-    MIOPEN_INTERNALS_EXPORT float GetWti(const FusionContext&,
-                                         const FusionDescription&) const override;
+    bool IsApplicable(const FusionContext& context,
+                      const FusionDescription& problem) const override;
+    ConvSolution GetSolution(const FusionContext& context,
+                             const FusionDescription& problem) const override;
+    float GetWti(const FusionContext&, const FusionDescription&) const override;
 };
 
 template <uint32_t Winodata, uint32_t Winofilter>
@@ -468,21 +451,21 @@ struct ConvWinoRageRxSFused final : FusionSolverBase
     ConvSolution GetSolution(const FusionContext&, const FusionDescription&) const override;
 };
 
-#ifndef CONV_WINO_FURY_RXS_CPP
+#ifndef CONV_WINO_RAGE_RXS_CPP
 extern template struct ConvWinoRageRxSFused<2, 3>;
 #endif
 
-struct BnFwdInferActivationFused final : FusionSolverBase
+struct MIOPEN_INTERNALS_EXPORT BnFwdInferActivationFused final : FusionSolverBase
 {
     const std::string& SolverDbId() const override
     {
         return GetSolverDbId<BnFwdInferActivationFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT bool IsApplicable(const FusionContext& context,
-                                              const FusionDescription& problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
-    GetSolution(const FusionContext& context, const FusionDescription& problem) const override;
+    bool IsApplicable(const FusionContext& context,
+                      const FusionDescription& problem) const override;
+    ConvSolution GetSolution(const FusionContext& context,
+                             const FusionDescription& problem) const override;
 };
 
 struct BnFwdTrgActivationFused final : FusionSolverBase
@@ -492,10 +475,10 @@ struct BnFwdTrgActivationFused final : FusionSolverBase
         return GetSolverDbId<BnFwdTrgActivationFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT bool IsApplicable(const FusionContext& context,
-                                              const FusionDescription& problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
-    GetSolution(const FusionContext& context, const FusionDescription& problem) const override;
+    bool IsApplicable(const FusionContext& context,
+                      const FusionDescription& problem) const override;
+    ConvSolution GetSolution(const FusionContext& context,
+                             const FusionDescription& problem) const override;
 };
 
 struct BnBwdTrgActivationFused final : FusionSolverBase
@@ -505,10 +488,10 @@ struct BnBwdTrgActivationFused final : FusionSolverBase
         return GetSolverDbId<BnBwdTrgActivationFused>();
     }
 
-    MIOPEN_INTERNALS_EXPORT bool IsApplicable(const FusionContext& context,
-                                              const FusionDescription& problem) const override;
-    MIOPEN_INTERNALS_EXPORT ConvSolution
-    GetSolution(const FusionContext& context, const FusionDescription& problem) const override;
+    bool IsApplicable(const FusionContext& context,
+                      const FusionDescription& problem) const override;
+    ConvSolution GetSolution(const FusionContext& context,
+                             const FusionDescription& problem) const override;
 };
 
 } // namespace fusion
