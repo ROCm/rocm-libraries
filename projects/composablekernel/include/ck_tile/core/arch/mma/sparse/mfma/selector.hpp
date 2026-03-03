@@ -33,7 +33,7 @@ template <typename ADataType,
 struct SparseMfmaDefaultSelector
 {
     private:
-    // Define our candidate WMMA implementation for the current parameters
+    // Define our candidate MFMA implementation for the current parameters
     using CandidateOp = amdgcn_mma<ADataType,
                                    BDataType,
                                    CDataType,
@@ -130,7 +130,7 @@ struct MmaDefaultSelector<ADataType,
     using CandidateTraits32x32 = MmaOpTraits<CandidateOp32x32>;
 
     // Check if each candidate is supported for the given fragment sizes
-    // For this case, we require the fragment sizes to be multiples of the WMMA shape
+    // For this case, we require the fragment sizes to be multiples of the MFMA shape
     static constexpr bool IsSupported16x16 = CandidateTraits16x16::IsSupported &&
                                              (FragM % CandidateTraits16x16::BlockM == 0u) &&
                                              (FragN % CandidateTraits16x16::BlockN == 0u) &&
@@ -141,7 +141,7 @@ struct MmaDefaultSelector<ADataType,
                                              (FragK % CandidateTraits32x32::BlockK == 0u);
 
     public:
-    // Select the largest supported WMMA operation for the given fragment shape
+    // Select the largest supported MFMA operation for the given fragment shape
     using SelectedOp =
         std::conditional_t<IsSupported32x32,
                            CandidateOp32x32,
