@@ -109,4 +109,5 @@ const hipdnn_data_sdk::data_objects::TensorAttributes& findTensorAttributes(
                                                    "Failed to find tensor with UID in tensorMap: "
                                                        + std::to_string(uid));
 }
-}
+
+} // namespace hip_kernel_provider::hip_kernel_utils

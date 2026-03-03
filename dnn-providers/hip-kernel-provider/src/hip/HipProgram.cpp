@@ -7,6 +7,7 @@
 #include "kernel_includes.hpp"
 #include "kernel_sources.hpp"
 #include <hip/hiprtc.h>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 HipProgram::HipProgram(std::string kernelFileName, const std::vector<std::string>& options)
     : _programName(std::move(kernelFileName))
@@ -83,6 +84,11 @@ HipProgram::~HipProgram()
 {
     if(_module != nullptr)
     {
-        [[maybe_unused]] auto result = hipModuleUnload(_module);
+        auto result = hipModuleUnload(_module);
+        if(result != hipSuccess)
+        {
+            // Log the error for debugging purposes
+            HIPDNN_PLUGIN_LOG_WARN("hipModuleUnload failed: " << hipGetErrorString(result));
+        }
     }
 }

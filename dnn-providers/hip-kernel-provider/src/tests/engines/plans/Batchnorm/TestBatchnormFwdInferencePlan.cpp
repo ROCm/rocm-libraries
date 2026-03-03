@@ -7,6 +7,7 @@
 #include "mocks/MockKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
@@ -74,7 +75,7 @@ TEST(TestBatchnormFwdInferencePlan, ExecuteWithoutCompileThrows)
     MockKernelCompiler mockCompiler;
     auto plan = createPlanFromSingleNodeGraph(mockCompiler);
     HipKernelHandle handle;
-    EXPECT_THROW(plan.execute(handle, nullptr, 0), std::runtime_error);
+    EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdInferencePlan, GetWorkspaceSizeReturnsZero)

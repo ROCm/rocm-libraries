@@ -7,7 +7,7 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
-#include <stdexcept>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider
 {
@@ -145,7 +145,9 @@ void BatchnormFwdInferencePlan::compile(const hipDeviceProp_t& deviceProperties)
     }
     else
     {
-        throw std::runtime_error("Unsupported tensor dimension: " + std::to_string(xDims->size()));
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported tensor dimension: "
+                                                           + std::to_string(xDims->size()));
     }
 
     auto inCstride = static_cast<unsigned int>(h * w);
@@ -252,7 +254,9 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
 {
     if(!_runnableKernel)
     {
-        throw std::runtime_error("BatchnormFwdInferencePlan::execute() called before compile()");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "BatchnormFwdInferencePlan::execute() called before compile()");
     }
 
     // Get device buffer pointers
