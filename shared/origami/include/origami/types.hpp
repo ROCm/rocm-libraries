@@ -446,19 +446,19 @@ struct config_t {
   /// CMS kernel flag
   bool cms_kernel = false;
 
-  /// Global read vector width for matrix A (elements per load, default=128-bit)
+  /// Global read vector width for matrix A (elements per load)
   std::size_t grvw_a = 1;
 
-  /// Global read vector width for matrix B (elements per load, default=128-bit)
+  /// Global read vector width for matrix B (elements per load)
   std::size_t grvw_b = 1;
 
-  /// Global write vector width for matrix D (elements per store, default=128-bit)
+  /// Global write vector width for matrix D (elements per store)
   std::size_t gwvw_d = 1;
 
-  /// LDS load vector width for matrix A
+  /// LDS load vector width for matrix A (elements per LDS read)
   int vector_width_a = 1;
 
-  /// LDS load vector width for matrix B
+  /// LDS load vector width for matrix B (elements per LDS read)
   int vector_width_b = 1;
 
   /// Backend-specific parameters (type should match target).
