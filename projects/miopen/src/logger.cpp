@@ -90,7 +90,7 @@ std::vector<std::string>& GetLogBuffer()
     {
         log_buffer.resize(log_buffer_size);
         auto& log_buffer_i = GetBufferIdx();
-        if(log_buffer_i >= log_buffer_size)
+        if(log_buffer_i > 0 && log_buffer_i >= log_buffer_size)
             log_buffer_i = 0;
     }
     return log_buffer;
