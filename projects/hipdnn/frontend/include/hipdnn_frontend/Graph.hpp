@@ -80,10 +80,10 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
-#include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 #include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
 #include <hipdnn_frontend/detail/GraphPacker.hpp>
+#include <hipdnn_frontend/detail/KnobPacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
@@ -1077,7 +1077,7 @@ public:
     /**
      * @brief Create an execution plan with specific engine and knob settings
      * @param engineId The engine ID to use
-     * @param settings Vector of KnobSetting objects to configure the engine
+     * @param settings Vector of KnobSetting objects to configure the engine (max 1024)
      * @return Error indicating success or failure
      *
      * This method allows fine-grained control over engine selection and

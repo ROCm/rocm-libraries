@@ -8,6 +8,7 @@
 #include <cstring>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
+#include <hipdnn_frontend/detail/KnobPacker.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -660,9 +661,10 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorInt64)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
-    auto result = createKnobSettingDescriptor(setting);
-    EXPECT_TRUE(result.error.is_good()) << result.error.err_msg;
-    EXPECT_TRUE(result.descriptor.valid());
+    ScopedHipdnnBackendDescriptor desc;
+    auto err = createKnobSettingDescriptor(setting, desc);
+    EXPECT_TRUE(err.is_good()) << err.err_msg;
+    EXPECT_TRUE(desc.valid());
 }
 
 TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorDouble)
@@ -688,9 +690,10 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorDouble)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     hipdnn_frontend::KnobSetting setting("double_knob", 3.14);
-    auto result = createKnobSettingDescriptor(setting);
-    EXPECT_TRUE(result.error.is_good()) << result.error.err_msg;
-    EXPECT_TRUE(result.descriptor.valid());
+    ScopedHipdnnBackendDescriptor desc;
+    auto err = createKnobSettingDescriptor(setting, desc);
+    EXPECT_TRUE(err.is_good()) << err.err_msg;
+    EXPECT_TRUE(desc.valid());
 }
 
 TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorString)
@@ -716,9 +719,10 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorString)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     hipdnn_frontend::KnobSetting setting("str_knob", std::string("my_value"));
-    auto result = createKnobSettingDescriptor(setting);
-    EXPECT_TRUE(result.error.is_good()) << result.error.err_msg;
-    EXPECT_TRUE(result.descriptor.valid());
+    ScopedHipdnnBackendDescriptor desc;
+    auto err = createKnobSettingDescriptor(setting, desc);
+    EXPECT_TRUE(err.is_good()) << err.err_msg;
+    EXPECT_TRUE(desc.valid());
 }
 
 TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnCreate)
@@ -728,9 +732,10 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnCreate)
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
 
     hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
-    auto result = createKnobSettingDescriptor(setting);
-    EXPECT_TRUE(result.error.is_bad());
-    EXPECT_EQ(result.error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    ScopedHipdnnBackendDescriptor desc;
+    auto err = createKnobSettingDescriptor(setting, desc);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
 
 TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnSetAttribute)
@@ -742,9 +747,10 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnSetAttribute)
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
-    auto result = createKnobSettingDescriptor(setting);
-    EXPECT_TRUE(result.error.is_bad());
-    EXPECT_EQ(result.error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    ScopedHipdnnBackendDescriptor desc;
+    auto err = createKnobSettingDescriptor(setting, desc);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
 
 TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnFinalize)
@@ -757,7 +763,8 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnFinalize)
     EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     hipdnn_frontend::KnobSetting setting("test_knob", int64_t{42});
-    auto result = createKnobSettingDescriptor(setting);
-    EXPECT_TRUE(result.error.is_bad());
-    EXPECT_EQ(result.error.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    ScopedHipdnnBackendDescriptor desc;
+    auto err = createKnobSettingDescriptor(setting, desc);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }
