@@ -303,8 +303,8 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
 
         for(unsigned int tile_idx = start_tile_idx; tile_idx < end_tile_idx; ++tile_idx)
         {
-            // Calculate global offset for the current tile
-            const OffsetT next_global_offset = static_cast<OffsetT>(tile_idx) * items_per_block;
+            // Calculate global offset for the next tile.
+            const OffsetT next_global_offset = static_cast<OffsetT>(tile_idx + 1) * items_per_block;
 
             // Calculate the end point of the current tile.
             // This will become the Partition Begin for the next tile.
@@ -314,7 +314,7 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
                                                                    next_global_offset,
                                                                    compare_function);
 
-            // Synchronize threads before processing the next tile to ensure all threads  have
+            // Synchronize threads before processing the next tile to ensure all threads have
             // finished using the shared memory from the previous tile's process_tile() call.
             // The very first tile does not need this barrier.
             if(tile_idx > start_tile_idx)
@@ -322,13 +322,16 @@ inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_
                 rocprim::syncthreads();
             }
 
+            // Calculate global offset for the current tile.
+            const OffsetT current_global_offset = next_global_offset - items_per_block;
+
             merge_impl().process_tile(keys_input_,
                                       keys_output_,
                                       values_input_,
                                       values_output_,
                                       size,
                                       current_run_len,
-                                      next_global_offset,
+                                      current_global_offset,
                                       partition_beg,
                                       partition_end,
                                       compare_function,
@@ -363,8 +366,7 @@ template<class Config,
          class KeysIterator,
          class ValuesIterator,
          class OffsetT,
-         class BinaryFunction,
-         bool UseFusedKernel = true>
+         class BinaryFunction>
 inline hipError_t merge_sort_block_merge_impl(
     KeysIterator                                               keys,
     ValuesIterator                                             values,

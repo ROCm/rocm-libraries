@@ -43,8 +43,7 @@ namespace detail
 template<typename OffsetT>
 struct merge_tile_boundaries
 {
-    OffsetT      run_beg_L, run_end_L;
-    OffsetT      run_beg_R, run_end_R;
+    OffsetT      run_beg_L, run_beg_R;
     unsigned int num_keys_L, num_keys_R;
 };
 
@@ -69,7 +68,7 @@ merge_tile_boundaries<OffsetT> compute_tile_boundaries(const OffsetT      global
     const OffsetT diag = global_offset - merge_run_base;
 
     // For each pair of runs to be merged, the input keys for the Left the Right Runs are stored
-    // adjacent to eachother
+    // adjacent to each other.
     OffsetT run_beg_L = partition_beg;
     OffsetT run_end_L = partition_end;
 
@@ -104,7 +103,7 @@ merge_tile_boundaries<OffsetT> compute_tile_boundaries(const OffsetT      global
     const unsigned int num_keys_L = static_cast<unsigned int>(run_end_L - run_beg_L);
     const unsigned int num_keys_R = static_cast<unsigned int>(run_end_R - run_beg_R);
 
-    return {run_beg_L, run_end_L, run_beg_R, run_end_R, num_keys_L, num_keys_R};
+    return {run_beg_L, run_beg_R, num_keys_L, num_keys_R};
 }
 
 template<unsigned int ItemsPerThread, class KeyT, class BinaryFunction>
@@ -529,16 +528,8 @@ template<class Key,
          class Value,
          unsigned int            BlockSize,
          unsigned int            ItemsPerThread,
-         arch::wavefront::target TargetWaveSize,
-         typename Enable = void>
-struct block_merge_fused_impl;
-
-template<class Key,
-         class Value,
-         unsigned int            BlockSize,
-         unsigned int            ItemsPerThread,
          arch::wavefront::target TargetWaveSize>
-struct block_merge_fused_impl<Key, Value, BlockSize, ItemsPerThread, TargetWaveSize>
+struct block_merge_fused_impl
 {
     static constexpr bool         with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
     static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
