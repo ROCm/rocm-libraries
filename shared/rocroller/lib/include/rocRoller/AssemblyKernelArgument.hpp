@@ -90,6 +90,15 @@ namespace rocRoller
             return m_simplifiedRestoredExpr;
         }
 
+        bool getPreloaded() const
+        {
+            return m_preloaded;
+        }
+        void setPreloaded(bool value)
+        {
+            m_preloaded = value;
+        }
+
     private:
         template <typename T1, typename T2, typename T3>
         friend struct rocRoller::Serialization::MappingTraits;
@@ -106,6 +115,8 @@ namespace rocRoller
 
         int m_offset = -1;
         int m_size   = -1;
+
+        bool m_preloaded = false;
     };
 
     std::ostream& operator<<(std::ostream& stream, AssemblyKernelArgument const& arg);
