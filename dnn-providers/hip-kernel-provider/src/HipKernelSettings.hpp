@@ -10,16 +10,4 @@
  */
 struct HipKernelSettings
 {
-    void setBenchmarkingEnabled(bool enabled)
-    {
-        _benchmarkingEnabled = enabled;
-    }
-
-    bool isBenchmarkingEnabled() const
-    {
-        return _benchmarkingEnabled;
-    }
-
-private:
-    bool _benchmarkingEnabled = false;
 };
