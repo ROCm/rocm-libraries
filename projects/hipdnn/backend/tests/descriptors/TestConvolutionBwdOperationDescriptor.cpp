@@ -433,7 +433,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, SetComputeDataTypeWrongElementCoun
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestConvolutionBwdOperationDescriptor, SetConvolutionbwdParamsWrongType)
+TEST_F(TestConvolutionBwdOperationDescriptor, SetConvolutionBwdParamsWrongType)
 {
     auto desc = getDescriptor();
     std::vector<int64_t> padding = {1, 1};
@@ -495,7 +495,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeTensorDescriptor)
 // GetAttribute Tests - Data Fields
 // =============================================================================
 
-TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeConvolutionbwdParams)
+TEST_F(TestConvolutionBwdOperationDescriptor, GetAttributeConvolutionBwdParams)
 {
     makeFinalized();
     auto desc = getDescriptor();
