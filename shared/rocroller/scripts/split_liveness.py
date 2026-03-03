@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """
 Split a liveness file into separate files for each kind of register.
 
