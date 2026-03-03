@@ -5,29 +5,47 @@
 #include <hipdnn_data_sdk/data_objects/block_scale_dequantize_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 
+#include <string_view>
+
+namespace hipdnn_data_sdk
+{
+namespace block_scale_dequantize_json_keys
+{
+constexpr std::string_view INPUTS = "inputs";
+constexpr std::string_view OUTPUTS = "outputs";
+constexpr std::string_view X_TENSOR_UID = "x_tensor_uid";
+constexpr std::string_view SCALE_TENSOR_UID = "scale_tensor_uid";
+constexpr std::string_view Y_TENSOR_UID = "y_tensor_uid";
+constexpr std::string_view BLOCK_SIZE = "block_size";
+constexpr std::string_view IS_NEGATIVE_SCALE = "is_negative_scale";
+} // namespace block_scale_dequantize_json_keys
+} // namespace hipdnn_data_sdk
+
 namespace hipdnn_data_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& blockScaleJson, const BlockScaleDequantizeAttributes& bsd)
 {
-    auto& inputs = blockScaleJson["inputs"] = {};
+    namespace keys = hipdnn_data_sdk::block_scale_dequantize_json_keys;
 
-    inputs["x_tensor_uid"] = bsd.x_tensor_uid();
-    inputs["scale_tensor_uid"] = bsd.scale_tensor_uid();
+    auto& inputs = blockScaleJson[keys::INPUTS] = {};
 
-    auto& outputs = blockScaleJson["outputs"] = {};
-    outputs["y_tensor_uid"] = bsd.y_tensor_uid();
+    inputs[keys::X_TENSOR_UID] = bsd.x_tensor_uid();
+    inputs[keys::SCALE_TENSOR_UID] = bsd.scale_tensor_uid();
+
+    auto& outputs = blockScaleJson[keys::OUTPUTS] = {};
+    outputs[keys::Y_TENSOR_UID] = bsd.y_tensor_uid();
 
     if(bsd.block_size() != nullptr && !bsd.block_size()->empty())
     {
-        auto& blockSizeArray = blockScaleJson["block_size"] = nlohmann::json::array();
+        auto& blockSizeArray = blockScaleJson[keys::BLOCK_SIZE] = nlohmann::json::array();
         for(auto val : *bsd.block_size())
         {
             blockSizeArray.push_back(val);
         }
     }
 
-    blockScaleJson["is_negative_scale"] = bsd.is_negative_scale();
+    blockScaleJson[keys::IS_NEGATIVE_SCALE] = bsd.is_negative_scale();
 }
 
 }
@@ -38,30 +56,32 @@ inline auto
     to<data_objects::BlockScaleDequantizeAttributes>(flatbuffers::FlatBufferBuilder& builder,
                                                      const nlohmann::json& entry)
 {
-    auto& inputs = entry["inputs"];
+    namespace keys = hipdnn_data_sdk::block_scale_dequantize_json_keys;
+
+    auto& inputs = entry[keys::INPUTS];
 
     std::vector<int32_t> blockSize;
-    if(entry.contains("block_size"))
+    if(entry.contains(keys::BLOCK_SIZE))
     {
-        for(const auto& val : entry["block_size"])
+        for(const auto& val : entry[keys::BLOCK_SIZE])
         {
             blockSize.push_back(val.get<int32_t>());
         }
     }
 
     bool isNegativeScale = false;
-    if(entry.contains("is_negative_scale"))
+    if(entry.contains(keys::IS_NEGATIVE_SCALE))
     {
-        isNegativeScale = entry["is_negative_scale"].get<bool>();
+        isNegativeScale = entry[keys::IS_NEGATIVE_SCALE].get<bool>();
     }
 
     auto blockSizeVector = builder.CreateVector(blockSize);
 
     return data_objects::CreateBlockScaleDequantizeAttributes(
         builder,
-        inputs.at("x_tensor_uid").get<int64_t>(),
-        inputs.at("scale_tensor_uid").get<int64_t>(),
-        entry.at("outputs").at("y_tensor_uid").get<int64_t>(),
+        inputs.at(keys::X_TENSOR_UID).get<int64_t>(),
+        inputs.at(keys::SCALE_TENSOR_UID).get<int64_t>(),
+        entry.at(keys::OUTPUTS).at(keys::Y_TENSOR_UID).get<int64_t>(),
         blockSizeVector,
         isNegativeScale);
 }

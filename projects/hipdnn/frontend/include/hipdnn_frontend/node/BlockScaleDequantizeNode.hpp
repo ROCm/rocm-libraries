@@ -4,6 +4,7 @@
 
 #include "Node.hpp"
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -107,9 +108,16 @@ public:
             y->set_dim(x->get_dim());
         }
 
-        if(y->get_stride().empty() && !x->get_stride().empty())
+        if(y->get_stride().empty())
         {
-            y->set_stride(x->get_stride());
+            if(!x->get_stride().empty())
+            {
+                y->set_stride(x->get_stride());
+            }
+            else if(!y->get_dim().empty())
+            {
+                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(y->get_dim()));
+            }
         }
 
         return {};
