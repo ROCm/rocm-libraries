@@ -45,9 +45,10 @@ int main(int argc, char** argv)
 
     testing::InitGoogleTest(&argc, argv);
 
-    // By this moment GTest has already parsed sharding env vars (GTEST_TOTAL_SHARDS, GTEST_SHARD_INDEX)
-    // during InitGoogleTest(). Clear them here so child processes spawned by multiprocess tests
-    // (e.g. perfdb) don't inherit sharding and skip work they're expected to perform.
+    // By this moment GTest has already parsed sharding env vars (GTEST_TOTAL_SHARDS,
+    // GTEST_SHARD_INDEX) during InitGoogleTest(). Clear them here so child processes spawned by
+    // multiprocess tests (e.g. perfdb) don't inherit sharding and skip work they're expected to
+    // perform.
 #ifdef _WIN32
     _putenv_s("GTEST_TOTAL_SHARDS", "");
     _putenv_s("GTEST_SHARD_INDEX", "");
