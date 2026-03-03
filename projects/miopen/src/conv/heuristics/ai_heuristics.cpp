@@ -685,9 +685,8 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     const bool is2d = problem.Is2d();
     const bool use_nd = is2d || is3d;
 
-
     // Check cache FIRST - avoids expensive model creation if we have cached results
-    auto cached_result = GetCachedPrediction(problem, device, is3d );
+    auto cached_result = GetCachedPrediction(problem, device, is3d);
     if(!cached_result.empty())
     {
         return cached_result;

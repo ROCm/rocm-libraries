@@ -43,12 +43,20 @@ namespace conv {
 using ProblemInterpreter = miopen::solver::ProblemInterpreter;
 using ProblemDescription = miopen::conv::ProblemDescription;
 
-int LayoutStringToCode(const std::string& layout)
+int LayoutStringToCodeND(const std::string& layout, const bool& is3d)
 {
-    if(layout == "NCDHW")
-        return 0;
-    if(layout == "NDHWC")
-        return 1;
+    if (is3d)
+    {
+        if(layout == "NCDHW")
+            return 0;
+        if(layout == "NDHWC")
+            return 1;
+    } else {
+        if(layout == "NCHW")
+            return 0;
+        if(layout == "NHWC")
+            return 1;
+    }
     // Add more as needed
     return -1; // Unknown
 }
@@ -56,45 +64,58 @@ int LayoutStringToCode(const std::string& layout)
 // Helper: Extract 3D convolution features
 MIOPEN_INTERNALS_EXPORT
 std::map<std::string, float>
-GetFeatures3D(const ProblemDescription& problem, int /*max_cu*/, const std::string& /*arch*/)
+GetFeaturesND(const ProblemDescription& problem, int /*max_cu*/, const std::string& /*arch*/)
 {
     std::map<std::string, float> features;
 
+    const bool is3d = problem.Is3d();
     // 1: spatial_dim
     features["spatial_dim"] = 3.0f;
 
     // 2–5: in_channels, in_d, in_h, in_w
     features["in_channels"] = static_cast<float>(ProblemInterpreter::GetInputChannelC(problem));
-    features["in_d"]        = static_cast<float>(ProblemInterpreter::GetInputDepthDi(problem));
+    if ( is3d ) {
+        features["in_d"]        = static_cast<float>(ProblemInterpreter::GetInputDepthDi(problem));
+    }    
     features["in_h"]        = static_cast<float>(ProblemInterpreter::GetInputHeightHi(problem));
     features["in_w"]        = static_cast<float>(ProblemInterpreter::GetInputWidthWi(problem));
 
     // 6–9: out_channels, out_d, out_h, out_w
     features["out_channels"] = static_cast<float>(ProblemInterpreter::GetOutputChannelK(problem));
-    features["out_d"]        = static_cast<float>(ProblemInterpreter::GetOutputDepthDo(problem));
+    if ( is3d ) {
+        features["out_d"]        = static_cast<float>(ProblemInterpreter::GetOutputDepthDo(problem));
+    }
     features["out_h"]        = static_cast<float>(ProblemInterpreter::GetOutputHeightHo(problem));
     features["out_w"]        = static_cast<float>(ProblemInterpreter::GetOutputWidthWo(problem));
 
     // 10–12: fil_d, fil_h, fil_w
-    features["fil_d"] = static_cast<float>(ProblemInterpreter::GetFilterDepthZ(problem));
+    if ( is3d ) {
+        features["fil_d"] = static_cast<float>(ProblemInterpreter::GetFilterDepthZ(problem));
+    }
     features["fil_h"] = static_cast<float>(ProblemInterpreter::GetFilterHeightY(problem));
     features["fil_w"] = static_cast<float>(ProblemInterpreter::GetFilterWidthX(problem));
 
     // 13–15: pad_d, pad_h, pad_w
-    features["pad_d"] = static_cast<float>(ProblemInterpreter::GetInputLeftPadD(problem));
+    if ( is3d ) {
+        features["pad_d"] = static_cast<float>(ProblemInterpreter::GetInputLeftPadD(problem));
+    }
     features["pad_h"] = static_cast<float>(ProblemInterpreter::GetInputLeftPadH(problem));
     features["pad_w"] = static_cast<float>(ProblemInterpreter::GetInputLeftPadW(problem));
 
     // 16–18: conv_stride_d, conv_stride_h, conv_stride_w
-    features["conv_stride_d"] =
-        static_cast<float>(ProblemInterpreter::GetAdjustedConvolutionStrideD(problem));
+    if ( is3d ) {
+        features["conv_stride_d"] =
+            static_cast<float>(ProblemInterpreter::GetAdjustedConvolutionStrideD(problem));
+    }
     features["conv_stride_h"] =
         static_cast<float>(ProblemInterpreter::GetAdjustedConvolutionStrideH(problem));
     features["conv_stride_w"] =
         static_cast<float>(ProblemInterpreter::GetAdjustedConvolutionStrideW(problem));
 
     // 19–21: dilation_d, dilation_h, dilation_w
-    features["dilation_d"] = static_cast<float>(problem.GetDilationD());
+    if ( is3d ) {
+        features["dilation_d"] = static_cast<float>(problem.GetDilationD());
+    }
     features["dilation_h"] = static_cast<float>(problem.GetDilationH());
     features["dilation_w"] = static_cast<float>(problem.GetDilationW());
 
@@ -105,12 +126,14 @@ GetFeatures3D(const ProblemDescription& problem, int /*max_cu*/, const std::stri
     features["bias"] = static_cast<float>(problem.GetBias());
 
     // 24–26: in_layout, fil_layout, out_layout (as codes)
-    features["in_layout"] =
-        static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetInputLayout(problem)));
+     if ( is3d ) {
+        features["in_layout"] =
+            static_cast<float>(LayoutStringToCodeND(ProblemInterpreter::GetInputLayout(problem),is3d));
+    }
     features["fil_layout"] =
-        static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetFilterLayout(problem)));
+        static_cast<float>(LayoutStringToCodeND(ProblemInterpreter::GetFilterLayout(problem),is3d));
     features["out_layout"] =
-        static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetOutputLayout(problem)));
+        static_cast<float>(LayoutStringToCodeND(ProblemInterpreter::GetOutputLayout(problem),is3d));
 
     // 27: precision
     features["precision"] = static_cast<float>(problem.GetInDataType());
