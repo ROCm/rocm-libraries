@@ -46,9 +46,24 @@ inline bool areDimensionsBroadcastCompatible(const std::vector<int64_t>& inputDi
     return true;
 }
 
-// Sets a default stride ordering based off the provided stride order.
-// Ex. dim = {1,2,3,4} stride_order = {3, 0, 2, 1} for NHWC
-// returns {24, 1, 8, 2}
+/**
+ * @brief Computes strides from dimensions and a stride ordering
+ *
+ * Generates strides for a tensor based on the provided dimensions and stride order.
+ * The stride order specifies the memory layout priority (lower values = tighter packing).
+ *
+ * @param dim Dimension sizes. The expected ordering depends on the operation type:
+ *            convolution/batchnorm use (N, C, H, W) or (N, C, D, H, W),
+ *            matmul uses (...batch, M, K) or (...batch, K, N).
+ * @param strideOrder Priority of each dimension in memory (lower = tighter packing).
+ *                    Use TensorLayout constants for common layouts.
+ * @return Strides corresponding to the requested memory layout
+ *
+ * @code{.cpp}
+ * // Example for convolution input: {N=1, C=2, H=3, W=4}
+ * auto nhwcStrides = generateStrides({1,2,3,4}, {3, 0, 2, 1}); // {24, 1, 8, 2}
+ * @endcode
+ */
 inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
                                             const std::vector<int64_t>& strideOrder)
 {
@@ -309,8 +324,18 @@ static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
     }
 }
 
-// Constructs a full tensor indices vector from batch, channel, and spatial components. spatialOffset allows
-// skipping initial elements in the spatialIndices vector for convenience.
+/**
+ * @brief Constructs a full tensor indices vector from batch, channel, and spatial components
+ *
+ * Builds an index vector following NCHW ordering: batch at position 0, channel at position 1,
+ * followed by spatial dimensions (H, W for 4D tensors; D, H, W for 5D tensors).
+ *
+ * @param batchIdx Batch index (position 0 in result)
+ * @param channelIdx Channel index (position 1 in result)
+ * @param spatialIndices Spatial dimension indices (positions 2+ in result)
+ * @param spatialOffset Number of elements to skip at the start of spatialIndices
+ * @return Combined index vector in NCHW/NCDHW order
+ */
 static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
                                                       int64_t channelIdx,
                                                       const std::vector<int64_t>& spatialIndices,

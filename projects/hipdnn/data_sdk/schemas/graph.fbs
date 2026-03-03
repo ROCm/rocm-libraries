@@ -14,10 +14,11 @@ include "layernorm_attributes.fbs";
 include "matmul_attributes.fbs";
 include "pointwise_attributes.fbs";
 include "rmsnorm_attributes.fbs";
+include "sdpa_attributes.fbs";
 
 namespace hipdnn_data_sdk.data_objects;
 
-union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt, MatmulAttributes, LayernormAttributes, RMSNormAttributes}
+union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt, MatmulAttributes, RMSNormAttributes, LayernormAttributes, SdpaAttributes}
 
 table Node {
 	name: string;

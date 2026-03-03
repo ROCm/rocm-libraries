@@ -144,6 +144,7 @@ option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(WIN32)
     option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
