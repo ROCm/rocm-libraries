@@ -2,18 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.25.2)
-
-project(rocm-libraries LANGUAGES C CXX ASM)
-
-include(CheckLanguage)
-check_language(Fortran)
-if(CMAKE_Fortran_COMPILER)
-    enable_language(Fortran)
-    set(ROCM_LIBS_HAVE_FORTRAN TRUE)
-else()
-    set(ROCM_LIBS_HAVE_FORTRAN FALSE)
-    message(STATUS "Fortran compiler not found - Fortran support disabled")
-endif()
+project(rocm-libraries LANGUAGES C CXX Fortran ASM)
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
@@ -44,12 +33,8 @@ set(SUPPORTED_COMPONENTS
     # projects
     hipblas-common
     hipblaslt
-    hipdnn
     rocprim
     rocrand
-    # dnn-providers
-    miopen-provider
-    hipblaslt-provider
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -143,14 +128,6 @@ if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     )
 endif()
 
-if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    add_subdirectory_with_message(
-        COMPONENT hipdnn
-        PREFIX_PATH projects
-        EXPECT_TARGET hipdnn_backend
-    )
-endif()
-
 if("rocprim" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT rocprim
@@ -164,22 +141,6 @@ if("rocrand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT rocrand
         PREFIX_PATH projects
         EXPECT_TARGET rocrand
-    )
-endif()
-
-if("miopen-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    add_subdirectory_with_message(
-        COMPONENT miopen-provider
-        PREFIX_PATH dnn-providers
-        EXPECT_TARGET miopen_plugin
-    )
-endif()
-
-if("hipblaslt-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    add_subdirectory_with_message(
-        COMPONENT hipblaslt-provider
-        PREFIX_PATH dnn-providers
-        EXPECT_TARGET hipblaslt_plugin
     )
 endif()
 

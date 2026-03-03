@@ -79,17 +79,6 @@ cmake --preset rocroller
 cmake --build --preset default
 ```
 
-To build [hipDNN](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn) with its provider plugins (miopen-provider and hipblaslt-provider):
-
-```bash
-# configure
-cmake --preset hipdnn
-# build
-cmake --build --preset default
-```
-
-See the [hipDNN Superbuild documentation](projects/hipdnn/docs/Superbuild.md) for details on available targets, component selection, and standalone vs superbuild workflows.
-
 > [!TIP]
 > By default, the configure presets will generate build artifacts to the `build` directory; override this by setting `-B <build-dir>`.
 > In addition, all configure presets use the `linux-amdclang.cmake` toolchain; override this by setting `-D CMAKE_TOOLCHAIN_FILE=<toolchain-file>`.

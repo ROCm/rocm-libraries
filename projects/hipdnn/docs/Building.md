@@ -50,16 +50,6 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
 - [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
 
-## Superbuild (Building with Providers)
-
-To build hipDNN together with its provider plugins (miopen-provider, hipblaslt-provider) from a single build directory, use the rocm-libraries superbuild. See [Superbuild](./Superbuild.md) for details.
-
-```bash
-# From the rocm-libraries root
-cmake --preset hipdnn
-cmake --build --preset default
-```
-
 ## Quick Start Guide
 
 Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies). Refer to the [LLVM_TOOLS_SEARCH_PREFIX](#llvm_tools_search_prefix) section later in this document for approaches to manage the multiple Clang toolchain versions required for hipDNN.
