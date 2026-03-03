@@ -60,7 +60,6 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
                        rocsparse_status_requires_sorted_storage);
 
     csrilu0_info->create_singularity_numeric_exact(A->batch_count, A->col_type, handle->stream);
-
     if(A->col_type == rocsparse_indextype_i32)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(

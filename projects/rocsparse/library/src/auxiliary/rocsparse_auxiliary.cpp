@@ -1430,7 +1430,7 @@ try
         hipStream_t default_stream{};
         dest->csritsv_info->copy(src->csritsv_info, default_stream);
     }
-    dest->boost.copy(src->boost);
+    dest->get_boost()->copy(*src->get_boost());
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }

@@ -50,9 +50,12 @@ protected:
     rocsparse::sorted_coo2csr_info_t* m_sorted_coo2csr_info{};
     rocsparse::trm_t                  m_trm;
 
+    rocsparse::numeric_boost m_boost{};
+
 public:
     void duplicate_trdata(const rocsparse_mat_info src, hipStream_t stream);
-
+    const rocsparse::numeric_boost*          get_boost() const;
+    rocsparse::numeric_boost*                get_boost();
     std::shared_ptr<_rocsparse_csrsv_info>   get_shared_csrsv_info();
     std::shared_ptr<_rocsparse_csrsm_info>   get_shared_csrsm_info();
     std::shared_ptr<_rocsparse_csrilu0_info> get_shared_csrilu0_info();
@@ -128,9 +131,6 @@ public:
 
     rocsparse_csrgemm_info csrgemm_info{};
     rocsparse_csritsv_info csritsv_info{};
-
-    // numeric boost for ilu0
-    rocsparse::numeric_boost boost;
 
     ~_rocsparse_mat_info();
 

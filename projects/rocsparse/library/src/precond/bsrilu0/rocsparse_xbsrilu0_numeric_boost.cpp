@@ -42,19 +42,18 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(1, info);
 
         // Reset boost
-        info->boost.set_enable(0);
-
+        auto boost = info->get_boost();
+        boost->set_enable(0);
         if(enable_boost)
         {
             ROCSPARSE_CHECKARG_POINTER(3, boost_tol);
             ROCSPARSE_CHECKARG_POINTER(4, boost_val);
-
-            info->boost.set_enable(enable_boost);
-            info->boost.set_tol_datatype(boost_tol_datatype);
-            info->boost.set_tol(boost_tol);
-            info->boost.set_val(reinterpret_cast<const void*>(boost_val));
-            info->boost.set_tol_pointer_mode(handle->pointer_mode);
-            info->boost.set_val_pointer_mode(handle->pointer_mode);
+            boost->define(enable_boost,
+                          handle->pointer_mode,
+                          boost_tol_datatype,
+                          boost_tol,
+                          handle->pointer_mode,
+                          boost_val);
         }
 
         return rocsparse_status_success;

@@ -206,6 +206,7 @@ namespace rocsparse
             case rocsparse_format_csr:
             {
                 auto csrilu0_info = spilu0_descr->get_csrilu0_info();
+
                 if(spilu0_descr->get_tolerance_pointer() != nullptr)
                 {
                     if(csrilu0_info != nullptr)

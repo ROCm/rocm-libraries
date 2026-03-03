@@ -668,7 +668,6 @@ void testing_spilu0_bad_arg(const Arguments& arg)
     rocsparse_error*       p_error = nullptr;
     rocsparse_local_handle local_handle;
     rocsparse_handle       handle = local_handle;
-
     //
     // Now get a concrete example and continue.
     //

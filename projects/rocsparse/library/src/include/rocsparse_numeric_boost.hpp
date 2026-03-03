@@ -31,16 +31,26 @@ namespace rocsparse
     struct numeric_boost
     {
     protected:
+        int32_t m_enable{};
+
         rocsparse_pointer_mode m_tol_pointer_mode{};
-        rocsparse_pointer_mode m_val_pointer_mode{};
-        int32_t                m_enable{};
-        rocsparse_datatype     m_tol_datatype{};
+        rocsparse_datatype     m_tol_datatype{rocsparse_datatype_f32_r};
         const void*            m_tol{};
+
+        rocsparse_pointer_mode m_val_pointer_mode{};
         const void*            m_val{};
 
     public:
         numeric_boost();
         ~numeric_boost();
+
+        void define(int32_t                enable,
+                    rocsparse_pointer_mode tol_pointer_mode,
+                    rocsparse_datatype     tol_datatype,
+                    const void*            tol,
+                    rocsparse_pointer_mode val_pointer_mode,
+                    const void*            val);
+
         const void*            get_tol() const;
         void                   set_tol(const void*);
         const void*            get_val() const;

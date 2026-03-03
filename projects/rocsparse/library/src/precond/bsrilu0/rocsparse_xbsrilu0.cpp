@@ -98,7 +98,7 @@ namespace rocsparse
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrilu0(handle,
                                                      bsrilu0_info,
                                                      &bsr,
-                                                     &info->boost,
+                                                     info->get_boost(),
                                                      std::numeric_limits<size_t>::max(),
                                                      temp_buffer));
 

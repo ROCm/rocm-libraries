@@ -152,10 +152,8 @@ try
 
         if(nullptr != spilu0_descr->get_csrilu0_info())
         {
-            std::cout << "hhhhhhhh " << std::endl;
             spilu0_descr->get_csrilu0_info()->get_singularity_numeric_near()->set_tolerance_pointer(
                 data, handle->pointer_mode, rocsparse_datatype_f64_r);
-            std::cout << "hhhhhhhh done" << std::endl;
         }
         else
         {

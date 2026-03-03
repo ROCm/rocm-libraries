@@ -110,7 +110,7 @@ namespace rocsparse
                                                      &csr,
                                                      policy,
                                                      csrilu0_info,
-                                                     &info->boost,
+                                                     info->get_boost(),
                                                      std::numeric_limits<size_t>::max(),
                                                      temp_buffer));
         return rocsparse_status_success;

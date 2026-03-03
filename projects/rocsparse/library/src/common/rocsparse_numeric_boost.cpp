@@ -23,6 +23,21 @@
 
 #include "rocsparse_numeric_boost.hpp"
 
+void rocsparse::numeric_boost::define(int32_t                enable,
+                                      rocsparse_pointer_mode tol_pointer_mode,
+                                      rocsparse_datatype     tol_datatype,
+                                      const void*            tol,
+                                      rocsparse_pointer_mode val_pointer_mode,
+                                      const void*            val)
+{
+    this->m_enable           = enable;
+    this->m_tol_pointer_mode = tol_pointer_mode;
+    this->m_tol_datatype     = tol_datatype;
+    this->m_tol              = tol;
+    this->m_val_pointer_mode = val_pointer_mode;
+    this->m_val              = val;
+}
+
 rocsparse::numeric_boost::~numeric_boost()
 {
     this->m_tol_pointer_mode = (rocsparse_pointer_mode)-1;
@@ -34,11 +49,11 @@ rocsparse::numeric_boost::~numeric_boost()
 }
 
 rocsparse::numeric_boost::numeric_boost()
-    : m_tol_pointer_mode((rocsparse_pointer_mode)-1)
-    , m_val_pointer_mode((rocsparse_pointer_mode)-1)
-    , m_enable(0)
-    , m_tol_datatype((rocsparse_datatype)-1)
+    : m_enable(0)
+    , m_tol_pointer_mode((rocsparse_pointer_mode)-1)
+    , m_tol_datatype(rocsparse_datatype_f32_r)
     , m_tol(nullptr)
+    , m_val_pointer_mode((rocsparse_pointer_mode)-1)
     , m_val(nullptr)
 {
 }
