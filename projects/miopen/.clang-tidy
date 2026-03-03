@@ -89,7 +89,6 @@ Checks: >-
   -abseil-*,
   -altera-*,
   -android-cloexec-fopen,
-  -boost-use-ranges,
   -bugprone-crtp-constructor-accessibility,
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
