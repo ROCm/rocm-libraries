@@ -714,6 +714,9 @@ namespace TensileLite
                                                    size_t                  validationStride,
                                                    double                  threshold)
         {
+            FastPointwiseComparison<ValidType> compareValid(threshold);
+            InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
+
             size_t elementsToCopy       = tensor.totalAllocatedElements();
             size_t elementsOffsetToCopy = 0;
             size_t elementsBeforeData   = 0;
@@ -838,6 +841,53 @@ namespace TensileLite
             if(boundsCheckElements > 0)
                 std::cout << "Performed bounds check on " << boundsCheckElements << " elements ("
                           << elementsBeforeData << " before data)" << std::endl;
+
+            if(compareValid.errorCount() > 0 && m_printMax > 0)
+            {
+                size_t printed = 0;
+                std::cout << "Index:  Device | Reference" << std::endl;
+
+                std::vector<size_t> printCoord(tensor.dimensions());
+                for(size_t elemNumber = 0;
+                    elemNumber < tensor.totalLogicalElements() && printed < static_cast<size_t>(m_printMax);
+                    elemNumber++)
+                {
+                    CoordNumbered(elemNumber,
+                                  printCoord.begin(),
+                                  printCoord.end(),
+                                  tensor.sizes().begin(),
+                                  tensor.sizes().end());
+                    size_t    elemIndex = tensor.index(printCoord);
+                    ValidType ref       = reference[elemIndex];
+                    ValidType res       = resultData[elemIndex];
+
+                    if(!AlmostEqual(ref, res, threshold))
+                    {
+                        if constexpr(std::is_same<int8_t, ValidType>())
+                        {
+                            std::cout << "[" << printed << "]  elem=" << elemNumber
+                                      << " idx=" << elemIndex << ": "
+                                      << static_cast<int>(res) << "!="
+                                      << static_cast<int>(ref) << std::endl;
+                        }
+                        else if constexpr(std::is_same<Float8, ValidType>()
+                                          || std::is_same<BFloat8, ValidType>())
+                        {
+                            std::cout << "[" << printed << "]  elem=" << elemNumber
+                                      << " idx=" << elemIndex << ": "
+                                      << static_cast<float>(res) << "!="
+                                      << static_cast<float>(ref) << std::endl;
+                        }
+                        else
+                        {
+                            std::cout << "[" << printed << "]  elem=" << elemNumber
+                                      << " idx=" << elemIndex << ": "
+                                      << res << "!=" << ref << std::endl;
+                        }
+                        printed++;
+                    }
+                }
+            }
 
             compareValid.report();
             compareInvalid.report();
