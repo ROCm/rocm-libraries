@@ -207,6 +207,12 @@ namespace rocRoller::KernelGraph::ControlGraph
         sortOrderCache();
 
         m_cacheStatus = CacheStatus::Valid;
+        //
+        // m_descendentCache is only used to help build m_orderCache,
+        // and it must be cleared after finish building m_orderCache
+        // to ensure no stale data being used when building m_orderCache
+        // next time.
+        //
         m_descendentCache.clear();
     }
 
