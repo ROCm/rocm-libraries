@@ -10,6 +10,15 @@ set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json
 set(HIPDNN_FMTLIB_VERSION "11.1.3" CACHE STRING "Version of fmtlib to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
 
+option(HIPDNN_FRONTEND_SKIP_JSON_LIB "Defines whether FE should not include nlohmann/json.hpp." OFF)
+
+# Status message
+if(HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    message(STATUS "hipDNN: JSON serialization disabled")
+else()
+    message(STATUS "hipDNN: JSON serialization enabled (requires nlohmann_json)")
+endif()
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)
@@ -117,14 +126,6 @@ if(DEFINED HIP_DNN_BUILD_FRONTEND)
 endif()
 option(HIPDNN_BUILD_FRONTEND "Build the frontend code" ON)
 
-# Migrate HIP_DNN_BUILD_PLUGINS -> HIPDNN_BUILD_PLUGINS
-if(DEFINED HIP_DNN_BUILD_PLUGINS)
-    set(HIPDNN_BUILD_PLUGINS ${HIP_DNN_BUILD_PLUGINS} CACHE BOOL "Builds the plugins as part of the main cmake" FORCE)
-    unset(HIP_DNN_BUILD_PLUGINS CACHE)
-    message(DEPRECATION "HIP_DNN_BUILD_PLUGINS has been renamed to HIPDNN_BUILD_PLUGINS. Please update your build scripts to use -DHIPDNN_BUILD_PLUGINS instead.")
-endif()
-option(HIPDNN_BUILD_PLUGINS "Builds the plugins as part of the main cmake" ON)
-
 # Migrate HIP_DNN_GENERATE_SDK_HEADERS -> HIPDNN_GENERATE_SDK_HEADERS
 if(DEFINED HIP_DNN_GENERATE_SDK_HEADERS)
     set(HIPDNN_GENERATE_SDK_HEADERS ${HIP_DNN_GENERATE_SDK_HEADERS} CACHE BOOL "Automatically generates sdk headers from schema during build" FORCE)
@@ -143,6 +144,7 @@ option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(WIN32)
     option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
@@ -216,11 +218,7 @@ add_subdirectory(test_sdk)
 add_subdirectory(plugin_sdk)
 
 add_subdirectory(tests)
-
-if(HIPDNN_BUILD_PLUGINS)
-    file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
-    add_subdirectory(plugins)
-endif()
+add_subdirectory(tools)
 
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
@@ -233,13 +231,6 @@ add_clang_tidy_custom_target()
 
 if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
-
-    if(HIPDNN_BUILD_PLUGINS)
-        set(MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT
-            -object ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/libmiopen_plugin.so -object
-            ./${CMAKE_INSTALL_BINDIR}/miopen_plugin_tests
-        )
-    endif()
 
     set(CODE_COVERAGE_IGNORE_REGEX
         ".*deps.*|.*tests.*|.*data_sdk.*data_objects.*|.*HipErrorHandler.*"
@@ -259,7 +250,6 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_plugin_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_test_sdk_tests
-        ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT}
     )
 
     # Helper function to create a code coverage target

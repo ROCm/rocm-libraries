@@ -4,10 +4,12 @@
 #pragma once
 
 #include "BackendDescriptor.hpp"
+#include "IGraphOperation.hpp"
 #include <flatbuffers/detached_buffer.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace hipdnn_backend
@@ -20,9 +22,37 @@ private:
     hipdnnHandle_t _handle = nullptr;
     mutable flatbuffers::DetachedBuffer _graphSerializedBuffer;
 
+    // For building graph from operation descriptors (type-agnostic)
+    std::vector<std::shared_ptr<IGraphOperation>> _operations;
+
+    // Graph-level attributes set via setAttribute (applied during buildGraphFromOperations)
+    hipdnn_data_sdk::data_objects::DataType _computeDataType
+        = hipdnn_data_sdk::data_objects::DataType::UNSET;
+    hipdnn_data_sdk::data_objects::DataType _intermediateDataType
+        = hipdnn_data_sdk::data_objects::DataType::UNSET;
+    hipdnn_data_sdk::data_objects::DataType _ioDataType
+        = hipdnn_data_sdk::data_objects::DataType::UNSET;
+    std::optional<int64_t> _preferredEngineId;
+
     void setHandle(hipdnnBackendAttributeType_t attributeType,
                    int64_t elementCount,
                    const void* arrayOfElements);
+
+    void setOperations(hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements);
+
+    void setDataType(hipdnnBackendAttributeName_t attributeName,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements);
+
+    void setPreferredEngineId(hipdnnBackendAttributeType_t attributeType,
+                              int64_t elementCount,
+                              const void* arrayOfElements);
+
+    // Build GraphT from operation descriptors
+    void buildGraphFromOperations();
 
 public:
     void finalize() override;

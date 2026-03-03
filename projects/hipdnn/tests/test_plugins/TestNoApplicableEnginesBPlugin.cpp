@@ -19,6 +19,12 @@ public:
     {
         return "1.0.0";
     }
+
+    const char* getPluginApiVersion() const override
+    {
+        return apiVersionWithoutTweak();
+    }
+
     int64_t getEngineId() const override
     {
         return hipdnn_tests::plugin_constants::engineId<NoApplicableEnginesBPlugin>();

@@ -15,6 +15,7 @@ add_executable(
     hipdnn_frontend_tests
     main.cpp
     TestAttributes.cpp
+    TestBackendInterface.cpp
     TestBackendLoggingHelpers.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp
@@ -29,20 +30,29 @@ add_executable(
     TestConvolutionDgradNode.cpp
     TestConvolutionNode.cpp
     TestConvolutionWgradAttributes.cpp
+    TestDescriptorHelpers.cpp
     TestConvolutionWgradNode.cpp
+    TestEngineOverrideConfig.cpp
     TestError.cpp
     TestGraph.cpp
-    TestHandle.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
     TestGraphSerialization.cpp
+    TestHandle.cpp
+    TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
+    TestLayernormAttributes.cpp
+    TestLayerNormNode.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp
+    TestSdpaAttributes.cpp
+    TestSdpaFpropNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
+    TestRMSNormAttributes.cpp
+    TestRMSNormNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
     TestTensorAttributes.cpp
     TestTensorValueAttributes.cpp

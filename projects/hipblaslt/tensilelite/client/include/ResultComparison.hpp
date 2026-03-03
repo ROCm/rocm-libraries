@@ -65,11 +65,12 @@ namespace TensileLite
         class PointwiseComparison
         {
         public:
-            PointwiseComparison(bool printValids, size_t printMax, bool printReport)
+            PointwiseComparison(bool printValids, size_t printMax, bool printReport, double threshold = -1.0)
                 : m_printValids(printValids)
                 , m_printMax(printMax)
                 , m_doPrint(printMax > 0)
                 , m_printReport(printReport)
+                , m_threshold(threshold)
             {
             }
 
@@ -77,7 +78,7 @@ namespace TensileLite
                 operator()(T referenceValue, T resultValue, size_t elemIndex, size_t elemNumber)
             {
                 m_values++;
-                bool match = AlmostEqual(referenceValue, resultValue);
+                bool match = AlmostEqual(referenceValue, resultValue, m_threshold);
                 if(!match)
                     m_errors++;
 
@@ -150,6 +151,7 @@ namespace TensileLite
             bool   m_doPrint     = false;
             bool   m_printReport = false;
             bool   m_failed      = false;
+            double m_threshold   = -1.0;
         };
 
         template <typename T>
