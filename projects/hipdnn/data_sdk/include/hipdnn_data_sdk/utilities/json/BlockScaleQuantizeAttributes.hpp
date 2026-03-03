@@ -5,30 +5,49 @@
 #include <hipdnn_data_sdk/data_objects/block_scale_quantize_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/json/Common.hpp>
 
+#include <string_view>
+
+namespace hipdnn_data_sdk
+{
+namespace block_scale_quantize_json_keys
+{
+constexpr std::string_view INPUTS = "inputs";
+constexpr std::string_view OUTPUTS = "outputs";
+constexpr std::string_view X_TENSOR_UID = "x_tensor_uid";
+constexpr std::string_view Y_TENSOR_UID = "y_tensor_uid";
+constexpr std::string_view SCALE_TENSOR_UID = "scale_tensor_uid";
+constexpr std::string_view BLOCK_SIZE = "block_size";
+constexpr std::string_view AXIS = "axis";
+constexpr std::string_view TRANSPOSE = "transpose";
+} // namespace block_scale_quantize_json_keys
+} // namespace hipdnn_data_sdk
+
 namespace hipdnn_data_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline void to_json(nlohmann::json& blockScaleJson, const BlockScaleQuantizeAttributes& bsq)
 {
-    auto& inputs = blockScaleJson["inputs"] = {};
+    namespace keys = hipdnn_data_sdk::block_scale_quantize_json_keys;
 
-    inputs["x_tensor_uid"] = bsq.x_tensor_uid();
+    auto& inputs = blockScaleJson[keys::INPUTS] = {};
 
-    auto& outputs = blockScaleJson["outputs"] = {};
-    outputs["y_tensor_uid"] = bsq.y_tensor_uid();
-    outputs["scale_tensor_uid"] = bsq.scale_tensor_uid();
+    inputs[keys::X_TENSOR_UID] = bsq.x_tensor_uid();
+
+    auto& outputs = blockScaleJson[keys::OUTPUTS] = {};
+    outputs[keys::Y_TENSOR_UID] = bsq.y_tensor_uid();
+    outputs[keys::SCALE_TENSOR_UID] = bsq.scale_tensor_uid();
 
     if(bsq.block_size().has_value())
     {
-        blockScaleJson["block_size"] = bsq.block_size().value();
+        blockScaleJson[keys::BLOCK_SIZE] = bsq.block_size().value();
     }
 
     if(bsq.axis().has_value())
     {
-        blockScaleJson["axis"] = bsq.axis().value();
+        blockScaleJson[keys::AXIS] = bsq.axis().value();
     }
 
-    blockScaleJson["transpose"] = bsq.transpose();
+    blockScaleJson[keys::TRANSPOSE] = bsq.transpose();
 }
 
 }
@@ -38,31 +57,33 @@ template <>
 inline auto to<data_objects::BlockScaleQuantizeAttributes>(flatbuffers::FlatBufferBuilder& builder,
                                                            const nlohmann::json& entry)
 {
-    auto& inputs = entry["inputs"];
+    namespace keys = hipdnn_data_sdk::block_scale_quantize_json_keys;
+
+    auto& inputs = entry[keys::INPUTS];
 
     flatbuffers::Optional<int32_t> blockSize = flatbuffers::nullopt;
-    if(entry.contains("block_size"))
+    if(entry.contains(keys::BLOCK_SIZE))
     {
-        blockSize = entry["block_size"].get<int32_t>();
+        blockSize = entry[keys::BLOCK_SIZE].get<int32_t>();
     }
 
     flatbuffers::Optional<int64_t> axis = flatbuffers::nullopt;
-    if(entry.contains("axis"))
+    if(entry.contains(keys::AXIS))
     {
-        axis = entry["axis"].get<int64_t>();
+        axis = entry[keys::AXIS].get<int64_t>();
     }
 
     bool transpose = false;
-    if(entry.contains("transpose"))
+    if(entry.contains(keys::TRANSPOSE))
     {
-        transpose = entry["transpose"].get<bool>();
+        transpose = entry[keys::TRANSPOSE].get<bool>();
     }
 
     return data_objects::CreateBlockScaleQuantizeAttributes(
         builder,
-        inputs.at("x_tensor_uid").get<int64_t>(),
-        entry.at("outputs").at("y_tensor_uid").get<int64_t>(),
-        entry.at("outputs").at("scale_tensor_uid").get<int64_t>(),
+        inputs.at(keys::X_TENSOR_UID).get<int64_t>(),
+        entry.at(keys::OUTPUTS).at(keys::Y_TENSOR_UID).get<int64_t>(),
+        entry.at(keys::OUTPUTS).at(keys::SCALE_TENSOR_UID).get<int64_t>(),
         blockSize,
         axis,
         transpose);
