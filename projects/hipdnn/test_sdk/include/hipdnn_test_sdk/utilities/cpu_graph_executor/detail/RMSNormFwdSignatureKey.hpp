@@ -7,13 +7,13 @@
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RmsnormFwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdPlan.hpp>
 #include <ostream>
 
 namespace hipdnn_test_sdk::detail
 {
 
-struct RmsnormFwdSignatureKey
+struct RMSNormFwdSignatureKey
 {
     const hipdnn_data_sdk::data_objects::NodeAttributes nodeType
         = hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes;
@@ -22,8 +22,8 @@ struct RmsnormFwdSignatureKey
     hipdnn_data_sdk::data_objects::DataType outputDataType;
     hipdnn_data_sdk::data_objects::DataType computeDataType;
 
-    RmsnormFwdSignatureKey() = default;
-    constexpr RmsnormFwdSignatureKey(hipdnn_data_sdk::data_objects::DataType x,
+    RMSNormFwdSignatureKey() = default;
+    constexpr RMSNormFwdSignatureKey(hipdnn_data_sdk::data_objects::DataType x,
                                      hipdnn_data_sdk::data_objects::DataType scale,
                                      hipdnn_data_sdk::data_objects::DataType output,
                                      hipdnn_data_sdk::data_objects::DataType compute)
@@ -34,7 +34,7 @@ struct RmsnormFwdSignatureKey
     {
     }
 
-    RmsnormFwdSignatureKey(
+    RMSNormFwdSignatureKey(
         const hipdnn_data_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap)
@@ -61,7 +61,7 @@ struct RmsnormFwdSignatureKey
         outputDataType = yTensorAttr->data_type();
     }
 
-    std::size_t operator()(const RmsnormFwdSignatureKey& k) const noexcept
+    std::size_t operator()(const RMSNormFwdSignatureKey& k) const noexcept
     {
         return k.hashSelf();
     }
@@ -75,21 +75,21 @@ struct RmsnormFwdSignatureKey
                ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 16);
     }
 
-    bool operator==(const RmsnormFwdSignatureKey& other) const noexcept
+    bool operator==(const RMSNormFwdSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && xDataType == other.xDataType
                && scaleDataType == other.scaleDataType && outputDataType == other.outputDataType
                && computeDataType == other.computeDataType;
     }
 
-    static std::unordered_map<RmsnormFwdSignatureKey,
+    static std::unordered_map<RMSNormFwdSignatureKey,
                               std::unique_ptr<IGraphNodePlanBuilder>,
-                              RmsnormFwdSignatureKey>
+                              RMSNormFwdSignatureKey>
         getPlanBuilders()
     {
-        std::unordered_map<RmsnormFwdSignatureKey,
+        std::unordered_map<RMSNormFwdSignatureKey,
                            std::unique_ptr<IGraphNodePlanBuilder>,
-                           RmsnormFwdSignatureKey>
+                           RMSNormFwdSignatureKey>
             map;
 
         addPlanBuilder<hipdnn_data_sdk::data_objects::DataType::FLOAT,
@@ -128,22 +128,22 @@ struct RmsnormFwdSignatureKey
               hipdnn_data_sdk::data_objects::DataType ScaleDataTypeEnum,
               hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
               hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
-    static void addPlanBuilder(std::unordered_map<RmsnormFwdSignatureKey,
+    static void addPlanBuilder(std::unordered_map<RMSNormFwdSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
-                                                  RmsnormFwdSignatureKey>& map)
+                                                  RMSNormFwdSignatureKey>& map)
     {
-        map[RmsnormFwdSignatureKey(
+        map[RMSNormFwdSignatureKey(
             XDataTypeEnum, ScaleDataTypeEnum, OutputDataTypeEnum, ComputeDataTypeEnum)]
-            = std::make_unique<RmsnormFwdPlanBuilder<XDataTypeEnum,
+            = std::make_unique<RMSNormFwdPlanBuilder<XDataTypeEnum,
                                                      ScaleDataTypeEnum,
                                                      OutputDataTypeEnum,
                                                      ComputeDataTypeEnum>>();
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const RmsnormFwdSignatureKey& key)
+inline std::ostream& operator<<(std::ostream& os, const RMSNormFwdSignatureKey& key)
 {
-    os << "RmsnormFwd(x=" << key.xDataType << ", scale=" << key.scaleDataType
+    os << "RMSNormFwd(x=" << key.xDataType << ", scale=" << key.scaleDataType
        << ", y=" << key.outputDataType << ", compute=" << key.computeDataType << ")";
     return os;
 }

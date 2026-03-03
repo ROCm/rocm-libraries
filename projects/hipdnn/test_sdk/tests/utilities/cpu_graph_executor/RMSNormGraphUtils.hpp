@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "RmsnormTensorBundles.hpp"
+#include "RMSNormTensorBundles.hpp"
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -12,14 +12,14 @@ namespace hipdnn_sdk_test_utils
 {
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildRmsnormFwdGraph(hipdnn_data_sdk::data_objects::DataType inputDataType,
+    buildRMSNormFwdGraph(hipdnn_data_sdk::data_objects::DataType inputDataType,
                          hipdnn_data_sdk::data_objects::DataType scaleDataType,
                          hipdnn_data_sdk::data_objects::DataType computeDataType,
                          const std::vector<int64_t>& dims,
                          const hipdnn_data_sdk::utilities::TensorLayout& layout)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
-    graph->set_name("RmsnormFwdTest");
+    graph->set_name("RMSNormFwdTest");
 
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
@@ -78,14 +78,14 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
 }
 
 inline std::shared_ptr<hipdnn_frontend::graph::Graph>
-    buildRmsnormFwdGraphWithBias(hipdnn_data_sdk::data_objects::DataType inputDataType,
+    buildRMSNormFwdGraphWithBias(hipdnn_data_sdk::data_objects::DataType inputDataType,
                                  hipdnn_data_sdk::data_objects::DataType scaleDataType,
                                  hipdnn_data_sdk::data_objects::DataType computeDataType,
                                  const std::vector<int64_t>& dims,
                                  const hipdnn_data_sdk::utilities::TensorLayout& layout)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
-    graph->set_name("RmsnormFwdWithBiasTest");
+    graph->set_name("RMSNormFwdWithBiasTest");
 
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, layout.strideOrder);
 

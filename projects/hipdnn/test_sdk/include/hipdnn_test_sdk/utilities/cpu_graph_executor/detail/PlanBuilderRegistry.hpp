@@ -15,7 +15,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanRegistrySignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RmsnormFwdPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdPlan.hpp>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <sstream>

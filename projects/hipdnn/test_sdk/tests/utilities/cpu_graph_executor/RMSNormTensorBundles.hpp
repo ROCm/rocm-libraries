@@ -11,9 +11,9 @@
 namespace hipdnn_sdk_test_utils
 {
 
-struct RmsnormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
+struct RMSNormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
 {
-    RmsnormFwdTensorBundle(
+    RMSNormFwdTensorBundle(
         const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap,
@@ -28,9 +28,9 @@ struct RmsnormFwdTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBu
     }
 };
 
-struct RmsnormFwdWithBiasTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
+struct RMSNormFwdWithBiasTensorBundle : public hipdnn_test_sdk::utilities::GraphTensorBundle
 {
-    RmsnormFwdWithBiasTensorBundle(
+    RMSNormFwdWithBiasTensorBundle(
         const hipdnn_data_sdk::flatbuffer_utilities::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap,

@@ -13,7 +13,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-class CpuFpReferenceRmsnorm
+class CpuFpReferenceRMSNorm
 {
 public:
     /// RMSNorm forward: y = x / sqrt(mean(x^2) + epsilon) * scale [+ bias]

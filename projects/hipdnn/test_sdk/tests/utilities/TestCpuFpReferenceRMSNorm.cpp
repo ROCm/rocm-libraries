@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceRmsnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
@@ -17,19 +17,19 @@ struct TypePair
     using Second = T2;
 };
 
-using TypesRmsnormFwdNchw = ::testing::Types<TypePair<float, float>,
+using TypesRMSNormFwdNchw = ::testing::Types<TypePair<float, float>,
                                              TypePair<half, float>,
                                              TypePair<bfloat16, float>,
                                              TypePair<double, double>>;
 
 template <class T>
-class CpuFpReferenceRmsnormFwdNchw : public ::testing::Test
+class CpuFpReferenceRMSNormFwdNchw : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceRmsnormFwdNchw, TypesRmsnormFwdNchw, );
+TYPED_TEST_SUITE(CpuFpReferenceRMSNormFwdNchw, TypesRMSNormFwdNchw, );
 
-TYPED_TEST(CpuFpReferenceRmsnormFwdNchw, RmsnormFwdNchw)
+TYPED_TEST(CpuFpReferenceRMSNormFwdNchw, RMSNormFwdNchw)
 {
     Tensor<typename TypeParam::First> inputTensor({1, 3, 224, 224});
     Tensor<typename TypeParam::First> outputTensor({1, 3, 224, 224});
@@ -41,19 +41,19 @@ TYPED_TEST(CpuFpReferenceRmsnormFwdNchw, RmsnormFwdNchw)
         scaleTensor.setHostValue(static_cast<typename TypeParam::Second>(1.0), 0, i);
     }
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
 }
 
-using TypesRmsnormFwdNhwc = ::testing::Types<TypePair<float, float>, TypePair<half, bfloat16>>;
+using TypesRMSNormFwdNhwc = ::testing::Types<TypePair<float, float>, TypePair<half, bfloat16>>;
 
 template <class T>
-class CpuFpReferenceRmsnormFwdNhwc : public ::testing::Test
+class CpuFpReferenceRMSNormFwdNhwc : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(CpuFpReferenceRmsnormFwdNhwc, TypesRmsnormFwdNhwc, );
+TYPED_TEST_SUITE(CpuFpReferenceRMSNormFwdNhwc, TypesRMSNormFwdNhwc, );
 
-TYPED_TEST(CpuFpReferenceRmsnormFwdNhwc, RmsnormFwdNhwc)
+TYPED_TEST(CpuFpReferenceRMSNormFwdNhwc, RMSNormFwdNhwc)
 {
     Tensor<typename TypeParam::First> inputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
     Tensor<typename TypeParam::First> outputTensor({6, 3, 32, 32}, TensorLayout::NHWC);
@@ -65,10 +65,10 @@ TYPED_TEST(CpuFpReferenceRmsnormFwdNhwc, RmsnormFwdNhwc)
         scaleTensor.setHostValue(static_cast<typename TypeParam::Second>(1.0), 0, i);
     }
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
 }
 
-TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdSanityValidationNchw)
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdSanityValidationNchw)
 {
     // RMSNorm: y = x / sqrt(mean(x^2) + epsilon) * scale
     const std::vector<int64_t> dims = {1, 1, 2, 2};
@@ -100,7 +100,7 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdSanityValidationNchw)
     const std::vector<double> expectedOutput
         = {1.0 * invRmsExpected, 2.0 * invRmsExpected, 3.0 * invRmsExpected, 4.0 * invRmsExpected};
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
 
     auto tolerance = 1e-6;
 
@@ -110,7 +110,7 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdSanityValidationNchw)
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), expectedOutput[3], tolerance);
 }
 
-TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdWithInvRms)
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdWithInvRms)
 {
     const std::vector<int64_t> dims = {1, 1, 2, 2};
 
@@ -131,7 +131,7 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdWithInvRms)
 
     double invRmsExpected = 1.0 / std::sqrt(7.5 + epsilon);
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, epsilon, &invRmsTensor);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon, &invRmsTensor);
 
     auto tolerance = 1e-5;
 
@@ -144,7 +144,7 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdWithInvRms)
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), 4.0 * invRmsExpected * 2.0, tolerance);
 }
 
-TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdMultipleChannels)
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdMultipleChannels)
 {
     const std::vector<int64_t> dims = {1, 2, 1, 2};
 
@@ -170,7 +170,7 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdMultipleChannels)
     // Channel 1: mean(x^2) = (9+16)/2 = 12.5, inv_rms = 1/sqrt(12.5+eps)
     double invRms1 = 1.0 / std::sqrt(12.5 + epsilon);
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
 
     auto tolerance = 1e-6;
 
@@ -183,7 +183,7 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdMultipleChannels)
     EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 1), 4.0 * invRms1 * 2.0, tolerance);
 }
 
-TEST(TestCpuFpReferenceRmsnormFp32, RmsnormFwd2D)
+TEST(TestCpuFpReferenceRMSNormFp32, RMSNormFwd2D)
 {
     // Test with 2D tensor (batch, channel)
     Tensor<float> inputTensor({4, 3});
@@ -196,10 +196,10 @@ TEST(TestCpuFpReferenceRmsnormFp32, RmsnormFwd2D)
         scaleTensor.setHostValue(1.0f, 0, i);
     }
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
 }
 
-TEST(TestCpuFpReferenceRmsnormFp32, RmsnormFwd3D)
+TEST(TestCpuFpReferenceRMSNormFp32, RMSNormFwd3D)
 {
     // Test with 3D tensor (batch, channel, length)
     Tensor<float> inputTensor({2, 3, 10});
@@ -212,10 +212,10 @@ TEST(TestCpuFpReferenceRmsnormFp32, RmsnormFwd3D)
         scaleTensor.setHostValue(2.0f, 0, i);
     }
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
 }
 
-TEST(TestCpuFpReferenceRmsnormFp32, RmsnormFwdNcdhw)
+TEST(TestCpuFpReferenceRMSNormFp32, RMSNormFwdNcdhw)
 {
     // Test with 5D tensor (batch, channel, depth, height, width)
     Tensor<float> inputTensor({2, 3, 4, 5, 6});
@@ -228,10 +228,10 @@ TEST(TestCpuFpReferenceRmsnormFp32, RmsnormFwdNcdhw)
         scaleTensor.setHostValue(1.0f, 0, i);
     }
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
 }
 
-TEST(TestCpuFpReferenceRmsnormFp32, RmsnormFwdNdhwc)
+TEST(TestCpuFpReferenceRMSNormFp32, RMSNormFwdNdhwc)
 {
     Tensor<float> inputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
     Tensor<float> outputTensor({2, 3, 4, 5, 6}, TensorLayout::NDHWC);
@@ -243,10 +243,10 @@ TEST(TestCpuFpReferenceRmsnormFp32, RmsnormFwdNdhwc)
         scaleTensor.setHostValue(2.0f, 0, i);
     }
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, 1e-5);
 }
 
-TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdConstantInput)
+TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdConstantInput)
 {
     // When all inputs are the same constant c, mean(x^2) = c^2
     // inv_rms = 1/sqrt(c^2+eps) ~ 1/c
@@ -263,7 +263,7 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdConstantInput)
 
     double epsilon = 1e-5;
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
 
     double invRms = 1.0 / std::sqrt(c * c + epsilon);
     double expectedY = c * invRms * 2.0;
@@ -276,7 +276,7 @@ TEST(TestCpuFpReferenceRmsnormFp64, RmsnormFwdConstantInput)
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), expectedY, tolerance);
 }
 
-TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdWithBias)
+TEST(TestCpuFpReferenceRMSNorm, RMSNormFwdWithBias)
 {
     // bias is added per-channel after scale multiplication:
     // y = x / rms * scale + bias
@@ -297,7 +297,7 @@ TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdWithBias)
     double epsilon = 0.0; // zero epsilon so inv_rms = 1
 
     Tensor<float>* noInvRms = nullptr;
-    CpuFpReferenceRmsnorm::forward(
+    CpuFpReferenceRMSNorm::forward(
         inputTensor, scaleTensor, outputTensor, epsilon, noInvRms, &biasTensor);
 
     // y = x * invRms * scale + bias = 1 * 1 * scale + bias
@@ -317,7 +317,7 @@ TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdWithBias)
     EXPECT_NEAR(outputTensor.getHostValue(0, 1, 1, 1), expectedC1, tolerance);
 }
 
-TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdBiasIsOptional)
+TEST(TestCpuFpReferenceRMSNorm, RMSNormFwdBiasIsOptional)
 {
     // Passing nullptr bias should give the same result as no-bias call
     const std::vector<int64_t> dims = {1, 1, 2, 2};
@@ -331,10 +331,10 @@ TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdBiasIsOptional)
     scaleTensor.setHostValue(1.5f, 0, 0);
     double epsilon = 1e-5;
 
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputNoBias, epsilon);
+    CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputNoBias, epsilon);
     Tensor<float>* noInvRms2 = nullptr;
     Tensor<float>* noBias = nullptr;
-    CpuFpReferenceRmsnorm::forward(
+    CpuFpReferenceRMSNorm::forward(
         inputTensor, scaleTensor, outputNullBias, epsilon, noInvRms2, noBias);
 
     auto tolerance = 1e-6f;

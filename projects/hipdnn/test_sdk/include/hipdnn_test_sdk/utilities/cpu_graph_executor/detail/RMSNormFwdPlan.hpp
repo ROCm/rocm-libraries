@@ -9,7 +9,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceRmsnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
@@ -19,10 +19,10 @@
 namespace hipdnn_test_sdk::detail
 {
 
-struct RmsnormFwdParams
+struct RMSNormFwdParams
 {
-    RmsnormFwdParams() = default;
-    RmsnormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
+    RMSNormFwdParams() = default;
+    RMSNormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes)
@@ -33,7 +33,7 @@ struct RmsnormFwdParams
     {
     }
 
-    RmsnormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
+    RMSNormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
@@ -61,10 +61,10 @@ template <typename XDataType,
           typename ScaleDataType,
           typename OutputDataType,
           typename ComputeDataType>
-class RmsnormFwdPlan : public IGraphNodePlanExecutor
+class RMSNormFwdPlan : public IGraphNodePlanExecutor
 {
 public:
-    RmsnormFwdPlan(RmsnormFwdParams&& params)
+    RMSNormFwdPlan(RMSNormFwdParams&& params)
         : _params(std::move(params))
     {
     }
@@ -95,7 +95,7 @@ public:
             auto shallowInvRmsTensor = createShallowTensor<ComputeDataType>(
                 _params.invRmsTensor, variantPack.at(_params.invRmsTensor.uid));
 
-            utilities::CpuFpReferenceRmsnorm::
+            utilities::CpuFpReferenceRMSNorm::
                 forward<XDataType, ScaleDataType, OutputDataType, ComputeDataType>(
                     *shallowXTensor,
                     *shallowScaleTensor,
@@ -106,7 +106,7 @@ public:
         }
         else
         {
-            utilities::CpuFpReferenceRmsnorm::
+            utilities::CpuFpReferenceRMSNorm::
                 forward<XDataType, ScaleDataType, OutputDataType, ComputeDataType>(
                     *shallowXTensor,
                     *shallowScaleTensor,
@@ -118,14 +118,14 @@ public:
     }
 
 private:
-    RmsnormFwdParams _params;
+    RMSNormFwdParams _params;
 };
 
 template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
           hipdnn_data_sdk::data_objects::DataType ScaleDataTypeEnum,
           hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
           hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
-class RmsnormFwdPlanBuilder : public IGraphNodePlanBuilder
+class RMSNormFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
     using XDataType = utilities::DataTypeToNative<XDataTypeEnum>;
@@ -185,7 +185,7 @@ public:
 
         const auto& tensorMap = graph.getTensorMap();
 
-        RmsnormFwdParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
+        RMSNormFwdParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
                                 *tensorMap.at(nodeAttributes->scale_tensor_uid()),
                                 *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
                                 *tensorMap.at(nodeAttributes->y_tensor_uid()));
@@ -205,7 +205,7 @@ public:
         }
 
         return std::make_unique<
-            RmsnormFwdPlan<XDataType, ScaleDataType, OutputDataType, ComputeDataType>>(
+            RMSNormFwdPlan<XDataType, ScaleDataType, OutputDataType, ComputeDataType>>(
             std::move(params));
     }
 };
