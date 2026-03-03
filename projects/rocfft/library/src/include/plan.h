@@ -301,6 +301,13 @@ struct rocfft_plan_t
     // after the space requirements are finalized.
     void AllocateInternalTempBuffers();
 
+    /**
+     * @return The lengths provided by the user at creation of this object
+     * @note Trivial unit-length dimensions are erased at plan creation,
+     * therefore *NOT* returned by this function.
+     */
+    std::vector<size_t> get_user_facing_lengths() const;
+
 private:
     // Multi-node or multi-GPU plan is built up from a vector of plan
     // items.  Items can launch kernels on a device, or move

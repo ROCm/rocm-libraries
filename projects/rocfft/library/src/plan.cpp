@@ -281,7 +281,7 @@ try
         if(user_io_strides)
         {
             desc_io_layout.len_axes.resize(user_io_strides_sz);
-            for(size_t dim = 0; dim < in_strides_size; dim++)
+            for(size_t dim = 0; dim < user_io_strides_sz; dim++)
                 desc_io_layout.len_axes[dim].inbuffer_stride = user_io_strides[dim];
         }
         if(user_io_dist != 0)
@@ -473,6 +473,16 @@ catch(...)
     return rocfft_handle_exception();
 }
 
+std::vector<size_t> rocfft_plan_t::get_user_facing_lengths() const
+{
+    if(transformType == rocfft_transform_type_complex_forward
+       || transformType == rocfft_transform_type_real_forward)
+    {
+        return desc.input_layout.lengths();
+    }
+    return desc.output_layout.lengths();
+}
+
 std::string rocfft_bench_command(const rocfft_plan& plan)
 {
     rocfft_params params;
@@ -488,10 +498,7 @@ std::string rocfft_bench_command(const rocfft_plan& plan)
     params.scale_factor   = plan->desc.storeOps.scale_factor;
 
     // reverse-copy lengths and strides (col-major to row-major)
-    const auto lengths  = plan->transformType == rocfft_transform_type_complex_forward
-                                 || plan->transformType == rocfft_transform_type_real_forward
-                              ? plan->desc.input_layout.lengths()
-                              : plan->desc.output_layout.lengths();
+    const auto lengths  = plan->get_user_facing_lengths();
     const auto istrides = plan->desc.input_layout.strides();
     const auto ostrides = plan->desc.output_layout.strides();
     params.length.assign(lengths.rbegin(), lengths.rend());
@@ -548,19 +555,15 @@ rocfft_location_t rocfft_plan_description_t::get_current_location() const
 // tree plan.
 void set_rootplan_params(const rocfft_plan plan, NodeMetaData& planData)
 {
-    planData.dimension = plan->desc.rank();
-    planData.batch     = plan->desc.batch();
-    for(size_t i = 0; i < plan->desc.rank(); i++)
-    {
-        planData.length       = plan->desc.input_layout.lengths();
-        planData.outputLength = plan->desc.output_layout.lengths();
-
-        planData.inStride  = plan->desc.input_layout.strides();
-        planData.outStride = plan->desc.output_layout.strides();
-    }
-    planData.iDist     = plan->desc.input_layout.distance();
-    planData.oDist     = plan->desc.output_layout.distance();
-    planData.placement = plan->placement;
+    planData.dimension    = plan->desc.rank();
+    planData.batch        = plan->desc.batch();
+    planData.length       = plan->desc.input_layout.lengths();
+    planData.outputLength = plan->desc.output_layout.lengths();
+    planData.inStride     = plan->desc.input_layout.strides();
+    planData.outStride    = plan->desc.output_layout.strides();
+    planData.iDist        = plan->desc.input_layout.distance();
+    planData.oDist        = plan->desc.output_layout.distance();
+    planData.placement    = plan->placement;
 
     // If in+out fields are specified, currently that means we're
     // gathering the data to one device and doing FFT there.  So
@@ -630,10 +633,7 @@ void set_bluestein_strides(const rocfft_plan plan, NodeMetaData& planData)
     const auto precision     = plan->precision;
     const auto transformType = plan->transformType;
     const auto rank          = plan->desc.rank();
-    const auto fftLength     = transformType == rocfft_transform_type_complex_forward
-                                   || transformType == rocfft_transform_type_real_forward
-                                   ? plan->desc.input_layout.lengths()
-                                   : plan->desc.output_layout.lengths();
+    const auto fftLength     = plan->get_user_facing_lengths();
     const auto placement     = plan->placement;
     const auto dimension     = planData.dimension;
 
@@ -3698,10 +3698,7 @@ try
 
     rocfft_cout << "dimensions: " << plan->desc.rank() << std::endl;
 
-    const auto lengths = plan->transformType == rocfft_transform_type_complex_forward
-                                 || plan->transformType == rocfft_transform_type_real_forward
-                             ? plan->desc.input_layout.lengths()
-                             : plan->desc.output_layout.lengths();
+    const auto lengths = plan->get_user_facing_lengths();
     rocfft_cout << "lengths: " << lengths[0];
     for(size_t i = 1; i < plan->desc.rank(); i++)
         rocfft_cout << ", " << lengths[i];

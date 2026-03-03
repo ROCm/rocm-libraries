@@ -30,13 +30,15 @@
 
 namespace
 {
-    std::vector<size_t> concatenate(const std::vector<size_t>& a, const std::vector<size_t>& b)
+    template <typename T>
+    std::vector<T> concatenate(const std::vector<T>& a, const std::vector<T>& b)
     {
         auto ret = a;
         std::copy(b.begin(), b.end(), std::back_inserter(ret));
         return ret;
     }
-    std::vector<size_t> concatenate(const std::vector<size_t>& a, const size_t& b)
+    template <typename T>
+    std::vector<T> concatenate(const std::vector<T>& a, const T& b)
     {
         auto ret = a;
         ret.push_back(b);
