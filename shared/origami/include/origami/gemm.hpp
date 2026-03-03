@@ -226,7 +226,7 @@ dim4_t wgm_to_grid(const dim4_t& grid, const workgroup_mapping_t& wgm_mapping, s
  * @param count Number of workgroups in the range.
  * @return dim4_t Unique tile counts in each dimension.
  */
- dim4_t count_unique_range(const dim4_t& grid, size_t wgm, size_t start, size_t count);
+ dim4_t count_unique_range(const dim4_t& grid, int wgm, size_t start, size_t count);
 
 /**
  * @brief Count unique tiles for a specific XCD during a specific timestep.
