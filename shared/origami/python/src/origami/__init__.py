@@ -21,6 +21,7 @@ try:
         config_t,
         prediction_result_t,
         workgroup_mapping_t,
+        staggerU_t,
         problem_t,
         hardware_t,
         # Hardware functions
