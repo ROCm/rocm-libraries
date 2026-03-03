@@ -48,7 +48,7 @@ TEST(TestBatchnormFwdInferenceParams, HasCorrectTensorPointersForSingleNode)
 }
 
 // ============================================================================
-// BatchnormFwdInferencePlan - ICompilablePlan interface
+// BatchnormFwdInferencePlan
 // ============================================================================
 
 namespace
