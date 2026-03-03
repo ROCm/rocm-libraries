@@ -64,14 +64,19 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     yTensorAttr->set_stride(strides);
     yTensorAttr->set_is_virtual(false);
 
+    // invRms has one value per (batch, spatial) position: shape [N, 1, H, W, ...]
+    auto invRmsDims = dims;
+    invRmsDims[1] = 1;
+    auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
+
     auto& invRmsTensorAttr = outputTensorsAttr[1];
     if(!invRmsTensorAttr->has_uid())
     {
         invRmsTensorAttr->set_uid(uid++);
     }
     invRmsTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(computeDataType));
-    invRmsTensorAttr->set_dim(derivedDims);
-    invRmsTensorAttr->set_stride(derivedStrides);
+    invRmsTensorAttr->set_dim(invRmsDims);
+    invRmsTensorAttr->set_stride(invRmsStrides);
     invRmsTensorAttr->set_is_virtual(false);
 
     return graph;
@@ -137,14 +142,19 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     yTensorAttr->set_stride(strides);
     yTensorAttr->set_is_virtual(false);
 
+    // invRms has one value per (batch, spatial) position: shape [N, 1, H, W, ...]
+    auto invRmsDims = dims;
+    invRmsDims[1] = 1;
+    auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
+
     auto& invRmsTensorAttr = outputTensorsAttr[1];
     if(!invRmsTensorAttr->has_uid())
     {
         invRmsTensorAttr->set_uid(uid++);
     }
     invRmsTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(computeDataType));
-    invRmsTensorAttr->set_dim(derivedDims);
-    invRmsTensorAttr->set_stride(derivedStrides);
+    invRmsTensorAttr->set_dim(invRmsDims);
+    invRmsTensorAttr->set_stride(invRmsStrides);
     invRmsTensorAttr->set_is_virtual(false);
 
     return graph;

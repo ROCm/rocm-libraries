@@ -37,22 +37,14 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
     const auto& attributes = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
-    RMSNormFwdParams params;
-    if(attributes.inv_rms_tensor_uid().has_value())
-    {
-        params = RMSNormFwdParams(*tensorMap.at(attributes.x_tensor_uid()),
-                                  *tensorMap.at(attributes.scale_tensor_uid()),
-                                  *tensorMap.at(attributes.epsilon_tensor_uid()),
-                                  *tensorMap.at(attributes.y_tensor_uid()),
-                                  *tensorMap.at(attributes.inv_rms_tensor_uid().value()));
-    }
-    else
-    {
-        params = RMSNormFwdParams(*tensorMap.at(attributes.x_tensor_uid()),
-                                  *tensorMap.at(attributes.scale_tensor_uid()),
-                                  *tensorMap.at(attributes.epsilon_tensor_uid()),
-                                  *tensorMap.at(attributes.y_tensor_uid()));
-    }
+    const auto* invRmsPtr = attributes.inv_rms_tensor_uid().has_value()
+                                ? tensorMap.at(attributes.inv_rms_tensor_uid().value())
+                                : nullptr;
+    RMSNormFwdParams params(*tensorMap.at(attributes.x_tensor_uid()),
+                            *tensorMap.at(attributes.scale_tensor_uid()),
+                            *tensorMap.at(attributes.epsilon_tensor_uid()),
+                            *tensorMap.at(attributes.y_tensor_uid()),
+                            invRmsPtr);
 
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
@@ -132,13 +124,18 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
     const auto& attributes = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
+    const auto* invRmsBiasPtr = attributes.inv_rms_tensor_uid().has_value()
+                                    ? tensorMap.at(attributes.inv_rms_tensor_uid().value())
+                                    : nullptr;
+    ASSERT_TRUE(attributes.bias_tensor_uid().has_value());
+    const auto* biasPtr = tensorMap.at(attributes.bias_tensor_uid().value());
+
     RMSNormFwdParams params(*tensorMap.at(attributes.x_tensor_uid()),
                             *tensorMap.at(attributes.scale_tensor_uid()),
                             *tensorMap.at(attributes.epsilon_tensor_uid()),
-                            *tensorMap.at(attributes.y_tensor_uid()));
-    ASSERT_TRUE(attributes.bias_tensor_uid().has_value());
-    params.biasTensor = unpackTensorAttributes(*tensorMap.at(attributes.bias_tensor_uid().value()));
-    params.hasBias = true;
+                            *tensorMap.at(attributes.y_tensor_uid()),
+                            invRmsBiasPtr,
+                            biasPtr);
 
     double epsilon = extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
 
@@ -148,7 +145,7 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
         params.scaleTensor,
         directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
     auto shallowBiasTensor = createShallowTensor<float>(
-        params.biasTensor,
+        params.biasTensor.value(),
         directTensorBundle.tensors[attributes.bias_tensor_uid().value()]->rawHostData());
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());

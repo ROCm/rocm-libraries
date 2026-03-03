@@ -16,13 +16,14 @@ namespace hipdnn_test_sdk::utilities
 class CpuFpReferenceRMSNorm
 {
 public:
-    /// RMSNorm forward: y = x / sqrt(mean(x^2) + epsilon) * scale [+ bias]
+    /// RMSNorm forward: y = x / RMS(x) * scale [+ bias]
+    /// where RMS is computed over the channel dimension for each (batch, spatial) position
     ///
     /// @param x           Input tensor (NCHW or NHWC layout)
     /// @param scale       Per-channel scale tensor, shape [1, C, 1, ..., 1]
     /// @param y           Output tensor (same shape as x)
     /// @param epsilon     Small scalar for numerical stability
-    /// @param invRms      Optional output: 1 / sqrt(mean(x^2) + epsilon) per channel
+    /// @param invRms      Optional output: 1 / RMS(x) per (batch, spatial) position
     /// @param bias        Optional per-channel bias tensor, shape [1, C, 1, ..., 1]
     template <class XDataType, class ScaleDataType, class YDataType, class ComputeDataType = float>
     static void forward(const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
@@ -38,62 +39,60 @@ public:
                 "RMSNorm forward requires at least 2D tensor (batch and channel).");
         }
 
-        int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
-
-        auto nhw = static_cast<ComputeDataType>(elementsPerChannel);
+        auto nChannels = x.dims().at(1);
+        auto channelCount = static_cast<ComputeDataType>(nChannels);
         auto epsilonCompute = static_cast<ComputeDataType>(epsilon);
 
         // Build dimensions for iteration: [batch, spatial...]
         std::vector<int64_t> batchAndSpatial = {x.dims()[0]};
         batchAndSpatial.insert(batchAndSpatial.end(), x.dims().begin() + 2, x.dims().end());
 
-        auto rmsnormFwdFunc = [&](const std::vector<int64_t>& indices) {
-            auto cidx = indices[0];
+        auto rmsnormFwdFunc = [&](const std::vector<int64_t>& batchSpatialIndices) {
+            auto batchIdx = batchSpatialIndices[0];
+
+            // Compute sum of squares across channels for this (batch, spatial) position
             auto sumSquares = static_cast<ComputeDataType>(0.0);
+            for(int64_t c = 0; c < nChannels; ++c)
+            {
+                auto fullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
+                    batchIdx, c, batchSpatialIndices, 1);
+                auto inVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+                sumSquares += inVal * inVal;
+            }
 
-            // Calculate mean of squares for this channel
-            hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
-                    auto fullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
-                        batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
-                    auto inVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
-                    sumSquares = sumSquares + (inVal * inVal);
-                });
-
-            ComputeDataType meanSquares = sumSquares / nhw;
+            ComputeDataType meanSquares = sumSquares / channelCount;
             auto invRmsValue = static_cast<ComputeDataType>(1.0)
                                / hipdnn_data_sdk::types::sqrt(meanSquares + epsilonCompute);
 
-            // Apply normalization with scale: y = x * invRms * scale
-            hipdnn_data_sdk::utilities::iterateAlongDimensions(
-                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
-                    auto fullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
-                        batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
-                    auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
-                    auto xNorm = xVal * invRmsValue;
+            // Apply normalization: y = x * invRms * scale [+ bias]
+            for(int64_t c = 0; c < nChannels; ++c)
+            {
+                auto fullIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
+                    batchIdx, c, batchSpatialIndices, 1);
+                auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+                auto xNorm = xVal * invRmsValue;
 
-                    ComputeDataType yVal
-                        = static_cast<ComputeDataType>(scale.getHostValue(0, cidx)) * xNorm;
-                    if(bias != nullptr)
-                    {
-                        yVal += static_cast<ComputeDataType>(bias->getHostValue(0, cidx));
-                    }
-                    y.setHostValue(static_cast<YDataType>(yVal), fullIndices);
-                });
+                ComputeDataType yVal
+                    = static_cast<ComputeDataType>(scale.getHostValue(0, c)) * xNorm;
+                if(bias != nullptr)
+                {
+                    yVal += static_cast<ComputeDataType>(bias->getHostValue(0, c));
+                }
+                y.setHostValue(static_cast<YDataType>(yVal), fullIndices);
+            }
 
-            // Save inverse RMS for backward pass if provided
+            // Save inverse RMS if provided
             if(invRms != nullptr)
             {
-                invRms->setHostValue(static_cast<ComputeDataType>(invRmsValue), 0, cidx);
+                auto invRmsIndices = hipdnn_data_sdk::utilities::buildTensorIndices(
+                    batchIdx, static_cast<int64_t>(0), batchSpatialIndices, 1);
+                invRms->setHostValue(static_cast<ComputeDataType>(invRmsValue), invRmsIndices);
             }
         };
 
-        // Build dimensions for parallel iteration - only channels
-        auto nChannels = x.dims().at(1);
-        std::vector<int64_t> parallelDims = {nChannels};
-
+        // Parallelize across (batch, spatial) positions
         auto parallelFunc
-            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(rmsnormFwdFunc, parallelDims);
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(rmsnormFwdFunc, batchAndSpatial);
         parallelFunc(std::thread::hardware_concurrency());
 
         // Mark all modified tensors as host-modified
@@ -103,22 +102,6 @@ public:
         {
             invRms->memory().markHostModified();
         }
-    }
-
-private:
-    static int64_t calculateElementsPerChannel(const std::vector<int64_t>& dims)
-    {
-        if(dims.size() < 2)
-        {
-            throw std::runtime_error("Tensor must have at least 2 dimensions (batch and channel).");
-        }
-
-        int64_t elementsPerChannel = dims.at(0); // batch dimension
-        for(size_t i = 2; i < dims.size(); ++i)
-        {
-            elementsPerChannel *= dims.at(i);
-        }
-        return elementsPerChannel;
     }
 };
 

@@ -70,27 +70,31 @@ TYPED_TEST(CpuFpReferenceRMSNormFwdNhwc, RMSNormFwdNhwc)
 
 TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdSanityValidationNchw)
 {
-    // RMSNorm: y = x / sqrt(mean(x^2) + epsilon) * scale
-    const std::vector<int64_t> dims = {1, 1, 2, 2};
+    // RMSNorm: y = x / sqrt(mean_C(x^2) + epsilon) * scale
+    // Reduction is over the channel dimension; each (batch, spatial) position has its own RMS.
+    const std::vector<int64_t> dims = {1, 4, 1, 1};
 
     Tensor<double> inputTensor(dims);
     Tensor<double> outputTensor(dims);
-    Tensor<double> scaleTensor({1, 1});
+    Tensor<double> scaleTensor({1, 4});
 
-    // x = [1, 2, 3, 4]
+    // x = [1, 2, 3, 4] across 4 channels at a single spatial position
     inputTensor.setHostValue(1.0, 0, 0, 0, 0);
-    inputTensor.setHostValue(2.0, 0, 0, 0, 1);
-    inputTensor.setHostValue(3.0, 0, 0, 1, 0);
-    inputTensor.setHostValue(4.0, 0, 0, 1, 1);
+    inputTensor.setHostValue(2.0, 0, 1, 0, 0);
+    inputTensor.setHostValue(3.0, 0, 2, 0, 0);
+    inputTensor.setHostValue(4.0, 0, 3, 0, 0);
 
-    scaleTensor.setHostValue(1.0, 0, 0);
+    for(int i = 0; i < 4; i++)
+    {
+        scaleTensor.setHostValue(1.0, 0, i);
+    }
 
     double epsilon = 1e-5;
 
-    // mean(x^2) = (1 + 4 + 9 + 16) / 4 = 30 / 4 = 7.5
+    // mean_C(x^2) = (1 + 4 + 9 + 16) / 4 = 30 / 4 = 7.5
     // rms = sqrt(7.5 + 1e-5) = 2.73861278753...
     // inv_rms = 1 / rms = 0.36514837167...
-    // y = x * inv_rms * scale
+    // y[c] = x[c] * inv_rms * scale
     // y[0] = 1.0 * 0.36514837167 = 0.36514837167
     // y[1] = 2.0 * 0.36514837167 = 0.73029674335
     // y[2] = 3.0 * 0.36514837167 = 1.09544511502
@@ -105,27 +109,30 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdSanityValidationNchw)
     auto tolerance = 1e-6;
 
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), expectedOutput[0], tolerance);
-    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), expectedOutput[1], tolerance);
-    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 0), expectedOutput[2], tolerance);
-    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), expectedOutput[3], tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 0), expectedOutput[1], tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 2, 0, 0), expectedOutput[2], tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 3, 0, 0), expectedOutput[3], tolerance);
 }
 
 TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdWithInvRms)
 {
-    const std::vector<int64_t> dims = {1, 1, 2, 2};
+    const std::vector<int64_t> dims = {1, 4, 1, 1};
 
     Tensor<double> inputTensor(dims);
     Tensor<double> outputTensor(dims);
-    Tensor<double> scaleTensor({1, 1});
-    Tensor<float> invRmsTensor({1, 1});
+    Tensor<double> scaleTensor({1, 4});
+    Tensor<float> invRmsTensor({1, 1, 1, 1});
 
-    // x = [1, 2, 3, 4]
+    // x = [1, 2, 3, 4] across 4 channels
     inputTensor.setHostValue(1.0, 0, 0, 0, 0);
-    inputTensor.setHostValue(2.0, 0, 0, 0, 1);
-    inputTensor.setHostValue(3.0, 0, 0, 1, 0);
-    inputTensor.setHostValue(4.0, 0, 0, 1, 1);
+    inputTensor.setHostValue(2.0, 0, 1, 0, 0);
+    inputTensor.setHostValue(3.0, 0, 2, 0, 0);
+    inputTensor.setHostValue(4.0, 0, 3, 0, 0);
 
-    scaleTensor.setHostValue(2.0, 0, 0);
+    for(int i = 0; i < 4; i++)
+    {
+        scaleTensor.setHostValue(2.0, 0, i);
+    }
 
     double epsilon = 1e-5;
 
@@ -135,13 +142,14 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdWithInvRms)
 
     auto tolerance = 1e-5;
 
-    EXPECT_NEAR(static_cast<double>(invRmsTensor.getHostValue(0, 0)), invRmsExpected, tolerance);
+    EXPECT_NEAR(
+        static_cast<double>(invRmsTensor.getHostValue(0, 0, 0, 0)), invRmsExpected, tolerance);
 
     // y = x * inv_rms * scale (scale = 2.0)
     EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), 1.0 * invRmsExpected * 2.0, tolerance);
-    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), 2.0 * invRmsExpected * 2.0, tolerance);
-    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 0), 3.0 * invRmsExpected * 2.0, tolerance);
-    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 1, 1), 4.0 * invRmsExpected * 2.0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 0), 2.0 * invRmsExpected * 2.0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 2, 0, 0), 3.0 * invRmsExpected * 2.0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 3, 0, 0), 4.0 * invRmsExpected * 2.0, tolerance);
 }
 
 TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdMultipleChannels)
@@ -165,22 +173,22 @@ TEST(TestCpuFpReferenceRMSNormFp64, RMSNormFwdMultipleChannels)
 
     double epsilon = 1e-5;
 
-    // Channel 0: mean(x^2) = (1+4)/2 = 2.5, inv_rms = 1/sqrt(2.5+eps)
-    double invRms0 = 1.0 / std::sqrt(2.5 + epsilon);
-    // Channel 1: mean(x^2) = (9+16)/2 = 12.5, inv_rms = 1/sqrt(12.5+eps)
-    double invRms1 = 1.0 / std::sqrt(12.5 + epsilon);
+    // Position (0,0,0): channels [1,3], mean(x^2) = (1+9)/2 = 5
+    double invRmsPos0 = 1.0 / std::sqrt(5.0 + epsilon);
+    // Position (0,0,1): channels [2,4], mean(x^2) = (4+16)/2 = 10
+    double invRmsPos1 = 1.0 / std::sqrt(10.0 + epsilon);
 
     CpuFpReferenceRMSNorm::forward(inputTensor, scaleTensor, outputTensor, epsilon);
 
     auto tolerance = 1e-6;
 
     // Channel 0 (scale=1.0): y = x * inv_rms * 1.0
-    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), 1.0 * invRms0, tolerance);
-    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), 2.0 * invRms0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 0), 1.0 * invRmsPos0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 0, 0, 1), 2.0 * invRmsPos1, tolerance);
 
     // Channel 1 (scale=2.0): y = x * inv_rms * 2.0
-    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 0), 3.0 * invRms1 * 2.0, tolerance);
-    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 1), 4.0 * invRms1 * 2.0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 0), 3.0 * invRmsPos0 * 2.0, tolerance);
+    EXPECT_NEAR(outputTensor.getHostValue(0, 1, 0, 1), 4.0 * invRmsPos1 * 2.0, tolerance);
 }
 
 TEST(TestCpuFpReferenceRMSNormFp32, RMSNormFwd2D)

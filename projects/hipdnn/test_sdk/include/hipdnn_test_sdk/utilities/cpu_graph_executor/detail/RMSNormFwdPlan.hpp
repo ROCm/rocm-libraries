@@ -4,6 +4,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <variant>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
@@ -21,29 +22,24 @@ namespace hipdnn_test_sdk::detail
 
 struct RMSNormFwdParams
 {
-    RMSNormFwdParams() = default;
-    RMSNormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes)
-        : xTensor(unpackTensorAttributes(xAttributes))
-        , scaleTensor(unpackTensorAttributes(scaleAttributes))
-        , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
-        , yTensor(unpackTensorAttributes(yAttributes))
-    {
-    }
-
     RMSNormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
                      const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes& invRmsAttributes)
+                     const hipdnn_data_sdk::data_objects::TensorAttributes* invRmsAttributes
+                     = nullptr,
+                     const hipdnn_data_sdk::data_objects::TensorAttributes* biasAttributes
+                     = nullptr)
         : xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
         , yTensor(unpackTensorAttributes(yAttributes))
-        , invRmsTensor(unpackTensorAttributes(invRmsAttributes))
-        , hasInvRms(true)
+        , invRmsTensor(invRmsAttributes != nullptr
+                           ? std::make_optional(unpackTensorAttributes(*invRmsAttributes))
+                           : std::nullopt)
+        , biasTensor(biasAttributes != nullptr
+                         ? std::make_optional(unpackTensorAttributes(*biasAttributes))
+                         : std::nullopt)
     {
     }
 
@@ -51,10 +47,8 @@ struct RMSNormFwdParams
     hipdnn_data_sdk::data_objects::TensorAttributesT scaleTensor;
     hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
     hipdnn_data_sdk::data_objects::TensorAttributesT yTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT invRmsTensor;
-    bool hasInvRms = false;
-    hipdnn_data_sdk::data_objects::TensorAttributesT biasTensor;
-    bool hasBias = false;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> invRmsTensor;
+    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> biasTensor;
 };
 
 template <typename XDataType,
@@ -84,37 +78,28 @@ public:
             _params.epsilonTensor, "Epsilon");
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>> shallowBiasTensor;
-        if(_params.hasBias)
+        if(_params.biasTensor.has_value())
         {
             shallowBiasTensor = createShallowTensor<ScaleDataType>(
-                _params.biasTensor, variantPack.at(_params.biasTensor.uid));
+                *_params.biasTensor, variantPack.at(_params.biasTensor->uid));
         }
 
-        if(_params.hasInvRms)
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>>
+            shallowInvRmsTensor;
+        if(_params.invRmsTensor.has_value())
         {
-            auto shallowInvRmsTensor = createShallowTensor<ComputeDataType>(
-                _params.invRmsTensor, variantPack.at(_params.invRmsTensor.uid));
+            shallowInvRmsTensor = createShallowTensor<ComputeDataType>(
+                *_params.invRmsTensor, variantPack.at(_params.invRmsTensor->uid));
+        }
 
-            utilities::CpuFpReferenceRMSNorm::
-                forward<XDataType, ScaleDataType, OutputDataType, ComputeDataType>(
-                    *shallowXTensor,
-                    *shallowScaleTensor,
-                    *shallowYTensor,
-                    epsilon,
-                    shallowInvRmsTensor.get(),
-                    shallowBiasTensor.get());
-        }
-        else
-        {
-            utilities::CpuFpReferenceRMSNorm::
-                forward<XDataType, ScaleDataType, OutputDataType, ComputeDataType>(
-                    *shallowXTensor,
-                    *shallowScaleTensor,
-                    *shallowYTensor,
-                    epsilon,
-                    nullptr,
-                    shallowBiasTensor.get());
-        }
+        utilities::CpuFpReferenceRMSNorm::
+            forward<XDataType, ScaleDataType, OutputDataType, ComputeDataType>(
+                *shallowXTensor,
+                *shallowScaleTensor,
+                *shallowYTensor,
+                epsilon,
+                shallowInvRmsTensor.get(),
+                shallowBiasTensor.get());
     }
 
 private:
@@ -162,12 +147,16 @@ public:
         if(nodeAttributes->bias_tensor_uid().has_value())
         {
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->bias_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->bias_tensor_uid().value(), ScaleDataTypeEnum);
         }
 
         // inv_rms is optional
         if(nodeAttributes->inv_rms_tensor_uid().has_value())
         {
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_rms_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->inv_rms_tensor_uid().value(), ComputeDataTypeEnum);
         }
 
         return true;
@@ -185,24 +174,19 @@ public:
 
         const auto& tensorMap = graph.getTensorMap();
 
+        const auto* invRmsPtr = nodeAttributes->inv_rms_tensor_uid().has_value()
+                                    ? tensorMap.at(nodeAttributes->inv_rms_tensor_uid().value())
+                                    : nullptr;
+        const auto* biasPtr = nodeAttributes->bias_tensor_uid().has_value()
+                                  ? tensorMap.at(nodeAttributes->bias_tensor_uid().value())
+                                  : nullptr;
+
         RMSNormFwdParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
                                 *tensorMap.at(nodeAttributes->scale_tensor_uid()),
                                 *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
-                                *tensorMap.at(nodeAttributes->y_tensor_uid()));
-
-        if(nodeAttributes->inv_rms_tensor_uid().has_value())
-        {
-            params.invRmsTensor = unpackTensorAttributes(
-                *tensorMap.at(nodeAttributes->inv_rms_tensor_uid().value()));
-            params.hasInvRms = true;
-        }
-
-        if(nodeAttributes->bias_tensor_uid().has_value())
-        {
-            params.biasTensor
-                = unpackTensorAttributes(*tensorMap.at(nodeAttributes->bias_tensor_uid().value()));
-            params.hasBias = true;
-        }
+                                *tensorMap.at(nodeAttributes->y_tensor_uid()),
+                                invRmsPtr,
+                                biasPtr);
 
         return std::make_unique<
             RMSNormFwdPlan<XDataType, ScaleDataType, OutputDataType, ComputeDataType>>(
