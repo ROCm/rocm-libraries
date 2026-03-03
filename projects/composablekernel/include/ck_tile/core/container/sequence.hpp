@@ -280,17 +280,9 @@ struct sequence_merge<Seq>
     using type = Seq;
 };
 
-/// @brief Generate a compile-time sequence by applying a functor to indices 0..N-1.
-/// @tparam NSize Number of elements in the generated sequence.
-/// @tparam F Functor type; must be default-constructible with a constexpr call operator
-///         accepting number<I> (or index_t via implicit conversion) and returning index_t.
-///         Lambdas with captures cannot be used; use a template struct functor instead.
 namespace detail {
 
-// Helper that applies functor F to indices and produces a sequence.
-// F must be default-constructible with a constexpr call operator returning index_t.
-// The operator is called with number<I>, which implicitly converts to index_t.
-// Lambdas with captures cannot be used; use a template struct functor instead.
+// Bridge: converts __make_integer_seq index pack into a sequence via functor application.
 template <typename T, T... Ids>
 struct sequence_gen_helper
 {
@@ -300,6 +292,13 @@ struct sequence_gen_helper
 
 } // namespace detail
 
+/**
+ * @brief Generate a compile-time sequence by applying a functor to indices 0..N-1.
+ * @tparam NSize Number of elements in the generated sequence.
+ * @tparam F Functor type; must be default-constructible with a constexpr call operator
+ *         accepting number<I> (or index_t via implicit conversion) and returning index_t.
+ *         Lambdas with captures cannot be used; use a template struct functor instead.
+ */
 template <index_t NSize, typename F>
 struct sequence_gen
 {
@@ -417,6 +416,40 @@ struct sequence_inclusive_scan_impl<sequence<Is...>, Reduce, Init, Reverse>
 
     using type = decltype(compute(make_index_sequence<sizeof...(Is)>{}));
 };
+// Exclusive scan: result[0] = Init, result[i] = Reduce(values[i-1], result[i-1]) for i > 0.
+template <typename Seq, typename Reduce, index_t Init>
+struct sequence_exclusive_scan_impl;
+
+template <index_t... Is, typename Reduce, index_t Init>
+struct sequence_exclusive_scan_impl<sequence<Is...>, Reduce, Init>
+{
+    template <index_t... Indices>
+    static constexpr auto compute(sequence<Indices...>)
+    {
+        constexpr index_t size = sizeof...(Is);
+        if constexpr(size == 0)
+        {
+            return sequence<>{};
+        }
+        else
+        {
+            constexpr auto arr = []() {
+                static_array<index_t, size> values = {Is...};
+                static_array<index_t, size> result = {0};
+                result[0]                          = Init;
+                for(index_t i = 1; i < size; ++i)
+                {
+                    result[i] = Reduce{}(values[i - 1], result[i - 1]);
+                }
+                return result;
+            }();
+            return sequence<arr[Indices]...>{};
+        }
+    }
+
+    using type = decltype(compute(make_index_sequence<sizeof...(Is)>{}));
+};
+
 } // namespace detail
 
 template <typename Seq, typename Reduce, index_t Init>
@@ -755,10 +788,13 @@ struct is_valid_sequence_map
 {
 };
 
-/// @brief Compute the inverse permutation of a sequence map.
-/// @tparam Is A valid permutation of {0, 1, ..., N-1}.
-/// @pre Input must satisfy is_valid_sequence_map (enforced by static_assert).
-/// Optimized using constexpr for-loop: O(1) template instantiation depth instead of O(N).
+/**
+ * @brief Compute the inverse permutation of a sequence map.
+ * @tparam Is A valid permutation of {0, 1, ..., N-1}.
+ * @pre Input must satisfy is_valid_sequence_map (enforced by static_assert).
+ *
+ * Optimized using constexpr for-loop: O(1) template instantiation depth instead of O(N).
+ */
 template <index_t... Is>
 struct sequence_map_inverse<sequence<Is...>>
 {
@@ -972,43 +1008,18 @@ CK_TILE_HOST_DEVICE constexpr auto inclusive_scan_sequence(Seq, Reduce, number<I
 }
 
 // e.g. Seq<2, 3, 4> --> Seq<0, 2, 5>, Init=0, Reduce=Add
-//      ResultSeq  TargetSeq  Reduce
-template <typename, typename, typename>
-struct sequence_exclusive_scan;
-
-template <index_t... Xs, index_t Y, index_t... Ys, typename Reduce>
-struct sequence_exclusive_scan<sequence<Xs...>, sequence<Y, Ys...>, Reduce>
-{
-    using old_scan = typename sequence_merge<sequence<Xs...>,
-                                             sequence<Reduce{}(Y, sequence<Xs...>{}.back())>>::type;
-    using type     = typename sequence_exclusive_scan<old_scan, sequence<Ys...>, Reduce>::type;
-};
-
-template <index_t... Xs, index_t Y, typename Reduce>
-struct sequence_exclusive_scan<sequence<Xs...>, sequence<Y>, Reduce>
-{
-    using type = sequence<Xs...>;
-};
-
-template <index_t... Xs, typename Reduce>
-struct sequence_exclusive_scan<sequence<Xs...>, sequence<>, Reduce>
-{
-    using type = sequence<Xs...>;
-};
-
 template <typename Seq, typename Reduce, index_t Init>
 constexpr auto exclusive_scan_sequence(Seq, Reduce, number<Init>)
 {
-    // TODO: c++20 and later can pass in Reduce with a lambda expression
-    return typename sequence_exclusive_scan<sequence<Init>, Seq, Reduce>::type{};
+    return typename detail::sequence_exclusive_scan_impl<Seq, Reduce, Init>::type{};
 }
 
+// e.g. Seq<2, 3, 4> --> Seq<0, 2, 5, 9> (N+1 elements: prefix sums including both endpoints)
 template <typename Seq>
 constexpr auto prefix_sum_sequence(Seq)
 {
-    return typename sequence_exclusive_scan<sequence<0>,
-                                            typename sequence_merge<Seq, sequence<0>>::type,
-                                            plus<index_t>>::type{};
+    using extended = typename sequence_merge<Seq, sequence<0>>::type;
+    return typename detail::sequence_exclusive_scan_impl<extended, plus<index_t>, 0>::type{};
 }
 
 template <typename Seq, index_t... Is>

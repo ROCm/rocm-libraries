@@ -2,17 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 
 namespace ck_tile {
 
-/// @brief Fixed-size array with aggregate initialization for constexpr contexts.
-///
-/// Unlike ck_tile::array, this has no custom constructors, making it a literal type
-/// suitable for constexpr evaluation and GPU kernel code. Use ck_tile::array when
-/// constructors or non-trivial initialization are needed.
-/// Use aggregate initialization: static_array<int, 3> arr{1, 2, 3};
+/**
+ * @brief Fixed-size array with aggregate initialization for constexpr contexts.
+ *
+ * Unlike ck_tile::array, this has no custom constructors, making it a literal type
+ * suitable for constexpr evaluation and GPU kernel code. Use ck_tile::array when
+ * constructors or non-trivial initialization are needed.
+ * Use aggregate initialization: static_array<int, 3> arr{1, 2, 3};
+ */
 template <typename T, index_t N>
 struct static_array
 {
@@ -24,6 +27,6 @@ struct static_array
     CK_TILE_HOST_DEVICE constexpr const T& operator[](index_t i) const { return elems[i]; }
     CK_TILE_HOST_DEVICE constexpr T& operator[](index_t i) { return elems[i]; }
 
-    CK_TILE_HOST_DEVICE constexpr static index_t size() { return N; }
+    CK_TILE_HOST_DEVICE static constexpr index_t size() { return N; }
 };
 } // namespace ck_tile

@@ -1,11 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-/**
- * @file test_sequence.cpp
- * @brief Unit tests for ck_tile::sequence metaprogramming utilities.
- */
-
 #include <gtest/gtest.h>
 #include "ck_tile/core/container/sequence.hpp"
 #include "ck_tile/core/utility/functional.hpp"
@@ -563,4 +558,83 @@ TEST(CkTileSequence, Transform)
     EXPECT_EQ(result.at(0), 2);
     EXPECT_EQ(result.at(1), 4);
     EXPECT_EQ(result.at(2), 6);
+}
+
+// ============================================================================
+// exclusive_scan_sequence tests
+// ============================================================================
+
+TEST(CkTileSequence, ExclusiveScanSum)
+{
+    // <2, 3, 4> with Init=0, Add -> <0, 2, 5>
+    constexpr auto result =
+        exclusive_scan_sequence(sequence<2, 3, 4>{}, plus<index_t>{}, number<0>{});
+    EXPECT_EQ(result.at(0), 0);
+    EXPECT_EQ(result.at(1), 2);
+    EXPECT_EQ(result.at(2), 5);
+}
+
+TEST(CkTileSequence, ExclusiveScanProduct)
+{
+    // <2, 3, 4> with Init=1, Mul -> <1, 2, 6>
+    constexpr auto result =
+        exclusive_scan_sequence(sequence<2, 3, 4>{}, multiplies<index_t>{}, number<1>{});
+    EXPECT_EQ(result.at(0), 1);
+    EXPECT_EQ(result.at(1), 2);
+    EXPECT_EQ(result.at(2), 6);
+}
+
+TEST(CkTileSequence, ExclusiveScanSingle)
+{
+    constexpr auto result = exclusive_scan_sequence(sequence<5>{}, plus<index_t>{}, number<0>{});
+    EXPECT_EQ(decltype(result)::size(), 1);
+    EXPECT_EQ(result.at(0), 0);
+}
+
+TEST(CkTileSequence, ExclusiveScanEmpty)
+{
+    constexpr auto result = exclusive_scan_sequence(sequence<>{}, plus<index_t>{}, number<0>{});
+    EXPECT_EQ(decltype(result)::size(), 0);
+}
+
+TEST(CkTileSequence, ExclusiveScanNonZeroInit)
+{
+    // <1, 2, 3> with Init=10, Add -> <10, 11, 13>
+    constexpr auto result =
+        exclusive_scan_sequence(sequence<1, 2, 3>{}, plus<index_t>{}, number<10>{});
+    EXPECT_EQ(result.at(0), 10);
+    EXPECT_EQ(result.at(1), 11);
+    EXPECT_EQ(result.at(2), 13);
+}
+
+// ============================================================================
+// prefix_sum_sequence tests
+// ============================================================================
+
+TEST(CkTileSequence, PrefixSumSequence)
+{
+    // <2, 3, 4> -> <0, 2, 5, 9> (N+1 elements)
+    constexpr auto result = prefix_sum_sequence(sequence<2, 3, 4>{});
+    EXPECT_EQ(decltype(result)::size(), 4);
+    EXPECT_EQ(result.at(0), 0);
+    EXPECT_EQ(result.at(1), 2);
+    EXPECT_EQ(result.at(2), 5);
+    EXPECT_EQ(result.at(3), 9);
+}
+
+TEST(CkTileSequence, PrefixSumSingle)
+{
+    // <5> -> <0, 5>
+    constexpr auto result = prefix_sum_sequence(sequence<5>{});
+    EXPECT_EQ(decltype(result)::size(), 2);
+    EXPECT_EQ(result.at(0), 0);
+    EXPECT_EQ(result.at(1), 5);
+}
+
+TEST(CkTileSequence, PrefixSumEmpty)
+{
+    // <> -> <0>
+    constexpr auto result = prefix_sum_sequence(sequence<>{});
+    EXPECT_EQ(decltype(result)::size(), 1);
+    EXPECT_EQ(result.at(0), 0);
 }
