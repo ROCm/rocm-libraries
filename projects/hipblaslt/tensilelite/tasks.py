@@ -122,6 +122,7 @@ def build_client(
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DGPU_TARGETS={gpu_targets}",
             f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={_cmake_bool(enable_rocprof)}",
+            "-DCMAKE_CXX_FLAGS=-march=native",
         ]
 
         if rocm_path:
