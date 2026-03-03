@@ -416,6 +416,7 @@ struct sequence_inclusive_scan_impl<sequence<Is...>, Reduce, Init, Reverse>
 
     using type = decltype(compute(make_index_sequence<sizeof...(Is)>{}));
 };
+
 // Exclusive scan: result[0] = Init, result[i] = Reduce(values[i-1], result[i-1]) for i > 0.
 template <typename Seq, typename Reduce, index_t Init>
 struct sequence_exclusive_scan_impl;
@@ -1009,14 +1010,14 @@ CK_TILE_HOST_DEVICE constexpr auto inclusive_scan_sequence(Seq, Reduce, number<I
 
 // e.g. Seq<2, 3, 4> --> Seq<0, 2, 5>, Init=0, Reduce=Add
 template <typename Seq, typename Reduce, index_t Init>
-constexpr auto exclusive_scan_sequence(Seq, Reduce, number<Init>)
+CK_TILE_HOST_DEVICE constexpr auto exclusive_scan_sequence(Seq, Reduce, number<Init>)
 {
     return typename detail::sequence_exclusive_scan_impl<Seq, Reduce, Init>::type{};
 }
 
 // e.g. Seq<2, 3, 4> --> Seq<0, 2, 5, 9> (N+1 elements: prefix sums including both endpoints)
 template <typename Seq>
-constexpr auto prefix_sum_sequence(Seq)
+CK_TILE_HOST_DEVICE constexpr auto prefix_sum_sequence(Seq)
 {
     using extended = typename sequence_merge<Seq, sequence<0>>::type;
     return typename detail::sequence_exclusive_scan_impl<extended, plus<index_t>, 0>::type{};
