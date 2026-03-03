@@ -13,6 +13,10 @@ struct MXScalePointer
     static constexpr int GranularityMN = SharedGranularityMN;
     static constexpr int GranularityK  = SharedGranularityK;
 
+    static_assert(GranularityK != 0,
+                  "GranularityK cannot be zero in primary template; "
+                  "use the partial specialization for GranularityK == 0");
+
     const ScaleType* ptr;
 
     CK_TILE_HOST_DEVICE MXScalePointer() = default;
