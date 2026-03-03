@@ -507,6 +507,12 @@ struct GroupedGemmKernel
         const index_t group_id = FindGroupId(gemm_desc_ptr, block_id, group_count);
         const auto& kargs      = gemm_desc_ptr[group_id];
 
+        // Early exit if no work to do.
+        if(kargs.group_karg.M == 0 || kargs.group_karg.N == 0 || kargs.group_karg.K == 0)
+        {
+            return;
+        }
+
         const auto grid_size_2d = TilePartitioner::GridSize(kargs.group_karg.M, kargs.group_karg.N);
         const auto block_idx_2d = OffsetTile1DPartitioner::GetOffsetedTileIndex(
             0,
@@ -534,6 +540,16 @@ struct GroupedGemmKernel
             const auto& k_batch    = kargs.k_batch;
             const auto block_start = cum_grid_size;
             cum_grid_size += TilePartitioner::GridSize(kargs.M, kargs.N) * k_batch;
+
+            // Early exit if no work to do.
+            // If M or N would be zero then the TilePartitioner::GridSize(kargs.M, kargs.N) would
+            // return zero and block_id would be less than cum_grid_size.
+            if(kargs.K == 0)
+            {
+                block_id = block_id + grid_size; // advance to next block
+                continue;
+            }
+
             while(block_id < cum_grid_size)
             {
                 const auto grid_size_2d = TilePartitioner::GridSize(kargs.M, kargs.N);
