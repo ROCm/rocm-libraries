@@ -57,6 +57,7 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionWrwOperationDescriptor>();
+        break;
     case HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
         privateDesc = std::make_shared<KnobSettingDescriptor>();
         break;
