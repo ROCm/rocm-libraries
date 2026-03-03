@@ -8,10 +8,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <cstdlib>
 #include <dirent.h>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -20,20 +20,20 @@
 #endif
 
 #if CK_TILE_FMHA_ENABLE_HEAD_GROUPING
+CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_FMHA_HEAD_GROUP_LOG)
+CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_FMHA_DISABLE_HEAD_GROUPING)
+CK_TILE_DECLARE_ENV_VAR_UINT64(CK_TILE_FMHA_LLC_CACHE_MB)
+
 namespace fmha_fwd_head_grouping {
 
 inline bool log_enabled()
 {
-    const char* env = std::getenv("CK_TILE_FMHA_HEAD_GROUP_LOG");
-    return env != nullptr && std::atoi(env) == 1;
+    return ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_FMHA_HEAD_GROUP_LOG));
 }
 
 inline bool disabled_by_env()
 {
-    const char* env_disable = std::getenv("CK_TILE_FMHA_DISABLE_HEAD_GROUPING");
-    if(env_disable != nullptr && std::atoi(env_disable) == 1)
-        return true;
-    return false;
+    return ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_FMHA_DISABLE_HEAD_GROUPING));
 }
 
 inline bool is_decimal_string(const std::string& s)
@@ -221,13 +221,17 @@ inline size_t get_llc_cache_bytes(const std::string& arch)
 {
     // resolve once and reuse.
     static const size_t resolved_llc_bytes = [&]() -> size_t {
-        const char* env_llc_mb = std::getenv("CK_TILE_FMHA_LLC_CACHE_MB");
-        if(env_llc_mb != nullptr)
+        const uint64_t llc_mb = ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_FMHA_LLC_CACHE_MB));
+        if(llc_mb > 0)
         {
-            const int mb = std::atoi(env_llc_mb);
-            if(mb > 0)
-                return static_cast<size_t>(mb) * 1024ull * 1024ull;
+            constexpr uint64_t kBytesPerMb   = 1024ull * 1024ull;
+            const uint64_t max_mb_for_size_t = static_cast<uint64_t>(
+                std::numeric_limits<size_t>::max() / static_cast<size_t>(kBytesPerMb));
+
+            if(llc_mb <= max_mb_for_size_t)
+                return static_cast<size_t>(llc_mb * kBytesPerMb);
         }
+
         return resolve_llc_cache_bytes_uncached(arch);
     }();
 
@@ -258,7 +262,6 @@ inline std::optional<ck_tile::index_t> get_head_group_size(ck_tile::index_t nhea
         return std::nullopt;
     if(seqlen_k <= 0 || hdim_q <= 0 || hdim_v <= 0 || batch <= 0)
         return std::nullopt;
-    static_cast<void>(batch);
 
     const size_t kv_bytes_per_head =
         static_cast<size_t>(seqlen_k) *
@@ -354,8 +357,8 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
     for(ck_tile::index_t head_start = 0; head_start < nhead; head_start += group_sz)
     {
         const ck_tile::index_t q_heads      = std::min(group_sz, nhead - head_start);
-        const ck_tile::index_t k_head_start = (gqa_ratio > 0 ? head_start / gqa_ratio : head_start);
-        const ck_tile::index_t k_heads      = (gqa_ratio > 0 ? q_heads / gqa_ratio : q_heads);
+        const ck_tile::index_t k_head_start = (gqa_ratio >= 1 ? head_start / gqa_ratio : head_start);
+        const ck_tile::index_t k_heads      = (gqa_ratio >= 1 ? q_heads / gqa_ratio : q_heads);
 
         auto args       = base_args;
         args.nhead_q    = q_heads;
