@@ -18,32 +18,23 @@ using namespace hipdnn_sdk_test_utils;
 
 TEST(TestRmsnormFwdSignatureKey, EqualityOperator)
 {
-    RmsnormFwdSignatureKey key1{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    RmsnormFwdSignatureKey key2{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    RmsnormFwdSignatureKey key3{
-        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    RmsnormFwdSignatureKey key4{
-        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RmsnormFwdSignatureKey key3{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RmsnormFwdSignatureKey key4{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_TRUE(key3 == key4);
 
-    RmsnormFwdSignatureKey key5{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    RmsnormFwdSignatureKey key6{
-        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RmsnormFwdSignatureKey key5{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key6{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_FALSE(key5 == key6);
 
-    RmsnormFwdSignatureKey key7{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    RmsnormFwdSignatureKey key8{
-        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key7{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key8{DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 
-    RmsnormFwdSignatureKey key9{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key9{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     RmsnormFwdSignatureKey key10{
         DataType::FLOAT, DataType::FLOAT, DataType::DOUBLE, DataType::FLOAT};
     EXPECT_FALSE(key9 == key10);
@@ -51,21 +42,15 @@ TEST(TestRmsnormFwdSignatureKey, EqualityOperator)
 
 TEST(TestRmsnormFwdSignatureKey, HashFunction)
 {
-    RmsnormFwdSignatureKey key1{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
-    RmsnormFwdSignatureKey key2{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key1{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key2{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    RmsnormFwdSignatureKey key3{
-        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    RmsnormFwdSignatureKey key4{
-        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
-    RmsnormFwdSignatureKey key5{
-        DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
-    RmsnormFwdSignatureKey key6{
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
+    RmsnormFwdSignatureKey key3{DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RmsnormFwdSignatureKey key4{DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
+    RmsnormFwdSignatureKey key5{DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    RmsnormFwdSignatureKey key6{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
 
     auto hash3 = key3.hashSelf();
     auto hash4 = key4.hashSelf();

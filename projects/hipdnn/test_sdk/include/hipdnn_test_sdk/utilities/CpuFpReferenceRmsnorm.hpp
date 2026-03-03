@@ -24,17 +24,13 @@ public:
     /// @param epsilon     Small scalar for numerical stability
     /// @param invRms      Optional output: 1 / sqrt(mean(x^2) + epsilon) per channel
     /// @param bias        Optional per-channel bias tensor, shape [1, C, 1, ..., 1]
-    template <class XDataType,
-              class ScaleDataType,
-              class YDataType,
-              class ComputeDataType = float>
-    static void forward(
-        const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
-        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
-        hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
-        double epsilon,
-        hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms = nullptr,
-        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias  = nullptr)
+    template <class XDataType, class ScaleDataType, class YDataType, class ComputeDataType = float>
+    static void forward(const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>& scale,
+                        hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
+                        double epsilon,
+                        hipdnn_data_sdk::utilities::TensorBase<ComputeDataType>* invRms = nullptr,
+                        const hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>* bias = nullptr)
     {
         if(x.dims().size() < 2)
         {

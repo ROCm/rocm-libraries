@@ -34,8 +34,7 @@ TEST(TestRmsnormFwdPlan, ExecutePlan)
     RmsnormFwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     RmsnormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
-    const auto& attributes
-        = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
+    const auto& attributes = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
     RmsnormFwdParams params;
@@ -57,8 +56,8 @@ TEST(TestRmsnormFwdPlan, ExecutePlan)
 
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
-    double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
-        params.epsilonTensor, "Epsilon");
+    double epsilon
+        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
@@ -68,10 +67,7 @@ TEST(TestRmsnormFwdPlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    CpuFpReferenceRmsnorm::forward(*shallowXTensor,
-                                   *shallowScaleTensor,
-                                   *shallowYTensor,
-                                   epsilon);
+    CpuFpReferenceRmsnorm::forward(*shallowXTensor, *shallowScaleTensor, *shallowYTensor, epsilon);
 
     RmsnormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
@@ -124,7 +120,7 @@ TEST(TestRmsnormFwdPlanBuilder, IsApplicable)
 TEST(TestRmsnormFwdPlan, ExecutePlanWithBias)
 {
     std::vector<int64_t> dims = {4, 3, 16, 16};
-    unsigned int seed         = getGlobalTestSeed();
+    unsigned int seed = getGlobalTestSeed();
     auto graph = buildRmsnormFwdGraphWithBias(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
@@ -133,8 +129,7 @@ TEST(TestRmsnormFwdPlan, ExecutePlanWithBias)
     RmsnormFwdWithBiasTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     RmsnormFwdWithBiasTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
-    const auto& attributes
-        = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
+    const auto& attributes = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
     RmsnormFwdParams params(*tensorMap.at(attributes.x_tensor_uid()),
@@ -143,7 +138,7 @@ TEST(TestRmsnormFwdPlan, ExecutePlanWithBias)
                             *tensorMap.at(attributes.y_tensor_uid()));
     ASSERT_TRUE(attributes.bias_tensor_uid().has_value());
     params.biasTensor = unpackTensorAttributes(*tensorMap.at(attributes.bias_tensor_uid().value()));
-    params.hasBias    = true;
+    params.hasBias = true;
 
     double epsilon = extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
 

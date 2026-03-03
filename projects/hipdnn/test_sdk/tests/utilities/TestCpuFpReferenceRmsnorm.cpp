@@ -18,9 +18,9 @@ struct TypePair
 };
 
 using TypesRmsnormFwdNchw = ::testing::Types<TypePair<float, float>,
-                                              TypePair<half, float>,
-                                              TypePair<bfloat16, float>,
-                                              TypePair<double, double>>;
+                                             TypePair<half, float>,
+                                             TypePair<bfloat16, float>,
+                                             TypePair<double, double>>;
 
 template <class T>
 class CpuFpReferenceRmsnormFwdNchw : public ::testing::Test
@@ -297,11 +297,11 @@ TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdWithBias)
     double epsilon = 0.0; // zero epsilon so inv_rms = 1
 
     Tensor<float>* noInvRms = nullptr;
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputTensor, epsilon, noInvRms,
-                                   &biasTensor);
+    CpuFpReferenceRmsnorm::forward(
+        inputTensor, scaleTensor, outputTensor, epsilon, noInvRms, &biasTensor);
 
     // y = x * invRms * scale + bias = 1 * 1 * scale + bias
-    float expectedC0 = 2.0f + 0.5f;  // 2.5
+    float expectedC0 = 2.0f + 0.5f; // 2.5
     float expectedC1 = 3.0f + -1.0f; // 2.0
 
     auto tolerance = 1e-5f;
@@ -332,16 +332,14 @@ TEST(TestCpuFpReferenceRmsnorm, RmsnormFwdBiasIsOptional)
     double epsilon = 1e-5;
 
     CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputNoBias, epsilon);
-    Tensor<float>* noInvRms2  = nullptr;
-    Tensor<float>* noBias     = nullptr;
-    CpuFpReferenceRmsnorm::forward(inputTensor, scaleTensor, outputNullBias, epsilon, noInvRms2,
-                                   noBias);
+    Tensor<float>* noInvRms2 = nullptr;
+    Tensor<float>* noBias = nullptr;
+    CpuFpReferenceRmsnorm::forward(
+        inputTensor, scaleTensor, outputNullBias, epsilon, noInvRms2, noBias);
 
     auto tolerance = 1e-6f;
-    EXPECT_NEAR(outputNoBias.getHostValue(0, 0, 0, 0),
-                outputNullBias.getHostValue(0, 0, 0, 0),
-                tolerance);
-    EXPECT_NEAR(outputNoBias.getHostValue(0, 0, 1, 1),
-                outputNullBias.getHostValue(0, 0, 1, 1),
-                tolerance);
+    EXPECT_NEAR(
+        outputNoBias.getHostValue(0, 0, 0, 0), outputNullBias.getHostValue(0, 0, 0, 0), tolerance);
+    EXPECT_NEAR(
+        outputNoBias.getHostValue(0, 0, 1, 1), outputNullBias.getHostValue(0, 0, 1, 1), tolerance);
 }

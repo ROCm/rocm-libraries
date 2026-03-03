@@ -42,8 +42,7 @@ struct RmsnormFwdSignatureKey
         const auto* nodeAttributes = node.attributes_as_RMSNormAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error(
-                "Node attributes could not be cast to RMSNormAttributes");
+            throw std::runtime_error("Node attributes could not be cast to RMSNormAttributes");
         }
 
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
@@ -79,8 +78,7 @@ struct RmsnormFwdSignatureKey
     bool operator==(const RmsnormFwdSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && xDataType == other.xDataType
-               && scaleDataType == other.scaleDataType
-               && outputDataType == other.outputDataType
+               && scaleDataType == other.scaleDataType && outputDataType == other.outputDataType
                && computeDataType == other.computeDataType;
     }
 

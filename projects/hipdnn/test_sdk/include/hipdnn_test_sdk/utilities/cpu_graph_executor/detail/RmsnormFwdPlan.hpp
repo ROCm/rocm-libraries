@@ -22,11 +22,10 @@ namespace hipdnn_test_sdk::detail
 struct RmsnormFwdParams
 {
     RmsnormFwdParams() = default;
-    RmsnormFwdParams(
-        const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes)
+    RmsnormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
+                     const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
+                     const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
+                     const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes)
         : xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
@@ -34,12 +33,11 @@ struct RmsnormFwdParams
     {
     }
 
-    RmsnormFwdParams(
-        const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
-        const hipdnn_data_sdk::data_objects::TensorAttributes& invRmsAttributes)
+    RmsnormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
+                     const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
+                     const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
+                     const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
+                     const hipdnn_data_sdk::data_objects::TensorAttributes& invRmsAttributes)
         : xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
@@ -97,27 +95,25 @@ public:
             auto shallowInvRmsTensor = createShallowTensor<ComputeDataType>(
                 _params.invRmsTensor, variantPack.at(_params.invRmsTensor.uid));
 
-            utilities::CpuFpReferenceRmsnorm::forward<XDataType,
-                                                      ScaleDataType,
-                                                      OutputDataType,
-                                                      ComputeDataType>(*shallowXTensor,
-                                                                       *shallowScaleTensor,
-                                                                       *shallowYTensor,
-                                                                       epsilon,
-                                                                       shallowInvRmsTensor.get(),
-                                                                       shallowBiasTensor.get());
+            utilities::CpuFpReferenceRmsnorm::
+                forward<XDataType, ScaleDataType, OutputDataType, ComputeDataType>(
+                    *shallowXTensor,
+                    *shallowScaleTensor,
+                    *shallowYTensor,
+                    epsilon,
+                    shallowInvRmsTensor.get(),
+                    shallowBiasTensor.get());
         }
         else
         {
-            utilities::CpuFpReferenceRmsnorm::forward<XDataType,
-                                                      ScaleDataType,
-                                                      OutputDataType,
-                                                      ComputeDataType>(*shallowXTensor,
-                                                                       *shallowScaleTensor,
-                                                                       *shallowYTensor,
-                                                                       epsilon,
-                                                                       nullptr,
-                                                                       shallowBiasTensor.get());
+            utilities::CpuFpReferenceRmsnorm::
+                forward<XDataType, ScaleDataType, OutputDataType, ComputeDataType>(
+                    *shallowXTensor,
+                    *shallowScaleTensor,
+                    *shallowYTensor,
+                    epsilon,
+                    nullptr,
+                    shallowBiasTensor.get());
         }
     }
 
@@ -203,8 +199,8 @@ public:
 
         if(nodeAttributes->bias_tensor_uid().has_value())
         {
-            params.biasTensor = unpackTensorAttributes(
-                *tensorMap.at(nodeAttributes->bias_tensor_uid().value()));
+            params.biasTensor
+                = unpackTensorAttributes(*tensorMap.at(nodeAttributes->bias_tensor_uid().value()));
             params.hasBias = true;
         }
 
