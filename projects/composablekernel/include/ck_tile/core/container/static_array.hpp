@@ -6,16 +6,13 @@
 #include "ck_tile/core/numeric/integer.hpp"
 
 namespace ck_tile {
-// Fixed-size array with aggregate initialization
-//
-// This is a minimal array type designed for:
-// - Constexpr/compile-time computation
-// - GPU kernel code (trivially copyable)
-// - Template metaprogramming
-//
-// Unlike ck_tile::array, this has no custom constructors,
-// making it a literal type suitable for constexpr contexts.
-// Use aggregate initialization: static_array<int, 3> arr{1, 2, 3};
+
+/// @brief Fixed-size array with aggregate initialization for constexpr contexts.
+///
+/// Unlike ck_tile::array, this has no custom constructors, making it a literal type
+/// suitable for constexpr evaluation and GPU kernel code. Use ck_tile::array when
+/// constructors or non-trivial initialization are needed.
+/// Use aggregate initialization: static_array<int, 3> arr{1, 2, 3};
 template <typename T, index_t N>
 struct static_array
 {

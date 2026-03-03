@@ -1,6 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+/**
+ * @file test_sequence.cpp
+ * @brief Unit tests for ck_tile::sequence metaprogramming utilities.
+ */
+
 #include <gtest/gtest.h>
 #include "ck_tile/core/container/sequence.hpp"
 #include "ck_tile/core/utility/functional.hpp"

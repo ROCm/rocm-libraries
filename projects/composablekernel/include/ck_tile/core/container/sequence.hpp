@@ -35,6 +35,7 @@ CK_TILE_HOST_DEVICE constexpr auto sequence_pop_front(sequence<I, Is...>);
 template <typename Seq>
 CK_TILE_HOST_DEVICE constexpr auto sequence_pop_back(Seq);
 
+// Implementation details for sequence element access and index generation.
 namespace detail {
 
 // O(1) type pack indexing via compiler builtin when available,
@@ -279,7 +280,11 @@ struct sequence_merge<Seq>
     using type = Seq;
 };
 
-// generate sequence - optimized using __make_integer_seq to avoid recursive instantiation
+/// @brief Generate a compile-time sequence by applying a functor to indices 0..N-1.
+/// @tparam NSize Number of elements in the generated sequence.
+/// @tparam F Functor type; must be default-constructible with a constexpr call operator
+///         accepting number<I> (or index_t via implicit conversion) and returning index_t.
+///         Lambdas with captures cannot be used; use a template struct functor instead.
 namespace detail {
 
 // Helper that applies functor F to indices and produces a sequence.
@@ -380,6 +385,9 @@ struct sequence_inclusive_scan_impl<sequence<Is...>, Reduce, Init, Reverse>
         }
         else
         {
+            // Compute all scan values in a single constexpr evaluation using
+            // static_array, then unpack via index expansion. Avoids O(N) recursive
+            // template instantiation.
             constexpr auto arr = []() {
                 static_array<index_t, size> values = {Is...};
                 static_array<index_t, size> result = {0};
@@ -747,8 +755,10 @@ struct is_valid_sequence_map
 {
 };
 
-// sequence_map_inverse - optimized using constexpr for-loop
-// Achieves O(1) template instantiation depth instead of O(N)
+/// @brief Compute the inverse permutation of a sequence map.
+/// @tparam Is A valid permutation of {0, 1, ..., N-1}.
+/// @pre Input must satisfy is_valid_sequence_map (enforced by static_assert).
+/// Optimized using constexpr for-loop: O(1) template instantiation depth instead of O(N).
 template <index_t... Is>
 struct sequence_map_inverse<sequence<Is...>>
 {
