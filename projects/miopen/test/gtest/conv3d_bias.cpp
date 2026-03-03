@@ -43,10 +43,15 @@ struct GPU_Conv3dBias : public testing::TestWithParam<std::vector<int>>
                    tensor_elem_gen_checkboard_sign{}(is...);
         };
 
-        miopen::test::conv::conv_bias_driver<T> test;
-        test.output = tensor<T>(lens);
-        test.output.generate(gen_value);
-        test.run();
+        tensor<T> output(lens);
+        output.generate(gen_value);
+
+        const auto spatial_dim = output.desc.GetNumDims() - 2;
+        std::vector<std::size_t> bias_lens(2 + spatial_dim, 1);
+        bias_lens[1] = output.desc.GetLengths()[1];
+        tensor<T> bias(bias_lens);
+
+        test_helpers::CompareResults(miopen::test::conv::verify_backwards_bias<T>{output, bias});
     }
 };
 
