@@ -352,18 +352,8 @@ inline fp8_e5m2 operator""_e5m2(long double val)
 // Math functions for fp8_e5m2 (in hipdnn_data_sdk::types namespace)
 // ============================================================================
 // These are defined in our namespace to enable ADL (Argument Dependent Lookup).
-// Use unqualified calls like: fabs(x), isnan(x), etc.
+// Use unqualified calls like: isnan(x), isinf(x), etc.
 // ============================================================================
-
-inline fp8_e5m2 abs(fp8_e5m2 x)
-{
-    return fp8_e5m2::from_bits(x.data & detail::FP8_E5M2_ABS_MASK);
-}
-
-inline fp8_e5m2 fabs(fp8_e5m2 x)
-{
-    return fp8_e5m2::from_bits(x.data & detail::FP8_E5M2_ABS_MASK);
-}
 
 inline bool isnan(fp8_e5m2 x)
 {

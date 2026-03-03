@@ -980,27 +980,6 @@ TYPED_TEST(StorageFloatTypes, InfinityHandling)
 }
 
 // ============================================================================
-// Math Function Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, Abs)
-{
-    using T = TypeParam;
-
-    EXPECT_TRUE(this->nearEqual(abs(T(-4.0f)), T(4.0f)));
-    EXPECT_TRUE(this->nearEqual(abs(T(4.0f)), T(4.0f)));
-    EXPECT_TRUE(this->nearEqual(abs(T(0.0f)), T(0.0f)));
-}
-
-TYPED_TEST(StorageFloatTypes, Fabs)
-{
-    using T = TypeParam;
-
-    EXPECT_TRUE(this->nearEqual(fabs(T(-4.0f)), T(4.0f)));
-    EXPECT_TRUE(this->nearEqual(fabs(T(4.0f)), T(4.0f)));
-}
-
-// ============================================================================
 // Stream Output Tests
 // ============================================================================
 
