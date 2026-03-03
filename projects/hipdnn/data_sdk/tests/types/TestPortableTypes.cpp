@@ -5,8 +5,8 @@
 /// @brief Typed tests for portable floating-point types.
 ///
 /// This file contains two test fixtures:
-/// - PortableFloatTypes: Full arithmetic and math tests for bfloat16 and half
-/// - StorageFloatTypes: Basic storage and conversion tests for fp8_e4m3 and fp8_e5m2
+/// - PortableFloatTypes: Common tests for all types (bfloat16, half, fp8_e4m3, fp8_e5m2)
+/// - MathFloatTypes: Arithmetic and math function tests for bfloat16 and half only
 /// Type-specific tests that cannot be generalized remain in their individual test files.
 
 #include <gtest/gtest.h>
@@ -130,8 +130,8 @@ struct PortableTypeTraits<fp8_e5m2>
 // NOLINTEND(readability-identifier-naming)
 
 // ============================================================================
-// Test Fixture (bfloat16, half)
-// Full arithmetic operations and math functions
+// Test Fixture (bfloat16, half, fp8_e4m3, fp8_e5m2)
+// Common tests for all portable float types
 // ============================================================================
 
 template <typename T>
@@ -151,8 +151,21 @@ protected:
     }
 };
 
-using PortableTypes = ::testing::Types<bfloat16, half>;
+using PortableTypes = ::testing::Types<bfloat16, half, fp8_e4m3, fp8_e5m2>;
 TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
+
+// ============================================================================
+// Math Float Types Fixture (bfloat16, half)
+// Full arithmetic operations and math functions
+// ============================================================================
+
+template <typename T>
+class MathFloatTypes : public PortableFloatTypes<T>
+{
+};
+
+using MathTypes = ::testing::Types<bfloat16, half>;
+TYPED_TEST_SUITE(MathFloatTypes, MathTypes, );
 
 // ============================================================================
 // Type Properties Tests
@@ -276,7 +289,7 @@ TYPED_TEST(PortableFloatTypes, ExplicitConversionToDouble)
 // Arithmetic Operator Tests
 // ============================================================================
 
-TYPED_TEST(PortableFloatTypes, Addition)
+TYPED_TEST(MathFloatTypes, Addition)
 {
     using T = TypeParam;
 
@@ -286,7 +299,7 @@ TYPED_TEST(PortableFloatTypes, Addition)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 3.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, Subtraction)
+TYPED_TEST(MathFloatTypes, Subtraction)
 {
     using T = TypeParam;
 
@@ -296,7 +309,7 @@ TYPED_TEST(PortableFloatTypes, Subtraction)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 2.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, Multiplication)
+TYPED_TEST(MathFloatTypes, Multiplication)
 {
     using T = TypeParam;
 
@@ -306,7 +319,7 @@ TYPED_TEST(PortableFloatTypes, Multiplication)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 8.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, Division)
+TYPED_TEST(MathFloatTypes, Division)
 {
     using T = TypeParam;
 
@@ -343,7 +356,7 @@ TYPED_TEST(PortableFloatTypes, UnaryPlus)
 // Compound Assignment Tests
 // ============================================================================
 
-TYPED_TEST(PortableFloatTypes, CompoundAddition)
+TYPED_TEST(MathFloatTypes, CompoundAddition)
 {
     using T = TypeParam;
 
@@ -352,7 +365,7 @@ TYPED_TEST(PortableFloatTypes, CompoundAddition)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 3.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, CompoundSubtraction)
+TYPED_TEST(MathFloatTypes, CompoundSubtraction)
 {
     using T = TypeParam;
 
@@ -361,7 +374,7 @@ TYPED_TEST(PortableFloatTypes, CompoundSubtraction)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 2.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, CompoundMultiplication)
+TYPED_TEST(MathFloatTypes, CompoundMultiplication)
 {
     using T = TypeParam;
 
@@ -370,7 +383,7 @@ TYPED_TEST(PortableFloatTypes, CompoundMultiplication)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 8.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, CompoundDivision)
+TYPED_TEST(MathFloatTypes, CompoundDivision)
 {
     using T = TypeParam;
 
@@ -383,7 +396,7 @@ TYPED_TEST(PortableFloatTypes, CompoundDivision)
 // Comparison Operator Tests
 // ============================================================================
 
-TYPED_TEST(PortableFloatTypes, Equality)
+TYPED_TEST(MathFloatTypes, Equality)
 {
     using T = TypeParam;
 
@@ -394,7 +407,7 @@ TYPED_TEST(PortableFloatTypes, Equality)
     EXPECT_FALSE(a == c);
 }
 
-TYPED_TEST(PortableFloatTypes, Inequality)
+TYPED_TEST(MathFloatTypes, Inequality)
 {
     using T = TypeParam;
 
@@ -404,7 +417,7 @@ TYPED_TEST(PortableFloatTypes, Inequality)
     EXPECT_FALSE(a != a);
 }
 
-TYPED_TEST(PortableFloatTypes, LessThan)
+TYPED_TEST(MathFloatTypes, LessThan)
 {
     using T = TypeParam;
 
@@ -415,7 +428,7 @@ TYPED_TEST(PortableFloatTypes, LessThan)
     EXPECT_FALSE(a < a);
 }
 
-TYPED_TEST(PortableFloatTypes, GreaterThan)
+TYPED_TEST(MathFloatTypes, GreaterThan)
 {
     using T = TypeParam;
 
@@ -426,7 +439,7 @@ TYPED_TEST(PortableFloatTypes, GreaterThan)
     EXPECT_FALSE(a > a);
 }
 
-TYPED_TEST(PortableFloatTypes, LessThanOrEqual)
+TYPED_TEST(MathFloatTypes, LessThanOrEqual)
 {
     using T = TypeParam;
 
@@ -438,7 +451,7 @@ TYPED_TEST(PortableFloatTypes, LessThanOrEqual)
     EXPECT_FALSE(b <= a);
 }
 
-TYPED_TEST(PortableFloatTypes, GreaterThanOrEqual)
+TYPED_TEST(MathFloatTypes, GreaterThanOrEqual)
 {
     using T = TypeParam;
 
@@ -450,7 +463,7 @@ TYPED_TEST(PortableFloatTypes, GreaterThanOrEqual)
     EXPECT_FALSE(b >= a);
 }
 
-TYPED_TEST(PortableFloatTypes, NanComparisonSemantics)
+TYPED_TEST(MathFloatTypes, NanComparisonSemantics)
 {
     using T = TypeParam;
 
@@ -545,7 +558,7 @@ TYPED_TEST(PortableFloatTypes, InfinityHandling)
 // Math Function Tests
 // ============================================================================
 
-TYPED_TEST(PortableFloatTypes, Abs)
+TYPED_TEST(MathFloatTypes, Abs)
 {
     using T = TypeParam;
 
@@ -554,7 +567,7 @@ TYPED_TEST(PortableFloatTypes, Abs)
     EXPECT_TRUE(this->nearEqual(abs(T(0.0f)), T(0.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Fabs)
+TYPED_TEST(MathFloatTypes, Fabs)
 {
     using T = TypeParam;
 
@@ -562,7 +575,7 @@ TYPED_TEST(PortableFloatTypes, Fabs)
     EXPECT_TRUE(this->nearEqual(fabs(T(4.0f)), T(4.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Max)
+TYPED_TEST(MathFloatTypes, Max)
 {
     using T = TypeParam;
 
@@ -572,7 +585,7 @@ TYPED_TEST(PortableFloatTypes, Max)
     EXPECT_TRUE(this->nearEqual(max(b, a), b));
 }
 
-TYPED_TEST(PortableFloatTypes, MaxWithNaN)
+TYPED_TEST(MathFloatTypes, MaxWithNaN)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
@@ -584,7 +597,7 @@ TYPED_TEST(PortableFloatTypes, MaxWithNaN)
     EXPECT_TRUE(isnan(max(nan, nan)));
 }
 
-TYPED_TEST(PortableFloatTypes, Min)
+TYPED_TEST(MathFloatTypes, Min)
 {
     using T = TypeParam;
 
@@ -594,7 +607,7 @@ TYPED_TEST(PortableFloatTypes, Min)
     EXPECT_TRUE(this->nearEqual(min(b, a), a));
 }
 
-TYPED_TEST(PortableFloatTypes, MinWithNaN)
+TYPED_TEST(MathFloatTypes, MinWithNaN)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
@@ -606,7 +619,7 @@ TYPED_TEST(PortableFloatTypes, MinWithNaN)
     EXPECT_TRUE(isnan(min(nan, nan)));
 }
 
-TYPED_TEST(PortableFloatTypes, Sqrt)
+TYPED_TEST(MathFloatTypes, Sqrt)
 {
     using T = TypeParam;
 
@@ -617,7 +630,7 @@ TYPED_TEST(PortableFloatTypes, Sqrt)
     EXPECT_TRUE(this->nearEqual(sqrt(b), T(4.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Exp)
+TYPED_TEST(MathFloatTypes, Exp)
 {
     using T = TypeParam;
 
@@ -625,7 +638,7 @@ TYPED_TEST(PortableFloatTypes, Exp)
     EXPECT_TRUE(this->nearEqual(exp(a), T(1.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Log)
+TYPED_TEST(MathFloatTypes, Log)
 {
     using T = TypeParam;
 
@@ -633,7 +646,7 @@ TYPED_TEST(PortableFloatTypes, Log)
     EXPECT_TRUE(this->nearEqual(log(a), T(0.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Tanh)
+TYPED_TEST(MathFloatTypes, Tanh)
 {
     using T = TypeParam;
 
@@ -641,7 +654,7 @@ TYPED_TEST(PortableFloatTypes, Tanh)
     EXPECT_TRUE(this->nearEqual(tanh(a), T(0.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Floor)
+TYPED_TEST(MathFloatTypes, Floor)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
@@ -650,7 +663,7 @@ TYPED_TEST(PortableFloatTypes, Floor)
     EXPECT_TRUE(this->nearEqual(floor(T(-2.5f)), T(-3.0f), Traits::large_tolerance));
 }
 
-TYPED_TEST(PortableFloatTypes, Ceil)
+TYPED_TEST(MathFloatTypes, Ceil)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
@@ -659,7 +672,7 @@ TYPED_TEST(PortableFloatTypes, Ceil)
     EXPECT_TRUE(this->nearEqual(ceil(T(-2.5f)), T(-2.0f), Traits::large_tolerance));
 }
 
-TYPED_TEST(PortableFloatTypes, Round)
+TYPED_TEST(MathFloatTypes, Round)
 {
     using T = TypeParam;
 
@@ -742,318 +755,6 @@ TYPED_TEST(PortableFloatTypes, NumericLimitsEpsilon)
 }
 
 TYPED_TEST(PortableFloatTypes, NumericLimitsInfinity)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    if constexpr(Traits::has_infinity)
-    {
-        T inf = std::numeric_limits<T>::infinity();
-        EXPECT_TRUE(isinf(inf));
-        EXPECT_FALSE(signbit(inf));
-    }
-}
-
-// ============================================================================
-// Test Fixture (fp8_e4m3, fp8_e5m2)
-// Basic storage, conversion, and bit manipulation tests only
-// ============================================================================
-
-template <typename T>
-class StorageFloatTypes : public ::testing::Test
-{
-protected:
-    using Traits = PortableTypeTraits<T>;
-
-    static bool nearEqual(float a, float b, float tol = Traits::tolerance)
-    {
-        return hipdnn_data_sdk::types::fabs(a - b) <= tol;
-    }
-
-    static bool nearEqual(T a, T b, float tol = Traits::tolerance)
-    {
-        return nearEqual(static_cast<float>(a), static_cast<float>(b), tol);
-    }
-};
-
-using StorageTypes = ::testing::Types<fp8_e4m3, fp8_e5m2>;
-TYPED_TEST_SUITE(StorageFloatTypes, StorageTypes, );
-
-// ============================================================================
-// Type Properties Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, TypeProperties)
-{
-    using T = TypeParam;
-
-    EXPECT_EQ(sizeof(T), 1);
-    EXPECT_TRUE(std::is_trivially_copyable_v<T>);
-    EXPECT_TRUE(std::is_standard_layout_v<T>);
-    EXPECT_TRUE(std::is_default_constructible_v<T>);
-    EXPECT_TRUE(std::is_copy_constructible_v<T>);
-    EXPECT_TRUE(std::is_move_constructible_v<T>);
-}
-
-// ============================================================================
-// Construction Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, ConstructFromFloat)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    T a(1.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 1.0f));
-
-    T b(0.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), 0.0f));
-
-    T c(-2.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(c), -2.0f, Traits::large_tolerance));
-}
-
-TYPED_TEST(StorageFloatTypes, ConstructFromDouble)
-{
-    using T = TypeParam;
-
-    T a(1.0);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 1.0f));
-
-    T b(2.0);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), 2.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, ConstructFromIntegral)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    T a(4);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 4.0f, Traits::large_tolerance));
-
-    T b(-8);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), -8.0f, Traits::large_tolerance));
-
-    T c(0u);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 0.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, FromBits)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    T one = Traits::from_bits(Traits::one_bits);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(one), 1.0f));
-
-    T zero = Traits::from_bits(Traits::zero_bits);
-    EXPECT_EQ(static_cast<float>(zero), 0.0f);
-
-    T nan = Traits::from_bits(Traits::nan_bits);
-    EXPECT_TRUE(isnan(nan));
-}
-
-TYPED_TEST(StorageFloatTypes, CopyConstruct)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    T a(2.0f);
-    T b(a);
-    EXPECT_EQ(Traits::to_bits(a), Traits::to_bits(b));
-    EXPECT_EQ(static_cast<float>(a), static_cast<float>(b));
-}
-
-// ============================================================================
-// Conversion Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, ExplicitConversionToFloat)
-{
-    using T = TypeParam;
-
-    T a(1.5f);
-    auto f = static_cast<float>(a);
-    EXPECT_TRUE(this->nearEqual(f, 1.5f));
-}
-
-TYPED_TEST(StorageFloatTypes, ExplicitConversionToDouble)
-{
-    using T = TypeParam;
-
-    T a(2.0f);
-    auto d = static_cast<double>(a);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(d), 2.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, UnaryNegation)
-{
-    using T = TypeParam;
-
-    T a(4.0f);
-    T b = -a;
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), -4.0f));
-
-    T c(-2.0f);
-    T d = -c;
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(d), 2.0f));
-}
-
-TYPED_TEST(StorageFloatTypes, UnaryPlus)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    T a(4.0f);
-    T b = +a;
-    EXPECT_EQ(Traits::to_bits(a), Traits::to_bits(b));
-}
-
-// ============================================================================
-// Special Values Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, PositiveZero)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    T zero = Traits::from_bits(Traits::zero_bits);
-    EXPECT_EQ(static_cast<float>(zero), 0.0f);
-    EXPECT_FALSE(signbit(zero));
-}
-
-TYPED_TEST(StorageFloatTypes, NegativeZero)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    T negZero = Traits::from_bits(Traits::neg_zero_bits);
-    EXPECT_EQ(static_cast<float>(negZero), -0.0f);
-    EXPECT_TRUE(signbit(negZero));
-}
-
-TYPED_TEST(StorageFloatTypes, QuietNaN)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    T nan = Traits::from_bits(Traits::nan_bits);
-    EXPECT_TRUE(isnan(nan));
-}
-
-TYPED_TEST(StorageFloatTypes, IsFinite)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    EXPECT_TRUE(isfinite(T(1.0f)));
-    EXPECT_TRUE(isfinite(T(0.0f)));
-    EXPECT_FALSE(isfinite(Traits::from_bits(Traits::nan_bits)));
-}
-
-TYPED_TEST(StorageFloatTypes, InfinityHandling)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    if constexpr(Traits::has_infinity)
-    {
-        T inf = Traits::from_bits(Traits::inf_bits);
-        EXPECT_TRUE(isinf(inf));
-        EXPECT_FALSE(signbit(inf));
-        EXPECT_FALSE(isnan(inf));
-
-        T negInf = Traits::from_bits(Traits::neg_inf_bits);
-        EXPECT_TRUE(isinf(negInf));
-        EXPECT_TRUE(signbit(negInf));
-        EXPECT_FALSE(isnan(negInf));
-    }
-    else
-    {
-        // For types without infinity (fp8_e4m3), verify inf bits give NaN
-        T val = Traits::from_bits(Traits::inf_bits);
-        EXPECT_FALSE(isinf(val));
-    }
-}
-
-// ============================================================================
-// Stream Output Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, StreamOutput)
-{
-    using T = TypeParam;
-
-    T a(2.0f);
-    std::ostringstream oss;
-    oss << a;
-    float parsed = std::stof(oss.str());
-    EXPECT_TRUE(this->nearEqual(parsed, 2.0f));
-}
-
-// ============================================================================
-// numeric_limits Tests
-// ============================================================================
-
-TYPED_TEST(StorageFloatTypes, NumericLimitsBasic)
-{
-    using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
-
-    EXPECT_TRUE(std::numeric_limits<T>::is_specialized);
-    EXPECT_TRUE(std::numeric_limits<T>::is_signed);
-    EXPECT_FALSE(std::numeric_limits<T>::is_integer);
-    EXPECT_EQ(std::numeric_limits<T>::has_infinity, Traits::has_infinity);
-    EXPECT_TRUE(std::numeric_limits<T>::has_quiet_NaN);
-}
-
-TYPED_TEST(StorageFloatTypes, NumericLimitsNaN)
-{
-    using T = TypeParam;
-
-    T nan = std::numeric_limits<T>::quiet_NaN();
-    EXPECT_TRUE(isnan(nan));
-}
-
-TYPED_TEST(StorageFloatTypes, NumericLimitsMax)
-{
-    using T = TypeParam;
-
-    T maxVal = std::numeric_limits<T>::max();
-    EXPECT_TRUE(isfinite(maxVal));
-}
-
-TYPED_TEST(StorageFloatTypes, NumericLimitsMin)
-{
-    using T = TypeParam;
-
-    T minVal = std::numeric_limits<T>::min();
-    EXPECT_TRUE(isfinite(minVal));
-    EXPECT_GT(static_cast<float>(minVal), 0.0f);
-}
-
-TYPED_TEST(StorageFloatTypes, NumericLimitsLowest)
-{
-    using T = TypeParam;
-
-    T lowestVal = std::numeric_limits<T>::lowest();
-    EXPECT_TRUE(isfinite(lowestVal));
-    EXPECT_LT(static_cast<float>(lowestVal), 0.0f);
-}
-
-TYPED_TEST(StorageFloatTypes, NumericLimitsEpsilon)
-{
-    using T = TypeParam;
-
-    T eps = std::numeric_limits<T>::epsilon();
-    EXPECT_TRUE(isfinite(eps));
-    EXPECT_GT(static_cast<float>(eps), 0.0f);
-}
-
-TYPED_TEST(StorageFloatTypes, NumericLimitsInfinity)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
