@@ -715,9 +715,9 @@ namespace origami
         hw_consts = getHardwareConstants(hw);
     }
 
-    int Formocast::getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall) const
+    int Formocast::getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset) const
     {
-        return simulator::getGlobalReadQueueFullStallCycles(currentCycle, fifo, bpRead, numWaves, isStall);
+        return simulator::getGlobalReadQueueFullStallCycles(currentCycle, fifo, bpRead, numWaves, isStall, isSgprOffset);
     }
 
     int Formocast::getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, int numLR) const
@@ -746,11 +746,15 @@ namespace origami
         int issuePenality = 0;
         if(numWaves == 4)
         {
+            // only 2 simds can be issued at the same time. if 4 simds, need 1 extra issue cycle.
             issuePenality = issueCycles;
-            if(bpWrite == 16)
-                issuePenality += 3;
         }
-        return std::max(previousLW + issueCycles + issuePenality, currentCycle + issueCycles);
+        if(currentCycle - previousLW >= issueCycles)
+        {
+            // if the space is enough, no stall.
+            return currentCycle + issueCycles;
+        }
+        return currentCycle + issueCycles + issuePenality;
     }
 
     void Formocast::pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict, bool isLocalRead, int numPreviousLRs)
