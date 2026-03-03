@@ -534,3 +534,22 @@ TEST_F(TestKnobSettingDescriptor, OverwriteKnobValueTypeBeforeFinalize)
         HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_DOUBLE, 1, nullptr, &actualValue));
     ASSERT_DOUBLE_EQ(actualValue, 3.14);
 }
+
+TEST_F(TestKnobSettingDescriptor, OverwriteIntValueWithStringBeforeFinalize)
+{
+    setKnobId("test_knob");
+    setInt64Value(42);
+    setStringValue("overwritten");
+    ASSERT_NO_THROW(getDescriptor()->finalize());
+
+    // Verify the value is now a string
+    int64_t count = 0;
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, 0, &count, nullptr));
+    ASSERT_EQ(count, static_cast<int64_t>(std::string("overwritten").size() + 1));
+
+    std::vector<char> buffer(static_cast<size_t>(count));
+    ASSERT_NO_THROW(getDescriptor()->getAttribute(
+        HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_CHAR, count, nullptr, buffer.data()));
+    ASSERT_EQ(std::string(buffer.data()), "overwritten");
+}

@@ -100,7 +100,9 @@ void KnobSettingDescriptor::setKnobValue(hipdnnBackendAttributeType_t attributeT
             HIPDNN_STATUS_BAD_PARAM,
             "KnobSettingDescriptor::setAttribute(): elementCount must be 1 for int64 value");
         hipdnn_data_sdk::data_objects::IntValueT intVal;
-        intVal.value = *static_cast<const int64_t*>(arrayOfElements);
+        int64_t tmp;
+        std::memcpy(&tmp, arrayOfElements, sizeof(int64_t));
+        intVal.value = tmp;
         _value.Set(intVal);
         _valueSet = true;
         break;
@@ -113,17 +115,20 @@ void KnobSettingDescriptor::setKnobValue(hipdnnBackendAttributeType_t attributeT
             HIPDNN_STATUS_BAD_PARAM,
             "KnobSettingDescriptor::setAttribute(): elementCount must be 1 for double value");
         hipdnn_data_sdk::data_objects::FloatValueT floatVal;
-        floatVal.value = *static_cast<const double*>(arrayOfElements);
+        double tmp;
+        std::memcpy(&tmp, arrayOfElements, sizeof(double));
+        floatVal.value = tmp;
         _value.Set(floatVal);
         _valueSet = true;
         break;
     }
     case HIPDNN_TYPE_CHAR:
     {
-        THROW_IF_LT(elementCount,
-                    static_cast<int64_t>(0),
-                    HIPDNN_STATUS_BAD_PARAM,
-                    "KnobSettingDescriptor::setAttribute(): elementCount is negative");
+        THROW_IF_LT(
+            elementCount,
+            static_cast<int64_t>(0),
+            HIPDNN_STATUS_BAD_PARAM,
+            "KnobSettingDescriptor::setAttribute(): elementCount is negative for string value");
         THROW_IF_TRUE(elementCount > MAX_KNOB_STRING_VALUE_LENGTH,
                       HIPDNN_STATUS_BAD_PARAM,
                       "KnobSettingDescriptor::setAttribute(): "

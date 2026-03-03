@@ -9,7 +9,6 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
-#include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -220,114 +219,6 @@ inline Error
 {
     HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, tensor));
     return setDescriptorAttrTensorRef(desc, attrName, tensor->get_uid(), tensorDescs, errorContext);
-}
-
-/// Result type for createKnobSettingDescriptor.
-struct KnobSettingDescriptorResult
-{
-    Error error;
-    ScopedHipdnnBackendDescriptor descriptor;
-};
-
-/// Creates a finalized HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR from a KnobSetting.
-/// The descriptor is ready to be passed to EngineConfigDescriptor via
-/// HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES.
-inline KnobSettingDescriptorResult
-    createKnobSettingDescriptor(const hipdnn_frontend::KnobSetting& setting)
-{
-    ScopedHipdnnBackendDescriptor desc(HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR);
-    if(!desc.valid())
-    {
-        return {{ErrorCode::HIPDNN_BACKEND_ERROR,
-                 "Failed to create knob setting descriptor for " + setting.knobId()},
-                {}};
-    }
-
-    // Set knob ID
-    auto idErr = setDescriptorAttrString(
-        desc.get(), HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, setting.knobId(), "knob ID");
-    if(idErr.is_bad())
-    {
-        return {idErr, {}};
-    }
-
-    // Set knob value, dispatching on the variant type
-    auto valueErr = std::visit(
-        [&](auto&& val) -> Error {
-            using T = std::decay_t<decltype(val)>;
-            if constexpr(std::is_same_v<T, int64_t>)
-            {
-                return setDescriptorAttrScalar(desc.get(),
-                                               HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
-                                               HIPDNN_TYPE_INT64,
-                                               val,
-                                               "knob value (int64)");
-            }
-            else if constexpr(std::is_same_v<T, double>)
-            {
-                return setDescriptorAttrScalar(desc.get(),
-                                               HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE,
-                                               HIPDNN_TYPE_DOUBLE,
-                                               val,
-                                               "knob value (double)");
-            }
-            else if constexpr(std::is_same_v<T, std::string>)
-            {
-                return setDescriptorAttrString(
-                    desc.get(), HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, val, "knob value (string)");
-            }
-            else
-            {
-                return {ErrorCode::INVALID_VALUE, "Unsupported knob value type"};
-            }
-        },
-        setting.value());
-
-    if(valueErr.is_bad())
-    {
-        return {valueErr, {}};
-    }
-
-    auto finalizeErr = finalizeDescriptor(desc.get(), "knob setting descriptor");
-    if(finalizeErr.is_bad())
-    {
-        return {finalizeErr, {}};
-    }
-
-    return {{}, std::move(desc)};
-}
-
-/// Applies knob settings to an engine config descriptor using the descriptor-based
-/// C API path. Creates a KnobSettingDescriptor per setting and passes them to
-/// the engine config via HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES.
-inline Error
-    applyKnobSettingsViaDescriptors(hipdnnBackendDescriptor_t engineConfigDesc,
-                                    const std::vector<hipdnn_frontend::KnobSetting>& settings)
-{
-    std::vector<ScopedHipdnnBackendDescriptor> knobDescs;
-    knobDescs.reserve(settings.size());
-    std::vector<hipdnnBackendDescriptor_t> knobDescPtrs;
-    knobDescPtrs.reserve(settings.size());
-
-    for(const auto& setting : settings)
-    {
-        auto result = createKnobSettingDescriptor(setting);
-        if(result.error.is_bad())
-        {
-            return result.error;
-        }
-        knobDescs.push_back(std::move(result.descriptor));
-        knobDescPtrs.push_back(knobDescs.back().get());
-    }
-
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        hipdnnBackend()->backendSetAttribute(engineConfigDesc,
-                                             HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
-                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                             static_cast<int64_t>(knobDescPtrs.size()),
-                                             knobDescPtrs.data()),
-        "Failed to set knob settings on engine config via descriptors.");
-    return {};
 }
 
 } // namespace hipdnn_frontend::detail
