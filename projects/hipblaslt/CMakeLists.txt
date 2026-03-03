@@ -234,16 +234,6 @@ if(NOT ROCM_LIBS_SUPERBUILD)
     endif()
 endif()
 
-# Add mxDataGenerator if needed by clients or tensilelite tests
-if((HIPBLASLT_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING) AND NOT ROCM_LIBS_SUPERBUILD)
-    if(HIPBLASLT_ENABLE_THEROCK)
-        find_package(mxDataGenerator REQUIRED)
-    else()
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/mxdatagenerator"
-                       "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
-    endif()
-endif()
-
 add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
