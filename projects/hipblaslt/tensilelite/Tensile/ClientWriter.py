@@ -207,6 +207,10 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
   iniFile = "--config-file={}".format(clientParametersPath)
   args = [clientExe, iniFile]
 
+  # Add MX PreSwizzle flag if enabled
+  if globalParameters["EnableMXPreSwizzle"]:
+    args.append("--enable-mx-preswizzle")
+
   try:
     subprocess.run(args, check=True)
   except (subprocess.CalledProcessError, OSError) as e:
@@ -298,8 +302,9 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
     runScriptFile.write("ERR1=0\n")
 
     clientExe = getClientExecutablePath()
+    mxPreSwizzleFlag = " --enable-mx-preswizzle" if globalParameters["EnableMXPreSwizzle"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {}\n".format(clientExe, configFile))
+      runScriptFile.write("{} --config-file {}{}\n".format(clientExe, configFile, mxPreSwizzleFlag))
     runScriptFile.write("ERR2=$?\n\n")
 
     runScriptFile.write("""
@@ -321,8 +326,9 @@ fi
         runScriptFile.write("%s -d 0 --resetclocks\n" % globalParameters["ROCmSMIPath"])
         runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
   else:
+    mxPreSwizzleFlag = " --enable-mx-preswizzle" if globalParameters["EnableMXPreSwizzle"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1\n".format(getClientExecutablePath(), configFile))
+      runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxPreSwizzleFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")

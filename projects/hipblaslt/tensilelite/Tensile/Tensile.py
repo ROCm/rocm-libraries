@@ -208,6 +208,8 @@ def addCommonArguments(argParser):
     argParser.add_argument("--client-lock", default=None)
     argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH),
         type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")
+    argParser.add_argument("--enable-mx-preswizzle", dest="EnableMXPreSwizzle", action="store_true",
+        help="Enable MX FP4 scale pre-swizzle for GPU kernel layout optimization")
 
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
 
@@ -234,6 +236,9 @@ def argUpdatedGlobalParameters(args):
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:
         rv["PrebuiltClient"] = args.prebuilt_client
+    if args.EnableMXPreSwizzle:
+        print1("# Command-line override: EnableMXPreSwizzle")
+        rv["EnableMXPreSwizzle"] = True
 
     for key, value in args.global_parameters:
         rv[key] = value
