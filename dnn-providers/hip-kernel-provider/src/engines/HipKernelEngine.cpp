@@ -51,11 +51,11 @@ void HipKernelEngine::getDetails(HipKernelHandle& handle,
 {
     flatbuffers::FlatBufferBuilder builder;
 
-    auto knob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
-        builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
+    // Define Global Knobs here and add them to the knobsVector
+    // auto knob = hipdnn_plugin_sdk::KnobFactory::createIntKnob(
+    //     builder, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, "Enable benchmarking", 0, 0, 1, 1, {});
 
     std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobsVector;
-    knobsVector.push_back(knob);
 
     // Collect custom knobs from plan builders
     for(const auto& planBuilder : _planBuilders)
