@@ -26,7 +26,9 @@
 from typing import Any, Optional
 from rocisa.instruction import SWaitCnt, SNop, SBarrier
 
-from Tensile.Components.CMSValidator import verify_packs_start_and_end_at_correct_indices, isValid
+from Tensile.Components.CMSValidator import (
+    add_local_read_constraints, add_pack_constraints, isValid,
+)
 from Tensile.Components.CustomSchedule import ScheduleInfo
 from cms_validation_base import CMSValidationTestBase
 
@@ -38,8 +40,7 @@ class TestValidatePackBF16(CMSValidationTestBase):
     def setUp(self, kernel_updates: Optional[dict[str, Any]] = None) -> None:
         super().setUp(kernel_updates)
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
 
     def test_passing(self):
         """
@@ -141,8 +142,7 @@ class TestValidatePackBF16MFMAReorder(CMSValidationTestBase):
         super().setUp(kernel_updates)
         self.mfma_reorder = [0, 2, 1, 3, 4, 6, 5, 7]
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
 
     def test_passing(self):
         """
@@ -223,8 +223,7 @@ class TestValidatePackBF16PLRPack(CMSValidationTestBase):
         kernel_updates["UsePLRPack"] = True
         super().setUp(kernel_updates)
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
 
     def test_passing_plr_pack(self):
         """
@@ -385,8 +384,7 @@ class TestValidatePackTF32(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
     
     def test_passing(self):
         """
@@ -572,8 +570,7 @@ class TestValidatePackTF32MFMAReorder(CMSValidationTestBase):
         # MFMA reorder: swap Q2 (indices 12-23) and Q3 (indices 24-35)
         self.mfma_reorder = list(range(12)) + list(range(24, 36)) + list(range(12, 24)) + list(range(36, 48))
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
     
     def test_passing(self):
         """
@@ -640,8 +637,7 @@ class TestValidatePackTF32CrossPackInterleaving(CMSValidationTestBase):
         kernel_updates["MIWaveTileB"] = 4
         super().setUp(kernel_updates)
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
     
     def test_passing_interleaved(self):
         """
@@ -761,8 +757,7 @@ class TestValidatePackTF32MultipleGroups(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
     
     def test_passing_two_groups_consecutive(self):
         """
@@ -900,8 +895,7 @@ class TestValidatePackTF32MFMA4x4x4(CMSValidationTestBase):
         self.q4s = self.q3e + 1
         self.q4e = self.num_vmfma - 1
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
     
     def test_passing(self):
         """
@@ -1201,8 +1195,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
         self.q4s = self.q3e + 1  # 18
         self.q4e = self.num_vmfma - 1  # 23
     
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_packs_start_and_end_at_correct_indices(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_local_read_constraints, add_pack_constraints]
     
     def _make_valid_pack_group(self, base_idx: int) -> list[int]:
         """

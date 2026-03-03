@@ -28,7 +28,6 @@
 #include "get_handle.hpp"
 #include <gtest/gtest_common.hpp>
 #include <gtest/gtest.h>
-#include <boost/algorithm/string.hpp>
 
 namespace lstm_extra {
 void GetArgs(const std::string& param, std::vector<std::string>& tokens)

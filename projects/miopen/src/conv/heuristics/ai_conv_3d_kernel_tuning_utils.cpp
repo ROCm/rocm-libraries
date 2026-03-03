@@ -54,7 +54,6 @@ int LayoutStringToCode(const std::string& layout)
 }
 
 // Helper: Extract 3D convolution features
-MIOPEN_INTERNALS_EXPORT
 std::map<std::string, float>
 GetFeatures3D(const ProblemDescription& problem, int /*max_cu*/, const std::string& /*arch*/)
 {
@@ -189,7 +188,6 @@ std::vector<std::string> ProcessExplicitXdlParams(const std::vector<std::string>
 }
 
 // Helper: Tokenize kernel string
-MIOPEN_INTERNALS_EXPORT
 std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
 {
     std::vector<std::string> tokens;
@@ -302,7 +300,6 @@ std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
 }
 
 // Helper: Fill indexes and kernels from valid_kernels
-MIOPEN_INTERNALS_EXPORT
 void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
                           std::vector<int>& indexes,
                           std::vector<std::vector<std::string>>& kernels)
@@ -330,7 +327,6 @@ void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
 // TODO: new CK functionality will use -1 for autodeduction, so we could add -1 to the list.
 // Note that the current models have not been trained with -1 in mind, so it may not work as
 // expected.
-MIOPEN_INTERNALS_EXPORT
 std::vector<int> GenerateSplitK(int max_split_k)
 {
     std::vector<int> split_ks;

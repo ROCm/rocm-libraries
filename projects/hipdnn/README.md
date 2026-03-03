@@ -65,6 +65,7 @@ hipDNN is organized into several key components. For detailed architecture descr
 | **[Plugin SDK](./plugin_sdk/)** | Header-only library for plugin development |
 | **[Samples](./samples/)** | Example implementations demonstrating hipDNN usage |
 | **[Tests](./tests/)** | Tests for the public API (incl. frontend integration tests) |
+| **[Tools](./tools/)** | Experimental utilities (e.g., benchmarking, engine listing) — subject to change |
 
 > [!NOTE]
 > Official hipDNN plugins can be found in the [dnn-providers](../../../dnn-providers/) folder (e.g., [MIOpen Plugin](../../../dnn-providers/miopen-provider/)).

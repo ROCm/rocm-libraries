@@ -96,13 +96,13 @@ namespace rocRoller
             return std::make_shared<Expression>(MagicShiftAndSign{a});
         }
 
-        ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width)
+        ExpressionPtr bfe(ExpressionPtr a, uint32_t offset, uint32_t width)
         {
             return std::make_shared<Expression>(
                 BitFieldExtract{{.arg{a}}, DataType::None, offset, width});
         }
 
-        ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width)
+        ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint32_t offset, uint32_t width)
         {
             return std::make_shared<Expression>(BitFieldExtract{{.arg{a}}, dt, offset, width});
         }

@@ -42,7 +42,7 @@
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight_scale.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data.hpp>
-#endif // MIOPEN_USE_COMPOSABLEKERNEL
+#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
 namespace miopen {
 
@@ -391,7 +391,10 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
     auto ptr_iter  = FindConvPtrByID(conv_ptrs, kernel_id);
 
     if(ptr_iter == conv_ptrs.end())
+    {
+        MIOPEN_LOG_E("Kernel does not exist.");
         return {miopenStatusInvalidValue};
+    }
 
     ConvSolution result;
 #ifdef CK_EXPERIMENTAL_BUILDER

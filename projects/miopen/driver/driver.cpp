@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include "driver.hpp"
 
+#include <miopen/errors.hpp>
+
 void Driver::AddGpuBufferCheckFlag(InputFlags& inflags)
 {
     inflags.AddInputFlag("gpubuffer_check",
@@ -49,8 +51,9 @@ GPUMem::Check Driver::GetGpuBufferCheck(const InputFlags& inflags) const
     case 1: return GPUMem::Check::Front;
     case 2: return GPUMem::Check::Back;
     default:
-        std::cerr << "Error: Invalid option " << check
-                  << " used with --gpubuffer_check.  Should be 0 (none), 1 (front), or 2 (back).";
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(
+            miopenStatusBadParm,
+            "Invalid option " + std::to_string(check) +
+                " used with --gpubuffer_check. Should be 0 (none), 1 (front), or 2 (back).");
     }
 }
