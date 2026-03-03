@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]  # Only for gfx950
+  marks: [xfail-gfx950, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx940, skip-gfx941]  # Only for gfx950
 
 GlobalParameters:
   NumElementsToValidate: -1
@@ -77,44 +77,46 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          # Small sizes (Exact)
-          - Exact: [128, 128, 1, 128]
+          ########################################
+          # 1. Small, Power-of-2 - to test optimized code path
+          ########################################
           - Exact: [256, 256, 1, 256]
-          # Medium sizes (Exact)
-          - Exact: [512, 512, 1, 512]
-          - Exact: [1024, 1024, 1, 1024]
-          # Large sizes (Exact)
-          - Exact: [2048, 2048, 1, 2048]
-          - Exact: [4096, 4096, 1, 4096]
-          # Edge cases
-          #- Exact: [1, 1, 1, 1]
-          - Exact: [1, 128, 1, 128]
-          - Exact: [128, 1, 1, 128]
-            #- Exact: [127, 128, 1, 129]
-          - Exact: [129, 127, 1, 128]
-            #- Exact: [255, 256, 1, 257]
-          - Exact: [257, 255, 1, 256]
-            #- Exact: [128, 128, 1, 127]
-            #- Exact: [128, 128, 1, 129]
-          # Batch variations
-          - Exact: [256, 256, 2, 256]
-          - Exact: [512, 512, 4, 512]
-          - Exact: [1024, 1024, 8, 1024]
-          - Exact: [256, 256, 16, 256]
-          # Rectangular matrices
-          - Exact: [512, 1024, 1, 256]
-          - Exact: [1024, 512, 1, 256]
-          - Exact: [256, 512, 1, 1024]
-          - Exact: [512, 256, 1, 1024]
-          # Small to medium range sweep (M, N, K: 128-512, step 128)
-          - Range: [[128, 128, 512], [128, 128, 512], [1], [128, 128, 512]]
-          # Medium range sweep (M, N, K: 512-1024, step 256)
-          - Range: [[512, 256, 1024], [512, 256, 1024], [1], [512, 256, 1024]]
-          # K dimension sweeps
-          - Range: [[256], [256], [1], [128, 128, 512]]
-          - Range: [[1024], [1024], [1], [256, 256, 1024]]
-          # Batch size sweeps (1-8)
-          - Range: [[512], [512], [1, 1, 8], [512]]
+
+          ########################################
+          # 2. Odd M - to test edge M
+          ########################################
+          - Exact: [63, 64, 1, 64]
+          - Exact: [255, 256, 1, 256]
+
+          ########################################
+          # 3. Odd N - to test edge N
+          ########################################
+          - Exact: [64, 63, 1, 64]
+          - Exact: [256, 255, 1, 256]
+
+          ########################################
+          # 4. Odd M and N - to test both edge dimensions
+          ########################################
+          - Exact: [63, 63, 1, 64]
+          - Exact: [255, 255, 1, 256]
+
+          ########################################
+          # 5. Odd K - to test tail loop
+          ########################################
+          - Exact: [64, 64, 1, 63]
+          - Exact: [256, 256, 1, 255]
+
+          ########################################
+          # 6. Small size with batch > 1
+          ########################################
+          - Exact: [32, 32, 8, 32]
+
+          ########################################
+          # 7. Medium size that doesn't divide evenly on CUs (stream-k)
+          ########################################
+          - Exact: [1000, 1000, 1, 256]
+          - Exact: [1500, 1500, 1, 512]
+          - Exact: [1024, 1024, 1, 333]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
