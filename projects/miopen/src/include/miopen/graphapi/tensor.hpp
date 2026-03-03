@@ -107,9 +107,9 @@ private:
 public:
     TensorBuilder& setDataType(miopenDataType_t dataType) &;
     TensorBuilder& setDim(const std::vector<std::size_t>& dimensions) &;
-    TensorBuilder& setDim(std::vector<std::size_t>&& dimensions) &;
+    MIOPEN_INTERNALS_NO_EXPORT TensorBuilder& setDim(std::vector<std::size_t>&& dimensions) &;
     TensorBuilder& setStride(const std::vector<std::size_t>& strides) &;
-    TensorBuilder& setStride(std::vector<std::size_t>&& strides) &;
+    MIOPEN_INTERNALS_NO_EXPORT TensorBuilder& setStride(std::vector<std::size_t>&& strides) &;
     TensorBuilder& setId(int64_t id) &;
     TensorBuilder& setVirtual(bool isVirtual) &;
 
@@ -136,7 +136,7 @@ public:
     TensorBuilder&& setId(int64_t id) && { return std::move(setId(id)); }
     TensorBuilder&& setVirtual(bool isVirtual) && { return std::move(setVirtual(isVirtual)); }
 
-    Tensor build() const&;
+    MIOPEN_INTERNALS_NO_EXPORT Tensor build() const&;
     Tensor build() &&;
 };
 
