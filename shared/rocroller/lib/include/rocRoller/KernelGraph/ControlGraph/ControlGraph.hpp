@@ -187,8 +187,6 @@ namespace rocRoller
              * Also, if a reference to the returned value is maintained through any changes
              * to the graph, the returned map will be cleared.
              */
-            //std::unordered_map<int, std::unordered_map<int, NodeOrdering>> const&
-            //    nodeOrderTable() const;
             std::unordered_map<int, std::unordered_map<int, NodeOrdering>> nodeOrderTable() const;
 
             template <typename T>
