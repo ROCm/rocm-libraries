@@ -26,6 +26,7 @@ namespace
 enum class FailurePoint
 {
     NONE, // No failure expected
+    VALIDATE, // Expect failure at validate
     CREATE_EXECUTION_PLAN, // Expect failure at create execution plan
     EXECUTE // Expect failure at execute
 };
@@ -37,6 +38,7 @@ struct IntegrationTestCase
     std::string graphName;
     FailurePoint expectedFailure;
     bool useManualUids;
+    NormFwdPhase forwardPhase;
 
     friend std::ostream& operator<<(std::ostream& os, const IntegrationTestCase& tc)
     {
@@ -49,6 +51,9 @@ struct IntegrationTestCase
         case FailurePoint::NONE:
             os << "NONE";
             break;
+        case FailurePoint::VALIDATE:
+            os << "VALIDATE";
+            break;
         case FailurePoint::CREATE_EXECUTION_PLAN:
             os << "CREATE_EXECUTION_PLAN";
             break;
@@ -60,7 +65,8 @@ struct IntegrationTestCase
             break;
         }
 
-        os << ", use_manual_uids: " << (tc.useManualUids ? "true" : "false") << "}";
+        os << ", use_manual_uids: " << (tc.useManualUids ? "true" : "false")
+           << ", forward_phase: " << tc.forwardPhase << "}";
 
         return os;
     }
@@ -74,25 +80,41 @@ protected:
     {
         SimpleLayernormTensorBundle(const std::vector<int64_t>& dims)
             : normalizedDims(dims.begin() + 1, dims.end())
+            , statsDims(makeStatsDims(dims))
             , xTensor(Tensor<InputType>(dims))
             , yTensor(Tensor<InputType>(dims))
             , scaleTensor(Tensor<ScaleBiasType>(normalizedDims))
             , biasTensor(Tensor<ScaleBiasType>(normalizedDims))
             , epsilonTensor(Tensor<ScaleBiasType>({1}))
+            , meanTensor(Tensor<ScaleBiasType>(statsDims))
+            , invVarianceTensor(Tensor<ScaleBiasType>(statsDims))
         {
             xTensor.fillWithValue(static_cast<InputType>(1.0f));
             yTensor.fillWithValue(static_cast<InputType>(0.0f));
             scaleTensor.fillWithValue(static_cast<ScaleBiasType>(1.0f));
             biasTensor.fillWithValue(static_cast<ScaleBiasType>(0.0f));
             epsilonTensor.fillWithValue(static_cast<ScaleBiasType>(1e-5f));
+            meanTensor.fillWithValue(static_cast<ScaleBiasType>(0.0f));
+            invVarianceTensor.fillWithValue(static_cast<ScaleBiasType>(0.0f));
         }
 
         std::vector<int64_t> normalizedDims;
+        std::vector<int64_t> statsDims;
         Tensor<InputType> xTensor;
         Tensor<InputType> yTensor;
         Tensor<ScaleBiasType> scaleTensor;
         Tensor<ScaleBiasType> biasTensor;
         Tensor<ScaleBiasType> epsilonTensor;
+        Tensor<ScaleBiasType> meanTensor;
+        Tensor<ScaleBiasType> invVarianceTensor;
+
+    private:
+        static std::vector<int64_t> makeStatsDims(const std::vector<int64_t>& dims)
+        {
+            std::vector<int64_t> result(dims.size(), 1);
+            result[0] = dims[0];
+            return result;
+        }
     };
 
     struct LayernormTestTensors
@@ -102,6 +124,8 @@ protected:
         std::shared_ptr<TensorAttributes> bias;
         std::shared_ptr<TensorAttributes> epsilon;
         std::shared_ptr<TensorAttributes> y;
+        std::shared_ptr<TensorAttributes> mean;
+        std::shared_ptr<TensorAttributes> invVariance;
     };
 
     void SetUp() override
@@ -137,7 +161,8 @@ protected:
     static std::pair<std::shared_ptr<Graph>, LayernormTestTensors> createLayernormTestGraphWithUids(
         const std::string& graphName,
         const SimpleLayernormTensorBundle<float, float>& tensorBundle,
-        bool useManualUids)
+        bool useManualUids,
+        NormFwdPhase forwardPhase)
     {
         auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
         graph->set_name(graphName)
@@ -183,17 +208,36 @@ protected:
         LayernormAttributes lnAttrs;
         lnAttrs.set_name("layernorm_fwd");
         lnAttrs.set_epsilon(tensors.epsilon);
-        lnAttrs.set_forward_phase(NormFwdPhase::INFERENCE);
+        lnAttrs.set_forward_phase(forwardPhase);
         lnAttrs.set_compute_data_type(DataType::FLOAT);
 
         auto outputTensors = graph->layernorm(tensors.x, tensors.scale, tensors.bias, lnAttrs);
 
         tensors.y = outputTensors[0];
+        tensors.mean = outputTensors[1];
+        tensors.invVariance = outputTensors[2];
+
         if(useManualUids)
         {
             tensors.y->set_uid(uid++);
+            if(tensors.mean)
+            {
+                tensors.mean->set_uid(uid++);
+            }
+            if(tensors.invVariance)
+            {
+                tensors.invVariance->set_uid(uid++);
+            }
         }
         tensors.y->set_data_type(DataType::FLOAT);
+        if(tensors.mean)
+        {
+            tensors.mean->set_data_type(DataType::FLOAT);
+        }
+        if(tensors.invVariance)
+        {
+            tensors.invVariance->set_data_type(DataType::FLOAT);
+        }
 
         return {graph, tensors};
     }
@@ -209,6 +253,16 @@ protected:
         variantPack[tensors.epsilon->get_uid()] = tensorBundle.epsilonTensor.memory().deviceData();
         variantPack[tensors.y->get_uid()] = tensorBundle.yTensor.memory().deviceData();
 
+        if(tensors.mean != nullptr)
+        {
+            variantPack[tensors.mean->get_uid()] = tensorBundle.meanTensor.memory().deviceData();
+        }
+        if(tensors.invVariance != nullptr)
+        {
+            variantPack[tensors.invVariance->get_uid()]
+                = tensorBundle.invVarianceTensor.memory().deviceData();
+        }
+
         return variantPack;
     }
 
@@ -219,6 +273,11 @@ protected:
                                  FailurePoint expectedFailure = FailurePoint::NONE)
     {
         auto result = graph->validate();
+        if(expectedFailure == FailurePoint::VALIDATE)
+        {
+            ASSERT_NE(result.code, ErrorCode::OK) << "validate should fail";
+            return;
+        }
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
         result = graph->build_operation_graph(handle);
@@ -243,6 +302,14 @@ protected:
         ASSERT_TRUE(tensors.bias->has_uid());
         ASSERT_TRUE(tensors.epsilon->has_uid());
         ASSERT_TRUE(tensors.y->has_uid());
+        if(tensors.mean)
+        {
+            ASSERT_TRUE(tensors.mean->has_uid());
+        }
+        if(tensors.invVariance)
+        {
+            ASSERT_TRUE(tensors.invVariance->has_uid());
+        }
 
         auto variantPack = createVariantPack(tensors, tensorBundle);
 
@@ -267,7 +334,14 @@ protected:
         SimpleLayernormTensorBundle<float, float> tensorBundle(dims);
 
         auto [graph, tensors] = createLayernormTestGraphWithUids(
-            testCase.graphName, tensorBundle, testCase.useManualUids);
+            testCase.graphName, tensorBundle, testCase.useManualUids, testCase.forwardPhase);
+
+        if(testCase.forwardPhase == NormFwdPhase::INFERENCE)
+        {
+            ASSERT_EQ(tensors.mean, nullptr) << "INFERENCE mode should not create mean tensor";
+            ASSERT_EQ(tensors.invVariance, nullptr)
+                << "INFERENCE mode should not create invVariance tensor";
+        }
 
         runGraphPipeline(graph, _handle, tensors, tensorBundle, testCase.expectedFailure);
     }
@@ -283,25 +357,47 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationLayernormForwardFp32,
     ::testing::Values(
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
-                            "DefaultPluginWithManualUids",
+                            "InferenceWithManualUids",
                             "DefaultPluginLayernormTest",
                             FailurePoint::NONE,
-                            true},
+                            true,
+                            NormFwdPhase::INFERENCE},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
-                            "DefaultPluginWithAutoUids",
+                            "InferenceWithAutoUids",
                             "DefaultPluginLayernormTestAutoUID",
                             FailurePoint::NONE,
-                            false},
+                            false,
+                            NormFwdPhase::INFERENCE},
+        IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
+                            "TrainingWithManualUids",
+                            "TrainingPluginLayernormTest",
+                            FailurePoint::NONE,
+                            true,
+                            NormFwdPhase::TRAINING},
+        IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
+                            "TrainingWithAutoUids",
+                            "TrainingPluginLayernormTestAutoUID",
+                            FailurePoint::NONE,
+                            false,
+                            NormFwdPhase::TRAINING},
+        IntegrationTestCase{hipdnn_tests::plugin_constants::testGoodPluginPath(),
+                            "NotSetPhaseValidationFails",
+                            "NotSetPhaseLayernormTest",
+                            FailurePoint::VALIDATE,
+                            true,
+                            NormFwdPhase::NOT_SET},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testExecuteFailsPluginPath(),
                             "ExecuteFailsPlugin",
                             "ExecuteFailsPluginLayernormTest",
                             FailurePoint::EXECUTE,
-                            true},
+                            true,
+                            NormFwdPhase::TRAINING},
         IntegrationTestCase{hipdnn_tests::plugin_constants::testNoApplicableEnginesAPluginPath(),
                             "NoApplicableEnginesPlugin",
                             "NoEnginesPluginLayernormTest",
                             FailurePoint::CREATE_EXECUTION_PLAN,
-                            true}),
+                            true,
+                            NormFwdPhase::TRAINING}),
     [](const ::testing::TestParamInfo<IntegrationTestCase>& info) {
         std::string name = info.param.description;
         std::transform(name.cbegin(), name.cend(), name.begin(), [](char c) {
