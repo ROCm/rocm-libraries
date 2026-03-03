@@ -249,14 +249,13 @@ namespace rocRoller
             }
 
         private:
-
             template <CForwardRangeOf<int> Range>
             std::vector<int> populateOrderCacheImpl(Range const& startingNodes) const;
             std::vector<int> populateOrderCacheImpl(int startingNode) const;
 
             virtual void clearCache(Graph::GraphModification modification) override;
             void         populateOrderCache() const;
-            void checkOrderCache() const;
+            void         checkOrderCache() const;
             void         sortOrderCache() const;
 
             /**
@@ -284,7 +283,7 @@ namespace rocRoller
                                  BRange const& nodesB,
                                  NodeOrdering  order) const;
 
-            mutable std::unordered_map<int, NodeOrders>       m_orderCache;
+            mutable std::unordered_map<int, NodeOrders> m_orderCache;
             /**
              * If an entry is present, the value will be the IDs of every descendent from the key,
              * following every kind of edge.
