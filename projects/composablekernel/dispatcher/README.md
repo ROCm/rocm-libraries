@@ -16,7 +16,7 @@ A unified kernel dispatch system for AMD GPUs with C++ and Python frontends.
 5. [Running Examples](#running-examples)
 6. [External Integration](#external-integration)
 7. [Core Concepts](#core-concepts)
-8. [Support Matrix](#support-matrix)
+8. [Operation Support Matrix](#operation-support-matrix)
 9. [Troubleshooting](#troubleshooting)
 10. [File Structure](#file-structure)
 
