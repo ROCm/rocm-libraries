@@ -407,11 +407,11 @@ void TestLogBufferOn()
             case 6: ASSERT_TRUE(isSubStr(line, "info")); break;
             case 7: ASSERT_TRUE(isSubStr(line, "info2")); break;
             case 8: ASSERT_TRUE(isSubStr(line, "throw")); break;
-	    case 9: ASSERT_TRUE(isSubStr(line, "")); break;
+            case 9: ASSERT_TRUE(isSubStr(line, "")); break;
             }
             line_i++;
         }
-	ASSERT_TRUE(line_i == 10);
+        ASSERT_TRUE(line_i == 10);
     }
     fs::remove(filename);
 }
