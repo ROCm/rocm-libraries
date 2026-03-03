@@ -634,7 +634,7 @@ try
             "                           ")
 
         ("norm_type",
-         value<char>()->default_value('M'),
+         value<char>()->default_value('1'),
             "1 (or O) = one-norm, F = Frobenius, I = infinity-norm, M = max element.\n"
             "                           Specifies which matrix norm to compute.\n"
             "                           ")
