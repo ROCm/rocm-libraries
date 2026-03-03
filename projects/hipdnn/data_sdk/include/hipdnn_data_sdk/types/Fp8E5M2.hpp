@@ -242,10 +242,14 @@ inline float fp8_e5m2_bits_to_float(uint8_t bits) noexcept
 } // namespace detail
 
 /**
- * @brief Custom FP8 E5M2 type for hipDNN
+ * @brief Custom storage-only FP8 E5M2 type for hipDNN
  *
  * This type provides a portable FP8 E5M2 (1 sign, 5 exponent, 2 mantissa) implementation
  * that does not require the __HIPCC__ macro. Uses OCP E5M2 format.
+ *
+ * This is a STORAGE-ONLY type intended for data representation and conversion,
+ * not direct computation. Arithmetic operations and comparisons are
+ * intentionally not provided. For computation, explicitly convert to float.
  *
  * Binary layout: 1 sign bit, 5 exponent bits, 2 mantissa bits
  * Range: +/- 57344 (max normal value)

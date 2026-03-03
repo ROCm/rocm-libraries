@@ -229,10 +229,14 @@ inline float fp8_e4m3_bits_to_float(uint8_t bits) noexcept
 } // namespace detail
 
 /**
- * @brief Custom FP8 E4M3 type for hipDNN
+ * @brief Custom storage-only FP8 E4M3 type for hipDNN
  *
  * This type provides a portable FP8 E4M3 (1 sign, 4 exponent, 3 mantissa) implementation
  * that does not require the __HIPCC__ macro. Uses OCP E4M3 format.
+ *
+ * This is a STORAGE-ONLY type intended for data representation and conversion,
+ * not direct computation. Arithmetic operations and comparisons are
+ * intentionally not provided. For computation, explicitly convert to float.
  *
  * Binary layout: 1 sign bit, 4 exponent bits, 3 mantissa bits
  * Range: +/- 448 (max normal value)
