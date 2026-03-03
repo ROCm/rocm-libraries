@@ -500,6 +500,10 @@ namespace rocRoller
                 auto expr            = m_fastArith(op.condition);
                 auto conditionResult = m_context->brancher()->resultRegister(expr);
 
+                co_yield Instruction::Wait(WaitCount::SyncQueue(m_context->targetArchitecture(),
+                                                                GPUWaitQueueType::SMemQueue,
+                                                                "DEBUG: Wait for scalar queue"));
+
                 co_yield Expression::generate(conditionResult, expr, m_context);
                 // -------------------------------------------------------------------------------
                 // TODO: remove this once we better handle data-flow across loops

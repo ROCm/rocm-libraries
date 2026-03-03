@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -6496,4 +6497,202 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
     auto x8 = std::make_shared<TensorAttributes>();
     x8->set_dim({8, 3, 32, 32}).set_data_type(DataType::FLOAT);
     EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
+}
+
+TEST_F(TestGraph, SdpaFpropNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNode");
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+
+    EXPECT_EQ(o->get_name(), "SdpaNode::O");
+    EXPECT_TRUE(o->get_is_virtual());
+    EXPECT_EQ(stats, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, SdpaFpropNodeCreationWithStats)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNodeStats");
+    attributes.set_generate_stats(true);
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+
+    EXPECT_EQ(o->get_name(), "SdpaNodeStats::O");
+    EXPECT_TRUE(o->get_is_virtual());
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(stats->get_name(), "SdpaNodeStats::STATS");
+    EXPECT_TRUE(stats->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraph)
+{
+    Graph graph;
+    graph.set_name("SerializedSdpaGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_uid(1)
+        .set_name("Q")
+        .set_dim({2, 8, 16, 64})
+        .set_stride({8192, 1024, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_uid(2)
+        .set_name("K")
+        .set_dim({2, 8, 32, 64})
+        .set_stride({16384, 2048, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_uid(3)
+        .set_name("V")
+        .set_dim({2, 8, 32, 64})
+        .set_stride({16384, 2048, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNode");
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedSdpaGraph");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    // 4 tensors: Q, K, V, O (no stats since generate_stats not set)
+    EXPECT_EQ(deserializedGraph->tensors.size(), 4);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*q, tensorLookup[q->get_uid()]);
+    validateTensor(*k, tensorLookup[k->get_uid()]);
+    validateTensor(*v, tensorLookup[v->get_uid()]);
+    validateTensor(*o, tensorLookup[o->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "SdpaNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes);
+    auto deserializedSdpaAttributes = deserializedGraph->nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(deserializedSdpaAttributes, nullptr);
+    EXPECT_EQ(deserializedSdpaAttributes->q_tensor_uid, q->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->k_tensor_uid, k->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->v_tensor_uid, v->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->o_tensor_uid, o->get_uid());
+    EXPECT_FALSE(deserializedSdpaAttributes->stats_tensor_uid.has_value());
+}
+
+TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraphWithStats)
+{
+    Graph graph;
+    graph.set_name("SerializedSdpaStatsGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_uid(1)
+        .set_name("Q")
+        .set_dim({2, 8, 16, 64})
+        .set_stride({8192, 1024, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_uid(2)
+        .set_name("K")
+        .set_dim({2, 8, 32, 64})
+        .set_stride({16384, 2048, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_uid(3)
+        .set_name("V")
+        .set_dim({2, 8, 32, 64})
+        .set_stride({16384, 2048, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaStatsNode");
+    attributes.set_generate_stats(true);
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+    ASSERT_NE(stats, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedSdpaStatsGraph");
+    // 5 tensors: Q, K, V, O, STATS
+    EXPECT_EQ(deserializedGraph->tensors.size(), 5);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "SdpaStatsNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes);
+    auto deserializedSdpaAttributes = deserializedGraph->nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(deserializedSdpaAttributes, nullptr);
+    EXPECT_EQ(deserializedSdpaAttributes->q_tensor_uid, q->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->k_tensor_uid, k->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->v_tensor_uid, v->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->o_tensor_uid, o->get_uid());
+    ASSERT_TRUE(deserializedSdpaAttributes->stats_tensor_uid.has_value());
+    EXPECT_EQ(deserializedSdpaAttributes->stats_tensor_uid.value(), stats->get_uid());
+    ASSERT_TRUE(deserializedSdpaAttributes->generate_stats.has_value());
+    EXPECT_TRUE(deserializedSdpaAttributes->generate_stats.value());
 }
