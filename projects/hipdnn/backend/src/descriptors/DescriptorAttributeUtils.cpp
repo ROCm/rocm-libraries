@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "DescriptorAttributeUtils.hpp"
+#include "BackendDescriptor.hpp"
 #include "DataTypeConversion.hpp"
 
 #include <algorithm>
@@ -118,6 +119,100 @@ void getDataType(hipdnn_data_sdk::data_objects::DataType source,
     {
         *elementCount = 1;
     }
+}
+
+void setConvMode(hipdnn_data_sdk::data_objects::ConvMode& target,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t elementCount,
+                 const void* arrayOfElements,
+                 const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_CONVOLUTION_MODE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    target = toSdkConvMode(*static_cast<const hipdnnConvolutionMode_t*>(arrayOfElements));
+}
+
+void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t requestedElementCount,
+                 int64_t* elementCount,
+                 void* arrayOfElements,
+                 const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_CONVOLUTION_MODE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    *static_cast<hipdnnConvolutionMode_t*>(arrayOfElements) = fromSdkConvMode(source);
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
+void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
+                         int64_t& uidTarget,
+                         hipdnnBackendAttributeType_t attributeType,
+                         int64_t elementCount,
+                         const void* arrayOfElements,
+                         const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+
+    auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        arrayOfElements,
+        HIPDNN_STATUS_BAD_PARAM,
+        std::string(errorPrefix) + ": Failed to unpack tensor descriptor");
+    THROW_IF_FALSE(tensorDesc->isFinalized(),
+                   HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
+                   std::string(errorPrefix) + ": Tensor descriptor not finalized");
+
+    descTarget = tensorDesc;
+    uidTarget = tensorDesc->getData().uid;
+}
+
+void getTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
+                         hipdnnBackendAttributeType_t attributeType,
+                         int64_t requestedElementCount,
+                         int64_t* elementCount,
+                         void* arrayOfElements,
+                         const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+    HipdnnBackendDescriptor::packDescriptor(descSource, arrayOfElements);
 }
 
 } // namespace hipdnn_backend
