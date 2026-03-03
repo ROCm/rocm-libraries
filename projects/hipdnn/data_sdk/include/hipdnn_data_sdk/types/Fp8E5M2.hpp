@@ -329,12 +329,6 @@ struct fp8_e5m2
         return *this;
     }
 
-    // Deleted compound assignment operators - FP8 types are storage-only
-    fp8_e5m2& operator+=(fp8_e5m2) = delete;
-    fp8_e5m2& operator-=(fp8_e5m2) = delete;
-    fp8_e5m2& operator*=(fp8_e5m2) = delete;
-    fp8_e5m2& operator/=(fp8_e5m2) = delete;
-
     // Stream output
     friend std::ostream& operator<<(std::ostream& os, fp8_e5m2 val)
     {
