@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -38,12 +39,14 @@
 #include "../device/kernels/common.h"
 #include "callback_map.h"
 #include "compute_scheme.h"
+#include "data_layout.h"
 #include "enum_printer.h"
 #include "function_map_key.h"
 #include "function_pool.h"
 #include "kargs.h"
 #include "load_store_ops.h"
 #include "logging.h"
+#include "rocfft_current_function.h"
 #include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
@@ -316,6 +319,45 @@ public:
 
     // Distance between consecutive batch members:
     size_t iDist = 0, oDist = 0;
+
+    // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
+    // `outStride`, `iDist`, and `oDist` could (and should) be replaced
+    // by two data_layout_t member objects instead.
+    inline data_layout_t layout_for(io_data_label io) const
+    {
+        switch(io)
+        {
+        case io_data_label::INPUT:
+            return data_layout_t::full_layout(length, inStride, batch, iDist);
+        case io_data_label::OUTPUT:
+            return data_layout_t::full_layout(outputLength, outStride, batch, oDist);
+        default:
+            throw std::invalid_argument("Unknown io data label given to "
+                                        + ROCFFT_CURRENT_FUNCTION);
+        }
+    };
+
+    inline size_t expected_buffer_size_for(io_data_label io) const
+    {
+        if(io != io_data_label::INPUT && io != io_data_label::OUTPUT)
+            throw std::invalid_argument("Invalid value given to " + ROCFFT_CURRENT_FUNCTION);
+
+        const auto layout = layout_for(io);
+        auto       ret
+            = layout.buffer_element_count()
+              * element_size(precision, io == io_data_label::INPUT ? inArrayType : outArrayType);
+        if(placement == rocfft_placement_inplace)
+        {
+            const auto other_layout = layout_for(other(io));
+
+            ret = std::max(
+                ret,
+                other_layout.buffer_element_count()
+                    * element_size(precision,
+                                   other(io) == io_data_label::INPUT ? inArrayType : outArrayType));
+        }
+        return ret;
+    }
 
     // Distance between consecutive batch members in fused Bluestein nodes
     size_t iDistBlue = 0, oDistBlue = 0;
