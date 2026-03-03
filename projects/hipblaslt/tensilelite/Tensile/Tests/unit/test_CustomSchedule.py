@@ -160,45 +160,28 @@ class TestCustomScheduleBF16:
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 
-    def test_schedule_256x96x64_16bit_TN(self):
-        """Tests the 256x96x64 16-bit TN schedule."""
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst, tr_lds, dtl_plus_lds_buf", [
+        (  True,  False,        True,      1,                 0),
+        ( False,   True,        True,      0,                 1),
+        # fmt: on
+        ])
+    def test_schedule_256x96x64_16bit(self, transA, transB, lds_tr_inst, tr_lds, dtl_plus_lds_buf):
+        """Tests the 256x96x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
         kernel["ProblemType"].update({
             "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": True, "TransposeB": False
+            "TransposeA": transA, "TransposeB": transB,
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 96, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 3,
-        })
-
-        has_schedule, schedule_info = hasCustomSchedule(kernel)
-        assert has_schedule
-        assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == 2
-        assert schedule_info.numMfma == 48
-        valid, message = isValid(schedule_info, {"kernel" : kernel})
-        assert valid, message
-
-    def test_schedule_256x96x64_16bit_NT_DPLB(self):
-        """Tests the 256x96x64 16-bit NT schedule with DtlPlusLdsBuf."""
-        kernel = create_base_kernel()
-        dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": False, "TransposeB": True,
-        })
-        kernel.update({
-            "MacroTile0": 256, "MacroTile1": 96, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
-            "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "TransposeLDS": 0, "MIWaveTileA": 8, "MIWaveTileB": 3,
-            "LDSTrInst": 1, "DtlPlusLdsBuf": True,
+            "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 3,
+            "LDSTrInst": lds_tr_inst, "DtlPlusLdsBuf": dtl_plus_lds_buf,
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)

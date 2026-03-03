@@ -2551,6 +2551,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - DirectToLds: [1]
+        - DtlPlusLdsBuf: [1]
         - StreamK: [3]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -2569,6 +2570,7 @@ BenchmarkProblems:
           - Range: [[256], [96], [1], [1, 17, 256]]
           - Range: [[256], [96], [1], [32, 64, 256]]
         - BiasTypeArgs: ['b']
+
   ########################################
   # HHS NT - standard
   ########################################
