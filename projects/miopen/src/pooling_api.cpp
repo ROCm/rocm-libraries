@@ -47,11 +47,11 @@ inline void Pooling_logging_cmd(const miopenPoolingDescriptor_t poolDesc,
         switch(miopen::deref(tensorDesc).GetType())
         {
         case miopenHalf: ss << "poolfp16"; break;
+        case miopenBFloat16: ss << "poolbfp16"; break;
         case miopenFloat: ss << "pool"; break;
         case miopenInt64:
         case miopenInt32:
         case miopenInt8:
-        case miopenBFloat16:
         case miopenDouble:
         case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz:

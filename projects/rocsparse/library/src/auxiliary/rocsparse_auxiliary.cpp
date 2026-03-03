@@ -5324,11 +5324,13 @@ try
 
     *descr = new _rocsparse_spgeam_descr();
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr)
 try
@@ -5358,11 +5360,13 @@ try
 
     delete descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spgeam_set_input gets the input on the SpGEAM descriptor.
@@ -5455,11 +5459,13 @@ try
     }
     }
     return rocsparse_status_invalid_value;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spgeam_get_output gets the output from the SpGEAM descriptor.
@@ -5493,11 +5499,13 @@ try
     }
 
     return rocsparse_status_invalid_value;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 #ifdef __cplusplus
 }

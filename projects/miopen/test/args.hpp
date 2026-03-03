@@ -72,8 +72,8 @@ string_map parse(std::vector<std::string> as, IsKeyword is_keyword)
 namespace detail {
 
 template <class T>
-auto is_container(miopen::rank<1>, T&& x)
-    -> decltype(x.insert(x.end(), *x.begin()), std::true_type{});
+auto is_container(miopen::rank<1>, T&& x) -> decltype(x.insert(x.end(), *x.begin()),
+                                                      std::true_type{});
 
 template <class T>
 std::false_type is_container(miopen::rank<0>, T&&);
@@ -103,25 +103,19 @@ struct requires_unwrap : T
 } // namespace detail
 
 template <class T>
-struct is_container : decltype(detail::is_container(miopen::rank<1>{}, std::declval<T>()))
-{
-};
+struct is_container : decltype(detail::is_container(miopen::rank<1>{}, std::declval<T>())){};
 
 template <class T>
 struct is_input_streamable : decltype(detail::is_input_streamable(
                                  miopen::rank<1>{},
                                  std::declval<std::istream>(),
-                                 std::declval<typename std::add_lvalue_reference<T>::type>()))
-{
-};
+                                 std::declval<typename std::add_lvalue_reference<T>::type>())){};
 
 template <class T>
 struct is_output_streamable : decltype(detail::is_output_streamable(
                                   miopen::rank<1>{},
                                   std::declval<std::ostream>(),
-                                  std::declval<typename std::add_lvalue_reference<T>::type>()))
-{
-};
+                                  std::declval<typename std::add_lvalue_reference<T>::type>())){};
 
 #ifdef _MSC_VER
 #define ARGS_REQUIRES_BOOL(...)                                                           \
@@ -182,8 +176,9 @@ struct any_value
 };
 
 template <class T, std::size_t... Ns, class Data>
-auto any_construct_impl(miopen::rank<1>, std::index_sequence<Ns...>, const Data& d)
-    -> decltype(T(any_value{d[Ns]}...))
+auto any_construct_impl(miopen::rank<1>,
+                        std::index_sequence<Ns...>,
+                        const Data& d) -> decltype(T(any_value{d[Ns]}...))
 {
     return T(any_value{d[Ns]}...);
 }

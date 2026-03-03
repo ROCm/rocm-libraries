@@ -2,11 +2,10 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
@@ -15,13 +14,18 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
 #include "GoldenReferenceCpu.hpp"
+#endif
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
+using namespace hipdnn_data_sdk::types;
 
 namespace fs = std::filesystem;
+
+#ifndef HIPDNN_DATA_SDK_SKIP_JSON_LIB
 
 template <class T>
 class TestCpuBatchnormFwdInferenceGoldenReference : public TestGoldenReferenceCpu
@@ -45,7 +49,7 @@ class TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16
 };
 
 class TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16
-    : public TestCpuBatchnormFwdInferenceGoldenReference<hip_bfloat16>
+    : public TestCpuBatchnormFwdInferenceGoldenReference<bfloat16>
 {
 };
 
@@ -94,6 +98,8 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32,
                          getGoldenReferenceParams("BatchnormFwdInference/ncdhw/fp32"));
 
+#endif // HIPDNN_DATA_SDK_SKIP_JSON_LIB
+
 //--------------------------
 
 template <typename T1, typename T2>
@@ -105,9 +111,11 @@ struct TypePair
 
 using TypesFwdInferenceNchw = ::testing::Types<TypePair<float, float>,
                                                TypePair<half, float>,
-                                               TypePair<hip_bfloat16, float>,
+                                               TypePair<bfloat16, float>,
                                                TypePair<double, double>,
-                                               TypePair<int8_t, float>>;
+                                               TypePair<int8_t, float>,
+                                               TypePair<fp8_e4m3, float>,
+                                               TypePair<fp8_e5m2, float>>;
 
 template <class T>
 class CpuFpReferenceBatchnormFwdInferenceNchw : public ::testing::Test
@@ -129,8 +137,7 @@ TYPED_TEST(CpuFpReferenceBatchnormFwdInferenceNchw, BatchnormFwdInferenceNchw)
         inputTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, outputTensor);
 }
 
-using TypesFwdInferenceNhwc
-    = ::testing::Types<TypePair<float, float>, TypePair<half, hip_bfloat16>>;
+using TypesFwdInferenceNhwc = ::testing::Types<TypePair<float, float>, TypePair<half, bfloat16>>;
 
 template <class T>
 class CpuFpReferenceBatchnormFwdInferenceNhwc : public ::testing::Test
@@ -297,10 +304,12 @@ struct TypeTriplet
 };
 
 using TypesBackwardNchw = ::testing::Types<TypeTriplet<float, float, float>,
-                                           TypeTriplet<hip_bfloat16, float, float>,
+                                           TypeTriplet<bfloat16, float, float>,
                                            TypeTriplet<half, float, float>,
                                            TypeTriplet<int8_t, float, float>,
-                                           TypeTriplet<half, hip_bfloat16, float>,
+                                           TypeTriplet<fp8_e4m3, float, float>,
+                                           TypeTriplet<fp8_e5m2, float, float>,
+                                           TypeTriplet<half, bfloat16, float>,
                                            TypeTriplet<double, double, double>>;
 
 template <typename T>
@@ -952,11 +961,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwFullFeatures)
     }
 }
 
-using TypesFwdTrainingNhwc = ::testing::Types<TypeTriplet<hip_bfloat16, float, float>,
+using TypesFwdTrainingNhwc = ::testing::Types<TypeTriplet<bfloat16, float, float>,
                                               TypeTriplet<half, float, float>,
                                               TypeTriplet<double, double, double>,
                                               TypeTriplet<int8_t, double, double>,
-                                              TypeTriplet<half, hip_bfloat16, float>>;
+                                              TypeTriplet<fp8_e4m3, float, float>,
+                                              TypeTriplet<fp8_e5m2, float, float>,
+                                              TypeTriplet<half, bfloat16, float>>;
 
 template <typename T>
 class CpuFpReferenceBatchnromFwdTrainingNchw : public ::testing::Test

@@ -11,5 +11,7 @@ enum DataType : byte {
     DOUBLE = 4,
     UINT8 = 5,
     INT32 = 6,
-    INT8 = 7
+    INT8 = 7,
+    FP8_E4M3 = 8,
+    FP8_E5M2 = 9,
 }

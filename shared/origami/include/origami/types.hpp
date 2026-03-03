@@ -277,11 +277,6 @@ struct runtime_options {
   double heuristics_variance;
 
   /**
-   * @brief Default constructor that reads from environment variables.
-   */
-  runtime_options();
-
-  /**
    * @brief Constructor with explicit values (does not read from environment).
    */
   runtime_options(bool debug, bool heuristics, double variance);
@@ -311,7 +306,7 @@ struct runtime_options {
 
   /**
    * @brief Read heuristics variance from environment variable.
-   * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.0 if not set
+   * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.01 if not set
    */
   static double read_heuristics_variance_from_env();
 
@@ -319,6 +314,14 @@ struct runtime_options {
    * @brief Update runtime options from environment variables.
    */
   void update_from_env();
+
+  private:
+  /**
+   * @brief Default constructor that reads from environment variables.
+   *
+   * This is made private because it should only be used through the static get() member.
+   */
+  runtime_options();
 };
 
 /**
@@ -331,6 +334,9 @@ struct config_t {
   /// Macro tile and matrix-instruction shape.
   dim3_t mt{0, 0, 0};
   dim3_t mi{0, 0, 0};
+
+  /// Main loop optimization flag (indicates use of any optimized kernel variant)
+  bool hand_optimized_main_loop = false;
 
   /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
@@ -360,16 +366,17 @@ struct config_t {
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
   constexpr bool operator==(const config_t& o) const noexcept {
-    return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b && workgroup_mapping == o.workgroup_mapping &&
-           prediction_mode == o.prediction_mode && target == o.target;
+    return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
+           cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
+           workgroup_mapping == o.workgroup_mapping && prediction_mode == o.prediction_mode &&
+           target == o.target;
   }
 
   std::size_t hash() const {
     return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
            std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
-           std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
-           std::hash<int>()(workgroup_mapping) ^
+           std::hash<int>()(hand_optimized_main_loop) ^ std::hash<int>()(cache_hints_a) ^
+           std::hash<int>()(cache_hints_b) ^ std::hash<int>()(workgroup_mapping) ^
            std::hash<std::uint32_t>()(static_cast<std::uint32_t>(prediction_mode)) ^
            std::hash<std::uint32_t>()(static_cast<std::uint32_t>(target));
   }
@@ -441,6 +448,22 @@ struct workgroup_mapping_t {
 };
 
 /**
+ * @brief Struct to define various staggerU parameters.
+ *
+ * Contains all the parameters needed to describe various staggerU parameters.
+ */
+ struct staggerU_t {
+  /// StaggerU mapping size.
+  std::size_t staggerUMapping = 0;
+
+  /// StaggerU size.
+  std::size_t staggerU = 0;
+
+  /// StaggerUStrideShift size.
+  std::size_t staggerUStrideShift = 0;
+};
+
+/**
  * @brief Get runtime options (always uses global singleton).
  *
  * @param config Configuration struct (unused, kept for API compatibility)
@@ -469,4 +492,3 @@ struct hash<origami::config_t> {
   }
 };
 }  // namespace std
-

@@ -30,11 +30,15 @@ namespace rocsparse
 {
     typedef enum csrmv_alg_
     {
-        csrmv_alg_rowsplit = 0,
+        csrmv_alg_default = 0,
+        csrmv_alg_rowsplit,
         csrmv_alg_adaptive,
         csrmv_alg_lrb,
         csrmv_alg_nnzsplit
     } csrmv_alg;
+
+    rocsparse_status csrmv_alg_default2csrmv_alg(rocsparse::csrmv_alg& alg,
+                                                 rocsparse_operation   operation);
 
     // Helper function to extract gamma arrays and z vectors for batched operations
     // gamma_device_array and z_array must be preallocated device buffers

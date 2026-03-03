@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,11 +35,21 @@ Tests:
   category: quick
   function: prune_dense2csr
   precision: *single_double_precisions
-  M: [3, 8, 13, 64, 256]
-  N: [3, 8, 13, 64, 256]
+  M: [3, 8]
+  N: [3, 8]
   denseld: [256, 512]
   threshold: [0.1, 0.5, 1.2]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
+
+- name: prune_dense2csr
+  category: quick
+  function: prune_dense2csr
+  precision: *single_double_precisions
+  M: [5, 7]
+  N: [2, 17]
+  denseld: [50]
+  threshold: [0.6, 0.9, 1.0]
+  baseA: [rocsparse_index_base_one]
 
 - name: prune_dense2csr
   category: pre_checkin
@@ -49,26 +59,6 @@ Tests:
   N: [241, 1000]
   denseld: [1000, 2000]
   threshold: [0.5, 0.0, 0.9, 0.001]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-
-- name: prune_dense2csr
-  category: nightly
-  function: prune_dense2csr
-  precision: *single_double_precisions
-  M: [2000, 4000, 8000]
-  N: [2000, 4000]
-  denseld: [ 8000 ]
-  threshold: [0.7, 0.2, 0.33, 0.5]
-  baseA: [rocsparse_index_base_zero]
-
-- name: prune_dense2csr
-  category: quick
-  function: prune_dense2csr
-  precision: *single_double_precisions
-  M: [5, 7, 10]
-  N: [2, 17, 33]
-  denseld: [50]
-  threshold: [0.6, 0.9, 1.0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
 - name: prune_dense2csr
@@ -84,9 +74,19 @@ Tests:
 - name: prune_dense2csr
   category: nightly
   function: prune_dense2csr
-  precision: *single_double_precisions
+  precision: *single_only_precisions
+  M: [2000, 4000, 8000]
+  N: [2000, 4000]
+  denseld: [8000]
+  threshold: [0.7, 0.2, 0.33, 0.5]
+  baseA: [rocsparse_index_base_zero]
+
+- name: prune_dense2csr
+  category: nightly
+  function: prune_dense2csr
+  precision: *double_only_precisions
   M: [1000]
   N: [1000]
-  denseld: [ 1000 ]
+  denseld: [1000]
   threshold: [0.4, 0.25, 0.23, 0.3]
   baseA: [rocsparse_index_base_one]

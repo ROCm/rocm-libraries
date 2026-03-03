@@ -11,6 +11,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraph_serialization.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LastRWTracer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LowerFromCommand.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/NodeSchedulingUtils.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTagManager.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Reindexer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScopeManager.cpp"

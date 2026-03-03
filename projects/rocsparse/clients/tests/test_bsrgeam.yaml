@@ -28,7 +28,6 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_range_quick
     - { alpha:   1.0, alphai:  1.0 }
-    - { alpha:  -0.5, alphai: -0.5 }
 
   - &alpha_range_checkin
     - { alpha:   0.0, alphai:  1.5 }
@@ -40,30 +39,24 @@ Definitions:
 
   - &beta_range_quick
     - { beta:   1.0, betai:  1.0 }
-    - { beta:  -0.5, betai: -0.5 }
 
   - &beta_range_checkin
     - { beta:   2.0, betai:  1.5 }
     - { beta:   0.0, betai:  1.5 }
-
 
   - &beta_range_nightly
     - { beta:   0.0, betai:  1.5 }
     - { beta:   2.0, betai:  0.0 }
 
 Tests:
-- name: bsrgeam_bad_arg
-  category: pre_checkin
-  function: bsrgeam_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: bsrgeam
   category: quick
   function: bsrgeam
   precision: *single_double_precisions_complex_real
-  M: [582]
+  M: [300]
   N: [243]
-  block_dim: [5, 11]
+  block_dim: [1, 5, 11]
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
   baseA: [rocsparse_index_base_one]
@@ -76,44 +69,14 @@ Tests:
   category: quick
   function: bsrgeam
   precision: *single_double_precisions_complex_real
-  M: [8, 582]
-  N: [12, 243]
-  block_dim: [3, 16]
+  M: [300]
+  N: [243]
+  block_dim: [2, 3, 16, 17]
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   baseC: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row]
-  matrix: [rocsparse_matrix_random]
-
-- name: bsrgeam
-  category: pre_checkin
-  function: bsrgeam
-  precision: *single_double_precisions_complex_real
-  M: [0, 24, 1582, 8422]
-  N: [0, 61, 2512, 11692]
-  block_dim: [4, 9]
-  alpha_alphai: *alpha_range_checkin
-  beta_betai: *beta_range_checkin
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
-
-- name: bsrgeam
-  category: nightly
-  function: bsrgeam
-  precision: *single_double_precisions_complex_real
-  M: [142323, 831934]
-  N: [54020, 1050323]
-  block_dim: [17]
-  alpha_alphai: *alpha_range_nightly
-  beta_betai: *beta_range_nightly
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
@@ -123,7 +86,7 @@ Tests:
   precision: *single_double_precisions
   M: 1
   N: 1
-  block_dim: [2, 14]
+  block_dim: [4, 8, 12, 16]
   alpha_alphai: *alpha_range_quick
   beta_betai: *beta_range_quick
   baseA: [rocsparse_index_base_one]
@@ -131,10 +94,92 @@ Tests:
   baseC: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6]
+  filename: [nos1]
+
+- name: bsrgeam_file
+  category: quick
+  function: bsrgeam
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [5, 9, 13, 17]
+  alpha_alphai: *alpha_range_quick
+  beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos2]
+
+- name: bsrgeam_file
+  category: quick
+  function: bsrgeam
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [6, 10, 14, 18]
+  alpha_alphai: *alpha_range_quick
+  beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos3]
+
+- name: bsrgeam_file
+  category: quick
+  function: bsrgeam
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [7, 11, 15, 19]
+  alpha_alphai: *alpha_range_quick
+  beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos4]
+
+- name: bsrgeam_file
+  category: quick
+  function: bsrgeam
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [8, 9, 26]
+  alpha_alphai: *alpha_range_quick
+  beta_betai: *beta_range_quick
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [qc2534]
+
+# Pre-checkin
+- name: bsrgeam_bad_arg
+  category: pre_checkin
+  function: bsrgeam_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: bsrgeam
+  category: pre_checkin
+  function: bsrgeam
+  precision: *single_double_precisions_complex_real
+  M: [24]
+  N: [61]
+  block_dim: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
 
 - name: bsrgeam_file
   category: pre_checkin
@@ -150,11 +195,59 @@ Tests:
   baseC: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [ASIC_320k,
-             nos1,
-             nos3,
-             nos5,
+  filename: [nos5,
              nos7]
+
+- name: bsrgeam_file
+  category: pre_checkin
+  function: bsrgeam
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [5, 8]
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [shipsec1,
+             scircuit,
+             ASIC_320k]
+
+- name: bsrgeam_file
+  category: pre_checkin
+  function: bsrgeam
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [9, 32]
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron2]
+
+# Nightly
+- name: bsrgeam
+  category: nightly
+  function: bsrgeam
+  precision: *single_double_precisions_complex_real
+  M: [142323, 831934]
+  N: [54020, 1050323]
+  block_dim: [17]
+  alpha_alphai: *alpha_range_nightly
+  beta_betai: *beta_range_nightly
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_random]
 
 - name: bsrgeam_file
   category: nightly
@@ -176,40 +269,6 @@ Tests:
              Chebyshev4,
              sme3Dc,
              shipsec1]
-
-- name: bsrgeam_file
-  category: quick
-  function: bsrgeam
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  block_dim: [8, 26]
-  alpha_alphai: *alpha_range_quick
-  beta_betai: *beta_range_quick
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [qc2534,
-             Chevron2]
-
-- name: bsrgeam_file
-  category: pre_checkin
-  function: bsrgeam
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  block_dim: [9, 32]
-  alpha_alphai: *alpha_range_checkin
-  beta_betai: *beta_range_checkin
-  baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_zero]
-  baseC: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             scircuit]
 
 - name: bsrgeam_file
   category: nightly

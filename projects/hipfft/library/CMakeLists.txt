@@ -165,7 +165,7 @@ endif()
 if (NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC")
   rocm_set_soversion(hipfft ${hipfft_SOVERSION})
   get_target_property(aliased_hipfftw_name hipfftw ALIASED_TARGET)
-  if (aliased_hipfftw_name STREQUAL "")
+  if (NOT aliased_hipfftw_name)
     # hipfftw is not an alias
     rocm_set_soversion(hipfftw ${hipfftw_SOVERSION})
   endif()

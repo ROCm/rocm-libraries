@@ -636,7 +636,7 @@ void fetchData2(uint ib,
         c_scan      = iDiv_legacy(t0, MLO_N_IN_HORIZ_READS);
         uint c_pix4 = iMod(t0, c_scan, MLO_N_IN_HORIZ_READS);
 #else
-        c_scan = t0 / MLO_N_IN_HORIZ_READS;
+        c_scan      = t0 / MLO_N_IN_HORIZ_READS;
         uint c_pix4 = t0 & (MLO_N_IN_HORIZ_READS - 1);
 #endif
         int in_scan = (c_scan + lcl_scan) * MLO_FILTER_STRIDE1 + f_s;
@@ -1076,7 +1076,7 @@ void MoveDataIn(_FLOAT proc_dat[MLO_IN_PIX_TILE1][MLO_IN_PIX_TILE0],
     {
         for(int i = 0; i < MLO_IN_PIX_TILE0; ++i)
         {
-            uint lcl_off = (lcl_in_y + j) * MLO_N_IN_BWD_HORIZ_READS + lcl_in_x + i;
+            uint lcl_off   = (lcl_in_y + j) * MLO_N_IN_BWD_HORIZ_READS + lcl_in_x + i;
             proc_dat[j][i] = lcl_mem[lcl_off];
         }
     }
@@ -1128,9 +1128,9 @@ void Convolve(_FLOAT_ACCUM* pvt_accum,
                     for(uint i = 0; i < MLO_OUT_PIX_TILE0; ++i)
                     {
                         uint pvt_off = (k * MLO_OUT_PIX_TILE1 + j) * MLO_OUT_PIX_TILE0 + i;
-                        uint y = ((MLO_N_FILTER_SPLITS1 - 1 - jj) * MLO_FILTER_STRIDE1 +
+                        uint y       = ((MLO_N_FILTER_SPLITS1 - 1 - jj) * MLO_FILTER_STRIDE1 +
                                   j % MLO_FILTER_STRIDE1);
-                        uint x = (MLO_N_FILTER_SPLITS0 - 1 - ii) * MLO_FILTER_STRIDE0 +
+                        uint x       = (MLO_N_FILTER_SPLITS0 - 1 - ii) * MLO_FILTER_STRIDE0 +
                                  i % MLO_FILTER_STRIDE0;
                         uint lcl_off = lcl_wei_read_off + k * MLO_FILTER_SIZE1 * MLO_FILTER_SIZE0 +
                                        y * MLO_FILTER_SIZE0 + x;
@@ -1169,9 +1169,9 @@ void Convolve(_FLOAT_ACCUM* pvt_accum,
                             ++i)
                         {
                             uint pvt_off = (k * MLO_OUT_PIX_TILE1 + j) * MLO_OUT_PIX_TILE0 + i;
-                            uint y = ((MLO_N_FILTER_SPLITS1 - 1 - jj) * MLO_FILTER_STRIDE1 +
+                            uint y       = ((MLO_N_FILTER_SPLITS1 - 1 - jj) * MLO_FILTER_STRIDE1 +
                                       j % MLO_FILTER_STRIDE1);
-                            uint x = (MLO_N_FILTER_SPLITS0 - 1 - ii) * MLO_FILTER_STRIDE0 +
+                            uint x       = (MLO_N_FILTER_SPLITS0 - 1 - ii) * MLO_FILTER_STRIDE0 +
                                      i % MLO_FILTER_STRIDE0;
                             uint lcl_off = lcl_wei_read_off +
                                            k * MLO_FILTER_SIZE1 * MLO_FILTER_SIZE0 +
@@ -1202,7 +1202,7 @@ void Convolve(_FLOAT_ACCUM* pvt_accum,
 #endif
                         } //  for (uint i = im*MLO_FILTER_STRIDE0; i < (im+1)*MLO_FILTER_STRIDE0 -
                           //  1; ++i)
-                    }     // for (uint im = 0; im < MLO_TILE_REPLICATE0; ++im)
+                    } // for (uint im = 0; im < MLO_TILE_REPLICATE0; ++im)
                 }
             }
         }
@@ -1219,9 +1219,9 @@ void Convolve(_FLOAT_ACCUM* pvt_accum,
                         for(uint i = 0; i < MLO_OUT_PIX_TILE0; ++i)
                         {
                             uint pvt_off = (k * MLO_OUT_PIX_TILE1 + j) * MLO_OUT_PIX_TILE0 + i;
-                            uint y = ((MLO_N_FILTER_SPLITS1 - 1 - jj) * MLO_FILTER_STRIDE1 +
+                            uint y       = ((MLO_N_FILTER_SPLITS1 - 1 - jj) * MLO_FILTER_STRIDE1 +
                                       j % MLO_FILTER_STRIDE1);
-                            uint x = (MLO_N_FILTER_SPLITS0 - 1 - ii) * MLO_FILTER_STRIDE0 +
+                            uint x       = (MLO_N_FILTER_SPLITS0 - 1 - ii) * MLO_FILTER_STRIDE0 +
                                      i % MLO_FILTER_STRIDE0;
                             uint lcl_off = lcl_wei_read_off +
                                            k * MLO_FILTER_SIZE1 * MLO_FILTER_SIZE0 +
@@ -1250,8 +1250,8 @@ void Convolve(_FLOAT_ACCUM* pvt_accum,
 #endif
 
                         } // for (uint i = 0; i < MLO_OUT_PIX_TILE0; ++i)
-                    }     // for (; ii > 0; --ii)
-                          //					for (; ii >= 0; --ii)
+                    } // for (; ii > 0; --ii)
+                      //					for (; ii >= 0; --ii)
                     {
                         for(uint im = 0; im < MLO_TILE_REPLICATE0; ++im)
                         {
@@ -1291,11 +1291,11 @@ void Convolve(_FLOAT_ACCUM* pvt_accum,
 #endif
                             } // for (uint i = im*MLO_FILTER_STRIDE0; i < (im +
                               // 1)*MLO_FILTER_STRIDE0 - 1; ++i)
-                        }     // for (uint im = 0; im < MLO_TILE_REPLICATE0; ++im)
+                        } // for (uint im = 0; im < MLO_TILE_REPLICATE0; ++im)
                     }
                 } // for (uint j = 0; j < MLO_OUT_PIX_TILE1 - 1; ++j)
-            }     // for (uint jm = 0; jm < MLO_TILE_REPLICATE1; ++jm)
-        }         // for (; jj > 0; --jj)
+            } // for (uint jm = 0; jm < MLO_TILE_REPLICATE1; ++jm)
+        } // for (; jj > 0; --jj)
 
     } // for (uint k = 0; k < MLO_N_LCL_OUT_MAPS; ++k)
 }
@@ -1324,7 +1324,7 @@ MIOpenCvBwd11x11(const __global _FLOAT* __restrict bot,
     __local _FLOAT lcl_mem[MLO_LCL_BWD_MEM_SZ];
 
     uint lcl_wei_write_off = 0;
-    uint lcl_wei_read_off = 0;
+    uint lcl_wei_read_off  = 0;
 
 #undef MLO_ACCUM_SZ
 #define MLO_ACCUM_SZ (MLO_OUT_PIX_TILE1 * MLO_OUT_PIX_TILE0 * MLO_N_LCL_OUT_MAPS)
@@ -1407,7 +1407,7 @@ MIOpenCvBwd11x11(const __global _FLOAT* __restrict bot,
 
     uint gbl_wei_off = k_idx * MLO_WEI_CHANNEL_STRIDE;
 
-    //#pragma unroll 2
+    // #pragma unroll 2
     for(int c = 0; c < MLO_N_INPUTS;
         ++c, gbl_in_off += MLO_IN_CHANNEL_STRIDE, gbl_wei_off += MLO_WEI_BATCH_STRIDE)
     {

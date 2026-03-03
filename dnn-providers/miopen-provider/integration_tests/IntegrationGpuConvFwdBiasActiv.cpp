@@ -9,9 +9,10 @@
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
-using namespace miopen_legacy_plugin::test_utilities;
+using namespace miopen_plugin::test_utilities;
 
 namespace
 {
@@ -23,7 +24,7 @@ class ConvFwdBiasActiv
           std::tuple<test_conv_common::ConvTestCase, bool, test_activation_common::ActivTestCase>>
 {
 protected:
-    void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
+    void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
     {
         // Skipping until CK is working on Windows
         SKIP_IF_WINDOWS();
@@ -38,11 +39,11 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
+        auto xAttr = makeTensorAttributes(
             "x", convTestCase.xDims, generateStrides(convTestCase.xDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto wAttr = graph::makeTensorAttributes(
+        auto wAttr = makeTensorAttributes(
             "w", convTestCase.wDims, generateStrides(convTestCase.wDims, layout.strideOrder));
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
@@ -59,7 +60,7 @@ protected:
         {
             const auto biasDims = getDerivedShape(convTestCase.yDims);
 
-            auto biasAttr = graph::makeTensorAttributes(
+            auto biasAttr = makeTensorAttributes(
                 "bias", biasDims, generateStrides(biasDims, layout.strideOrder));
             auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -110,8 +111,8 @@ protected:
 using IntegrationGpuConvFwdBiasActivNchwFp32 = ConvFwdBiasActiv<float>;
 using IntegrationGpuConvFwdBiasActivNcdhwFp32 = ConvFwdBiasActiv<float>;
 
-using IntegrationGpuConvFwdBiasActivNchwBfp16 = ConvFwdBiasActiv<hip_bfloat16>;
-using IntegrationGpuConvFwdBiasActivNcdhwBfp16 = ConvFwdBiasActiv<hip_bfloat16>;
+using IntegrationGpuConvFwdBiasActivNchwBfp16 = ConvFwdBiasActiv<bfloat16>;
+using IntegrationGpuConvFwdBiasActivNcdhwBfp16 = ConvFwdBiasActiv<bfloat16>;
 
 using IntegrationGpuConvFwdBiasActivNchwFp16 = ConvFwdBiasActiv<half>;
 using IntegrationGpuConvFwdBiasActivNcdhwFp16 = ConvFwdBiasActiv<half>;
@@ -119,8 +120,8 @@ using IntegrationGpuConvFwdBiasActivNcdhwFp16 = ConvFwdBiasActiv<half>;
 using IntegrationGpuConvFwdBiasActivNhwcFp32 = ConvFwdBiasActiv<float>;
 using IntegrationGpuConvFwdBiasActivNdhwcFp32 = ConvFwdBiasActiv<float>;
 
-using IntegrationGpuConvFwdBiasActivNhwcBfp16 = ConvFwdBiasActiv<hip_bfloat16>;
-using IntegrationGpuConvFwdBiasActivNdhwcBfp16 = ConvFwdBiasActiv<hip_bfloat16>;
+using IntegrationGpuConvFwdBiasActivNhwcBfp16 = ConvFwdBiasActiv<bfloat16>;
+using IntegrationGpuConvFwdBiasActivNdhwcBfp16 = ConvFwdBiasActiv<bfloat16>;
 
 using IntegrationGpuConvFwdBiasActivNhwcFp16 = ConvFwdBiasActiv<half>;
 using IntegrationGpuConvFwdBiasActivNdhwcFp16 = ConvFwdBiasActiv<half>;
@@ -139,12 +140,12 @@ TEST_P(IntegrationGpuConvFwdBiasActivNcdhwFp32, Correctness)
 
 TEST_P(IntegrationGpuConvFwdBiasActivNchwBfp16, Correctness)
 {
-    runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NCHW);
+    runGraphTest(conv::getToleranceFwd<bfloat16>(), TensorLayout::NCHW);
 }
 
 TEST_P(IntegrationGpuConvFwdBiasActivNcdhwBfp16, Correctness)
 {
-    runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NCDHW);
+    runGraphTest(conv::getToleranceFwd<bfloat16>(), TensorLayout::NCDHW);
 }
 
 TEST_P(IntegrationGpuConvFwdBiasActivNchwFp16, Correctness)
@@ -169,12 +170,12 @@ TEST_P(IntegrationGpuConvFwdBiasActivNdhwcFp32, Correctness)
 
 TEST_P(IntegrationGpuConvFwdBiasActivNhwcBfp16, Correctness)
 {
-    runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NHWC);
+    runGraphTest(conv::getToleranceFwd<bfloat16>(), TensorLayout::NHWC);
 }
 
 TEST_P(IntegrationGpuConvFwdBiasActivNdhwcBfp16, Correctness)
 {
-    runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NDHWC);
+    runGraphTest(conv::getToleranceFwd<bfloat16>(), TensorLayout::NDHWC);
 }
 
 TEST_P(IntegrationGpuConvFwdBiasActivNhwcFp16, Correctness)

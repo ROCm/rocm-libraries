@@ -1,34 +1,12 @@
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /*********************************************************
  * The implementation of the rocblaslt<->rocRoller interface layer. *
  *********************************************************/
 
 #include "rocroller_host.hpp"
+#include "custom_kernels.hpp"
 #include "gemm.hpp"
 #include "kernel_type.hpp"
 #include "parameter_selection.hpp"
@@ -62,7 +40,14 @@ struct RocRollerHandle
  */
 void rocroller_create_handle(void** handle)
 {
-    *handle = new RocRollerHandle();
+    auto rr_handle = new RocRollerHandle();
+    *handle        = rr_handle;
+
+    if(getenv("HIPBLASLT_ROCROLLER_NO_CUSTOM_KERNEL") == nullptr)
+    {
+        // If these kernels are loaded, they are used instead of RocRoller kernels
+        preloadCustomKernels(rr_handle->cache);
+    }
 }
 
 /**
@@ -446,9 +431,11 @@ rocblaslt_status
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Error building the following kernel:" << std::endl;
-        std::cerr << params->toString() << std::endl;
-        std::cerr << e.what() << std::endl;
+        std::stringstream msg;
+        msg << "Error building the following kernel:" << std::endl;
+        msg << params->toString() << std::endl;
+        msg << e.what() << std::endl;
+        log_info(__func__, msg.str());
         return rocblaslt_status_not_implemented;
     }
 
@@ -501,8 +488,8 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    if(auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
-       scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
+    auto scale_type = hipDataType_to_rocRoller_type(prob.scale_type);
+    if(scale_type != rocRoller::DataType::None && scale_type != rocRoller::DataType::Float)
     {
         std::cerr << "rocRoller only supports F32 as scale type not " << scale_type << std::endl;
         return rocblaslt_status_invalid_value;
@@ -525,6 +512,20 @@ rocblaslt_status
             break;
 
         index = parametersToIndex(solutionIndexParameter);
+        
+        // Validate problem dimensions match kernel tile requirements before generating kernel
+        // to avoid ocRoller expression evaluation with invalid dimensions
+        if(solutionIndexParameter.workgroupTile.m > 0 && solutionIndexParameter.workgroupTile.n > 0
+           && solutionIndexParameter.workgroupTile.k > 0)
+        {
+            if(prob.m % solutionIndexParameter.workgroupTile.m != 0
+               || prob.n % solutionIndexParameter.workgroupTile.n != 0
+               || prob.k % solutionIndexParameter.workgroupTile.k != 0)
+            {
+                continue;  // Skip this solution entirely
+            }
+        }
+        
         auto existingSolution
             = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
         std::shared_ptr<GemmKernel> kernel;
@@ -647,15 +648,7 @@ rocblaslt_status isRocRollerSolutionSupported(rocblaslt_handle             handl
     if(status != rocblaslt_status_success)
         return status;
 
-    auto workSpaceRequired = workspaceRequired(kernel, prob);
-
-    if(workSpaceRequired > prob.workspaceSize)
-        return rocblaslt_status_invalid_value;
-
-    auto commandArgs = createCommandArguments(kernel, prob, DEFAULT_WGM);
-    auto runtimeArgs = commandArgs.runtimeArguments();
-
-    if(!kernel->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
+    if(!isSupportedProblem(kernel, prob))
     {
         return rocblaslt_status_invalid_value;
     }
@@ -732,6 +725,9 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
                            coldIterations,
                            hotIterations);
     }
+
+    if(kernel->isCustomKernel())
+        return runCustomKernel(kernel, prob);
 
     return runGemmKernel(kernel, prob);
 }
