@@ -653,7 +653,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, InitializeExecutionSettingsSetsWorkspaceSiz
                                                               builder.GetSize());
 
     const auto range = _planBuilder.getWorkspaceSizeRange(_handle, graph);
-    const auto testWorkspaceSize = range.min + (range.max - range.min) / 2;
+    const auto testWorkspaceSize = range.min + ((range.max - range.min) / 2);
 
     flatbuffers::FlatBufferBuilder configBuilder;
     auto knobIdOffset = configBuilder.CreateString("global.workspace_size_limit");

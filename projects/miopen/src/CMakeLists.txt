@@ -86,6 +86,7 @@ set( MIOpen_Source
     ctc_api.cpp
     db.cpp
     db_record.cpp
+    demangle.cpp
     driver_arguments.cpp
     dropout.cpp
     dropout_api.cpp
@@ -280,6 +281,7 @@ set( MIOpen_Source
     solver/kthvalue/forward_kthvalue.cpp
     solver/layernorm/backward_layernorm.cpp
     solver/layernorm/backward_t5layernorm.cpp
+    solver/layernorm/common_layernorm.cpp
     solver/layernorm/forward_addlayernorm.cpp
     solver/layernorm/forward_layernorm.cpp
     solver/layernorm/forward_t5layernorm.cpp
@@ -594,8 +596,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenUpSample.cpp
         kernels/MIOpenUtilKernels4.cpp
         kernels/MIOpenUtilKernels5.cpp
-        kernels/MIOpenVecAdd.cpp
-        kernels/MIOpenVecAddOCL.cl
         kernels/MIOpenIm2d2Col.cpp
         kernels/MIOpenIm3d2Col.cpp
         kernels/MIOpenCol2Im2d.cpp

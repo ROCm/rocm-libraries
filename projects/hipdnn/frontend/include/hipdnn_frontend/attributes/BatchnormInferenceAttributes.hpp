@@ -191,6 +191,5 @@ public:
     }
 };
 
-typedef BatchnormInferenceAttributes
-    Batchnorm_inference_attributes; ///< @brief cuDNN compatibility alias
+typedef BatchnormInferenceAttributes Batchnorm_inference_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph
