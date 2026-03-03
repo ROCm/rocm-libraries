@@ -11,7 +11,7 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(MIOPEN_PLUGIN_VERSION "0.0.1")
-project(miopen_provider VERSION ${MIOPEN_PLUGIN_VERSION} LANGUAGES CXX)
+project(miopen-provider VERSION ${MIOPEN_PLUGIN_VERSION} LANGUAGES CXX)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
 
@@ -93,9 +93,16 @@ list(
 # remove when fixed. Added to prevent issues with not finding hip cmake.
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
-find_package(hip REQUIRED)
-find_package(hipdnn_data_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+    find_package(hip REQUIRED)
+
+    # hipdnn SDK dependencies - use targets directly if available (superbuild),
+    # otherwise find installed packages (true standalone)
+    if(NOT TARGET hipdnn_data_sdk)
+        find_package(hipdnn_data_sdk CONFIG REQUIRED)
+    endif()
+    if(NOT TARGET hipdnn_plugin_sdk)
+        find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+    endif()
 
 include(CheckToolVersion)
 include(ClangCheck)
@@ -197,11 +204,15 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
+    # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    finalize_test_targets("${PROJECT_NAME}")
 
-    install_miopen_plugin_ctest_files()
+    # For standalone builds we need to install the ctest files
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        install_miopen_plugin_ctest_files()
+    endif()
 endif()
 
 install(TARGETS miopen_plugin EXPORT miopen-plugin
