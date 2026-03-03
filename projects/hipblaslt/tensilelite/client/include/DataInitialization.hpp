@@ -2261,7 +2261,7 @@ namespace TensileLite
         template <>
         inline bool DataInitialization::isBadOutput<BFloat16>(BFloat16 value)
         {
-            return std::isinf(value);
+            return std::isinf(static_cast<float>(value));
         }
 
         template <>

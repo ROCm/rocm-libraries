@@ -52,6 +52,7 @@
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
+#include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
 #include "HipdnnStatus.h"
 
@@ -339,6 +340,36 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
  */
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
     hipdnnBackendDescriptor_t* descriptor, const uint8_t* serializedGraph, size_t graphByteSize);
+
+/*!
+ * @brief Retrieves the binary-serialized graph from a finalized operation graph descriptor.
+ *
+ * Uses the standard two-call pattern: call first with @p serializedGraph set to @c nullptr to query
+ * the required buffer size, then call again with a caller-allocated buffer to receive the data.
+ * The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR and must be finalized.
+ *
+ * @param [in]  descriptor        A finalized operation graph descriptor.
+ * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
+ *                                Ignored when @p serializedGraph is @c nullptr.
+ * @param [out] graphByteSize     Pointer to receive the size of the serialized graph in bytes.
+ *                                Always written on success.
+ * @param [out] serializedGraph   Caller-allocated buffer to receive the serialized graph data,
+ *                                or @c nullptr to query the required size only.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS              The serialized graph was successfully retrieved,
+ *                                            or the size query completed successfully.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or graphByteSize is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM            The descriptor is not an operation graph descriptor.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED  The descriptor is not finalized.
+ * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  The requestedByteSize is smaller than the
+ *                                                     serialized graph size.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR       An internal error occurred during serialization.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedBinaryGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                              size_t requestedByteSize,
+                                              size_t* graphByteSize,
+                                              uint8_t* serializedGraph);
 
 /*!
  * @brief Callback function for logging messages.

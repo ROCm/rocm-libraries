@@ -25,6 +25,7 @@ add_library(
     descriptors/GraphDescriptor.cpp
     descriptors/TensorDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
+    descriptors/ConvolutionWrwOperationDescriptor.cpp
     descriptors/DescriptorAttributeUtils.cpp
     descriptors/DataTypeConversion.cpp
     descriptors/VariantDescriptor.cpp
