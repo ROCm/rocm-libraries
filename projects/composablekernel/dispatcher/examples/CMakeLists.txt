@@ -346,6 +346,19 @@ add_declarative_gpu_example(gemm_04_heuristics           gemm/cpp/04_heuristics.
 add_declarative_gpu_example(gemm_05_json_export          gemm/cpp/05_json_export.cpp)
 add_declarative_gpu_example(gemm_06_multi_registry       gemm/cpp/06_multi_registry.cpp)
 
+# ML Heuristic example -- requires LightGBM shared library
+find_library(LIGHTGBM_LIB NAMES LightGBM lib_lightgbm
+    HINTS /usr/local/lib /opt/rocm/lib
+    PATHS "$ENV{HOME}/.local/lib/python3.12/site-packages/lightgbm/lib"
+          "/workspace/.local/lib/python3.12/site-packages/lightgbm/lib")
+if(LIGHTGBM_LIB)
+    add_declarative_gpu_example(gemm_09_ml_heuristic gemm/cpp/09_ml_heuristic.cpp)
+    target_link_libraries(gemm_09_ml_heuristic PRIVATE ${LIGHTGBM_LIB})
+    message(STATUS "LightGBM found: ${LIGHTGBM_LIB} -- building gemm_09_ml_heuristic")
+else()
+    message(STATUS "LightGBM not found -- skipping gemm_09_ml_heuristic (install lightgbm to enable)")
+endif()
+
 # =============================================================================
 # GEMM Python Library - Single Fallback Kernel
 # =============================================================================
