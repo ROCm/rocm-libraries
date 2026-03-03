@@ -13,6 +13,8 @@ GlobalParameters:
   MaxWorkspaceSize: 13421772800
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
+  DataInitTypeA: 12
+  DataInitTypeB: 13
   BoundsCheck: 2
   KeepBuildTmp: True
   EnqueuesPerSync: 10
@@ -50,7 +52,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - StaggerU: [0]
         - 1LDSBuffer: [0]
-        - DirectToLds: [0,1] # carson: was 1
+        - DirectToLds: [0,1]
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
         - VectorWidthA: [-1,4,1]
@@ -96,6 +98,7 @@ BenchmarkProblems:
         - NumElementsPerBatchStore: [16]
         - WorkGroupMappingXCC: [8]
         - StoreVectorWidth: [2]
+        - UsePLRPack: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -224,6 +227,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - VectorWidthA: [-1,2]
         - VectorWidthB: [-1,2]
+        - UsePLRPack: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -273,6 +277,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,  4,  4 , 2,2 ]
           - [16, 16, 32, 1,  1,  6,  4 , 2,2 ]
           - [16, 16, 32, 1,  1,  6,  6 , 2,2 ]
+        - ClusterLocalRead: [0, 1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [32]
@@ -286,6 +291,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - VectorWidthA: [-1,1]
         - VectorWidthB: [-1,1]
+        - UsePLRPack: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -335,6 +341,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1,  4,  4 , 2,2 ]
           - [16, 16, 32, 1,  1,  6,  4 , 2,2 ]
           - [16, 16, 32, 1,  1,  6,  6 , 2,2 ]
+        - ClusterLocalRead: [0, 1]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - DepthU: [32]
@@ -348,6 +355,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - VectorWidthA: [-1,2]
         - VectorWidthB: [-1,2]
+        - UsePLRPack: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

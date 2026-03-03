@@ -72,13 +72,13 @@ TEST(TestTypes, GetDataTypeEnumFromType)
 
     EXPECT_EQ(getDataTypeEnumFromType<float>(), DataType::FLOAT);
     EXPECT_EQ(getDataTypeEnumFromType<half>(), DataType::HALF);
-    EXPECT_EQ(getDataTypeEnumFromType<hip_bfloat16>(), DataType::BFLOAT16);
+    EXPECT_EQ(getDataTypeEnumFromType<bfloat16>(), DataType::BFLOAT16);
     EXPECT_EQ(getDataTypeEnumFromType<double>(), DataType::DOUBLE);
     EXPECT_EQ(getDataTypeEnumFromType<uint8_t>(), DataType::UINT8);
     EXPECT_EQ(getDataTypeEnumFromType<int32_t>(), DataType::INT32);
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
-    EXPECT_EQ(getDataTypeEnumFromType<hip_fp8_e4m3>(), DataType::FP8_E4M3);
-    EXPECT_EQ(getDataTypeEnumFromType<hip_fp8_e5m2>(), DataType::FP8_E5M2);
+    EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
+    EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
 
     EXPECT_EQ(getDataTypeEnumFromType<float*>(), DataType::NOT_SET);
     EXPECT_EQ(getDataTypeEnumFromType<char>(), DataType::NOT_SET);
@@ -231,4 +231,20 @@ TEST(TestTypes, KnobValueTypeRoundTripConversion)
     EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::FLOAT64)), KnobValueType::FLOAT64);
     EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::STRING)), KnobValueType::STRING);
     EXPECT_EQ(fromSdkType(toSdkType(KnobValueType::NOT_SET)), KnobValueType::NOT_SET);
+}
+
+TEST(TestTypes, ToHipdnnDataType)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toHipdnnDataType(DataType::FLOAT), HIPDNN_DATA_FLOAT);
+    EXPECT_EQ(toHipdnnDataType(DataType::DOUBLE), HIPDNN_DATA_DOUBLE);
+    EXPECT_EQ(toHipdnnDataType(DataType::HALF), HIPDNN_DATA_HALF);
+    EXPECT_EQ(toHipdnnDataType(DataType::INT8), HIPDNN_DATA_INT8);
+    EXPECT_EQ(toHipdnnDataType(DataType::INT32), HIPDNN_DATA_INT32);
+    EXPECT_EQ(toHipdnnDataType(DataType::UINT8), HIPDNN_DATA_UINT8);
+    EXPECT_EQ(toHipdnnDataType(DataType::BFLOAT16), HIPDNN_DATA_BFLOAT16);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP8_E4M3), HIPDNN_DATA_FP8_E4M3);
+    EXPECT_EQ(toHipdnnDataType(DataType::FP8_E5M2), HIPDNN_DATA_FP8_E5M2);
+    EXPECT_EQ(toHipdnnDataType(DataType::NOT_SET), std::nullopt);
 }

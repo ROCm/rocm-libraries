@@ -266,10 +266,12 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *      * Hermitian and complex data defaults to interleaved if a specific
           format is not specified.
  *  * Offset of first data element in the data buffer.  Defaults to 0 if unspecified.
- *  * Stride between consecutive elements in each dimension.  Defaults
-      to contiguous data in all dimensions if unspecified.
- *  * Distance between consecutive batches.  Defaults to contiguous
-      batches if unspecified.
+ *  * Stride between consecutive elements in each dimension. Defaults to packed data
+      layout consistent with the type of transform and its placement (requested at
+      plan creation), if unspecified.
+ *  * Distance between consecutive batches. Zero values are interpreted as defaults
+      to be deduced from the corresponding length and stride along the last transform
+      dimension.
  *
  *  Not all combinations of array types are supported and error codes
  *  will be returned for unsupported cases.

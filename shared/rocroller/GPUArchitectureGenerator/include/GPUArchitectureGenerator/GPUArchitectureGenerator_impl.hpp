@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -332,6 +309,48 @@ namespace GPUArchitectureGenerator
             {
                 AddCapability(
                     isaVersion, rocRoller::GPUCapability::DSReadTransposeB6PaddingBytes, 4);
+            }
+
+            {
+                /**
+                 * Try to assemble a kernel that requests the given number of preloaded kernel
+                 * arguments. Some architectures require the amdhsa_accum_offset directive and
+                 * some don't support it so we try both.
+                 */
+                auto tryPreloadedArgs = [hipcc, isaVersion](int n, bool accumOffset) -> bool {
+                    std::ostringstream kernel;
+                    kernel << ".amdhsa_kernel hello_world" << std::endl;
+                    kernel << ".amdhsa_next_free_vgpr .amdgcn.next_free_vgpr" << std::endl;
+                    kernel << ".amdhsa_next_free_sgpr .amdgcn.next_free_sgpr" << std::endl;
+                    if(accumOffset)
+                        kernel << ".amdhsa_accum_offset 4" << std::endl;
+                    kernel << ".amdhsa_user_sgpr_kernarg_preload_length " << n << std::endl;
+                    kernel << ".amdhsa_user_sgpr_kernarg_preload_offset 0" << std::endl;
+
+                    kernel << ".end_amdhsa_kernel" << std::endl;
+
+                    if(isaVersion.toString().starts_with("gfx94"))
+                        std::cout << kernel.str();
+
+                    return TryAssembler(hipcc, isaVersion, kernel.str(), "");
+                };
+
+                // Binary search for the max number of preloaded kernel arguments.
+                int minVal = 0, maxVal = 108;
+                while((minVal + 1) < maxVal)
+                {
+                    int n = (minVal + maxVal) / 2;
+                    if(tryPreloadedArgs(n, true) || tryPreloadedArgs(n, false))
+                    {
+                        minVal = n;
+                    }
+                    else
+                    {
+                        maxVal = n;
+                    }
+                }
+
+                AddCapability(isaVersion, rocRoller::GPUCapability::MaxPreloadedKernargs, minVal);
             }
 
             for(auto const& info : InstructionInfos)

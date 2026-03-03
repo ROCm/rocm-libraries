@@ -15,8 +15,8 @@ struct MIOPEN_INTERNALS_EXPORT TmpDir
     fs::path path;
     explicit TmpDir(std::string_view prefix = "");
 
-    TmpDir(TmpDir&&)            = default;
-    TmpDir& operator=(TmpDir&&) = default;
+    TmpDir(TmpDir&&) noexcept            = default;
+    TmpDir& operator=(TmpDir&&) noexcept = default;
 
     fs::path operator/(std::string_view other) const { return path / other; }
 
