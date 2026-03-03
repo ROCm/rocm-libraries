@@ -105,78 +105,6 @@ struct data_layout_t
                   bool                       is_partial = true);
 
     /**
-     * @brief Construct a new `data_layout_t` object implicitly capturing a full
-     * range of logical indices.
-     * 
-     * @param[in] lengths spans of the logical index range along all length axes.
-     * @param[in] strides in-buffer strides associated with all length axes.
-     * @param[in] batches spans of the logical index range along all batch axes.
-     * @param[in] distances in-buffer strides associated with all batch axes.
-     * 
-     * @throw An `std::invalid_argument` is thrown if any of the following is detected:
-     * 
-     * - `lengths` or `strides` are empty or have different sizes;
-     * 
-     * - `batches` or `distances` are empty or have different sizes.
-     */
-    data_layout_t(const std::vector<size_t>& lengths,
-                  const std::vector<size_t>& strides,
-                  const std::vector<size_t>& batches,
-                  const std::vector<size_t>& distances);
-
-    /**
-     * @brief Construct a new `data_layout_t` object implicitly capturing a full
-     * range of logical indices with one batch axis.
-     * 
-     * @param[in] lengths spans of the logical index range along all length axes.
-     * @param[in] strides in-buffer strides associated with all length axes.
-     * @param[in] batch span of the logical index range along its batch axis.
-     * @param[in] distance in-buffer stride associated with the batch axis.
-     * 
-     * @throw An `std::invalid_argument` is thrown if `lengths` or `strides`
-     * are empty or have different sizes.
-     * 
-     */
-    data_layout_t(const std::vector<size_t>& lengths,
-                  const std::vector<size_t>& strides,
-                  size_t                     batch,
-                  size_t                     distance);
-
-    /**
-     * @brief Construct a new `data_layout_t` object implicitly capturing a full
-     * range of logical indices, with default in-buffer strides (enforcing in-buffer
-     * contiguity for the innermost length axis).
-     * 
-     * @param[in] lengths spans of the logical index range along all length axes.
-     * @param[in] batches spans of the logical index range along all batch axes.
-     * @param[in] real_case_with_padding flag setting the in-buffer stride of the
-     * layout's first non-contiguous axis to the value that is required in real
-     * domain for real, in-place Discrete Fourier Transforms.
-     * 
-     * @throw An `std::invalid_argument` is thrown if `lengths` or `batches` are empty.
-     */
-    data_layout_t(const std::vector<size_t>& lengths,
-                  const std::vector<size_t>& batches,
-                  bool                       real_case_with_padding = false);
-
-    /**
-     * @brief Construct a new `data_layout_t` object implicitly capturing a full
-     * range of logical indices with one batch axis, and default in-buffer strides
-     * (enforcing in-buffer contiguity for the innermost length axis).
-     * 
-     * @param[in] lengths spans of the logical index range along all length axes.
-     * @param[in] batch span of the logical index range along its batch axis.
-     * @param[in] real_case_with_padding flag setting the in-buffer stride of the
-     * layout's first non-contiguous axis to the value that is required in real
-     * domain for real, in-place Discrete Fourier Transforms.
-     * 
-     * @throw An `std::invalid_argument` is thrown if `lengths` is empty.
-     */
-    data_layout_t(const std::vector<size_t>& lengths,
-                  size_t                     batch,
-                  bool                       real_case_with_padding = false);
-
-    /**
      * @return The number of length axes.
      */
     size_t get_len_rank() const;
@@ -434,7 +362,7 @@ private:
     void reorder_length_axes(const std::vector<size_t>& len_axis_order);
 
     /**
-     * @brief Reset the object's state to to capture a full range of logical
+     * @brief Reset the object's state to capture a full range of logical
      * indices with either prescribed or default strides and/or distance.
      * 
      * @param[in] lengths spans of the logical index range along all length axes.
@@ -457,11 +385,11 @@ private:
      * - `strides` (resp. `distances`) is not empty and does not have the same
      * size as `lengths` (resp. `batches`).
      */
-    void reset(const std::vector<size_t>& lengths,
-               const std::vector<size_t>& strides,
-               const std::vector<size_t>& batches,
-               const std::vector<size_t>& distances,
-               bool                       real_case_with_padding);
+    void full_range_reset(const std::vector<size_t>& lengths,
+                          const std::vector<size_t>& strides,
+                          const std::vector<size_t>& batches,
+                          const std::vector<size_t>& distances,
+                          bool                       real_case_with_padding);
 
     // Friends that need access to private members and/or default constructor below.
     // -----------------------------------------------------------------------------

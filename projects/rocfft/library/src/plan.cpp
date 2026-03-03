@@ -985,11 +985,11 @@ rocfft_status
             throw std::logic_error(ROCFFT_CURRENT_FUNCTION
                                    + " detected an unexpected batch rank in a plan description");
         }
-        io_layout.reset(io_lengths,
-                        current_strides /* default strides set if empty */,
-                        {number_of_transforms},
-                        current_distances /* default distances if empty */,
-                        is_real_domain && placement == rocfft_placement_inplace);
+        io_layout.full_range_reset(io_lengths,
+                                   current_strides /* default strides set if empty */,
+                                   {number_of_transforms},
+                                   current_distances /* default distances if empty */,
+                                   is_real_domain && placement == rocfft_placement_inplace);
     }
     // -------------------------------------------
     //   Finalize and validate I/O fields if any

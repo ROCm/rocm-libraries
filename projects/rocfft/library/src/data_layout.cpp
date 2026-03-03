@@ -113,54 +113,6 @@ data_layout_t::data_layout_t(const std::vector<size_t>& lower,
     }
 }
 
-data_layout_t::data_layout_t(const std::vector<size_t>& lengths,
-                             const std::vector<size_t>& strides,
-                             const std::vector<size_t>& batches,
-                             const std::vector<size_t>& distances)
-    : data_layout_t(std::vector<size_t>(lengths.size() + batches.size(), 0),
-                    concatenate(lengths, batches),
-                    concatenate(strides, distances),
-                    batches.size(),
-                    false /* : is_partial */)
-{
-    // If successful, the constructor delegation used above is fine iff
-    if(strides.size() != lengths.size() || distances.size() != batches.size())
-        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                    + " requires strides (resp. distances) and lengths (resp. "
-                                      "batches) to be of the same size.");
-}
-
-data_layout_t::data_layout_t(const std::vector<size_t>& lengths,
-                             const std::vector<size_t>& strides,
-                             size_t                     batch,
-                             size_t                     distance)
-    : data_layout_t(std::vector<size_t>(lengths.size() + 1, 0),
-                    concatenate(lengths, batch),
-                    concatenate(strides, distance),
-                    1,
-                    false /* : is_partial */)
-{
-}
-
-data_layout_t::data_layout_t(const std::vector<size_t>& lengths,
-                             const std::vector<size_t>& batches,
-                             bool                       real_case_with_padding)
-{
-    const std::vector<size_t> empty_for_default_strides_and_dist = {};
-    reset(lengths,
-          empty_for_default_strides_and_dist,
-          batches,
-          empty_for_default_strides_and_dist,
-          real_case_with_padding);
-}
-
-data_layout_t::data_layout_t(const std::vector<size_t>& lengths,
-                             size_t                     batch,
-                             bool                       real_case_with_padding)
-    : data_layout_t(lengths, std::vector<size_t>(1, batch), real_case_with_padding)
-{
-}
-
 size_t data_layout_t::get_len_rank() const
 {
     return len_axes.size();
@@ -469,11 +421,11 @@ void data_layout_t::clear()
     batch_axes.clear();
 }
 
-void data_layout_t::reset(const std::vector<size_t>& lengths,
-                          const std::vector<size_t>& strides,
-                          const std::vector<size_t>& batches,
-                          const std::vector<size_t>& distances,
-                          bool                       real_case_with_padding)
+void data_layout_t::full_range_reset(const std::vector<size_t>& lengths,
+                                     const std::vector<size_t>& strides,
+                                     const std::vector<size_t>& batches,
+                                     const std::vector<size_t>& distances,
+                                     bool                       real_case_with_padding)
 {
     if(lengths.empty() || batches.empty())
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
