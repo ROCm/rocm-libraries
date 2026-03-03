@@ -376,15 +376,12 @@ void TestLogBufferOn()
             case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
             case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
             case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-            case 3:
-                ASSERT_FALSE(isSubStr(line, "trace"));
-                ASSERT_TRUE(isSubStr(line, "error"));
-                break;
+            case 3: ASSERT_TRUE(isSubStr(line, "error")); break;
+            case 4: ASSERT_TRUE(isSubStr(line, "")); break;
             }
             line_i++;
         }
     }
-    fs::remove(filename);
 
     // test log dump after throw
     miopen::ClearLogBuffer();
@@ -405,10 +402,17 @@ void TestLogBufferOn()
             case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
             case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
             case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-            case 3: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            case 3: ASSERT_TRUE(isSubStr(line, "error")); break;
+            case 4: ASSERT_TRUE(isSubStr(line, "")); break;
+            case 5: ASSERT_TRUE(isSubStr(line, "warn")); break;
+            case 6: ASSERT_TRUE(isSubStr(line, "info")); break;
+            case 7: ASSERT_TRUE(isSubStr(line, "info2")); break;
+            case 8: ASSERT_TRUE(isSubStr(line, "throw")); break;
+	    case 9: ASSERT_TRUE(isSubStr(line, "")); break;
             }
             line_i++;
         }
+	ASSERT_TRUE(line_i == 10);
     }
     fs::remove(filename);
 }

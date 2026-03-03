@@ -124,7 +124,7 @@ void OutputBufferedLogs()
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(::getpid()) + ".log");
     std::cerr << "Buffered " << buffer_size << " messages to file: " << sysinfo::GetSystemHostname()
               << ":" << filename.string() << std::endl;
-    auto err_file = std::ofstream{filename};
+    auto err_file = std::ofstream{filename, std::ofstream::app};
     size_t i      = log_buffer_i;
     do
     {
@@ -134,6 +134,7 @@ void OutputBufferedLogs()
         }
         i = (i + 1) % log_buffer_size;
     } while(i != log_buffer_i);
+    err_file << std::endl;
 }
 
 namespace debug {
