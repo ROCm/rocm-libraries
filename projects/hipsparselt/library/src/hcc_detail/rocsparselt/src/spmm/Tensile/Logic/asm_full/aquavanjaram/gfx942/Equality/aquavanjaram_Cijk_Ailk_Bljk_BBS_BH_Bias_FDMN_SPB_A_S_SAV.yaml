@@ -12100,548 +12100,6 @@
     GlobalReadPerMfma: 1
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
-    GlobalReadVectorWidthMetadata: 4
-    GlobalSplitU: -1
-    GlobalSplitUAlgorithm: MultipleBuffer
-    GlobalSplitUCoalesced: false
-    GlobalSplitUWorkGroupMappingRoundRobin: true
-    GlobalWriteVectorWidth: 8
-    GroupLoadStore: 0
-    GuaranteeNoPartialA: false
-    GuaranteeNoPartialB: true
-    GuaranteeNoPartialMetadata: false
-    ISA: [9, 4, 2]
-    InnerUnroll: 1
-    InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
-    Kernel: true
-    KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x128x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: false
-    LSCA: 256
-    LSCB: 32
-    LSCMetadata: 8
-    LSPA: 8
-    LSPB: 64
-    LSPMetadata: 128
-    LVCA: 32
-    LVCB: 4
-    LVCMetadata: 2
-    LVPA: 1
-    LVPB: 8
-    LVPMetadata: 32
-    LdsBlockSizePerPadA: 0
-    LdsBlockSizePerPadB: 128
-    LdsBlockSizePerPadMetadata: 0
-    LdsBytesNoAmax: 43008
-    LdsInitCVgprs: false
-    LdsNumBytes: 43008
-    LdsNumElementsAlignedA: 32768
-    LdsNumElementsAlignedB: 9216
-    LdsNumElementsAlignedMetadata: 1024
-    LdsOffsetA: 0
-    LdsOffsetA_Blk: 43008
-    LdsOffsetB: 32768
-    LdsOffsetB_Blk: 76800
-    LdsOffsetBias: 0
-    LdsOffsetBiasGSU: 0
-    LdsOffsetBiasNonGSU: 0
-    LdsOffsetMetadata: 41984
-    LdsOffsetMetadata_Blk: 75776
-    LdsPadA: 0
-    LdsPadB: 8
-    LdsPadMetadata: 0
-    LocalReadVectorWidth: 8
-    LocalSplitU: 1
-    LocalSplitUReuseLDS: 1
-    LocalWritePerMfma: -1
-    LocalWriteUseSgprA: false
-    LocalWriteUseSgprB: false
-    LocalWriteUseSgprMetadata: false
-    LoopIters: 2
-    LoopUnroll: 64
-    MFMA_BF16_1K: false
-    MIArchVgpr: false
-    MIBlock: [16, 16, 32, 1, 1, 1]
-    MIInputPerThread: 8
-    MIInputPerThreadA: 8
-    MIInputPerThreadB: 4
-    MIInputPerThreadMetadata: 1
-    MIOutputVectorWidth: 4
-    MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [8, 4]
-    MIWaveTileA: 8
-    MIWaveTileB: 4
-    MIWaveTileMetadata: 4
-    MacroTile0: 256
-    MacroTile1: 128
-    MacroTileA: 256
-    MacroTileB: 128
-    MacroTileMetadata: 128
-    MagicDivAlg: 2
-    MathClocksUnrolledLoop: 0
-    MatrixInstB: 1
-    MatrixInstBM: 1
-    MatrixInstBN: 1
-    MatrixInstK: 32
-    MatrixInstM: 16
-    MatrixInstN: 16
-    MatrixInstruction: [16, 16, 32, 1]
-    MaxLDS: 65536
-    MaxOccupancy: 40
-    MbskPrefetchMethod: 0
-    MfmaInitCVgprs: false
-    MinGRIncPerMfma: 1
-    NoLdsWriteCode: false
-    NoReject: false
-    NoTailLoop: false
-    NonDTLTailLoopA: false
-    NonDTLTailLoopB: false
-    NonTemporal: -1
-    NonTemporalA: 0
-    NonTemporalB: 0
-    NonTemporalC: 0
-    NonTemporalD: 4
-    NonTemporalE: 0
-    NonTemporalMetadata: 0
-    NonTemporalWS: 0
-    NumElementsPerBatchStore: 0
-    NumElementsPerThread: 128
-    NumGlobalWriteVectorsPerThread: 16
-    NumLdsBlk: 1
-    NumLoadsA: 8
-    NumLoadsB: 2
-    NumLoadsCoalescedA: 1
-    NumLoadsCoalescedB: 1
-    NumLoadsCoalescedMetadata: 1
-    NumLoadsMetadata: 1
-    NumLoadsPerpendicularA: 8
-    NumLoadsPerpendicularB: 2
-    NumLoadsPerpendicularMetadata: 1
-    NumThreads: 256
-    NumTotalPackedLoadsA: -1
-    NumTotalPackedLoadsB: -1
-    NumTotalPackedLoadsMetadata: -1
-    NumWaveSplitK: 1
-    OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
-    PrefetchGlobalRead: 2
-    PrefetchLocalRead: 1
-    PreloadKernArgs: true
-    SFCWGM:
-    - [1, 1]
-    - [1, 1]
-    ScheduleGROverBarrier: 0
-    ScheduleGlobalRead: 1
-    ScheduleIterAlg: 3
-    ScheduleLocalWrite: 1
-    SolutionIndex: 47
-    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x128x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
-    SpaceFillingAlgo: []
-    StaggerU: 16
-    StaggerUMapping: 0
-    StaggerUStride: 256
-    StorePriorityOpt: 0
-    StoreRemapVectorWidth: 0
-    StoreSwapAddr: false
-    StoreSyncOpt: 0
-    StoreVectorWidth: 8
-    StreamK: 0
-    StreamKAtomic: 0
-    StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 0
-    SubGroup0: 8
-    SubGroup1: 32
-    SubGroupA: 8
-    SubGroupB: 32
-    SubGroupMetadata: 32
-    SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
-    TailloopInNll: false
-    ThreadTile: [1, 1]
-    ThreadTile0: 32
-    ThreadTile1: 4
-    ThreadTileA: 32
-    ThreadTileB: 4
-    ThreadTileMetadata: 4
-    TransposeLDS: 1
-    TransposeLDSMetadata: 1
-    ULSGRODoubleG2L: 0
-    UnrollLoopSwapGlobalReadOrder: 0
-    UnrollMajorLDSA: false
-    UnrollMajorLDSB: true
-    UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 0
-    UseDirect32XEmulation: false
-    UseDot2F32XEmulation: false
-    UseDotInstruction: false
-    UseF32XEmulation: false
-    UseGeneralizedNLCOneA: false
-    UseGeneralizedNLCOneB: false
-    UseGeneralizedNLCOneMetadata: false
-    UseInstOffsetForGRO: 0
-    UseMFMAF32XEmulation: false
-    UsePLRPack: false
-    UseSgprForGRO: -1
-    Valid: true
-    VectorStore: -1
-    VectorWidthA: 8
-    VectorWidthB: 1
-    VectorWidthMetadata: 1
-    WaveSeparateGlobalReadA: 0
-    WaveSeparateGlobalReadB: 0
-    WaveSeparateGlobalReadMetadata: 0
-    WaveSplitK: false
-    WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 1
-    WorkGroupMappingXCC: 1
-    WorkGroupMappingXCCGroup: -1
-    WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, -1]
-    _DepthU: 64
-    _DepthUA: 64
-    _DepthUB: 32
-    _DepthUMetadata: 8
-    _GlobalAccumulation: MultipleBuffer
-    _UseSgprForGRO: false
-    _VectorStore: 1
-    _WorkspaceSizePerElemBias: 0
-    _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 1
-    enableGLTrA: false
-    enableGLTrB: false
-    enableLDSTrA: false
-    enableLDSTrB: false
-    numSubTiles: 1
-    reorderGRInstForDTVA: false
-    reorderGRInstForDTVB: false
-    tailLoopOptA: false
-    tailLoopOptB: false
-  - 1LDSBuffer: 1
-    ActivationAlt: false
-    ActivationFuncCall: true
-    ActivationFused: true
-    AdaptiveGemm: 0
-    AssertAIGreaterThanEqual: -1
-    AssertAILessThanEqual: -1
-    AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
-    AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
-    AssertSummationElementMultiple: 8
-    AssignedDerivedParameters: true
-    AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
-    BufferLoad: true
-    BufferStore: true
-    CUCount: null
-    CUOccupancy: -1
-    ClusterLocalRead: 1
-    CodeObjectVersion: 4
-    ConvertAfterDS: false
-    CustomKernelName: ''
-    DebugStreamK: 0
-    DepthU: 64
-    DirectToLds: 0
-    DirectToLdsA: false
-    DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprA: false
-    DirectToVgprB: false
-    DirectToVgprSparseMetadata: false
-    DtlPlusLdsBuf: 0
-    EdgeType: ShiftPtr
-    EnableF32XdlMathOp: false
-    EnableMatrixInstruction: true
-    ExpandPointerSwap: true
-    ExpertSchedulingMode: 0
-    ExtraLatencyForLR: 0
-    ExtraMiLatencyLeft: -1
-    ForceDisableShadowInit: false
-    ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
-    GlobalReadVectorWidthA: 2
-    GlobalReadVectorWidthB: 8
-    GlobalReadVectorWidthMetadata: 8
-    GlobalSplitU: -1
-    GlobalSplitUAlgorithm: MultipleBuffer
-    GlobalSplitUCoalesced: false
-    GlobalSplitUWorkGroupMappingRoundRobin: true
-    GlobalWriteVectorWidth: 1
-    GroupLoadStore: 0
-    GuaranteeNoPartialA: false
-    GuaranteeNoPartialB: true
-    GuaranteeNoPartialMetadata: false
-    ISA: [9, 4, 2]
-    InnerUnroll: 1
-    InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
-      SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
-    KRingShift: false
-    Kernel: true
-    KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT224x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSUAMB_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA3584_LBSPPB128_LBSPPM0_LPA16_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT7_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA7_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: false
-    LSCA: 32
-    LSCB: 32
-    LSCMetadata: 8
-    LSPA: 16
-    LSPB: 64
-    LSPMetadata: 256
-    LVCA: 16
-    LVCB: 4
-    LVCMetadata: 1
-    LVPA: 8
-    LVPB: 8
-    LVPMetadata: 32
-    LdsBlockSizePerPadA: 3584
-    LdsBlockSizePerPadB: 128
-    LdsBlockSizePerPadMetadata: 0
-    LdsBytesNoAmax: 49408
-    LdsInitCVgprs: false
-    LdsNumBytes: 49408
-    LdsNumElementsAlignedA: 28928
-    LdsNumElementsAlignedB: 18432
-    LdsNumElementsAlignedMetadata: 2048
-    LdsOffsetA: 0
-    LdsOffsetA_Blk: 49408
-    LdsOffsetB: 28928
-    LdsOffsetB_Blk: 80384
-    LdsOffsetBias: 0
-    LdsOffsetBiasGSU: 0
-    LdsOffsetBiasNonGSU: 0
-    LdsOffsetMetadata: 47360
-    LdsOffsetMetadata_Blk: 78336
-    LdsPadA: 16
-    LdsPadB: 8
-    LdsPadMetadata: 0
-    LocalReadVectorWidth: 8
-    LocalSplitU: 1
-    LocalSplitUReuseLDS: 1
-    LocalWritePerMfma: -1
-    LocalWriteUseSgprA: false
-    LocalWriteUseSgprB: false
-    LocalWriteUseSgprMetadata: false
-    LoopIters: 2
-    LoopUnroll: 64
-    MFMA_BF16_1K: false
-    MIArchVgpr: false
-    MIBlock: [16, 16, 32, 1, 1, 1]
-    MIInputPerThread: 8
-    MIInputPerThreadA: 8
-    MIInputPerThreadB: 4
-    MIInputPerThreadMetadata: 1
-    MIOutputVectorWidth: 4
-    MIRegPerOut: 1
-    MIWaveGroup: [2, 2]
-    MIWaveTile: [7, 8]
-    MIWaveTileA: 7
-    MIWaveTileB: 8
-    MIWaveTileMetadata: 8
-    MacroTile0: 224
-    MacroTile1: 256
-    MacroTileA: 224
-    MacroTileB: 256
-    MacroTileMetadata: 256
-    MagicDivAlg: 2
-    MathClocksUnrolledLoop: 0
-    MatrixInstB: 1
-    MatrixInstBM: 1
-    MatrixInstBN: 1
-    MatrixInstK: 32
-    MatrixInstM: 16
-    MatrixInstN: 16
-    MatrixInstruction: [16, 16, 32, 1]
-    MaxLDS: 65536
-    MaxOccupancy: 40
-    MbskPrefetchMethod: 0
-    MfmaInitCVgprs: false
-    MinGRIncPerMfma: 1
-    NoLdsWriteCode: false
-    NoReject: false
-    NoTailLoop: false
-    NonDTLTailLoopA: false
-    NonDTLTailLoopB: false
-    NonTemporal: -1
-    NonTemporalA: 0
-    NonTemporalB: 0
-    NonTemporalC: 0
-    NonTemporalD: 0
-    NonTemporalE: 0
-    NonTemporalMetadata: 0
-    NonTemporalWS: 0
-    NumElementsPerBatchStore: 0
-    NumElementsPerThread: 224
-    NumGlobalWriteVectorsPerThread: 224
-    NumLdsBlk: 1
-    NumLoadsA: 28
-    NumLoadsB: 4
-    NumLoadsCoalescedA: 7
-    NumLoadsCoalescedB: 1
-    NumLoadsCoalescedMetadata: 1
-    NumLoadsMetadata: 1
-    NumLoadsPerpendicularA: 4
-    NumLoadsPerpendicularB: 4
-    NumLoadsPerpendicularMetadata: 1
-    NumThreads: 256
-    NumTotalPackedLoadsA: -1
-    NumTotalPackedLoadsB: -1
-    NumTotalPackedLoadsMetadata: -1
-    NumWaveSplitK: 1
-    OptNoLoadLoop: 1
-    PackedC0IdxChars: [I]
-    PackedC0IndicesX: [0]
-    PackedC1IdxChars: [J]
-    PackedC1IndicesX: [1]
-    PrefetchGlobalRead: 2
-    PrefetchLocalRead: 1
-    PreloadKernArgs: true
-    SFCWGM:
-    - [1, 1]
-    - [1, 1]
-    ScheduleGROverBarrier: 0
-    ScheduleGlobalRead: 1
-    ScheduleIterAlg: 3
-    ScheduleLocalWrite: 1
-    SolutionIndex: 48
-    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT224x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA3584_LBSPPB128_LBSPPM0_LPA16_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT7_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA7_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
-    SpaceFillingAlgo: []
-    StaggerU: 0
-    StaggerUMapping: 0
-    StaggerUStride: 0
-    StorePriorityOpt: 0
-    StoreRemapVectorWidth: 0
-    StoreSwapAddr: false
-    StoreSyncOpt: 0
-    StoreVectorWidth: 1
-    StreamK: 0
-    StreamKAtomic: 0
-    StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 0
-    SubGroup0: 8
-    SubGroup1: 32
-    SubGroupA: 8
-    SubGroupB: 32
-    SubGroupMetadata: 32
-    SuppressNoLoadLoop: false
-    SwapGlobalReadOrder: false
-    TailloopInNll: false
-    ThreadTile: [1, 1]
-    ThreadTile0: 28
-    ThreadTile1: 8
-    ThreadTileA: 28
-    ThreadTileB: 8
-    ThreadTileMetadata: 8
-    TransposeLDS: 1
-    TransposeLDSMetadata: 1
-    ULSGRODoubleG2L: 0
-    UnrollLoopSwapGlobalReadOrder: 0
-    UnrollMajorLDSA: false
-    UnrollMajorLDSB: true
-    UnrollMajorLDSMetadata: 1
-    Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: 0
-    UseDirect32XEmulation: false
-    UseDot2F32XEmulation: false
-    UseDotInstruction: false
-    UseF32XEmulation: false
-    UseGeneralizedNLCOneA: false
-    UseGeneralizedNLCOneB: false
-    UseGeneralizedNLCOneMetadata: false
-    UseInstOffsetForGRO: 0
-    UseMFMAF32XEmulation: false
-    UsePLRPack: false
-    UseSgprForGRO: -1
-    Valid: true
-    VectorStore: -1
-    VectorWidthA: 1
-    VectorWidthB: 1
-    VectorWidthMetadata: 1
-    WaveSeparateGlobalReadA: 0
-    WaveSeparateGlobalReadB: 0
-    WaveSeparateGlobalReadMetadata: 0
-    WaveSplitK: false
-    WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 8
-    WorkGroupMappingXCC: 8
-    WorkGroupMappingXCCGroup: -1
-    WorkGroupReduction: false
-    WorkspaceCheck: [4, 0, -1]
-    _DepthU: 64
-    _DepthUA: 64
-    _DepthUB: 32
-    _DepthUMetadata: 8
-    _GlobalAccumulation: MultipleBuffer
-    _UseSgprForGRO: false
-    _VectorStore: 1
-    _WorkspaceSizePerElemBias: 0
-    _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 0
-    enableGLTrA: false
-    enableGLTrB: false
-    enableLDSTrA: false
-    enableLDSTrB: false
-    numSubTiles: 1
-    reorderGRInstForDTVA: false
-    reorderGRInstForDTVB: false
-    tailLoopOptA: false
-    tailLoopOptB: false
-  - 1LDSBuffer: 1
-    ActivationAlt: false
-    ActivationFuncCall: true
-    ActivationFused: true
-    AdaptiveGemm: 0
-    AssertAIGreaterThanEqual: -1
-    AssertAILessThanEqual: -1
-    AssertFree0ElementMultiple: 1
-    AssertFree1DivByMT1LowbitGT1: 0
-    AssertFree1ElementMultiple: 1
-    AssertKRingShiftTailWrapOnly: 0
-    AssertSummationElementMultiple: 8
-    AssignedDerivedParameters: true
-    AssignedProblemIndependentDerivedParameters: true
-    BAddrInterleave: false
-    BufferLoad: true
-    BufferStore: true
-    CUCount: null
-    CUOccupancy: -1
-    ClusterLocalRead: 1
-    CodeObjectVersion: 4
-    ConvertAfterDS: false
-    CustomKernelName: ''
-    DebugStreamK: 0
-    DepthU: 64
-    DirectToLds: 0
-    DirectToLdsA: false
-    DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprA: false
-    DirectToVgprB: false
-    DirectToVgprSparseMetadata: false
-    DtlPlusLdsBuf: 0
-    EdgeType: ShiftPtr
-    EnableF32XdlMathOp: false
-    EnableMatrixInstruction: true
-    ExpandPointerSwap: true
-    ExpertSchedulingMode: 0
-    ExtraLatencyForLR: 0
-    ExtraMiLatencyLeft: -1
-    ForceDisableShadowInit: false
-    ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
-    GlobalReadVectorWidthA: 8
-    GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
     GlobalSplitU: -1
     GlobalSplitUAlgorithm: MultipleBuffer
@@ -12783,7 +12241,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 49
+    SolutionIndex: 47
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     SpaceFillingAlgo: []
@@ -13054,7 +12512,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 50
+    SolutionIndex: 48
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA2_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     SpaceFillingAlgo: []
@@ -13325,7 +12783,7 @@
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
-    SolutionIndex: 51
+    SolutionIndex: 49
     SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT192x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT12_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA3_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM8_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     SpaceFillingAlgo: []
@@ -13455,12 +12913,12 @@
     GlobalReadPerMfma: 1
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
-    GlobalReadVectorWidthMetadata: 4
+    GlobalReadVectorWidthMetadata: 8
     GlobalSplitU: -1
     GlobalSplitUAlgorithm: MultipleBuffer
     GlobalSplitUCoalesced: true
-    GlobalSplitUWorkGroupMappingRoundRobin: true
-    GlobalWriteVectorWidth: 2
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 8
     GroupLoadStore: 0
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
@@ -13473,39 +12931,39 @@
     KRingShift: false
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT320x128x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA5120_LBSPPB128_LBSPPM0_LPA32_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT10_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA5_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW2_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
+    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
     LDSTrInst: false
-    LSCA: 64
+    LSCA: 256
     LSCB: 32
     LSCMetadata: 8
-    LSPA: 32
+    LSPA: 8
     LSPB: 64
-    LSPMetadata: 128
-    LVCA: 8
+    LSPMetadata: 256
+    LVCA: 32
     LVCB: 4
-    LVCMetadata: 2
-    LVPA: 4
+    LVCMetadata: 1
+    LVPA: 1
     LVPB: 8
     LVPMetadata: 32
-    LdsBlockSizePerPadA: 5120
+    LdsBlockSizePerPadA: 0
     LdsBlockSizePerPadB: 128
     LdsBlockSizePerPadMetadata: 0
-    LdsBytesNoAmax: 51712
+    LdsBytesNoAmax: 53248
     LdsInitCVgprs: false
-    LdsNumBytes: 51712
-    LdsNumElementsAlignedA: 41472
-    LdsNumElementsAlignedB: 9216
-    LdsNumElementsAlignedMetadata: 1024
+    LdsNumBytes: 53248
+    LdsNumElementsAlignedA: 32768
+    LdsNumElementsAlignedB: 18432
+    LdsNumElementsAlignedMetadata: 2048
     LdsOffsetA: 0
-    LdsOffsetA_Blk: 51712
-    LdsOffsetB: 41472
-    LdsOffsetB_Blk: 94208
+    LdsOffsetA_Blk: 53248
+    LdsOffsetB: 32768
+    LdsOffsetB_Blk: 88064
     LdsOffsetBias: 0
     LdsOffsetBiasGSU: 0
     LdsOffsetBiasNonGSU: 0
-    LdsOffsetMetadata: 50688
-    LdsOffsetMetadata_Blk: 93184
-    LdsPadA: 32
+    LdsOffsetMetadata: 51200
+    LdsOffsetMetadata_Blk: 86016
+    LdsPadA: 0
     LdsPadB: 8
     LdsPadMetadata: 0
     LocalReadVectorWidth: 8
@@ -13527,15 +12985,15 @@
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
     MIWaveGroup: [2, 2]
-    MIWaveTile: [10, 4]
-    MIWaveTileA: 10
-    MIWaveTileB: 4
-    MIWaveTileMetadata: 4
-    MacroTile0: 320
-    MacroTile1: 128
-    MacroTileA: 320
-    MacroTileB: 128
-    MacroTileMetadata: 128
+    MIWaveTile: [8, 8]
+    MIWaveTileA: 8
+    MIWaveTileB: 8
+    MIWaveTileMetadata: 8
+    MacroTile0: 256
+    MacroTile1: 256
+    MacroTileA: 256
+    MacroTileB: 256
+    MacroTileMetadata: 256
     MagicDivAlg: 2
     MathClocksUnrolledLoop: 0
     MatrixInstB: 1
@@ -13564,17 +13022,559 @@
     NonTemporalMetadata: 0
     NonTemporalWS: 0
     NumElementsPerBatchStore: 0
-    NumElementsPerThread: 160
-    NumGlobalWriteVectorsPerThread: 80
+    NumElementsPerThread: 256
+    NumGlobalWriteVectorsPerThread: 32
     NumLdsBlk: 1
-    NumLoadsA: 10
-    NumLoadsB: 2
-    NumLoadsCoalescedA: 5
+    NumLoadsA: 8
+    NumLoadsB: 4
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsCoalescedMetadata: 1
+    NumLoadsMetadata: 1
+    NumLoadsPerpendicularA: 8
+    NumLoadsPerpendicularB: 4
+    NumLoadsPerpendicularMetadata: 1
+    NumThreads: 256
+    NumTotalPackedLoadsA: -1
+    NumTotalPackedLoadsB: -1
+    NumTotalPackedLoadsMetadata: -1
+    NumWaveSplitK: 1
+    OptNoLoadLoop: 1
+    PackedC0IdxChars: [I]
+    PackedC0IndicesX: [0]
+    PackedC1IdxChars: [J]
+    PackedC1IndicesX: [1]
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    PreloadKernArgs: true
+    SFCWGM:
+    - [1, 1]
+    - [1, 1]
+    ScheduleGROverBarrier: 0
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 3
+    ScheduleLocalWrite: 1
+    SolutionIndex: 50
+    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC1_GSUWGMRR0_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
+    SourceSwap: 1
+    SpaceFillingAlgo: []
+    StaggerU: 16
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    StorePriorityOpt: 0
+    StoreRemapVectorWidth: 0
+    StoreSwapAddr: false
+    StoreSyncOpt: 0
+    StoreVectorWidth: 8
+    StreamK: 0
+    StreamKAtomic: 0
+    StreamKFixupTreeReduction: 0
+    StreamKXCCMapping: 0
+    SubGroup0: 8
+    SubGroup1: 32
+    SubGroupA: 8
+    SubGroupB: 32
+    SubGroupMetadata: 32
+    SuppressNoLoadLoop: false
+    SwapGlobalReadOrder: false
+    TailloopInNll: false
+    ThreadTile: [1, 1]
+    ThreadTile0: 32
+    ThreadTile1: 8
+    ThreadTileA: 32
+    ThreadTileB: 8
+    ThreadTileMetadata: 8
+    TransposeLDS: 1
+    TransposeLDSMetadata: 1
+    ULSGRODoubleG2L: 0
+    UnrollLoopSwapGlobalReadOrder: 0
+    UnrollMajorLDSA: false
+    UnrollMajorLDSB: true
+    UnrollMajorLDSMetadata: 1
+    Use64bShadowLimit: 1
+    UseCustomMainLoopSchedule: 0
+    UseDirect32XEmulation: false
+    UseDot2F32XEmulation: false
+    UseDotInstruction: false
+    UseF32XEmulation: false
+    UseGeneralizedNLCOneA: false
+    UseGeneralizedNLCOneB: false
+    UseGeneralizedNLCOneMetadata: false
+    UseInstOffsetForGRO: 0
+    UseMFMAF32XEmulation: false
+    UsePLRPack: false
+    UseSgprForGRO: -1
+    Valid: true
+    VectorStore: -1
+    VectorWidthA: 8
+    VectorWidthB: 2
+    VectorWidthMetadata: 2
+    WaveSeparateGlobalReadA: 0
+    WaveSeparateGlobalReadB: 0
+    WaveSeparateGlobalReadMetadata: 0
+    WaveSplitK: false
+    WavefrontSize: 64
+    WorkGroup: [32, 8, 1]
+    WorkGroupMapping: 8
+    WorkGroupMappingXCC: 8
+    WorkGroupMappingXCCGroup: -1
+    WorkGroupReduction: false
+    WorkspaceCheck: [4, 0, -1]
+    _DepthU: 64
+    _DepthUA: 64
+    _DepthUB: 32
+    _DepthUMetadata: 8
+    _GlobalAccumulation: MultipleBuffer
+    _UseSgprForGRO: false
+    _VectorStore: 1
+    _WorkspaceSizePerElemBias: 0
+    _WorkspaceSizePerElemC: 4
+    _staggerStrideShift: 1
+    enableGLTrA: false
+    enableGLTrB: false
+    enableLDSTrA: false
+    enableLDSTrB: false
+    numSubTiles: 1
+    reorderGRInstForDTVA: false
+    reorderGRInstForDTVB: false
+    tailLoopOptA: false
+    tailLoopOptB: false
+  - 1LDSBuffer: 1
+    ActivationAlt: false
+    ActivationFuncCall: true
+    ActivationFused: true
+    AdaptiveGemm: 0
+    AssertAIGreaterThanEqual: -1
+    AssertAILessThanEqual: -1
+    AssertFree0ElementMultiple: 1
+    AssertFree1DivByMT1LowbitGT1: 0
+    AssertFree1ElementMultiple: 1
+    AssertKRingShiftTailWrapOnly: 0
+    AssertSummationElementMultiple: 8
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BAddrInterleave: false
+    BufferLoad: true
+    BufferStore: true
+    CUCount: null
+    CUOccupancy: -1
+    ClusterLocalRead: 1
+    CodeObjectVersion: 4
+    ConvertAfterDS: false
+    CustomKernelName: ''
+    DebugStreamK: 0
+    DepthU: 64
+    DirectToLds: 0
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DirectToLdsMetadata: false
+    DirectToVgprA: false
+    DirectToVgprB: false
+    DirectToVgprSparseMetadata: false
+    DtlPlusLdsBuf: 0
+    EdgeType: ShiftPtr
+    EnableF32XdlMathOp: false
+    EnableMatrixInstruction: true
+    ExpandPointerSwap: true
+    ExpertSchedulingMode: 0
+    ExtraLatencyForLR: 0
+    ExtraMiLatencyLeft: -1
+    ForceDisableShadowInit: false
+    ForceUnrollSubIter: false
+    GlobalReadPerMfma: 1
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 8
+    GlobalReadVectorWidthMetadata: 8
+    GlobalSplitU: -1
+    GlobalSplitUAlgorithm: MultipleBuffer
+    GlobalSplitUCoalesced: false
+    GlobalSplitUWorkGroupMappingRoundRobin: true
+    GlobalWriteVectorWidth: 8
+    GroupLoadStore: 0
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: true
+    GuaranteeNoPartialMetadata: false
+    ISA: [9, 4, 2]
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+      SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    KRingShift: false
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1
+    LDSTrInst: false
+    LSCA: 256
+    LSCB: 32
+    LSCMetadata: 8
+    LSPA: 8
+    LSPB: 64
+    LSPMetadata: 256
+    LVCA: 32
+    LVCB: 4
+    LVCMetadata: 1
+    LVPA: 1
+    LVPB: 8
+    LVPMetadata: 32
+    LdsBlockSizePerPadA: 0
+    LdsBlockSizePerPadB: 128
+    LdsBlockSizePerPadMetadata: 0
+    LdsBytesNoAmax: 53248
+    LdsInitCVgprs: false
+    LdsNumBytes: 53248
+    LdsNumElementsAlignedA: 32768
+    LdsNumElementsAlignedB: 18432
+    LdsNumElementsAlignedMetadata: 2048
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 53248
+    LdsOffsetB: 32768
+    LdsOffsetB_Blk: 88064
+    LdsOffsetBias: 0
+    LdsOffsetBiasGSU: 0
+    LdsOffsetBiasNonGSU: 0
+    LdsOffsetMetadata: 51200
+    LdsOffsetMetadata_Blk: 86016
+    LdsPadA: 0
+    LdsPadB: 8
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: 8
+    LocalSplitU: 1
+    LocalSplitUReuseLDS: 1
+    LocalWritePerMfma: -1
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LocalWriteUseSgprMetadata: false
+    LoopIters: 2
+    LoopUnroll: 64
+    MFMA_BF16_1K: false
+    MIArchVgpr: false
+    MIBlock: [16, 16, 32, 1, 1, 1]
+    MIInputPerThread: 8
+    MIInputPerThreadA: 8
+    MIInputPerThreadB: 4
+    MIInputPerThreadMetadata: 1
+    MIOutputVectorWidth: 4
+    MIRegPerOut: 1
+    MIWaveGroup: [2, 2]
+    MIWaveTile: [8, 8]
+    MIWaveTileA: 8
+    MIWaveTileB: 8
+    MIWaveTileMetadata: 8
+    MacroTile0: 256
+    MacroTile1: 256
+    MacroTileA: 256
+    MacroTileB: 256
+    MacroTileMetadata: 256
+    MagicDivAlg: 2
+    MathClocksUnrolledLoop: 0
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstBN: 1
+    MatrixInstK: 32
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction: [16, 16, 32, 1]
+    MaxLDS: 65536
+    MaxOccupancy: 40
+    MbskPrefetchMethod: 0
+    MfmaInitCVgprs: false
+    MinGRIncPerMfma: 1
+    NoLdsWriteCode: false
+    NoReject: false
+    NoTailLoop: false
+    NonDTLTailLoopA: false
+    NonDTLTailLoopB: false
+    NonTemporal: -1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NonTemporalD: 4
+    NonTemporalE: 0
+    NonTemporalMetadata: 0
+    NonTemporalWS: 0
+    NumElementsPerBatchStore: 0
+    NumElementsPerThread: 256
+    NumGlobalWriteVectorsPerThread: 32
+    NumLdsBlk: 1
+    NumLoadsA: 8
+    NumLoadsB: 4
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsCoalescedMetadata: 1
+    NumLoadsMetadata: 1
+    NumLoadsPerpendicularA: 8
+    NumLoadsPerpendicularB: 4
+    NumLoadsPerpendicularMetadata: 1
+    NumThreads: 256
+    NumTotalPackedLoadsA: -1
+    NumTotalPackedLoadsB: -1
+    NumTotalPackedLoadsMetadata: -1
+    NumWaveSplitK: 1
+    OptNoLoadLoop: 1
+    PackedC0IdxChars: [I]
+    PackedC0IndicesX: [0]
+    PackedC1IdxChars: [J]
+    PackedC1IndicesX: [1]
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 1
+    PreloadKernArgs: true
+    SFCWGM:
+    - [1, 1]
+    - [1, 1]
+    ScheduleGROverBarrier: 0
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 3
+    ScheduleLocalWrite: 1
+    SolutionIndex: 51
+    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT256x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW8_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA8_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
+    SourceSwap: 1
+    SpaceFillingAlgo: []
+    StaggerU: 8
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    StorePriorityOpt: 0
+    StoreRemapVectorWidth: 0
+    StoreSwapAddr: false
+    StoreSyncOpt: 0
+    StoreVectorWidth: 8
+    StreamK: 0
+    StreamKAtomic: 0
+    StreamKFixupTreeReduction: 0
+    StreamKXCCMapping: 0
+    SubGroup0: 8
+    SubGroup1: 32
+    SubGroupA: 8
+    SubGroupB: 32
+    SubGroupMetadata: 32
+    SuppressNoLoadLoop: false
+    SwapGlobalReadOrder: false
+    TailloopInNll: false
+    ThreadTile: [1, 1]
+    ThreadTile0: 32
+    ThreadTile1: 8
+    ThreadTileA: 32
+    ThreadTileB: 8
+    ThreadTileMetadata: 8
+    TransposeLDS: 1
+    TransposeLDSMetadata: 1
+    ULSGRODoubleG2L: 0
+    UnrollLoopSwapGlobalReadOrder: 0
+    UnrollMajorLDSA: false
+    UnrollMajorLDSB: true
+    UnrollMajorLDSMetadata: 1
+    Use64bShadowLimit: 1
+    UseCustomMainLoopSchedule: 0
+    UseDirect32XEmulation: false
+    UseDot2F32XEmulation: false
+    UseDotInstruction: false
+    UseF32XEmulation: false
+    UseGeneralizedNLCOneA: false
+    UseGeneralizedNLCOneB: false
+    UseGeneralizedNLCOneMetadata: false
+    UseInstOffsetForGRO: 0
+    UseMFMAF32XEmulation: false
+    UsePLRPack: false
+    UseSgprForGRO: -1
+    Valid: true
+    VectorStore: -1
+    VectorWidthA: 8
+    VectorWidthB: 2
+    VectorWidthMetadata: 2
+    WaveSeparateGlobalReadA: 0
+    WaveSeparateGlobalReadB: 0
+    WaveSeparateGlobalReadMetadata: 0
+    WaveSplitK: false
+    WavefrontSize: 64
+    WorkGroup: [32, 8, 1]
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 1
+    WorkGroupMappingXCCGroup: -1
+    WorkGroupReduction: false
+    WorkspaceCheck: [4, 0, -1]
+    _DepthU: 64
+    _DepthUA: 64
+    _DepthUB: 32
+    _DepthUMetadata: 8
+    _GlobalAccumulation: MultipleBuffer
+    _UseSgprForGRO: false
+    _VectorStore: 1
+    _WorkspaceSizePerElemBias: 0
+    _WorkspaceSizePerElemC: 4
+    _staggerStrideShift: 1
+    enableGLTrA: false
+    enableGLTrB: false
+    enableLDSTrA: false
+    enableLDSTrB: false
+    numSubTiles: 1
+    reorderGRInstForDTVA: false
+    reorderGRInstForDTVB: false
+    tailLoopOptA: false
+    tailLoopOptB: false
+  - 1LDSBuffer: 1
+    ActivationAlt: false
+    ActivationFuncCall: true
+    ActivationFused: true
+    AdaptiveGemm: 0
+    AssertAIGreaterThanEqual: -1
+    AssertAILessThanEqual: -1
+    AssertFree0ElementMultiple: 1
+    AssertFree1DivByMT1LowbitGT1: 0
+    AssertFree1ElementMultiple: 1
+    AssertKRingShiftTailWrapOnly: 0
+    AssertSummationElementMultiple: 8
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BAddrInterleave: false
+    BufferLoad: true
+    BufferStore: true
+    CUCount: null
+    CUOccupancy: -1
+    ClusterLocalRead: 1
+    CodeObjectVersion: 4
+    ConvertAfterDS: false
+    CustomKernelName: ''
+    DebugStreamK: 0
+    DepthU: 64
+    DirectToLds: 0
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DirectToLdsMetadata: false
+    DirectToVgprA: false
+    DirectToVgprB: false
+    DirectToVgprSparseMetadata: false
+    DtlPlusLdsBuf: 0
+    EdgeType: ShiftPtr
+    EnableF32XdlMathOp: false
+    EnableMatrixInstruction: true
+    ExpandPointerSwap: true
+    ExpertSchedulingMode: 0
+    ExtraLatencyForLR: 0
+    ExtraMiLatencyLeft: -1
+    ForceDisableShadowInit: false
+    ForceUnrollSubIter: false
+    GlobalReadPerMfma: 1
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 8
+    GlobalReadVectorWidthMetadata: 8
+    GlobalSplitU: -1
+    GlobalSplitUAlgorithm: MultipleBuffer
+    GlobalSplitUCoalesced: false
+    GlobalSplitUWorkGroupMappingRoundRobin: true
+    GlobalWriteVectorWidth: 4
+    GroupLoadStore: 0
+    GuaranteeNoPartialA: false
+    GuaranteeNoPartialB: true
+    GuaranteeNoPartialMetadata: false
+    ISA: [9, 4, 2]
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+      SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    KRingShift: false
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT192x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUAMB_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT12_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA3_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1
+    LDSTrInst: false
+    LSCA: 64
+    LSCB: 32
+    LSCMetadata: 8
+    LSPA: 32
+    LSPB: 64
+    LSPMetadata: 256
+    LVCA: 8
+    LVCB: 4
+    LVCMetadata: 1
+    LVPA: 4
+    LVPB: 8
+    LVPMetadata: 32
+    LdsBlockSizePerPadA: 0
+    LdsBlockSizePerPadB: 128
+    LdsBlockSizePerPadMetadata: 0
+    LdsBytesNoAmax: 45056
+    LdsInitCVgprs: false
+    LdsNumBytes: 45056
+    LdsNumElementsAlignedA: 24576
+    LdsNumElementsAlignedB: 18432
+    LdsNumElementsAlignedMetadata: 2048
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 45056
+    LdsOffsetB: 24576
+    LdsOffsetB_Blk: 71680
+    LdsOffsetBias: 0
+    LdsOffsetBiasGSU: 0
+    LdsOffsetBiasNonGSU: 0
+    LdsOffsetMetadata: 43008
+    LdsOffsetMetadata_Blk: 69632
+    LdsPadA: 0
+    LdsPadB: 8
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: 8
+    LocalSplitU: 1
+    LocalSplitUReuseLDS: 1
+    LocalWritePerMfma: -1
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LocalWriteUseSgprMetadata: false
+    LoopIters: 2
+    LoopUnroll: 64
+    MFMA_BF16_1K: false
+    MIArchVgpr: false
+    MIBlock: [16, 16, 32, 1, 1, 1]
+    MIInputPerThread: 8
+    MIInputPerThreadA: 8
+    MIInputPerThreadB: 4
+    MIInputPerThreadMetadata: 1
+    MIOutputVectorWidth: 4
+    MIRegPerOut: 1
+    MIWaveGroup: [1, 4]
+    MIWaveTile: [12, 4]
+    MIWaveTileA: 12
+    MIWaveTileB: 4
+    MIWaveTileMetadata: 4
+    MacroTile0: 192
+    MacroTile1: 256
+    MacroTileA: 192
+    MacroTileB: 256
+    MacroTileMetadata: 256
+    MagicDivAlg: 2
+    MathClocksUnrolledLoop: 0
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstBN: 1
+    MatrixInstK: 32
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction: [16, 16, 32, 1]
+    MaxLDS: 65536
+    MaxOccupancy: 40
+    MbskPrefetchMethod: 0
+    MfmaInitCVgprs: false
+    MinGRIncPerMfma: 1
+    NoLdsWriteCode: false
+    NoReject: false
+    NoTailLoop: false
+    NonDTLTailLoopA: false
+    NonDTLTailLoopB: false
+    NonTemporal: -1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NonTemporalD: 4
+    NonTemporalE: 0
+    NonTemporalMetadata: 0
+    NonTemporalWS: 0
+    NumElementsPerBatchStore: 0
+    NumElementsPerThread: 192
+    NumGlobalWriteVectorsPerThread: 48
+    NumLdsBlk: 1
+    NumLoadsA: 6
+    NumLoadsB: 4
+    NumLoadsCoalescedA: 3
     NumLoadsCoalescedB: 1
     NumLoadsCoalescedMetadata: 1
     NumLoadsMetadata: 1
     NumLoadsPerpendicularA: 2
-    NumLoadsPerpendicularB: 2
+    NumLoadsPerpendicularB: 4
     NumLoadsPerpendicularMetadata: 1
     NumThreads: 256
     NumTotalPackedLoadsA: -1
@@ -13597,33 +13597,33 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 52
-    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT320x128x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC1_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA5120_LBSPPB128_LBSPPM0_LPA32_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT10_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA5_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW2_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA2_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM8_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Ailk_Bljk_BBS_BH_Bias_FDMN_SPB_A_S_SAV_MT192x256x64_MI16x16x1_SN_LDSB1_AFC1_AG0_AFEM1_AFEM1_ASEM8_CLR1_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSUn1_GSUAMB_GSUC0_GSUWGMRR1_GLS0_ISA942_IU1_K1_LDSTI0_LBSPPA0_LBSPPB128_LBSPPM0_LPA0_LPB8_LPM0_LRVW8_LWPMn1_MIAV0_MIWT12_4_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTM0_NEPBS0_NLCA3_NLCB1_ONLL1_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK0_SKFTR0_SKXCCM0_SGRO0_TIN0_TLDS1_TLDSM1_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM4_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     SpaceFillingAlgo: []
-    StaggerU: 16
+    StaggerU: 0
     StaggerUMapping: 0
-    StaggerUStride: 256
+    StaggerUStride: 0
     StorePriorityOpt: 0
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
-    StoreVectorWidth: 2
+    StoreVectorWidth: 4
     StreamK: 0
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
-    SubGroup0: 8
-    SubGroup1: 32
-    SubGroupA: 8
-    SubGroupB: 32
-    SubGroupMetadata: 32
+    SubGroup0: 4
+    SubGroup1: 64
+    SubGroupA: 4
+    SubGroupB: 64
+    SubGroupMetadata: 64
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: false
     TailloopInNll: false
     ThreadTile: [1, 1]
-    ThreadTile0: 40
+    ThreadTile0: 48
     ThreadTile1: 4
-    ThreadTileA: 40
+    ThreadTileA: 48
     ThreadTileB: 4
     ThreadTileMetadata: 4
     TransposeLDS: 1
@@ -13648,7 +13648,7 @@
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
-    VectorWidthA: 2
+    VectorWidthA: 4
     VectorWidthB: 2
     VectorWidthMetadata: 2
     WaveSeparateGlobalReadA: 0
@@ -13656,8 +13656,8 @@
     WaveSeparateGlobalReadMetadata: 0
     WaveSplitK: false
     WavefrontSize: 64
-    WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 8
+    WorkGroup: [16, 16, 1]
+    WorkGroupMapping: 4
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -13671,7 +13671,7 @@
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 1
+    _staggerStrideShift: 0
     enableGLTrA: false
     enableGLTrB: false
     enableLDSTrA: false
@@ -13831,17 +13831,17 @@
   - - [16384, 4096, 1, 1024]
     - [46, 337.18]
   - - [16384, 1024, 1, 1024]
-    - [47, 261.84]
+    - [50, 317.98]
   - - [16384, 1024, 1, 4096]
-    - [48, 323.67]
+    - [51, 388.55]
   - - [133120, 512, 1, 6144]
-    - [49, 351.8]
+    - [47, 351.8]
   - - [133120, 1024, 1, 6144]
-    - [50, 393.61]
+    - [48, 393.61]
   - - [20544, 1024, 1, 6144]
-    - [51, 306.34]
+    - [49, 306.34]
   - - [20544, 512, 1, 6144]
-    - [52, 281.17]
+    - [52, 304.74]
 - null
 - null
 - DeviceEfficiency

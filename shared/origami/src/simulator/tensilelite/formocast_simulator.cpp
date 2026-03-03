@@ -439,28 +439,28 @@ namespace origami
             pp.hitRate = 0;
             return pp;
         }
-        // if ((M < 128 && MT0 - M >= 16) || (N < 128 && MT1 - N >= 16))
-        // {
-        //     pp.microSeconds = 9999999.9;
-        //     pp.hitRate = 0;
-        //     return pp;
-        // }
-        // if ((M >= 128 && MT0 - M >= 32) || (N >= 128 && MT1 - N >= 32))
-        // {
-        //     pp.microSeconds = 9999999.9;
-        //     pp.hitRate = 0;
-        //     return pp;
-        // }
-        // if(problem.dataType == data_type_t::BFloat16 || problem.dataType == data_type_t::Half)
-        // {
-        //     if(problem.bpeA == 2 && problem.bpeB == 2)
-        //         if (((K >= 64 && depthU <=32) || (K <= 32 && depthU > 32) || (K > 32 && depthU > K)) && NumBatches < hw_consts.NumCUs && sizeMapping.matrixInstruction[2] >= 32)
-        //         {
-        //             pp.microSeconds = 9999999.9;
-        //             pp.hitRate = 0;
-        //             return pp;
-        //         }
-        // }
+        if ((M < 128 && MT0 - M >= 16) || (N < 128 && MT1 - N >= 16))
+        {
+            pp.microSeconds = 9999999.9;
+            pp.hitRate = 0;
+            return pp;
+        }
+        if ((M >= 128 && MT0 - M >= 32) || (N >= 128 && MT1 - N >= 32))
+        {
+            pp.microSeconds = 9999999.9;
+            pp.hitRate = 0;
+            return pp;
+        }
+        if(problem.dataType == data_type_t::BFloat16 || problem.dataType == data_type_t::Half)
+        {
+            if(problem.bpeA == 2 && problem.bpeB == 2)
+                if (((K >= 64 && depthU <=32) || (K <= 32 && depthU > 32) || (K > 32 && depthU > K)) && NumBatches < hw_consts.NumCUs && sizeMapping.matrixInstruction[2] >= 32)
+                {
+                    pp.microSeconds = 9999999.9;
+                    pp.hitRate = 0;
+                    return pp;
+                }
+        }
         if(DirectToLdsA && M < MT0)
         {
             pp.microSeconds = 9999999.9;
