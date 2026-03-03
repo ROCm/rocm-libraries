@@ -135,6 +135,7 @@ void OutputBufferedLogs()
         i = (i + 1) % log_buffer_size;
     } while(i != log_buffer_i);
     err_file << std::endl;
+    ClearLogBuffer();
 }
 
 namespace debug {

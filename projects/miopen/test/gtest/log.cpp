@@ -384,7 +384,6 @@ void TestLogBufferOn()
     }
 
     // test log dump after throw
-    miopen::ClearLogBuffer();
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");
     MIOPEN_LOG_I2("info2");
