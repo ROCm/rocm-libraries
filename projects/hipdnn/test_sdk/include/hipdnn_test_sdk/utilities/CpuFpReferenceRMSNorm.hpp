@@ -3,11 +3,9 @@
 
 #pragma once
 
-#include <algorithm>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
-#include <numeric>
 #include <vector>
 
 namespace hipdnn_test_sdk::utilities
