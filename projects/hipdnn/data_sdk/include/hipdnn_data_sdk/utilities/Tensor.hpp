@@ -32,8 +32,8 @@ namespace hipdnn_data_sdk::utilities
  * `generateStrides()`.
  *
  * For example, for a convolution input with dims = {1, 64, 28, 28} (N=1, C=64, H=28, W=28):
- * - TensorLayout::NCHW produces strides {50176, 784, 28, 1} (channel-first)
- * - TensorLayout::NHWC produces strides {50176, 1, 1792, 64} (channel-last)
+ * - TensorLayout::NCHW (stride order {3,2,1,0}) produces strides {50176, 784, 28, 1} (channel-first; N=50176, C=784, H=28, W=1)
+ * - TensorLayout::NHWC (stride order {3,0,2,1}) produces strides {50176, 1, 1792, 64} (channel-last; N=50176, C=1, H=1792, W=64)
  */
 struct TensorLayout
 {

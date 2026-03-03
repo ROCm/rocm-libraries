@@ -47,7 +47,7 @@ using hipdnn_data_sdk::types::half;
  * Convolution and batch normalization tensors use `(N, C, H, W)` or `(N, C, D, H, W)`.
  * Matmul tensors use `(...batch, M, K)` for A and `(...batch, K, N)` for B.
  * Pointwise operations accept any shape with broadcasting support.
- * In all cases, the memory layout is controlled by strides, not by dimension order.
+ * In all cases, the memory layout is controlled by strides, not by dimension order in the tensor shape vector.
  * Use `hipdnn_data_sdk::utilities::generateStrides()` to compute strides from a TensorLayout.
  *
  * @code{.cpp}
@@ -59,6 +59,14 @@ using hipdnn_data_sdk::types::half;
  *              .set_data_type(DataType::HALF)
  *              .set_uid(0)
  *              .set_name("input_x"));
+ *
+ * // Same dimensions with NHWC (channel-last) layout
+ * auto x_nhwc = Graph::tensor(TensorAttributes()
+ *              .set_dim({1, 64, 28, 28})   // dims: N=1, C=64, H=28, W=28
+ *              .set_stride({50176, 1, 1792, 64})  // NHWC layout strides
+ *              .set_data_type(DataType::HALF)
+ *              .set_uid(1)
+ *              .set_name("input_x_nhwc"));
  *
  * // Create a scalar tensor
  * TensorAttributes scalar(2.0f);  // Pass-by-value float
@@ -285,7 +293,7 @@ public:
      *       convolution and batch normalization use (N, C, H, W) / (N, C, D, H, W),
      *       matmul uses (...batch, M, K) / (...batch, K, N),
      *       and pointwise operations accept any shape.
-     *       Memory layout is always controlled by strides, not dimension order.
+     *       Memory layout is always controlled by strides and stride order, not by dimension order in the tensor shape vector.
      */
     TensorAttributes&
         set_dim(const std::vector<int64_t>& dim) // NOLINT(readability-identifier-naming)

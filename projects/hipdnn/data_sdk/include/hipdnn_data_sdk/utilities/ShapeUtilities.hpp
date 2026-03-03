@@ -328,7 +328,7 @@ static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
  * @brief Constructs a full tensor indices vector from batch, channel, and spatial components
  *
  * Builds an index vector following NCHW ordering: batch at position 0, channel at position 1,
- * followed by spatial dimensions (H, W for 4D; D, H, W for 5D).
+ * followed by spatial dimensions (H, W for 4D tensors; D, H, W for 5D tensors).
  *
  * @param batchIdx Batch index (position 0 in result)
  * @param channelIdx Channel index (position 1 in result)

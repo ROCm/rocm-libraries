@@ -60,7 +60,7 @@ ninja
 
 Tensor dimension ordering in hipDNN is **operation-specific**, following the same conventions as
 PyTorch and cuDNN. The **memory layout** (channel-first vs channel-last) is always controlled by
-strides, not by the order of the dimension vector. Use the `TensorLayout` constants and
+strides and stride order, not by the order of the tensor dimension vector that always holds values as [N,C,H,W] or [N,C,D,H,W]. For example, memory arranged as NCHW corresponds to stride order {3,2,1,0} (W is the most tightly packed), and NDHWC corresponds to stride order {4,0,3,2,1} (C is the most tightly packed). Use the `TensorLayout` constants and
 `generateStrides()` utility to compute strides for common layouts.
 
 #### Convolution
@@ -73,13 +73,13 @@ strides, not by the order of the dimension vector. Use the `TensorLayout` consta
 
 ```cpp
 // Convolution example: dims always follow (N, C, spatial...) ordering
-auto x = graph.tensor(TensorAttributes()
+auto x = TensorAttributes()
              .set_dim({1, 64, 28, 28})   // N=1, C=64, H=28, W=28
-             .set_stride(generateStrides({1, 64, 28, 28}, TensorLayout::NHWC.strideOrder)));
+             .set_stride(generateStrides({1, 64, 28, 28}, TensorLayout::NHWC.strideOrder));
 
-auto w = graph.tensor(TensorAttributes()
+auto w = TensorAttributes()
              .set_dim({128, 64, 3, 3})   // K=128, C=64, R=3, S=3
-             .set_stride(generateStrides({128, 64, 3, 3}, TensorLayout::NHWC.strideOrder)));
+             .set_stride(generateStrides({128, 64, 3, 3}, TensorLayout::NHWC.strideOrder));
 ```
 
 #### Batch Normalization
@@ -97,7 +97,7 @@ Statistics are computed per-channel over the batch and spatial dimensions.
 | Tensor | Shape | Description |
 |--------|-------|-------------|
 | Input (x) | `(N, ...)` | Batch first, then feature dims |
-| Scale, Bias | `(1, C, H, W)` | Batch dim = 1, feature dims match input |
+| Scale, Bias | `(1, ...)` | Batch dim = 1, remaining dims match input feature dims |
 | Mean, Inv Variance | Stats dims | Batch dims from input, normalized dims = 1 |
 
 Normalization is performed over the feature dimensions (all dims where scale > 1).
@@ -114,13 +114,13 @@ Batch dimensions support broadcasting (dims must be equal or divisible).
 
 ```cpp
 // Matmul example: A(batch, M, K) @ B(batch, K, N) -> C(batch, M, N)
-auto a = graph.tensor(TensorAttributes()
+auto a = TensorAttributes()
              .set_dim({4, 128, 64})    // batch=4, M=128, K=64
-             .set_stride({128*64, 64, 1}));
+             .set_stride({128*64, 64, 1});
 
-auto b = graph.tensor(TensorAttributes()
+auto b = TensorAttributes()
              .set_dim({4, 64, 256})    // batch=4, K=64, N=256
-             .set_stride({64*256, 256, 1}));
+             .set_stride({64*256, 256, 1});
 ```
 
 #### Pointwise Operations
