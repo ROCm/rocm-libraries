@@ -1211,11 +1211,22 @@ void fix_batch(int argc, char* argv[])
         }
 }
 
+static void rocblas_print_asan_kernel_warning()
+{
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    rocblas_cout << "rocblas-bench WARNING: AddressSanitizer build active; some kernel launch "
+                    "configurations are reduced for stability and may not match production "
+                    "performance."
+                 << std::endl;
+#endif
+}
+
 int main(int argc, char* argv[])
 try
 {
     client_omp_manager::limit_by_processor_count();
     rocblas_client_init();
+    rocblas_print_asan_kernel_warning();
 
     fix_batch(argc, argv);
     Arguments   arg;
