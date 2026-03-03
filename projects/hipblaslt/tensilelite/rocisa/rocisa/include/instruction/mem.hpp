@@ -2570,7 +2570,7 @@ namespace rocisa
             dsCopy->offset += 16;
             kStr2 += dsCopy->toString();
             kStr = formatWithComment(kStr);
-            kStr2 = formatWithComment(kStr);
+            kStr2 = formatWithComment(kStr2);
             // TODO: refactor this
             auto srcCopy = RegisterContainer(*dynamic_cast<RegisterContainer*>(src0.get()));
             auto srcCopyPtr = std::make_shared<RegisterContainer>(srcCopy);
