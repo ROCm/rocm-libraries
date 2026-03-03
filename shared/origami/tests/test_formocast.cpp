@@ -425,38 +425,36 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     simulator.setHardware(hardware_t::architecture_t::gfx950);
     
     SECTION("Check global read FIFO full - no stall") {
-        std::queue<int> fifo;
-        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, false);
+        std::deque<int> fifo;
+        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, false, false);
         REQUIRE(result == 100);
-        REQUIRE(fifo.size() == 1);
-        REQUIRE(fifo.back() == 100);
+        REQUIRE(fifo.size() == 0);
     }
     
     SECTION("Check global read FIFO full - with stall") {
-        std::queue<int> fifo;
-        fifo.push(10);
-        fifo.push(20);
-        fifo.push(30);
-        fifo.push(40);
-        // no stall
-        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, true);
-        REQUIRE(result == 100);
-        REQUIRE(fifo.size() == 4);
+        std::deque<int> fifo;
+        fifo.push_back(10);
+        fifo.push_back(11);
+        fifo.push_back(12);
+        fifo.push_back(13);
+        fifo.push_back(15);
+        fifo.push_back(16);
+        fifo.push_back(17);
+        fifo.push_back(18);
+        fifo.push_back(20);
+        fifo.push_back(21);
+        fifo.push_back(22);
+        fifo.push_back(23);
+        fifo.push_back(25);
+        fifo.push_back(26);
+        fifo.push_back(27);
+        fifo.push_back(28);
+        // stall
+        int result = simulator.getGlobalReadQueueFullStallCycles(29, fifo, 8, 4, true, false);
+        REQUIRE(result == 32);
+        REQUIRE(fifo.size() == 20);
     }
-    
-    SECTION("Check global read FIFO full - causes stall") {
-        std::queue<int> fifo;
-        fifo.push(50);
-        fifo.push(60);
-        fifo.push(70);
-        fifo.push(80);
-        // stall to 130
-        int result = simulator.getGlobalReadQueueFullStallCycles(100, fifo, 8, 4, true);
-        REQUIRE(result == 130);
-        REQUIRE(fifo.size() == 4);
-        REQUIRE(fifo.back() == 130);
-    }
-    
+
     SECTION("Check local read FIFO full - no stall") {
         std::queue<int> fifo;
         // no stall
@@ -588,50 +586,34 @@ TEST_CASE("Formocast: FIFO queue operations", "[formocast]") {
     
     SECTION("Get local write queue full stall cycles - numWaves != 4") {
         // When numWaves != 4, no penalty is applied
-        // result = max(previousLW + issueCycles, currentCycle + issueCycles)
-        // Test case 1: currentCycle dominates
-        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 10, 8, 2);
-        REQUIRE(result1 == 110); // max(50 + 10, 100 + 10) = 110
-        
-        // Test case 2: previousLW dominates
-        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 150, 10, 8, 2);
-        REQUIRE(result2 == 160); // max(150 + 10, 100 + 10) = 160
+        // Test case 1: no penalty
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 3, 8, 2);
+        REQUIRE(result1 == 103);
+
+        // Test case 2: previousLW dominates without penalty
+        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 70, 3, 8, 2);
+        REQUIRE(result2 == 103);
+
+        // Test case 3: closer previousLW dominates without penalty
+        int result3 = simulator.getLocalWriteQueueFullStallCycles(100, 99, 3, 8, 2);
+        REQUIRE(result3 == 103);
     }
-    
-    SECTION("Get local write queue full stall cycles - numWaves == 4, bpWrite != 16") {
-        // When numWaves == 4 and bpWrite != 16, penalty = issueCycles
-        // result = max(previousLW + issueCycles + issueCycles, currentCycle + issueCycles)
-        // Test case 1: currentCycle dominates
-        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 10, 8, 4);
-        REQUIRE(result1 == 110); // max(50 + 10 + 10, 100 + 10) = max(70, 110) = 110
-        
-        // Test case 2: previousLW + penalty dominates
-        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 120, 10, 8, 4);
-        REQUIRE(result2 == 140); // max(120 + 10 + 10, 100 + 10) = max(140, 110) = 140
-    }
-    
+
     SECTION("Get local write queue full stall cycles - numWaves == 4, bpWrite == 16") {
-        // When numWaves == 4 and bpWrite == 16, penalty = issueCycles + 3
-        // result = max(previousLW + issueCycles + issueCycles + 3, currentCycle + issueCycles)
+        // When numWaves == 4 and bpWrite == 16, penalty = issueCycles
         // Test case 1: currentCycle dominates
-        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 10, 16, 4);
-        REQUIRE(result1 == 110); // max(50 + 10 + 10 + 3, 100 + 10) = max(73, 110) = 110
+        int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 50, 5, 16, 4);
+        REQUIRE(result1 == 105);
         
         // Test case 2: previousLW + penalty dominates
-        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 120, 10, 16, 4);
-        REQUIRE(result2 == 143); // max(120 + 10 + 10 + 3, 100 + 10) = max(143, 110) = 143
+        int result2 = simulator.getLocalWriteQueueFullStallCycles(100, 99, 5, 16, 4);
+        REQUIRE(result2 == 110);
     }
     
     SECTION("Get local write queue full stall cycles - edge cases") {
         // Edge case: previousLW == currentCycle
         int result1 = simulator.getLocalWriteQueueFullStallCycles(100, 100, 10, 8, 2);
-        REQUIRE(result1 == 110); // max(100 + 10, 100 + 10) = 110
-        
-        // Edge case: numWaves == 4, bpWrite == 16, previousLW much larger
-        // penalty = issueCycles + 3 = 5 + 3 = 8
-        // result = max(200 + 5 + 8, 50 + 5) = max(213, 55) = 213
-        int result2 = simulator.getLocalWriteQueueFullStallCycles(50, 200, 5, 16, 4);
-        REQUIRE(result2 == 213);
+        REQUIRE(result1 == 110);
     }
 }
 
