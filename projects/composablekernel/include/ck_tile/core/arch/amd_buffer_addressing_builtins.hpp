@@ -81,6 +81,13 @@ __device__ inline auto amd_wave_read_first_lane(const Object& obj)
     return out;
 }
 
+// Overload for host to return the same value
+template <typename T>
+__host__ inline T amd_wave_read_first_lane(T v)
+{
+    return v;
+}
+
 // 128 bit SGPRs to supply buffer resource in buffer instructions
 // https://rocm-documentation.readthedocs.io/en/latest/GCN_ISA_Manuals/testdocbook.html#vector-memory-buffer-instructions
 struct __attribute__((packed)) buffer_resource
@@ -102,6 +109,12 @@ CK_TILE_DEVICE int32x4_t make_wave_buffer_resource(const void* ptr,
         r = amd_wave_read_first_lane(r);
     }
     return r;
+}
+CK_TILE_DEVICE __amdgpu_buffer_rsrc_t make_builtin_buffer_resource(const void* ptr,
+                                                                   uint32_t size = 0xffffffff)
+{
+    return __builtin_amdgcn_make_buffer_rsrc(
+        const_cast<void*>(ptr), /*stride*/ 0, size, CK_TILE_BUFFER_RESOURCE_3RD_DWORD);
 }
 
 namespace impl {
@@ -1735,27 +1748,22 @@ CK_TILE_DEVICE void amd_async_buffer_load_impl(T* smem,
 template <typename T,
           index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
-          bool oob_conditional_check          = true>
+          bool oob_conditional_check          = true,
+          index_t IMM                         = 0>
 CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
-                                          int32x4_t src_wave_buffer_resource,
+                                          const __amdgpu_buffer_rsrc_t rsrc,
                                           index_t src_thread_addr_offset,
-                                          index_t src_wave_addr_offset,
-                                          index_t src_immediate_addr_offset    = 0,
-                                          index_t flag                         = 0,
-                                          bool_constant<oob_conditional_check> = {})
+                                          index_t src_wave_addr_offset              = 0,
+                                          number<IMM> /*src_immediate_addr_offset*/ = {},
+                                          index_t flag                              = 0,
+                                          bool_constant<oob_conditional_check>      = {})
 {
     constexpr index_t bytes = sizeof(T) * N;
-
-    // Used to catch the cases when src_immediate_addr_offset is NOT 0.
-    // Remove this assert once other sizes are implemented.
-    assert(src_immediate_addr_offset == 0 &&
-           "wrong! not implemented src_immediate_addr_offset size, only 0 supported");
-    ignore = src_immediate_addr_offset;
+    static_assert(IMM < (1 << 12), "wrong! immediate offset too large");
 
 #if defined(__gfx950__)
     static_assert(bytes == 4 || bytes == 12 || bytes == 16,
                   "wrong! only support in dword, dwordx3, dwordx4");
-    src_wave_addr_offset = 0;
 #else
     static_assert(bytes == 4, "wrong! not implemented vector size");
 #endif
@@ -1763,18 +1771,18 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
     // Set up v_offset:
     index_t v_offset = src_thread_addr_offset;
     if constexpr(oob_conditional_check)
-        v_offset = flag ? v_offset : src_wave_buffer_resource[2];
+        v_offset = flag ? v_offset : 0x7fffffff; // large offset to cause OOB access
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast"
     // Use C-style cast to change address space without dropping llvm noalias attribute
-    llvm_amdgcn_raw_buffer_load_lds(src_wave_buffer_resource,
-                                    (as3_uint32_ptr)(smem),
-                                    bytes,
-                                    v_offset,
-                                    src_wave_addr_offset,
-                                    /*src_immediate_addr_offset*/ 0,
-                                    static_cast<index_t>(coherence));
+    __builtin_amdgcn_raw_ptr_buffer_load_lds(rsrc,
+                                             smem,
+                                             bytes,
+                                             v_offset,
+                                             src_wave_addr_offset,
+                                             /*imm*/ IMM,
+                                             static_cast<index_t>(coherence));
 #pragma clang diagnostic pop
 }
 
@@ -2396,6 +2404,9 @@ CK_TILE_DEVICE void amd_buffer_atomic_max_impl(const thread_buffer<T, N> src_thr
     }
 }
 
+template <typename T>
+using has_type = typename T::type;
+
 // buffer_load requires:
 //   1) p_src_wave must point to global memory space
 //   2) p_src_wave must be a wavewise pointer.
@@ -2428,21 +2439,46 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
 #else
     if constexpr(oob_conditional_check)
     {
-        if(src_thread_element_valid)
+        if(!src_thread_element_valid)
         {
-            return amd_buffer_load_impl<T, N, coherence>(
-                src_wave_buffer_resource, src_thread_addr_offset, 0);
-        }
-        else
-        {
-            return thread_buffer<T, N>{numeric<T>::zero()};
+            if constexpr(is_detected<has_type, T>::value)
+            {
+                // Use vector_t for not valid elements to avoid permute instructions.
+                // Get raw type from structure
+                using vector_t = typename T::type __attribute__((ext_vector_type(N)));
+                if constexpr(sizeof(vector_t) != sizeof(typename T::type) * N)
+                {
+                    // Not possible to use set_as
+                    return thread_buffer<T, N>{numeric<T>::zero()};
+                }
+                else
+                {
+                    thread_buffer<T, N> tmp;
+                    tmp.template set_as<vector_t>(number<0>{},
+                                                  vector_t{numeric<typename T::type>::zero()});
+                    return tmp;
+                }
+            }
+            else
+            {
+                // Use vector_t for not valid elements to avoid permute instructions.
+                using vector_t = T __attribute__((ext_vector_type(N)));
+                if constexpr(sizeof(vector_t) != sizeof(T) * N)
+                {
+                    // Not possible to use set_as
+                    return thread_buffer<T, N>{numeric<T>::zero()};
+                }
+                else
+                {
+                    thread_buffer<T, N> tmp;
+                    tmp.template set_as<vector_t>(number<0>{}, vector_t{numeric<T>::zero()});
+                    return tmp;
+                }
+            }
         }
     }
-    else
-    {
-        return amd_buffer_load_impl<T, N, coherence>(
-            src_wave_buffer_resource, src_thread_addr_offset, 0);
-    }
+    return amd_buffer_load_impl<T, N, coherence>(
+        src_wave_buffer_resource, src_thread_addr_offset, 0);
 #endif
 }
 
@@ -2466,13 +2502,47 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
 
     index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
 
-    thread_buffer<T, N> tmp =
-        amd_buffer_load_impl<T, N, coherence>(src_wave_buffer_resource, src_thread_addr_offset, 0);
-
     if constexpr(oob_conditional_check)
-        return src_thread_element_valid ? tmp : thread_buffer<T, N>{customized_value};
-    else
-        return tmp;
+    {
+        if(!src_thread_element_valid)
+        {
+            if constexpr(is_detected<has_type, T>::value)
+            {
+                // Use vector_t for not valid elements to avoid permute instructions.
+                // Get raw type from structure
+                using vector_t = typename T::type __attribute__((ext_vector_type(N)));
+                if constexpr(sizeof(vector_t) != sizeof(typename T::type) * N)
+                {
+                    // Not possible to use set_as
+                    return thread_buffer<T, N>{customized_value};
+                }
+                else
+                {
+                    thread_buffer<T, N> tmp;
+                    tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+                    return tmp;
+                }
+            }
+            else
+            {
+                // Use vector_t for not valid elements to avoid permute instructions.
+                using vector_t = T __attribute__((ext_vector_type(N)));
+                if constexpr(sizeof(vector_t) != sizeof(T) * N)
+                {
+                    // Not possible to use set_as
+                    return thread_buffer<T, N>{customized_value};
+                }
+                else
+                {
+                    thread_buffer<T, N> tmp;
+                    tmp.template set_as<vector_t>(number<0>{}, vector_t{customized_value});
+                    return tmp;
+                }
+            }
+        }
+    }
+    return amd_buffer_load_impl<T, N, coherence>(
+        src_wave_buffer_resource, src_thread_addr_offset, 0);
 }
 
 template <typename T,
@@ -2585,22 +2655,24 @@ CK_TILE_DEVICE void amd_async_buffer_load_with_oob_raw(T* smem,
 template <typename T,
           index_t N,
           amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default,
-          bool oob_conditional_check          = false>
+          bool oob_conditional_check          = false,
+          typename linear_offset_t>
 CK_TILE_DEVICE void amd_async_buffer_load_with_oob(CK_TILE_LDS_ADDR T* smem,
-                                                   const int32x4_t src_wave_buffer_resource,
+                                                   const __amdgpu_buffer_rsrc_t rsrc,
                                                    index_t src_thread_element_offset,
-                                                   index_t src_linear_element_offset,
+                                                   index_t src_wave_addr_offset,
+                                                   linear_offset_t,
                                                    bool is_valid_element,
                                                    bool_constant<oob_conditional_check> = {})
 {
-    index_t src_thread_addr_offset = src_thread_element_offset * sizeof(T);
-    index_t src_linear_addr_offset = src_linear_element_offset * sizeof(T);
+    index_t src_thread_addr_offset           = src_thread_element_offset * sizeof(T);
+    constexpr index_t src_linear_addr_offset = static_cast<index_t>(linear_offset_t{}) * sizeof(T);
 
     amd_async_buffer_load<T, N, coherence>(smem,
-                                           src_wave_buffer_resource,
+                                           rsrc,
                                            src_thread_addr_offset,
-                                           0,
-                                           src_linear_addr_offset,
+                                           src_wave_addr_offset,
+                                           number<src_linear_addr_offset>{},
                                            is_valid_element,
                                            bool_constant<oob_conditional_check>{});
 }
@@ -2854,6 +2926,12 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
         typedef __attribute__((__vector_size__(2 * sizeof(index_t)))) index_t llvm_i32x2_t;
         auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_i32x2_t*>(in_ptr_);
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr8_b64_v2i32(lds_ptr));
+    }
+    else if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::pk_fp4_t>)
+    {
+        typedef __attribute__((__vector_size__(2 * sizeof(index_t)))) index_t llvm_i32x2_t;
+        auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_i32x2_t*>(in_ptr_);
+        return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr4_b64_v2i32(lds_ptr));
     }
     else
     {

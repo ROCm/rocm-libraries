@@ -9,6 +9,9 @@ add_executable(
     hipblaslt_plugin_integration_tests
     main.cpp
     IntegrationGpuMatmul.cpp
+    IntegrationGpuMatmulActiv.cpp
+    IntegrationGpuMatmulBias.cpp
+    IntegrationGpuMatmulBiasActiv.cpp
 )
 
 target_compile_options(hipblaslt_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

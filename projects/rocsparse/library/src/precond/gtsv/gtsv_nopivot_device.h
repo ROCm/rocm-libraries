@@ -77,6 +77,17 @@ namespace rocsparse
         srhs[tid]             = B[tid + ldb * hipBlockIdx_x];
         srhs[tid + BLOCKSIZE] = B[tid + BLOCKSIZE + ldb * hipBlockIdx_x];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = 0;
+        }
+        if(tid == (BLOCKSIZE - 1))
+        {
+            sc[tid + BLOCKSIZE] = 0;
+        }
+
         __syncthreads();
 
         // Forward reduction using cyclic reduction
@@ -183,6 +194,17 @@ namespace rocsparse
         sc[tid]   = du[tid];
         srhs[tid] = B[tid + ldb * hipBlockIdx_x];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = static_cast<T>(0);
+        }
+        if(tid == (BLOCKSIZE - 1))
+        {
+            sc[tid] = static_cast<T>(0);
+        }
+
         __syncthreads();
 
         for(rocsparse_int j = 0; j < iter; j++)
@@ -274,6 +296,17 @@ namespace rocsparse
         sc[tid + BLOCKSIZE]   = du[tid + BLOCKSIZE];
         srhs[tid]             = B[tid + ldb * hipBlockIdx_x];
         srhs[tid + BLOCKSIZE] = B[tid + BLOCKSIZE + ldb * hipBlockIdx_x];
+
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = static_cast<T>(0);
+        }
+        if(tid == (BLOCKSIZE - 1))
+        {
+            sc[tid + BLOCKSIZE] = static_cast<T>(0);
+        }
 
         __syncthreads();
 
@@ -441,6 +474,16 @@ namespace rocsparse
         sc[tid]   = (tid < m) ? du[tid] : static_cast<T>(0);
         srhs[tid] = (tid < m) ? B[tid + ldb * hipBlockIdx_x] : static_cast<T>(0);
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = static_cast<T>(0);
+        }
+        if(tid == (m - 1))
+        {
+            sc[tid] = static_cast<T>(0);
+        }
         __syncthreads();
 
         for(rocsparse_int j = 0; j < iter; j++)
@@ -540,6 +583,25 @@ namespace rocsparse
         T k3 = -a0[left];
         T k4 = -c0[right];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(gid == 0)
+        {
+            k1 = static_cast<T>(0);
+        }
+        if(left == 0)
+        {
+            k3 = static_cast<T>(0);
+        }
+        if(gid == (m - 1))
+        {
+            k2 = static_cast<T>(0);
+        }
+        if(right == (m - 1))
+        {
+            k4 = static_cast<T>(0);
+        }
+
         b1[gid] = b0[gid] - c0[left] * k1 - a0[right] * k2;
         a1[gid] = k3 * k1;
         c1[gid] = k4 * k2;
@@ -584,6 +646,25 @@ namespace rocsparse
         T k2 = c0[gid] / b0[right];
         T k3 = -a0[left];
         T k4 = -c0[right];
+
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(gid == 0)
+        {
+            k1 = static_cast<T>(0);
+        }
+        if(left == 0)
+        {
+            k3 = static_cast<T>(0);
+        }
+        if(gid == (m - 1))
+        {
+            k2 = static_cast<T>(0);
+        }
+        if(right == (m - 1))
+        {
+            k4 = static_cast<T>(0);
+        }
 
         b1[gid] = b0[gid] - c0[left] * k1 - a0[right] * k2;
         a1[gid] = k3 * k1;
@@ -843,6 +924,25 @@ namespace rocsparse
         T k3 = -a0[left];
         T k4 = -c0[right];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(gid == 0)
+        {
+            k1 = static_cast<T>(0);
+        }
+        if(left == 0)
+        {
+            k3 = static_cast<T>(0);
+        }
+        if(gid == (m - 1))
+        {
+            k2 = static_cast<T>(0);
+        }
+        if(right == (m - 1))
+        {
+            k4 = static_cast<T>(0);
+        }
+
         b1[gid] = b0[gid] - c0[left] * k1 - a0[right] * k2;
         a1[gid] = k3 * k1;
         c1[gid] = k4 * k2;
@@ -895,6 +995,25 @@ namespace rocsparse
         T k2 = c0[gid] / b0[right];
         T k3 = -a0[left];
         T k4 = -c0[right];
+
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(gid == 0)
+        {
+            k1 = static_cast<T>(0);
+        }
+        if(left == 0)
+        {
+            k3 = static_cast<T>(0);
+        }
+        if(gid == (m - 1))
+        {
+            k2 = static_cast<T>(0);
+        }
+        if(right == (m - 1))
+        {
+            k4 = static_cast<T>(0);
+        }
 
         b1[gid] = b0[gid] - c0[left] * k1 - a0[right] * k2;
         a1[gid] = k3 * k1;

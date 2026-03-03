@@ -4,22 +4,17 @@
 
 1. **Prerequisites:**
 
+   - If you're new to hipDNN, see the [Consumer Quick Start](../docs/ConsumerQuickStart.md) for project setup basics.
    - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja
-     * ROCm / TheRock (includes AMD Clang compiler)
+     * ROCm (for HIP runtime)
    - A ROCm-compatible GPU is required to run the samples
-
-> [!IMPORTANT]
-> **AMD Clang++ Requirement for Samples**
-> **AMD Clang++ is required** to compile hipDNN samples and tests. These components utilize `Tensor.hpp` and reference validation implementations that depend on HIP device headers for GPU buffer allocation.
->
-> **Note for API Consumers:** This requirement **does not** apply to standard usage of the `hipDNN` Frontend. Projects consuming the library API without using these specific `data_sdk` utilities for validation & GPU memory allocation do not require AMD Clang++.
 
 2. **Build Samples:** From this `samples` directory:
    ```bash
    mkdir build && cd build
-   cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ -G Ninja ..
+   cmake -G Ninja ..
    ninja
    ```
    - Note: If you have installed hipdnn to a custom location you just need to specify the `CMAKE_PREFIX_PATH` to point to the install location.  Ensure you specify the full path and not a relative one.
@@ -327,3 +322,49 @@ Output: y (activated convolution result)
 - Reduces memory bandwidth by avoiding intermediate tensor writes/reads
 - Eliminates kernel launch overhead between operations
 - Enables better cache utilization by processing data in a single pass
+
+### [**`KnobsUsage`**](./knobs/KnobsUsage.cpp)
+
+Demonstrates how to use hipDNN's engine configuration knobs system for runtime parameter tuning.
+
+**What This Sample Shows:**
+1. **Querying Available Knobs**: How to discover what knobs an engine supports
+2. **Knob Metadata**: Understanding knob types, constraints, and default values
+3. **Setting Knob Values**: Creating execution plans with custom knob settings
+4. **Knob Validation**: Validating settings against knob constraints
+5. **Knob Value Types**: Using integer, float, and string knobs
+6. **Real Execution**: Running graphs with different knob configurations
+
+**Common Knobs:**
+- `global.benchmarking` (int64, 0-1): Enable MIOpen kernel benchmarking for optimal performance
+- `global.workspace_size_limit` (int64, dynamic): Limit workspace memory for convolution operations
+
+**Usage:**
+```bash
+./knobs_usage                # Run all demonstrations including graph execution
+./knobs_usage --skip-execution  # Show knob API demonstrations only (faster)
+```
+
+**Key Features:**
+- Comprehensive demonstration of the knobs API
+- Shows both query and configuration workflows
+- Demonstrates validation and error handling
+- Includes real graph execution with different knob configurations
+- Educational sample with detailed console output
+
+**Sample Output Sections:**
+- Section 1: Query available knobs and their metadata
+- Section 2: Use knob lookup map for specific knobs
+- Section 3: Create execution plan with default knobs
+- Section 4: Set custom knob values
+- Section 5: Validate knob settings against constraints
+- Section 6: Demonstrate different knob value types
+- Section 7-8: Execute graphs with different knob configurations
+
+**Related Documentation:**
+- [hipDNN Knobs Documentation](../docs/Knobs.md) - Complete knobs guide
+- [HowTo Guide](../docs/HowTo.md#configuring-engine-knobs) - Quick start
+- [MIOpen Provider Knobs](../../dnn-providers/miopen-provider/docs/Knobs.md) - Provider-specific knobs
+
+> [!NOTE]
+> This sample is educational and demonstrates the knobs API. It is not a performance benchmark or validation test.

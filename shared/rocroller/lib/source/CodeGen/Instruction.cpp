@@ -1,31 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context.hpp>
+#include <rocRoller/Utilities/String.hpp>
 
 namespace rocRoller
 {
@@ -166,5 +144,156 @@ namespace rocRoller
     void Instruction::setPeekedStatus(Scheduling::InstructionStatus status)
     {
         m_peekedStatus = std::move(status);
+    }
+
+    void Instruction::preambleString(std::ostream& os, LogLevel level) const
+    {
+        if(level >= LogLevel::Warning)
+        {
+            for(auto const& w : m_warnings)
+            {
+                for(auto const& s : EscapeComment(w))
+                {
+                    os << s;
+                }
+                os << "\n";
+            }
+        }
+        allocationString(os, level);
+    }
+
+    void Instruction::directiveString(std::ostream& os, LogLevel level) const
+    {
+        os << m_directive;
+        if(!m_directive.empty())
+            os << "\n";
+    }
+
+    void Instruction::functionalString(std::ostream& os, LogLevel level) const
+    {
+        if(!m_label.empty())
+        {
+            os << m_label << ":\n";
+        }
+
+        directiveString(os, level);
+        m_waitCount.toStream(os, level);
+
+        if(m_nopCount > 0)
+        {
+            if(requiresVnopForHazard())
+            {
+                for(int i = 0; i < m_nopCount; i++)
+                    os << "v_nop\n";
+            }
+            else
+            {
+                int count = m_nopCount;
+                while(count > 16)
+                {
+                    // s_nop can only handle values from 0 to 0xf
+                    os << "s_nop 0xf\n";
+                    count -= 16;
+                }
+                // Note: "s_nop 0" is 1 nop, "s_nop 0xf" is 16 nops
+                os << "s_nop " << (count - 1) << "\n";
+            }
+        }
+
+        auto pos = os.tellp();
+
+        coreInstructionString(os);
+
+        if(level > LogLevel::Terse)
+        {
+            std::string input;
+            if(!m_controlOps.empty())
+                input = fmt::format("(op {}) ", m_controlOps.front());
+            if(!m_comments.empty())
+                input += m_comments.front();
+
+            // Only include the first comment in the functional string.
+            for(auto const& s : EscapeComment(input, 1))
+            {
+                os << s;
+            }
+        }
+
+        if(pos != os.tellp())
+        {
+            os << "\n";
+        }
+    }
+
+    void Instruction::allocationString(std::ostream& os, LogLevel level) const
+    {
+        if(level > LogLevel::Terse)
+        {
+            for(auto const& alloc : m_allocations)
+            {
+                if(alloc)
+                {
+                    for(auto const& line : EscapeComment(alloc->descriptiveComment("Allocated")))
+                    {
+                        os << line;
+                    }
+                }
+            }
+        }
+    }
+
+    void Instruction::coreInstructionString(std::ostream& os) const
+    {
+        if(m_opcode.empty())
+        {
+            return;
+        }
+
+        os << m_opcode << " ";
+
+        bool firstDstArg = true;
+        for(auto const& dst : m_dst)
+        {
+            if(dst)
+            {
+                if(!firstDstArg)
+                {
+                    os << ", ";
+                }
+                dst->toStream(os);
+                firstDstArg = false;
+            }
+        }
+
+        for(auto const& src : m_src)
+        {
+            if(src && !firstDstArg)
+            {
+                os << ", ";
+                break;
+            }
+        }
+
+        bool firstSrcArg = true;
+        for(auto const& src : m_src)
+        {
+            if(src)
+            {
+                if(!firstSrcArg)
+                {
+                    os << ", ";
+                }
+                src->toStream(os);
+                firstSrcArg = false;
+            }
+        }
+
+        for(std::string const& mod : m_modifiers)
+        {
+            if(!mod.empty())
+            {
+                os << " " << mod;
+            }
+        }
     }
 }

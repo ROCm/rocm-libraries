@@ -4,15 +4,13 @@
 include(CMakePackageConfigHelpers)
 
 # Read data_sdk version for minimum requirement
-hipdnn_get_data_sdk_version(HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
+hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION)
 
 set(HIP_DNN_FRONTEND_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_subdirectory(tests)
 
 add_library(hipdnn_frontend INTERFACE)
-
-target_compile_definitions(hipdnn_frontend INTERFACE COMPONENT_NAME="hipdnn_frontend")
 
 target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
 
@@ -21,6 +19,11 @@ set(HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/fro
 target_include_directories(
     hipdnn_frontend INTERFACE $<BUILD_INTERFACE:${HIP_DNN_FRONTEND_INCLUDE_DIR}>
                               $<INSTALL_INTERFACE:${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}>
+)
+
+target_compile_definitions(
+    hipdnn_frontend INTERFACE
+    $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_FRONTEND_SKIP_JSON_LIB>
 )
 
 # Generate the config file from template
