@@ -113,8 +113,8 @@ struct rocfft_field_t
     data_layout_t get_full_data_range() const;
 
     /**
-     * @brief Finalize all the field's bricks, i.e., sort them by increasing rank (stable
-     * sort) and set the `is_partial` flags for all axes of their layouts.
+     * @brief Finalizes all the field's bricks, i.e., sorts them by increasing rank (stable
+     * sort) and sets the `is_partial` flags for all axes of their layouts.
      */
     void finalize();
 
@@ -171,7 +171,7 @@ struct rocfft_plan_description_t
     rocfft_location_t get_current_location() const;
 
     /**
-     * @brief Finalize the plan description by
+     * @brief Finalizes the plan description by
      * 
      * - assigning default values for structure members that have not been explicitly set yet;
      * 
@@ -193,13 +193,19 @@ struct rocfft_plan_description_t
      * 
      * - Input and output fields are both set for multi-process usage;
      * 
+     * - Usage of multiple I/O fields in descriptors is reported as unsupported;
+     * 
      * - I/O array types are not planar if the corresponding field(s) are set;
      * 
      * - I/O array types are consistent with the expected data types;
      * 
-     * - I/O array types are consistent for in-place transforms (if requested);
-     *
+     * - I/O array types are consistent for in-place transforms (if in-place is requested);
      * 
+     * - locations of I/O buffers are consistent for in-place transforms (if in-place is requested);
+     * 
+     * - I/O data layouts and offsets (unless ignored) are consistent with in-place usage
+     *   for single-device transforms (if in-place is requested);
+     *
      * @param[in] dft_type user-provided type of transform for the owning plan.
      * @param[in] placement user-provided placement of transform results for the owning plan.
      * @param[in] user_lengths user-provided lengths of the transform for the owning plan.
@@ -215,6 +221,41 @@ struct rocfft_plan_description_t
                                             const size_t*           user_lengths,
                                             const size_t            len_rank,
                                             const size_t            number_of_transforms);
+
+    /**
+     * @brief Verifies if the description has undistributed input/output data and,
+     * if so, returns the location thereof.
+     * 
+     * @param[in] io input (resp. output) data sets are considered for argument value
+     * `io_data_label::INPUT` (resp. `io_data_label::OUTPUT`)
+     * @return An `std::optional<rocfft_location_t>` object which has a value set to
+     * the expected location of the input (resp. output) data, if undistributed. 
+     * @throw An `std::invalid_argument` exception is thrown if `io` is not an
+     * expected value.
+     */
+    std::optional<rocfft_location_t> expected_undistributed_location_for(io_data_label io) const;
+
+    /**
+     * @return `true` if the description is consistent with single-device
+     * operations on the current location.
+     */
+    bool has_undistributed_io_on_current_location() const;
+
+    /**
+     * @brief Returns a read accessor for the input (resp. output) data layout that must take
+     * precedence. If a lone-brick input (resp. output) field is used, this returns a (const)
+     * reference to that brick's layout. Otherwise, a (const) reference to `input_layout`
+     * (resp. `output_layout`) is returned.
+     * 
+     * @param[in] io input (resp. output) data set(s) are considered for argument
+     * value `io_data_label::INPUT` (resp. `io_data_label::OUTPUT`)
+     * 
+     * @throw An `std::logic_error` is thrown if this description involves more than one brick
+     * on input (resp. output), i.e., if this description does not have an undistributed data
+     * layout on input (resp. output). An `std::invalid_argument` exception is thrown if `io`
+     * is not an expected value.
+     */
+    const data_layout_t& undistributed_layout_for(io_data_label io) const;
 
     // Count the number of pointers required for either input or output
     // - planar data requires two pointers, real + complex require one.
@@ -275,13 +316,6 @@ struct rocfft_plan_t
 
     size_t WorkBufBytes() const;
 
-    // Insert core execPlan into multi-item plan, surrounding it with
-    // sufficient items to gather/scatter to/from a single device if
-    // the plan needs it.  Gathering all the data to a single device is
-    // suboptimal but is a first step towards proper multi-device
-    // logic.
-    void GatherScatterSingleDevicePlan(std::unique_ptr<ExecPlan>&& execPlan);
-
     // Construct an optimized multi-device plan for the FFT
     // parameters in *this.  Returns false if:
     // - multiple devices are not requested for this FFT, or
@@ -307,6 +341,13 @@ struct rocfft_plan_t
      * therefore *NOT* returned by this function.
      */
     std::vector<size_t> get_user_facing_lengths() const;
+    /**
+     * @brief Creates a plan execution item capable of tackling the plan's task
+     * via a single-device execution (the current-locaton device, implicitly). If
+     * the plan was not configured for single-device executions, the required
+     * input-gathering and output-scattering execution items are also created.
+     */
+    void MakeSingleDevPlanWithGatherScatterIfNeeded();
 
 private:
     // Multi-node or multi-GPU plan is built up from a vector of plan
@@ -338,25 +379,35 @@ private:
     // plan items can have void*'s that point to these buffers.
     std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>> tempBuffers;
 
-    // gather a set of bricks to a field on the current device
-    std::vector<size_t> GatherBricksToField(rocfft_location_t                  destLocation,
-                                            const std::vector<rocfft_brick_t>& bricks,
-                                            rocfft_precision                   precision,
-                                            rocfft_array_type                  arrayType,
-                                            const data_layout_t&               gathering_layout,
-                                            BufferPtr                          output,
-                                            const std::vector<size_t>&         antecedents,
-                                            size_t                             elem_size);
+    /**
+     * @brief Creates the plan items required to gather the input data buffer(s) of a
+     * multi-device transform into the input buffer of the (single-device) execution
+     * plan (abiding by the input data layout set for that execution plan).
+     * 
+     * @param[in] execution_plan single-device execution plan.
+     * @param[in] antecedents indices of the plan items that must complete before
+     * the gather steps may be initiated.
+     * @return An `std::vector<size_t>` of indices of the created plan items. When these
+     * items complete, the execution plan's input buffer is set for computing the desired
+     * transform.
+     */
+    std::vector<size_t> CreateInputGatheringItems(const ExecPlan&            execution_plan,
+                                                  const std::vector<size_t>& antecedents = {});
 
-    // scatter a field on the current device to a set of bricks
-    std::vector<size_t> ScatterFieldToBricks(rocfft_location_t                  srcLocation,
-                                             BufferPtr                          input,
-                                             rocfft_precision                   precision,
-                                             rocfft_array_type                  arrayType,
-                                             const data_layout_t&               layout_to_scatter,
-                                             const std::vector<rocfft_brick_t>& bricks,
-                                             const std::vector<size_t>&         antecedents,
-                                             size_t                             elem_size);
+    /**
+     * @brief Creates the plan items required to scatter the output buffer of the (single-device)
+     * execution plan (observing the output data layout set for that execution plan) into the
+     * output data buffer(s) of a multi-device transform.
+     * 
+     * @param[in] execution_plan single-device execution plan.
+     * @param[in] antecedents indices of the plan items that must complete before
+     * the scatter steps may be initiated. 
+     * @return An `std::vector<size_t>` of indices of the created plan items. When these items
+     * complete, the user's output buffers are set with the corresponding portions of the
+     * transform's results.
+     */
+    std::vector<size_t> CreateOutputScatteringItems(const ExecPlan&            execution_plan,
+                                                    const std::vector<size_t>& antecedents);
 
     // Transpose the input field to the output field by adding work items
     // to the plan.  Antecedents are provided as a vector of item
@@ -415,6 +466,22 @@ private:
                   const std::optional<StoreOps>& storeOps,
                   const std::vector<size_t>&     inputAntecedents,
                   std::vector<size_t>&           outputItems);
+
+    /**
+     * @brief Creates and returns the metadata configuring the single-device
+     * execution plan item used for tackling the plan's task. If the plan's
+     * task cannot be handled by a single-device execution item operating on
+     * the current device, the returned object parameterizes an execution plan
+     * item configured to
+     * - read (resp. write) directly from (resp. into) the user's input (resp.
+     *   output) data buffer, if that data is undistribued and expected on the
+     *   current device at execution. If not, default packed layouts for in-place
+     *   operations are set on input and output;
+     * 
+     * - operate in-place, unless the above made that impossible or if the
+     *   plan's configuration does not guarantee that it is safe to do so.
+     */
+    NodeMetaData get_single_dev_exec_plan_metadata() const;
 };
 
 bool PlanPowX(ExecPlan& execPlan);
