@@ -363,3 +363,199 @@ TEST(CkTileSequence, MakeIndexSequenceSmall)
         EXPECT_EQ(Result{}.at(i), i);
     }
 }
+
+// ============================================================================
+// sequence basic accessors tests
+// ============================================================================
+
+TEST(CkTileSequence, SizeAndIsStatic)
+{
+    EXPECT_EQ((sequence<1, 2, 3>::size()), 3);
+    EXPECT_EQ((sequence<>::size()), 0);
+    EXPECT_TRUE((sequence<1, 2, 3>::is_static()));
+}
+
+TEST(CkTileSequence, FrontAndBack)
+{
+    constexpr auto s = sequence<10, 20, 30>{};
+    EXPECT_EQ(s.at(0), 10);
+    EXPECT_EQ(s.at(2), 30);
+}
+
+TEST(CkTileSequence, SumAndProduct)
+{
+    EXPECT_EQ((sequence<1, 2, 3, 4>::sum()), 10);
+    EXPECT_EQ((sequence<1, 2, 3, 4>::product()), 24);
+    EXPECT_EQ((sequence<>::sum()), 0);
+    EXPECT_EQ((sequence<>::product()), 1);
+    EXPECT_EQ((sequence<5>::sum()), 5);
+    EXPECT_EQ((sequence<5>::product()), 5);
+}
+
+// ============================================================================
+// sequence push/pop tests
+// ============================================================================
+
+TEST(CkTileSequence, PushFrontSequence)
+{
+    constexpr auto result = sequence<3, 4>{}.push_front(sequence<1, 2>{});
+    EXPECT_EQ(result.at(0), 1);
+    EXPECT_EQ(result.at(1), 2);
+    EXPECT_EQ(result.at(2), 3);
+    EXPECT_EQ(result.at(3), 4);
+}
+
+TEST(CkTileSequence, PushBackSequence)
+{
+    constexpr auto result = sequence<1, 2>{}.push_back(sequence<3, 4>{});
+    EXPECT_EQ(result.at(0), 1);
+    EXPECT_EQ(result.at(1), 2);
+    EXPECT_EQ(result.at(2), 3);
+    EXPECT_EQ(result.at(3), 4);
+}
+
+TEST(CkTileSequence, PopFront)
+{
+    constexpr auto result = sequence_pop_front(sequence<1, 2, 3>{});
+    EXPECT_EQ(decltype(result)::size(), 2);
+    EXPECT_EQ(result.at(0), 2);
+    EXPECT_EQ(result.at(1), 3);
+}
+
+TEST(CkTileSequence, PopBack)
+{
+    constexpr auto result = sequence_pop_back(sequence<1, 2, 3>{});
+    EXPECT_EQ(decltype(result)::size(), 2);
+    EXPECT_EQ(result.at(0), 1);
+    EXPECT_EQ(result.at(1), 2);
+}
+
+// ============================================================================
+// sequence reverse tests
+// ============================================================================
+
+TEST(CkTileSequence, Reverse)
+{
+    constexpr auto result = sequence<1, 2, 3, 4>{}.reverse();
+    EXPECT_EQ(result.at(0), 4);
+    EXPECT_EQ(result.at(1), 3);
+    EXPECT_EQ(result.at(2), 2);
+    EXPECT_EQ(result.at(3), 1);
+}
+
+TEST(CkTileSequence, ReverseSingle)
+{
+    constexpr auto result = sequence<42>{}.reverse();
+    EXPECT_EQ(result.at(0), 42);
+}
+
+// ============================================================================
+// sequence extract tests
+// ============================================================================
+
+TEST(CkTileSequence, Extract)
+{
+    constexpr auto result = sequence<10, 20, 30, 40>{}.extract(sequence<2, 0, 3>{});
+    EXPECT_EQ(result.at(0), 30);
+    EXPECT_EQ(result.at(1), 10);
+    EXPECT_EQ(result.at(2), 40);
+}
+
+// ============================================================================
+// sequence_merge tests
+// ============================================================================
+
+TEST(CkTileSequence, MergeTwoSequences)
+{
+    constexpr auto result = merge_sequences(sequence<1, 2>{}, sequence<3, 4>{});
+    EXPECT_EQ(decltype(result)::size(), 4);
+    EXPECT_EQ(result.at(0), 1);
+    EXPECT_EQ(result.at(3), 4);
+}
+
+TEST(CkTileSequence, MergeWithEmpty)
+{
+    constexpr auto result = merge_sequences(sequence<1, 2>{}, sequence<>{});
+    EXPECT_EQ(decltype(result)::size(), 2);
+    EXPECT_EQ(result.at(0), 1);
+}
+
+// ============================================================================
+// sequence arithmetic operator tests
+// ============================================================================
+
+TEST(CkTileSequence, OperatorAdd)
+{
+    constexpr auto result = sequence<1, 2, 3>{} + sequence<10, 20, 30>{};
+    EXPECT_EQ(result.at(0), 11);
+    EXPECT_EQ(result.at(1), 22);
+    EXPECT_EQ(result.at(2), 33);
+}
+
+TEST(CkTileSequence, OperatorSubtract)
+{
+    constexpr auto result = sequence<10, 20, 30>{} - sequence<1, 2, 3>{};
+    EXPECT_EQ(result.at(0), 9);
+    EXPECT_EQ(result.at(1), 18);
+    EXPECT_EQ(result.at(2), 27);
+}
+
+TEST(CkTileSequence, OperatorMultiply)
+{
+    constexpr auto result = sequence<2, 3, 4>{} * sequence<5, 6, 7>{};
+    EXPECT_EQ(result.at(0), 10);
+    EXPECT_EQ(result.at(1), 18);
+    EXPECT_EQ(result.at(2), 28);
+}
+
+TEST(CkTileSequence, OperatorAddScalar)
+{
+    constexpr auto result = sequence<1, 2, 3>{} + number<10>{};
+    EXPECT_EQ(result.at(0), 11);
+    EXPECT_EQ(result.at(1), 12);
+    EXPECT_EQ(result.at(2), 13);
+}
+
+TEST(CkTileSequence, OperatorMultiplyScalar)
+{
+    constexpr auto result = sequence<1, 2, 3>{} * number<10>{};
+    EXPECT_EQ(result.at(0), 10);
+    EXPECT_EQ(result.at(1), 20);
+    EXPECT_EQ(result.at(2), 30);
+}
+
+TEST(CkTileSequence, ScalarOperatorAdd)
+{
+    constexpr auto result = number<100>{} + sequence<1, 2, 3>{};
+    EXPECT_EQ(result.at(0), 101);
+    EXPECT_EQ(result.at(1), 102);
+    EXPECT_EQ(result.at(2), 103);
+}
+
+// ============================================================================
+// sequence equality tests
+// ============================================================================
+
+TEST(CkTileSequence, EqualityTrue) { EXPECT_TRUE((sequence<1, 2, 3>{} == sequence<1, 2, 3>{})); }
+
+TEST(CkTileSequence, EqualityFalse) { EXPECT_FALSE((sequence<1, 2, 3>{} == sequence<1, 2, 4>{})); }
+
+TEST(CkTileSequence, InequalityTrue) { EXPECT_TRUE((sequence<1, 2, 3>{} != sequence<1, 2, 4>{})); }
+
+TEST(CkTileSequence, EqualityEmpty) { EXPECT_TRUE((sequence<>{} == sequence<>{})); }
+
+// ============================================================================
+// sequence transform tests
+// ============================================================================
+
+TEST(CkTileSequence, Transform)
+{
+    struct Double
+    {
+        constexpr index_t operator()(index_t x) const { return x * 2; }
+    };
+    constexpr auto result = sequence<1, 2, 3>{}.transform(Double{});
+    EXPECT_EQ(result.at(0), 2);
+    EXPECT_EQ(result.at(1), 4);
+    EXPECT_EQ(result.at(2), 6);
+}
