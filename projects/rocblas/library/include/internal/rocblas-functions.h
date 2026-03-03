@@ -23624,6 +23624,110 @@ ROCBLAS_EXPORT rocblas_status rocblas_syrk_ex(rocblas_handle    handle,
     \brief <b> BLAS EX API </b>
 
     \details
+    The herk_ex functions perform one of the matrix-matrix operations for a Hermitian rank-k update:
+
+        C := alpha*op( A )*op( A )^H + beta*C,
+
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` is an ``n`` by ``k`` matrix, and
+    ``C`` is a ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
+
+        op( A ) = A, and A is n by k if transA == rocblas_operation_none
+        op( A ) = A^H and A is k by n if transA == rocblas_operation_conjugate_transpose
+
+    Currently supported datatypes are as follows:
+
+    ------------------------------------
+    | a_type | c_type | execution_type |
+    |--------|--------|----------------|
+    | f32_c  | f32_c  |      f64_c     |
+    | f32_c  | f64_c  |      f64_c     |
+    ------------------------------------
+
+    @param[in]
+    handle    [rocblas_handle]
+              handle to the rocBLAS library context queue.
+
+    @param[in]
+    uplo    [rocblas_fill]
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
+
+    @param[in]
+    transA  [rocblas_operation]
+            - rocblas_operation_conjugate_transpose:  op(A) = A^H
+            - rocblas_operation_none:                 op(A) = A
+
+    @param[in]
+    n       [rocblas_int]
+            n specifies the number of rows and columns of C. n >= 0.
+
+    @param[in]
+    k       [rocblas_int]
+            k specifies the number of columns of op(A). k >= 0.
+
+    @param[in]
+    alpha     [const void *]
+            device pointer or host pointer specifying the scalar alpha. When alpha is
+            zero, then A is not referenced and A need not be set before
+            entry. Same datatype as the real component of the compute_type.
+
+    @param[in]
+    A       pointer storing matrix A on the GPU.
+            Matrix dimension is ( lda, k ) when transA = rocblas_operation_none. Otherwise, (lda, n).
+    
+    @param[in]
+    a_type [rocblas_datatype]
+           specifies the datatype of matrix A.
+    
+    @param[in]
+    lda     [rocblas_int]
+            lda specifies the first dimension of A.
+            - If transA = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
+
+    @param[in]
+    beta     [const void *]
+            device pointer or host pointer specifying the scalar beta. When beta is
+            zero, then C need not be set before
+            entry. Same datatype as the real component of the compute_type.
+
+    @param[in]
+    C       pointer storing matrix C on the GPU.
+            Only the upper/lower triangular part is accessed.
+    
+    @param[in]
+    c_type [rocblas_datatype]
+           specifies the datatype of matrix C.
+    
+    @param[in]
+    ldc    [rocblas_int]
+           ldc specifies the first dimension of C. ldc >= max( 1, n ).
+    
+    @param[in]
+    execution_type [rocblas_datatype]
+           specifies the datatype of computation.
+
+    ********************************************************************/
+ROCBLAS_EXPORT rocblas_status rocblas_herk_ex(rocblas_handle    handle,
+                                              rocblas_fill      uplo,
+                                              rocblas_operation transA,
+                                              rocblas_int       n,
+                                              rocblas_int       k,
+                                              const void*       alpha,
+                                              const void*       A,
+                                              rocblas_datatype  a_type,
+                                              rocblas_int       lda,
+                                              const void*       beta,
+                                              void*             C,
+                                              rocblas_datatype  c_type,
+                                              rocblas_int       ldc,
+                                              rocblas_datatype  execution_type);
+//! @}
+
+/*! @{
+    \brief <b> BLAS EX API </b>
+
+    \details
     axpy_ex   computes constant alpha multiplied by vector x, plus vector y.
 
         y := alpha * x + y

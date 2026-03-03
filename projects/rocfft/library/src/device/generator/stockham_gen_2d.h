@@ -319,7 +319,7 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             "  uses " + std::to_string(kernel0.threads_per_transform)
                 + " threads per row-transform of length-" + std::to_string(length0),
             "  does max " + std::to_string(max_rows_tpb) + " row-transforms per thread block",
-            "row-elem is contigous (SB_UNIT)"};
+            "row-elem is contiguous (SB_UNIT)"};
 
         length0_part
             += CommentLines{"calc the thread_in_device value once and for all device funcs"};
@@ -375,9 +375,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
 
             auto templates = device_call_templates();
             templates.set_value(stride_type.name, "SB_1ST");
-            length0_part += Call{"forward_length" + std::to_string(length0) + "_SBRR_device",
-                                 templates,
-                                 device_call_arguments(0)};
+            length0_part
+                += Call{"forward_full_pass_length" + std::to_string(length0) + "_SBRR_device",
+                        templates,
+                        device_call_arguments(0)};
             length0_part += LineBreak{};
 
             length0_part += CommentLines{"call a post-store from registers to lds (if necessary)"};
@@ -416,7 +417,7 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             "  uses " + std::to_string(kernel1.threads_per_transform)
                 + " threads per col-transform of length-" + std::to_string(length1),
             "  does max " + std::to_string(max_cols_tpb) + " col-transforms per thread block",
-            "col-elem is non-contigous (SB_NONUNIT), each elem is strided with stride_lds"};
+            "col-elem is non-contiguous (SB_NONUNIT), each elem is strided with stride_lds"};
 
         length1_part
             += CommentLines{"calc the thread_in_device value once and for all device funcs"};
@@ -472,9 +473,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             auto arguments2 = device_call_arguments(0);
             if(factors != kernel1.factors)
                 arguments2[3] = twiddles + length0 - factors.front();
-            length1_part += Call{"forward_length" + std::to_string(length1) + "_SBRR_device",
-                                 templates2,
-                                 arguments2};
+            length1_part
+                += Call{"forward_full_pass_length" + std::to_string(length1) + "_SBRR_device",
+                        templates2,
+                        arguments2};
             length1_part += LineBreak{};
 
             length1_part += CommentLines{"call a post-store from registers to lds (if necessary)"};

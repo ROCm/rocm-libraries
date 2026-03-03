@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Expression.hpp>
 
@@ -721,8 +698,8 @@ namespace rocRoller
         BitFieldExtract deepBitFieldExtract(BitFieldExtract expr)
         {
             auto visitor = DeepBitfieldExtractVisitor(expr.offset, expr.width, expr.outputDataType);
-            auto extracted = visitor.call(expr.arg);
-            int  offset    = visitor.get_offset();
+            auto extracted  = visitor.call(expr.arg);
+            uint32_t offset = visitor.get_offset();
 
             return BitFieldExtract{{extracted}, expr.outputDataType, offset, expr.width};
         }
@@ -743,6 +720,23 @@ namespace rocRoller
 
                 Expr cpy = expr;
                 cpy.arg  = call(expr.arg);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(Reinterpret const& expr) const
+            {
+                if(resultVariableType(expr.arg).dataType == expr.destinationType)
+                    return call(expr.arg);
+
+                if(expr.arg && std::holds_alternative<Reinterpret>(*expr.arg))
+                {
+                    // Collapse: reinterpret(B, reinterpret(A, x)) -> reinterpret(B, x)
+                    auto const& innerReinterpret = std::get<Reinterpret>(*expr.arg);
+                    return call(reinterpret(expr.destinationType, innerReinterpret.arg));
+                }
+
+                Reinterpret cpy = expr;
+                cpy.arg         = call(expr.arg);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -827,16 +821,12 @@ namespace rocRoller
                 if(result.has_value())
                     return literal(result.value());
 
-                // Extracting the entire arg with no offset (same type)
+                // Extracting the entire arg with no offset
                 auto argVarType = resultVariableType(cpy.arg);
                 if(cpy.offset == 0 && cpy.width == argVarType.getElementSize() * 8
-                   && argVarType.dataType == cpy.outputDataType)
-                    return call(cpy.arg);
-
-                // TODO: Enable this simplification with a reinterpret_cast expression
-                // // Extracting the entire arg with no offset
-                // if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
-                //     return call(convert(cpy.outputDataType, cpy.arg));
+                   && argVarType.getElementSize()
+                          == DataTypeInfo::Get(cpy.outputDataType).elementBytes)
+                    return call(reinterpret(cpy.outputDataType, cpy.arg));
 
                 cpy.arg = call(cpy.arg);
                 return std::make_shared<Expression>(cpy);
@@ -864,6 +854,35 @@ namespace rocRoller
                 cpy.matC                 = call(expr.matC);
                 cpy.scaleA               = call(expr.scaleA);
                 cpy.scaleB               = call(expr.scaleB);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(Conditional const& expr) const
+            {
+                // Check if the condition can be evaluated at Translate time or not.
+                bool const eval_lhs = evaluationTimes(expr.lhs)[EvaluationTime::Translate];
+                if(eval_lhs)
+                {
+                    bool const condFalse = std::visit(
+                        [](auto&& arg) {
+                            using T = std::decay_t<decltype(arg)>;
+                            if constexpr(std::is_pointer_v<T>)
+                                return arg == nullptr;
+                            else
+                                return arg == T();
+                        },
+                        evaluate(expr.lhs));
+
+                    if(condFalse)
+                        return call(expr.r2hs);
+                    else
+                        return call(expr.r1hs);
+                }
+
+                auto cpy = expr;
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
                 return std::make_shared<Expression>(cpy);
             }
 

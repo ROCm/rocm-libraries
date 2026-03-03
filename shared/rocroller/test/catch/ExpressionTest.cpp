@@ -1,34 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/Expression_evaluate_detail.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -268,38 +246,38 @@ namespace ExpressionTest
         expected += R"(
              // BitFieldExtract<0,16>(rb: VGPR Value: Halfx2 x 1: v1)
              // Allocated : 2 VGPRs (Value: Half): v3, v2
-              v_bfe_u32 v11, v7, 0, 16
-              v_bfe_u32 v10, v7, 16, 16
+              v_bfe_u32 v10, v7, 0, 16
+              v_bfe_u32 v11, v7, 16, 16
 
              // BitFieldExtract<0,16>(rb: VGPR Value: BFloat16x2 x 1: v1)
              // Allocated : 2 VGPRs (Value: BFloat16): v3, v2
-             v_bfe_u32 v11, v7, 0, 16
-             v_bfe_u32 v10, v7, 16, 16
+             v_bfe_u32 v10, v7, 0, 16
+             v_bfe_u32 v11, v7, 16, 16
 
              // BitFieldExtract<0,8>(rb: VGPR Value: FP8x4 x 1: v1)
              // Allocated : 4 VGPRs (Value: FP8): v5, v4, v3, v2
-             v_bfe_u32 v13, v7, 0, 8
-             v_bfe_u32 v12, v7, 8, 8
-             v_bfe_u32 v11, v7, 16, 8
-             v_bfe_u32 v10, v7, 24, 8
+             v_bfe_u32 v10, v7, 0, 8
+             v_bfe_u32 v11, v7, 8, 8
+             v_bfe_u32 v12, v7, 16, 8
+             v_bfe_u32 v13, v7, 24, 8
 
              // BitFieldExtract<0,8>(rb: VGPR Value: BF8x4 x 1: v1)
              // Allocated : 4 VGPRs (Value: BF8): v5, v4, v3, v2
-             v_bfe_u32 v13, v7, 0, 8
-             v_bfe_u32 v12, v7, 8, 8
-             v_bfe_u32 v11, v7, 16, 8
-             v_bfe_u32 v10, v7, 24, 8
+             v_bfe_u32 v10, v7, 0, 8
+             v_bfe_u32 v11, v7, 8, 8
+             v_bfe_u32 v12, v7, 16, 8
+             v_bfe_u32 v13, v7, 24, 8
 
              // BitFieldExtract<0,4>(rb: VGPR Value: FP4x8 x 1: v1)
              // Allocated : 8 VGPRs (Value: FP4): v9, v8, v7, v6, v5, v4, v3, v2
-             v_bfe_u32 v17, v7, 0, 4
-             v_bfe_u32 v16, v7, 4, 4
-             v_bfe_u32 v15, v7, 8, 4
-             v_bfe_u32 v14, v7, 12, 4
-             v_bfe_u32 v13, v7, 16, 4
-             v_bfe_u32 v12, v7, 20, 4
-             v_bfe_u32 v11, v7, 24, 4
-             v_bfe_u32 v10, v7, 28, 4
+             v_bfe_u32 v10, v7, 0, 4
+             v_bfe_u32 v11, v7, 4, 4
+             v_bfe_u32 v12, v7, 8, 4
+             v_bfe_u32 v13, v7, 12, 4
+             v_bfe_u32 v14, v7, 16, 4
+             v_bfe_u32 v15, v7, 20, 4
+             v_bfe_u32 v16, v7, 24, 4
+             v_bfe_u32 v17, v7, 28, 4
         )";
 
         {
@@ -374,6 +352,9 @@ namespace ExpressionTest
         )";
 
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+
+        auto bfe1 = Expression::BitFieldExtract{{.arg{a}}, DataType::UInt8, 300u, 8u};
+        CHECK(bfe1.offset == 300u);
     }
 
     TEST_CASE("Expression comments", "[expression][comments][codegen]")
@@ -1934,6 +1915,104 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Reinterpret produces no instructions and changes register type",
+              "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        const auto make_expression = [&](auto type) {
+            auto r
+                = std::make_shared<Register::Value>(context.get(), Register::Type::Vector, type, 1);
+            r->allocateNow();
+            return r->expression();
+        };
+
+        SECTION("Int32 to UInt32")
+        {
+            auto a    = make_expression(DataType::Int32);
+            auto expr = Expression::reinterpret(DataType::UInt32, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::UInt32);
+        }
+
+        SECTION("Float to UInt32")
+        {
+            auto a    = make_expression(DataType::Float);
+            auto expr = Expression::reinterpret(DataType::UInt32, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::UInt32);
+        }
+
+        SECTION("UInt64 to Int64")
+        {
+            auto a    = make_expression(DataType::UInt64);
+            auto expr = Expression::reinterpret(DataType::Int64, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::Int64);
+        }
+
+        SECTION("Reinterpret in arithmetic expression, uint32 -> int32")
+        {
+            auto a = make_expression(DataType::UInt32);
+            auto b = make_expression(DataType::UInt32);
+            auto c = make_expression(DataType::Int32);
+
+            auto expr = Expression::reinterpret(DataType::Int32, a + b) + c;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"(
+                v_add_u32 v3, v0, v1
+                v_add_i32 v4, v3, v2
+            )";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("Reinterpret in arithmetic expression, float -> uint32")
+        {
+            auto a = make_expression(DataType::Float);
+            auto b = make_expression(DataType::UInt32);
+
+            auto expr = Expression::reinterpret(DataType::UInt32, a) + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"(
+                v_add_u32 v2, v0, v1
+            )";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("Size mismatch throws")
+        {
+            auto a = make_expression(DataType::Float);
+            CHECK_THROWS_AS(Expression::reinterpret(DataType::Int64, a), FatalError);
+        }
+
+        SECTION("Invalid reinterpret - unsupported type")
+        {
+            auto a = make_expression(DataType::UInt32);
+            CHECK_THROWS(Expression::reinterpret(DataType::None, a));
+        }
+    }
+
     TEST_CASE("Expression evaluate comparisons", "[expression]")
     {
         auto command = std::make_shared<Command>();
@@ -2486,93 +2565,182 @@ namespace ExpressionTest
 
         SECTION("Int32 to UInt32")
         {
-            int32_t value  = -1;
-            auto    result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
-            CHECK(std::get<uint32_t>(result) == 0xFFFFFFFFu);
+            auto value = literal(int32_t(-1));
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xFFFFFFFFu);
         }
 
         SECTION("UInt32 to Int32")
         {
-            uint32_t value  = 0xFFFFFFFFu;
-            auto     result = reinterpret(CommandArgumentValue(value), DataType::Int32);
-            CHECK(std::get<int32_t>(result) == -1);
+            auto value = literal(uint32_t(0xFFFFFFFFu));
+            auto expr  = reinterpret(DataType::Int32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int32);
+            CHECK(std::get<int32_t>(evaluate(expr)) == -1);
         }
 
         SECTION("Int32 to Raw32")
         {
-            int32_t value  = -1;
-            auto    result = reinterpret(CommandArgumentValue(value), DataType::Raw32);
-            CHECK(std::get<Raw32>(result).value == 0xFFFFFFFFu);
+            auto value = literal(int32_t(-1));
+            auto expr  = reinterpret(DataType::Raw32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Raw32);
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xFFFFFFFFu);
         }
 
         SECTION("Raw32 to UInt32")
         {
-            Raw32 value(0xDEADBEEFu);
-            auto  result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
-            CHECK(std::get<uint32_t>(result) == 0xDEADBEEFu);
+            auto value = literal(Raw32(0xDEADBEEFu));
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xDEADBEEFu);
         }
 
         SECTION("Raw32 to Int32")
         {
-            Raw32 value(0x80000000u);
-            auto  result = reinterpret(CommandArgumentValue(value), DataType::Int32);
-            CHECK(std::get<int32_t>(result) == static_cast<int32_t>(0x80000000));
+            auto value = literal(Raw32(0x80000000u));
+            auto expr  = reinterpret(DataType::Int32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int32);
+            CHECK(std::get<int32_t>(evaluate(expr)) == static_cast<int32_t>(0x80000000));
         }
 
         SECTION("UInt32 to Raw32")
         {
-            uint32_t value  = 0x12345678u;
-            auto     result = reinterpret(CommandArgumentValue(value), DataType::Raw32);
-            CHECK(std::get<Raw32>(result).value == 0x12345678u);
+            auto value = literal(uint32_t(0x12345678u));
+            auto expr  = reinterpret(DataType::Raw32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Raw32);
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0x12345678u);
         }
 
         SECTION("Int64 to UInt64")
         {
-            int64_t value  = -1LL;
-            auto    result = reinterpret(CommandArgumentValue(value), DataType::UInt64);
-            CHECK(std::get<uint64_t>(result) == 0xFFFFFFFFFFFFFFFFull);
+            auto value = literal(int64_t(-1LL));
+            auto expr  = reinterpret(DataType::UInt64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt64);
+            CHECK(std::get<uint64_t>(evaluate(expr)) == 0xFFFFFFFFFFFFFFFFull);
         }
 
         SECTION("UInt64 to Int64")
         {
-            uint64_t value  = 0x8000000000000000ull;
-            auto     result = reinterpret(CommandArgumentValue(value), DataType::Int64);
-            CHECK(std::get<int64_t>(result) == static_cast<int64_t>(0x8000000000000000ull));
+            auto value = literal(uint64_t(0x8000000000000000ull));
+            auto expr  = reinterpret(DataType::Int64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int64);
+            CHECK(std::get<int64_t>(evaluate(expr)) == static_cast<int64_t>(0x8000000000000000ull));
         }
 
         SECTION("Float to UInt32")
         {
-            float value  = 1.0f;
-            auto  result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
+            auto value = literal(1.0f);
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
             // 1.0f in IEEE 754
-            CHECK(std::get<uint32_t>(result) == 0x3F800000u);
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x3F800000u);
         }
 
         SECTION("UInt32 to Float")
         {
-            uint32_t value  = 0x40000000u; // 2.0f in IEEE 754
-            auto     result = reinterpret(CommandArgumentValue(value), DataType::Float);
-            CHECK(std::get<float>(result) == 2.0f);
+            auto value = literal(uint32_t(0x40000000u)); // 2.0f in IEEE 754
+            auto expr  = reinterpret(DataType::Float, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Float);
+            CHECK(std::get<float>(evaluate(expr)) == 2.0f);
         }
 
         SECTION("Double to UInt64")
         {
-            double value  = 1.0;
-            auto   result = reinterpret(CommandArgumentValue(value), DataType::UInt64);
+            auto value = literal(1.0);
+            auto expr  = reinterpret(DataType::UInt64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt64);
             // 1.0 in IEEE 754 double
-            CHECK(std::get<uint64_t>(result) == 0x3FF0000000000000ull);
+            CHECK(std::get<uint64_t>(evaluate(expr)) == 0x3FF0000000000000ull);
         }
 
         SECTION("Invalid reinterpret - different sizes")
         {
-            int32_t value = 42;
-            CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::Int64), FatalError);
+            auto value = literal(int32_t(42));
+            CHECK_THROWS_AS(reinterpret(DataType::Int64, value), FatalError);
         }
 
         SECTION("Invalid reinterpret - unsupported type")
         {
-            int32_t value = 42;
-            CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::None), FatalError);
+            auto value = literal(int32_t(42));
+            CHECK_THROWS(reinterpret(DataType::None, value));
+        }
+    }
+
+    TEST_CASE("Expression evaluate reinterpretTruncateValue with endianness", "[expression]")
+    {
+        auto swapEndian = [](auto value) -> decltype(value) {
+            using T                = decltype(value);
+            constexpr size_t N     = sizeof(T);
+            auto             bytes = std::bit_cast<std::array<std::byte, N>>(value);
+            std::reverse(bytes.begin(), bytes.end());
+            return std::bit_cast<T>(bytes);
+        };
+
+        constexpr bool isLittleEndian = std::endian::native == std::endian::little;
+        constexpr bool isBigEndian    = std::endian::native == std::endian::big;
+
+        SECTION("Round-trip: Native to opposite endianness and back - UInt64 to UInt32")
+        {
+            uint64_t originalValue = 15ull;
+
+            if constexpr(isLittleEndian)
+            {
+                // System is LE: convert to BE, truncate, convert back
+                uint64_t valueAsBE = swapEndian(originalValue);
+
+                auto resultBE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                    valueAsBE, DataType::UInt32, std::endian::big);
+                uint32_t truncatedBE = std::get<uint32_t>(resultBE);
+
+                uint32_t truncatedLE = swapEndian(truncatedBE);
+
+                CHECK(truncatedLE == 15u);
+            }
+            else if constexpr(isBigEndian)
+            {
+                // System is BE: convert to LE, truncate, convert back
+                uint64_t valueAsLE = swapEndian(originalValue);
+
+                auto resultLE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                    valueAsLE, DataType::UInt32, std::endian::little);
+                uint32_t truncatedLE = std::get<uint32_t>(resultLE);
+
+                uint32_t truncatedBE = swapEndian(truncatedLE);
+
+                CHECK(truncatedBE == 15u);
+            }
+        }
+
+        SECTION("Native endianness - UInt64 to UInt32")
+        {
+            uint64_t originalValue = 15ull;
+            auto     result        = Expression::EvaluateDetail::reinterpretTruncateValue(
+                originalValue, DataType::UInt32, std::endian::native);
+            CHECK(std::get<uint32_t>(result) == 15u);
+        }
+
+        SECTION("Same-size reinterpret - endianness independent (no truncation)")
+        {
+            int value = 0x00000FFF;
+
+            auto resultLE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                value, DataType::UInt32, std::endian::little);
+            auto resultBE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                value, DataType::UInt32, std::endian::big);
+
+            CHECK(std::get<uint32_t>(resultLE) == 0x00000FFFu);
+            CHECK(std::get<uint32_t>(resultBE) == 0x00000FFFu);
         }
     }
 
@@ -3045,9 +3213,9 @@ namespace ExpressionTest
             // 4294965263 = 11111111111111111111100000001111
             std::string expected = R"(
                 v_and_b32 v2, 130048, v0
-                v_and_b32 v3, 4294965263, v1
-                v_lshrrev_b32 v4, 6, v2
-                v_or_b32 v2, v4, v3
+                v_lshrrev_b32 v3, 6, v2
+                v_and_b32 v2, 4294965263, v1
+                v_or_b32 v4, v3, v2
             )";
 
             CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));

@@ -460,6 +460,36 @@ auto rocblas_syrk_ex_dispatch(const Arguments& arg)
     return TEST<void, void, void>{}(arg);
 }
 
+// herk_ex
+template <template <typename...> class TEST>
+auto rocblas_herk_ex_dispatch(const Arguments& arg)
+{
+    const auto Ti = arg.a_type, To = arg.c_type, Tex = arg.compute_type;
+
+    if(Ti == rocblas_datatype_f32_c && To == Ti)
+    {
+        if(Tex == rocblas_datatype_f64_c)
+        {
+            return TEST<rocblas_float_complex, rocblas_float_complex, rocblas_double_complex>{}(
+                arg);
+        }
+    }
+    else if(Ti != Tex && Tex == rocblas_datatype_f64_c)
+    {
+        if(Ti == rocblas_datatype_f32_c && To == rocblas_datatype_f64_c)
+        {
+            return TEST<rocblas_float_complex, rocblas_double_complex, rocblas_double_complex>{}(
+                arg);
+        }
+    }
+    // covers s, d, c, z precisions
+    // else
+    // {
+    //     return rocblas_simple_dispatch<TEST>(arg); // Ti = Tex = To
+    // }
+    return TEST<void, void, void>{}(arg);
+}
+
 // gemm functions
 template <template <typename...> class TEST>
 auto rocblas_gemm_dispatch(const Arguments& arg)

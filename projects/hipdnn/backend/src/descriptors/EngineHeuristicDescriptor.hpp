@@ -61,6 +61,8 @@ public:
     std::shared_ptr<const GraphDescriptor> getGraph() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
+
+    std::string toString() const override;
 };
 
 } // namespace hipdnn_backend

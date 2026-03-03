@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Run a benchmark suite."""
 
@@ -66,6 +44,7 @@ def run_problems(
     work_dir: Path,
     env: Dict[str, str],
     id_filter: list[str],
+    l2: bool,
 ) -> bool:
 
     SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
@@ -87,12 +66,22 @@ def run_problems(
         yaml = (work_dir / f"{problem.group}-{i:06d}.yaml").resolve()
         problem.set_output(yaml)
         cmd = problem.command()
-        scmd = " ".join(cmd)
         log = yaml.with_suffix(".log")
         rr_env = {k: str(v) for k, v in env.items() if k.startswith("ROC")}
         rr_env_str = " ".join([f"{k}={v}" for k, v in rr_env.items()])
 
+        if l2:
+            counters = str(yaml.resolve().parent / yaml.stem)
+            cmd = [
+                "rocprofv3",
+                "--pmc=TCC_HIT,TCC_MISS",
+                "--output-file=" + counters,
+                "--output-format=json",
+                "--",
+            ] + cmd
+
         with log.open("w") as f:
+            scmd = " ".join(cmd)
             print(f"# env: {rr_env_str}", file=f, flush=True)
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
@@ -136,6 +125,25 @@ def generate_missing_attr_value(run, attr):
             wgm_dim = getattr(run, "workgroupMappingDim")
             wgm_value = getattr(run, "workgroupMappingValue")
             return (wgm_dim, wgm_value)
+        case "matchMemoryAccess":
+            return True
+        case "unroll_x" | "unroll_y":
+            return 0
+        case "storeLDS_D":
+            store = getattr(run, "store")
+            return "LDS" in store
+        case "streamK":
+            # Old version used bool, new version uses str
+            streamK = getattr(run, "streamK", "None")
+            if isinstance(streamK, str):
+                return streamK != "None"
+            return streamK
+        case "streamKTwoTile":
+            streamK = getattr(run, "streamK", "None")
+            return streamK == "TwoTile"
+        case "streamKTwoTileDPFirst":
+            streamK = getattr(run, "streamK", "None")
+            return streamK == "TwoTileDPFirst"
         case _:
             raise RuntimeError(
                 f"Cannot handle attribute missing in previous rrperf version: {attr}"
@@ -192,6 +200,11 @@ def get_args(parser: argparse.ArgumentParser):
         help="Pin clocks before launching benchmark clients.",
     )
     parser.add_argument(
+        "--l2",
+        action="store_true",
+        help="Collect L2 performance counters (TCC_HIT and TCC_MISS).",
+    )
+    parser.add_argument(
         "--dump_csv",
         help="Dump benchmark CSV with included headers.",
         action="store_true",
@@ -214,6 +227,7 @@ def run_cli(  # noqa: C901
     rocm_smi: str = "rocm-smi",
     pin_clocks: bool = False,
     recast: bool = False,
+    l2: bool = False,
     **kwargs,
 ) -> Tuple[bool, Path]:
     """Run benchmarks!
@@ -264,7 +278,7 @@ def run_cli(  # noqa: C901
     timestamp = rundir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")
 
-    result = run_problems(generator, build_dir, rundir, env, id_filter)
+    result = run_problems(generator, build_dir, rundir, env, id_filter, l2)
 
     if submit:
         ptsdir = rundir / "rocRoller"

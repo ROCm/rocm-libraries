@@ -28,6 +28,7 @@
 
 #include <../test/tensor_holder.hpp>
 #include <../test/verify.hpp>
+#include <../test/cpu_layernorm.hpp>
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "miopen/miopen.h"
@@ -37,237 +38,11 @@
 #include <cfloat>
 #include <cstdlib>
 #include <memory>
+#include <miopen/errors.hpp>
 #include <miopen/tensor.hpp>
 #include <vector>
 
-template <typename Tgpu, typename Tcheck>
-int32_t mloLayerNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
-                                   Tgpu* input,
-                                   Tgpu* weight,
-                                   Tgpu* bias,
-                                   Tcheck* outputhost,
-                                   Tcheck* meanhost,
-                                   Tcheck* rstdhost,
-                                   float eps,
-                                   int32_t normalized_dim,
-                                   miopenNormMode_t mode)
-{
-    auto layout   = miopen::deref(inputDesc).GetLayoutEnum();
-    size_t stride = 1;
-    if(normalized_dim > 1 && layout.has_value() &&
-       (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
-    {
-        stride = miopen::deref(inputDesc).GetLengths()[1]; // stride = C
-    }
-
-    auto dims         = miopen::deref(inputDesc).GetLengths();
-    size_t outer_size = 1;
-    size_t inner_size = 1;
-    size_t norm_dim   = static_cast<size_t>(normalized_dim);
-
-    for(size_t i = 0ULL; i < dims.size(); ++i)
-    {
-        if(i < norm_dim)
-        {
-            if(!(stride > 1 && i == 1))
-            {
-                outer_size *= dims[i];
-            }
-        }
-        else
-        {
-            inner_size *= dims[i];
-        }
-    }
-
-    int32_t ret = 0;
-
-    for(int32_t o = 0; o < outer_size; o++)
-    {
-        for(int32_t s = 0; s < stride; s++)
-        {
-            Tcheck pmean = 0.0f;
-            Tcheck pvar  = 0.0f;
-            for(int32_t i = 0; i < inner_size; i++)
-            {
-                Tcheck tmp = static_cast<Tcheck>(input[o * inner_size * stride + i * stride + s]);
-                pmean += tmp;
-                pvar += tmp * tmp;
-            }
-
-            pmean        = pmean / inner_size;
-            pvar         = pvar / inner_size - pmean * pmean;
-            Tcheck prstd = 1.0f / sqrt(pvar + eps);
-
-            meanhost[o * stride + s] = pmean;
-            rstdhost[o * stride + s] = prstd;
-
-            for(int32_t i = 0; i < inner_size; i++)
-            {
-                Tcheck pweight =
-                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
-                Tcheck pbias =
-                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 0 : static_cast<Tcheck>(bias[i]);
-                outputhost[o * inner_size * stride + i * stride + s] =
-                    (static_cast<Tcheck>(input[o * inner_size * stride + i * stride + s]) - pmean) *
-                        prstd * pweight +
-                    pbias;
-            }
-        }
-    }
-    return ret;
-}
-
-template <typename Tgpu, typename Tcheck>
-int32_t mloLayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
-                                    Tgpu* dy,
-                                    Tgpu* x,
-                                    Tgpu* weight,
-                                    Tcheck* meanhost,
-                                    Tcheck* rstdhost,
-                                    Tcheck* dxhost,
-                                    int32_t normalized_dim,
-                                    miopenNormMode_t mode)
-{
-    auto layout   = miopen::deref(dyDesc).GetLayoutEnum();
-    size_t stride = 1;
-    if(normalized_dim > 1 && layout.has_value() &&
-       (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
-    {
-        stride = miopen::deref(dyDesc).GetLengths()[1]; // stride = C
-    }
-
-    auto dims         = miopen::deref(dyDesc).GetLengths();
-    size_t outer_size = 1;
-    size_t inner_size = 1;
-    size_t norm_dim   = static_cast<size_t>(normalized_dim);
-
-    for(size_t i = 0ULL; i < dims.size(); ++i)
-    {
-        if(i < norm_dim)
-        {
-            if(!(stride > 1 && i == 1))
-            {
-                outer_size *= dims[i];
-            }
-        }
-        else
-        {
-            inner_size *= dims[i];
-        }
-    }
-
-    int32_t ret = 0;
-
-    for(int o = 0; o < outer_size; ++o)
-    {
-        for(int s = 0; s < stride; ++s)
-        {
-            Tcheck sum_dy_weight   = 0;
-            Tcheck sum_dy_weight_x = 0;
-
-            for(int i = 0; i < inner_size; ++i)
-            {
-                Tcheck pweight =
-                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
-                Tcheck pdy =
-                    dy ? static_cast<Tcheck>(dy[o * inner_size * stride + i * stride + s]) : 0;
-                Tcheck px = static_cast<Tcheck>(x[o * inner_size * stride + i * stride + s]);
-                sum_dy_weight += pdy * pweight;
-                sum_dy_weight_x += pdy * px * pweight;
-            }
-
-            Tcheck scale = 1.0f / static_cast<Tcheck>(inner_size);
-            Tcheck prstd = static_cast<Tcheck>(rstdhost[o * stride + s]);
-            Tcheck pmean = static_cast<Tcheck>(meanhost[o * stride + s]);
-            Tcheck a = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
-            Tcheck b = prstd * sum_dy_weight * scale - a * pmean;
-
-            for(int i = 0; i < inner_size; ++i)
-            {
-                Tcheck pweight =
-                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<Tcheck>(weight[i]);
-                Tcheck pdy =
-                    dy ? static_cast<Tcheck>(dy[o * inner_size * stride + i * stride + s]) : 0;
-
-                Tcheck val = prstd * pdy * pweight -
-                             a * static_cast<Tcheck>(x[o * inner_size * stride + i * stride + s]) -
-                             b;
-                dxhost[o * inner_size * stride + i * stride + s] = static_cast<Tcheck>(val);
-            }
-        }
-    }
-
-    return ret;
-}
-
-template <typename Tgpu, typename Tcheck>
-int32_t mloLayerNormBackwardWeightBiasRunHost(miopenTensorDescriptor_t dyDesc,
-                                              Tgpu* dy,
-                                              Tgpu* x,
-                                              Tcheck* meanhost,
-                                              Tcheck* rstdhost,
-                                              Tcheck* dwhost,
-                                              Tcheck* dbhost,
-                                              int32_t normalized_dim)
-{
-    auto layout   = miopen::deref(dyDesc).GetLayoutEnum();
-    size_t stride = 1;
-    if(normalized_dim > 1 && (layout == miopenTensorNHWC || layout == miopenTensorNDHWC))
-    {
-        stride = miopen::deref(dyDesc).GetLengths()[1]; // stride = C
-    }
-
-    auto dims         = miopen::deref(dyDesc).GetLengths();
-    size_t outer_size = 1;
-    size_t inner_size = 1;
-    size_t norm_dim   = static_cast<size_t>(normalized_dim);
-
-    int32_t ret = 0;
-
-    for(size_t i = 0ULL; i < dims.size(); ++i)
-    {
-        if(i < norm_dim)
-        {
-            if(!(stride > 1 && i == 1))
-            {
-                outer_size *= dims[i];
-            }
-        }
-        else
-        {
-            inner_size *= dims[i];
-        }
-    }
-
-    for(int i = 0; i < inner_size; ++i)
-    {
-        Tcheck sum_dw = 0;
-        Tcheck sum_db = 0;
-
-        for(int s = 0; s < stride; ++s)
-        {
-            for(int o = 0; o < outer_size; ++o)
-            {
-                Tcheck prstd = static_cast<Tcheck>(rstdhost[o * stride + s]);
-                Tcheck pmean = static_cast<Tcheck>(meanhost[o * stride + s]);
-                Tcheck pdy =
-                    dy ? static_cast<Tcheck>(dy[o * inner_size * stride + i * stride + s]) : 0;
-                Tcheck px = static_cast<Tcheck>(x[o * inner_size * stride + i * stride + s]);
-
-                sum_dw += pdy * (px - pmean) * prstd;
-                sum_db += pdy;
-            }
-        }
-
-        dwhost[i] = sum_dw;
-        dbhost[i] = sum_db;
-    }
-
-    return ret;
-}
-
-template <typename Tgpu, typename Tref>
+template <typename T>
 class LayerNormDriver : public Driver
 {
 public:
@@ -284,7 +59,7 @@ public:
         miopenCreateTensorDescriptor(&dwDesc);
         miopenCreateTensorDescriptor(&dbDesc);
 
-        data_type = miopen_type<Tgpu>{};
+        data_type = miopen_type<T>{};
     }
 
     int AddCmdLineArgs() override;
@@ -303,7 +78,7 @@ public:
     int RunBackwardGPU() override;
     int RunBackwardCPU();
 
-    Tref GetTolerance();
+    double GetTolerance();
     int VerifyBackward() override;
     int VerifyForward() override;
     ~LayerNormDriver() override
@@ -348,32 +123,34 @@ private:
     std::unique_ptr<GPUMem> db_dev;
     std::unique_ptr<GPUMem> workspace_dev;
 
-    std::vector<Tgpu> in;
-    std::vector<Tgpu> weight;
-    std::vector<Tgpu> bias;
-    std::vector<Tgpu> out;
-    std::vector<Tgpu> mean;
-    std::vector<Tgpu> rstd;
-    std::vector<Tref> outhost;
-    std::vector<Tref> meanhost;
-    std::vector<Tref> rstdhost;
-    std::vector<Tgpu> dy;
-    std::vector<Tgpu> dx;
-    std::vector<Tgpu> dw;
-    std::vector<Tgpu> db;
-    std::vector<Tref> dxhost;
-    std::vector<Tref> dwhost;
-    std::vector<Tref> dbhost;
+    tensor<T> in;
+    tensor<T> weight;
+    tensor<T> bias;
+    tensor<T> out;
+    tensor<T> mean;
+    tensor<T> rstd;
+    tensor<T> outhost;
+    tensor<T> meanhost;
+    tensor<T> rstdhost;
+    tensor<T> dy;
+    tensor<T> dx;
+    tensor<T> dw;
+    tensor<T> db;
+    tensor<T> dxhost;
+    tensor<T> dwhost;
+    tensor<T> dbhost;
 
     size_t ws_sizeInBytes;
 
     float eps;
     int dim;
     miopenNormMode_t mode;
+
+    bool use_multithread;
 };
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
+template <typename T>
+int LayerNormDriver<T>::ParseCmdLineArgs(int argc, char* argv[])
 {
     inflags.Parse(argc, argv);
 
@@ -381,11 +158,14 @@ int LayerNormDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     {
         miopenEnableProfiling(GetHandle(), true);
     }
+
+    use_multithread = (inflags.GetValueInt("mt") != 0);
+
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::GetandSetData()
+template <typename T>
+int LayerNormDriver<T>::GetandSetData()
 {
     auto in_len = GetInputTensorLengthsFromCmdLine();
     ValidateLayout();
@@ -445,8 +225,8 @@ int LayerNormDriver<Tgpu, Tref>::GetandSetData()
     return 0;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::AddCmdLineArgs()
+template <typename T>
+int LayerNormDriver<T>::AddCmdLineArgs()
 {
     inflags.AddInputFlag("forw", 'F', "0", "Run only Forward LayerNorm (Default=0)", "int");
     inflags.AddInputFlag("layout",
@@ -476,27 +256,28 @@ int LayerNormDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+    inflags.AddInputFlag("mt", 'u', "0", "Use multithreaded version (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
+template <typename T>
+int LayerNormDriver<T>::AllocateBuffersAndCopy()
 {
-    const Tgpu Tgpu0val      = static_cast<Tgpu>(0.0);
-    const Tgpu Tgpu1val      = static_cast<Tgpu>(1.0);
-    const Tgpu Tgpuminus1val = static_cast<Tgpu>(-1.0);
-    const Tref Tref0ref      = static_cast<Tref>(0.0);
-    size_t in_sz             = GetTensorSize(inputDesc);
-    size_t weight_sz         = GetTensorSize(weightDesc);
-    size_t bias_sz           = GetTensorSize(biasDesc);
-    size_t out_sz            = GetTensorSize(outputDesc);
-    size_t mean_sz           = GetTensorSize(meanDesc);
-    size_t rstd_sz           = GetTensorSize(rstdDesc);
-    size_t dy_sz             = GetTensorSize(dyDesc);
-    size_t dx_sz             = GetTensorSize(dxDesc);
-    size_t dw_sz             = GetTensorSize(dwDesc);
-    size_t db_sz             = GetTensorSize(dbDesc);
+    const T T0val      = static_cast<T>(0.0);
+    const T T1val      = static_cast<T>(1.0);
+    const T Tminus1val = static_cast<T>(-1.0);
+    auto genT0val      = [&](auto...) { return T0val; };
+    size_t in_sz       = GetTensorSize(inputDesc);
+    size_t weight_sz   = GetTensorSize(weightDesc);
+    size_t bias_sz     = GetTensorSize(biasDesc);
+    size_t out_sz      = GetTensorSize(outputDesc);
+    size_t mean_sz     = GetTensorSize(meanDesc);
+    size_t rstd_sz     = GetTensorSize(rstdDesc);
+    size_t dy_sz       = GetTensorSize(dyDesc);
+    size_t dx_sz       = GetTensorSize(dxDesc);
+    size_t dw_sz       = GetTensorSize(dwDesc);
+    size_t db_sz       = GetTensorSize(dbDesc);
 
     auto status = miopenGetLayerNormBackwardWorkspaceSize(GetHandle(),
                                                           mode,
@@ -515,90 +296,90 @@ int LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     uint32_t ctx = 0;
 
-    in_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_sz, sizeof(Tgpu)));
-    weight_dev    = std::unique_ptr<GPUMem>(new GPUMem(ctx, weight_sz, sizeof(Tgpu)));
-    bias_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, bias_sz, sizeof(Tgpu)));
-    out_dev       = std::unique_ptr<GPUMem>(new GPUMem(ctx, out_sz, sizeof(Tgpu)));
-    mean_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, mean_sz, sizeof(Tgpu)));
-    rstd_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, rstd_sz, sizeof(Tgpu)));
-    dy_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dy_sz, sizeof(Tgpu)));
-    dx_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dx_sz, sizeof(Tgpu)));
-    dw_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dw_sz, sizeof(Tgpu)));
-    db_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, db_sz, sizeof(Tgpu)));
+    in_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_sz, sizeof(T)));
+    weight_dev    = std::unique_ptr<GPUMem>(new GPUMem(ctx, weight_sz, sizeof(T)));
+    bias_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, bias_sz, sizeof(T)));
+    out_dev       = std::unique_ptr<GPUMem>(new GPUMem(ctx, out_sz, sizeof(T)));
+    mean_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, mean_sz, sizeof(T)));
+    rstd_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, rstd_sz, sizeof(T)));
+    dy_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dy_sz, sizeof(T)));
+    dx_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dx_sz, sizeof(T)));
+    dw_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, dw_sz, sizeof(T)));
+    db_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, db_sz, sizeof(T)));
     workspace_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, ws_sizeInBytes, sizeof(std::byte)));
 
-    in       = std::vector<Tgpu>(in_sz, Tgpu0val);
-    weight   = std::vector<Tgpu>(weight_sz, Tgpu0val);
-    bias     = std::vector<Tgpu>(bias_sz, Tgpu0val);
-    out      = std::vector<Tgpu>(out_sz, Tgpu0val);
-    mean     = std::vector<Tgpu>(mean_sz, Tgpu0val);
-    rstd     = std::vector<Tgpu>(rstd_sz, Tgpu0val);
-    dy       = std::vector<Tgpu>(dy_sz, Tgpu0val);
-    dx       = std::vector<Tgpu>(dx_sz, Tgpu0val);
-    dw       = std::vector<Tgpu>(dw_sz, Tgpu0val);
-    db       = std::vector<Tgpu>(db_sz, Tgpu0val);
-    outhost  = std::vector<Tref>(out_sz, Tref0ref);
-    meanhost = std::vector<Tref>(mean_sz, Tref0ref);
-    rstdhost = std::vector<Tref>(rstd_sz, Tref0ref);
-    dxhost   = std::vector<Tref>(dx_sz, Tref0ref);
-    dwhost   = std::vector<Tref>(dw_sz, Tref0ref);
-    dbhost   = std::vector<Tref>(db_sz, Tref0ref);
+    in       = tensor<T>(miopen::deref(inputDesc)).generate(genT0val);
+    weight   = tensor<T>(miopen::deref(weightDesc)).generate(genT0val);
+    bias     = tensor<T>(miopen::deref(biasDesc)).generate(genT0val);
+    out      = tensor<T>(miopen::deref(outputDesc)).generate(genT0val);
+    mean     = tensor<T>(miopen::deref(meanDesc)).generate(genT0val);
+    rstd     = tensor<T>(miopen::deref(rstdDesc)).generate(genT0val);
+    dy       = tensor<T>(miopen::deref(dyDesc)).generate(genT0val);
+    dx       = tensor<T>(miopen::deref(dxDesc)).generate(genT0val);
+    dw       = tensor<T>(miopen::deref(dwDesc)).generate(genT0val);
+    db       = tensor<T>(miopen::deref(dbDesc)).generate(genT0val);
+    outhost  = tensor<T>(miopen::deref(outputDesc)).generate(genT0val);
+    meanhost = tensor<T>(miopen::deref(meanDesc)).generate(genT0val);
+    rstdhost = tensor<T>(miopen::deref(rstdDesc)).generate(genT0val);
+    dxhost   = tensor<T>(miopen::deref(dxDesc)).generate(genT0val);
+    dwhost   = tensor<T>(miopen::deref(dwDesc)).generate(genT0val);
+    dbhost   = tensor<T>(miopen::deref(dbDesc)).generate(genT0val);
 
     for(int i = 0; i < in_sz; i++)
     {
-        in[i] = prng::gen_A_to_B<Tgpu>(Tgpu0val, Tgpu1val);
-        dy[i] = prng::gen_A_to_B<Tgpu>(Tgpuminus1val, Tgpu1val);
+        in[i] = prng::gen_A_to_B<T>(T0val, T1val);
+        dy[i] = prng::gen_A_to_B<T>(Tminus1val, T1val);
     }
 
-    if(in_dev->ToGPU(GetStream(), in.data()) != 0)
+    if(in_dev->ToGPU(GetStream(), in.data.data()) != 0)
         std::cerr << "Error copying (in) to GPU, size: " << in_dev->GetSize() << std::endl;
-    if(dy_dev->ToGPU(GetStream(), dy.data()) != 0)
+    if(dy_dev->ToGPU(GetStream(), dy.data.data()) != 0)
         std::cerr << "Error copying (dy) to GPU, size: " << dy_dev->GetSize() << std::endl;
 
     for(int i = 0; i < weight_sz; i++)
     {
         if(mode == MIOPEN_ELEMENTWISE_AFFINE)
-            weight[i] = static_cast<Tgpu>(1);
+            weight[i] = static_cast<T>(1);
         else
-            weight[i] = prng::gen_A_to_B<Tgpu>(Tgpu0val, Tgpu1val);
+            weight[i] = prng::gen_A_to_B<T>(T0val, T1val);
     }
 
-    if(weight_dev->ToGPU(GetStream(), weight.data()) != 0)
+    if(weight_dev->ToGPU(GetStream(), weight.data.data()) != 0)
         std::cerr << "Error copying (weight) to GPU, size: " << weight_dev->GetSize() << std::endl;
 
     for(int i = 0; i < bias_sz; i++)
     {
         if(mode == MIOPEN_ELEMENTWISE_AFFINE)
-            bias[i] = Tgpu0val;
+            bias[i] = T0val;
         else
-            bias[i] = prng::gen_A_to_B<Tgpu>(Tgpu0val, Tgpu1val);
+            bias[i] = prng::gen_A_to_B<T>(T0val, T1val);
     }
-    if(bias_dev->ToGPU(GetStream(), bias.data()) != 0)
+    if(bias_dev->ToGPU(GetStream(), bias.data.data()) != 0)
         std::cerr << "Error copying (bias) to GPU, size: " << bias_dev->GetSize() << std::endl;
 
-    if(out_dev->ToGPU(GetStream(), out.data()) != 0)
+    if(out_dev->ToGPU(GetStream(), out.data.data()) != 0)
         std::cerr << "Error copying (out) to GPU, size: " << out_dev->GetSize() << std::endl;
 
-    if(mean_dev->ToGPU(GetStream(), mean.data()) != 0)
+    if(mean_dev->ToGPU(GetStream(), mean.data.data()) != 0)
         std::cerr << "Error copying (mean) to GPU, size: " << mean_dev->GetSize() << std::endl;
 
-    if(rstd_dev->ToGPU(GetStream(), rstd.data()) != 0)
+    if(rstd_dev->ToGPU(GetStream(), rstd.data.data()) != 0)
         std::cerr << "Error copying (rstd) to GPU, size: " << rstd_dev->GetSize() << std::endl;
 
-    if(dx_dev->ToGPU(GetStream(), dx.data()) != 0)
+    if(dx_dev->ToGPU(GetStream(), dx.data.data()) != 0)
         std::cerr << "Error copying (dx) to GPU, size: " << dx_dev->GetSize() << std::endl;
 
-    if(dw_dev->ToGPU(GetStream(), dw.data()) != 0)
+    if(dw_dev->ToGPU(GetStream(), dw.data.data()) != 0)
         std::cerr << "Error copying (dw) to GPU, size: " << dw_dev->GetSize() << std::endl;
 
-    if(db_dev->ToGPU(GetStream(), db.data()) != 0)
+    if(db_dev->ToGPU(GetStream(), db.data.data()) != 0)
         std::cerr << "Error copying (db) to GPU, size: " << db_dev->GetSize() << std::endl;
 
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::RunForwardGPU()
+template <typename T>
+int LayerNormDriver<T>::RunForwardGPU()
 {
     float kernel_total_time = 0.0;
     float kernel_first_time = 0.0;
@@ -646,39 +427,31 @@ int LayerNormDriver<Tgpu, Tref>::RunForwardGPU()
                   << " ms\n";
     }
 
-    if(out_dev->FromGPU(GetStream(), out.data()) != 0)
+    if(out_dev->FromGPU(GetStream(), out.data.data()) != 0)
         std::cerr << "Error copying (out_dev) from GPU, size: " << out_dev->GetSize() << std::endl;
 
-    if(mean_dev->FromGPU(GetStream(), mean.data()) != 0)
+    if(mean_dev->FromGPU(GetStream(), mean.data.data()) != 0)
         std::cerr << "Error copying (mean_dev) from GPU, size: " << mean_dev->GetSize()
                   << std::endl;
 
-    if(rstd_dev->FromGPU(GetStream(), rstd.data()) != 0)
+    if(rstd_dev->FromGPU(GetStream(), rstd.data.data()) != 0)
         std::cerr << "Error copying (rstd_dev) from GPU, size: " << rstd_dev->GetSize()
                   << std::endl;
 
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::RunForwardCPU()
+template <typename T>
+int LayerNormDriver<T>::RunForwardCPU()
 {
-    mloLayerNormForwardRunHost<Tgpu, Tref>(inputDesc,
-                                           in.data(),
-                                           weight.data(),
-                                           bias.data(),
-                                           outhost.data(),
-                                           meanhost.data(),
-                                           rstdhost.data(),
-                                           eps,
-                                           dim,
-                                           mode);
+    cpu_layernorm_forward<T>(
+        in, weight, bias, outhost, meanhost, rstdhost, eps, dim, mode, use_multithread);
 
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::RunBackwardGPU()
+template <typename T>
+int LayerNormDriver<T>::RunBackwardGPU()
 {
     float kernel_total_time = 0.0;
     float kernel_first_time = 0.0;
@@ -731,151 +504,142 @@ int LayerNormDriver<Tgpu, Tref>::RunBackwardGPU()
                   << " ms\n";
     }
 
-    if(dx_dev->FromGPU(GetStream(), dx.data()) != 0)
+    if(dx_dev->FromGPU(GetStream(), dx.data.data()) != 0)
         std::cerr << "Error copying (dx_dev) from GPU, size: " << dx_dev->GetSize() << std::endl;
 
-    if(dw_dev->FromGPU(GetStream(), dw.data()) != 0)
+    if(dw_dev->FromGPU(GetStream(), dw.data.data()) != 0)
         std::cerr << "Error copying (dw_dev) from GPU, size: " << dw_dev->GetSize() << std::endl;
 
-    if(db_dev->FromGPU(GetStream(), db.data()) != 0)
+    if(db_dev->FromGPU(GetStream(), db.data.data()) != 0)
         std::cerr << "Error copying (db_dev) from GPU, size: " << db_dev->GetSize() << std::endl;
 
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::RunBackwardCPU()
+template <typename T>
+int LayerNormDriver<T>::RunBackwardCPU()
 {
-    mloLayerNormBackwardRunHost<Tgpu, Tref>(dyDesc,
-                                            dy.data(),
-                                            in.data(),
-                                            weight.data(),
-                                            meanhost.data(),
-                                            rstdhost.data(),
-                                            dxhost.data(),
-                                            dim,
-                                            mode);
+    cpu_layernorm_backward(dy, in, weight, meanhost, rstdhost, dxhost, dim, mode, use_multithread);
 
-    mloLayerNormBackwardWeightBiasRunHost<Tgpu, Tref>(dyDesc,
-                                                      dy.data(),
-                                                      in.data(),
-                                                      meanhost.data(),
-                                                      rstdhost.data(),
-                                                      dwhost.data(),
-                                                      dbhost.data(),
-                                                      dim);
+    cpu_layernorm_backward_weight_bias(
+        dy, in, meanhost, rstdhost, dwhost, dbhost, dim, use_multithread);
 
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-Tref LayerNormDriver<Tgpu, Tref>::GetTolerance()
+template <typename T>
+double LayerNormDriver<T>::GetTolerance()
 {
-    // Computation error of fp16 is ~2^13 (=8192) bigger than
-    // the one of fp32 because mantissa is shorter by 13 bits.
-    auto tolerance = std::is_same<Tgpu, float>::value ? 1.5e-6 : 8.2e-3;
-
-    // bf16 mantissa has 7 bits, by 3 bits shorter than fp16.
-    if(std::is_same<Tgpu, bfloat16>::value)
-        tolerance *= 8.0;
+    // Take the greater of twice a random walk of floating point errors in the accumulator type or
+    // one floating point error in the buffer type
+    auto mantissa_bits = std::is_same<T, float>::value              ? 23
+                         : std::is_same<T, half_float::half>::value ? 10
+                                                                    : 7;
+    auto tolerance =
+        std::max(2.0 * std::sqrt(in.GetSize()) / (1 << 23), 1.0 / (1 << mantissa_bits));
     return tolerance;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::VerifyForward()
+template <typename T>
+int LayerNormDriver<T>::VerifyForward()
 {
     RunForwardCPU();
-    const Tref tolerance = GetTolerance();
-    auto error           = miopen::rms_range(outhost, out);
+    const double tolerance  = GetTolerance();
+    auto error              = miopen::rms_range(outhost, out);
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward LayerNorm FAILED: " << error << " > " << tolerance << std::endl;
+        std::cout << "Forward LayerNorm FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Forward LayerNorm Verifies OK on CPU reference (" << error << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Forward LayerNorm Verifies OK against " << solver_type << " CPU reference ("
+                  << error << " < " << tolerance << ')' << std::endl;
     }
 
     auto meanerror = miopen::rms_range(meanhost, mean);
     if(!std::isfinite(meanerror) || meanerror > tolerance)
     {
-        std::cout << "Forward Layernorm mean FAILED: " << meanerror << " > " << tolerance
-                  << std::endl;
+        std::cout << "Forward LayerNorm mean FAILED against " << solver_type
+                  << " CPU reference: " << meanerror << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Forward LayerNorm mean Verifies OK on CPU reference (" << meanerror << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Forward LayerNorm mean Verifies OK against " << solver_type
+                  << " CPU reference (" << meanerror << " < " << tolerance << ')' << std::endl;
     }
 
     auto rstderror = miopen::rms_range(rstdhost, rstd);
     if(!std::isfinite(rstderror) || rstderror > tolerance)
     {
-        std::cout << "Forward LayerNorm rstd FAILED: " << rstderror << " > " << tolerance
-                  << std::endl;
+        std::cout << "Forward LayerNorm rstd FAILED against " << solver_type
+                  << " CPU reference: " << rstderror << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Forward LayerNorm rstd Verifies OK on CPU reference (" << rstderror << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Forward LayerNorm rstd Verifies OK against " << solver_type
+                  << " CPU reference (" << rstderror << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-int LayerNormDriver<Tgpu, Tref>::VerifyBackward()
+template <typename T>
+int LayerNormDriver<T>::VerifyBackward()
 {
     RunBackwardCPU();
-    const Tref tolerance = GetTolerance();
-
-    auto error = miopen::rms_range(dxhost, dx);
+    const double tolerance  = GetTolerance();
+    auto error              = miopen::rms_range(dxhost, dx);
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Backward LayerNorm FAILED: " << error << " > " << tolerance << std::endl;
+        std::cout << "Backward LayerNorm FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
     {
-        std::cout << "Backward LayerNorm Verifies OK on CPU reference (" << error << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Backward LayerNorm Verifies OK against " << solver_type << " CPU reference ("
+                  << error << " < " << tolerance << ')' << std::endl;
     }
 
     auto dwerror = miopen::rms_range(dwhost, dw);
     if(!std::isfinite(dwerror) || dwerror > tolerance)
     {
-        std::cout << "Backward LayerNorm dw FAILED: " << dwerror << " > " << tolerance << std::endl;
+        std::cout << "Backward LayerNorm dw FAILED against " << solver_type
+                  << " CPU reference: " << dwerror << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
     {
-        std::cout << "Backward LayerNorm dw Verifies OK on CPU reference (" << dwerror << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Backward LayerNorm Verifies dw OK against " << solver_type
+                  << " CPU reference (" << dwerror << " < " << tolerance << ')' << std::endl;
     }
 
     auto dberror = miopen::rms_range(dbhost, db);
     if(!std::isfinite(dberror) || dberror > tolerance)
     {
-        std::cout << "Backward LayerNorm db FAILED: " << dberror << " > " << tolerance << std::endl;
+        std::cout << "Backward LayerNorm db FAILED against " << solver_type
+                  << " CPU reference: " << dberror << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
     {
-        std::cout << "Backward LayerNorm db Verifies OK on CPU reference (" << dberror << " < "
-                  << tolerance << ')' << std::endl;
+        std::cout << "Backward LayerNorm Verifies db OK against " << solver_type
+                  << " CPU reference (" << dberror << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
 }
 
-template <typename Tgpu, typename Tref>
-std::vector<int> LayerNormDriver<Tgpu, Tref>::GetInputTensorLengthsFromCmdLine()
+template <typename T>
+std::vector<int> LayerNormDriver<T>::GetInputTensorLengthsFromCmdLine()
 {
     int in_n = inflags.GetValueInt("in_n");
     int in_c = inflags.GetValueInt("in_c");
@@ -901,8 +665,8 @@ std::vector<int> LayerNormDriver<Tgpu, Tref>::GetInputTensorLengthsFromCmdLine()
     }
 }
 
-template <typename Tgpu, typename Tref>
-void LayerNormDriver<Tgpu, Tref>::ValidateLayout()
+template <typename T>
+void LayerNormDriver<T>::ValidateLayout()
 {
     auto layout_value = inflags.GetValueStr("layout");
     int in_d          = inflags.GetValueInt("in_d");
@@ -926,52 +690,45 @@ void LayerNormDriver<Tgpu, Tref>::ValidateLayout()
     else if(layout_value != "NCHW" && layout_value != "NHWC" && layout_value != "NCDHW" &&
             layout_value != "NDHWC" && layout_value != "NW")
     {
-        std::cerr << "Invalid layout parameter value: " << layout_value << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid layout parameter value: " + layout_value);
     }
     else if((in_d == 0 || in_c == 0 || in_h == 0) &&
             (layout_value == "NCDHW" || layout_value == "NDHWC"))
     {
-        std::cerr << "The input depth (in_d), channels (in_c) and height (in_h) must be greater "
-                     "than zero for layouts NCDHW and NDHWC"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The input depth (in_d), channels (in_c) and height (in_h) must be greater "
+                     "than zero for layouts NCDHW and NDHWC");
     }
     else if(in_d != 0 && (layout_value == "NCHW" || layout_value == "NHWC"))
     {
-        std::cerr << "The input depth (in_d) must be zero and the input channels (in_c) and height "
-                     "(in_h) must be greater than zero for layouts NCHW and NHWC"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The input depth (in_d) must be zero and the input channels (in_c) and height "
+                     "(in_h) must be greater than zero for layouts NCHW and NHWC");
     }
     else if((in_d != 0 || in_c != 0 || in_h != 0) && layout_value == "NW")
     {
-        std::cerr
-            << "The input depth (in_d), channels (in_c) and height (in_h) be zero for layout NW"
-            << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The input depth (in_d), channels (in_c) and height (in_h) must be zero for "
+                     "layout NW");
     }
 
     int normalized_dim = inflags.GetValueInt("normalized_dim");
     if(normalized_dim >= 5 && (layout_value == "NCDHW" || layout_value == "NDHWC"))
     {
-        std::cerr << "The normalized dimension (normalized_dim) must be less than 5 for layouts "
-                     "NCDHW and NDHWC"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The normalized dimension (normalized_dim) must be less than 5 for layouts "
+                     "NCDHW and NDHWC");
     }
     else if(normalized_dim >= 4 && (layout_value == "NCHW" || layout_value == "NHWC"))
     {
-        std::cerr << "The normalized dimension (normalized_dim) must be less than 4 for layouts "
-                     "NCHW and NHWC"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The normalized dimension (normalized_dim) must be less than 4 for layouts "
+                     "NCHW and NHWC");
     }
     else if(normalized_dim >= 2 && layout_value == "NW")
     {
-        std::cerr << "The normalized dimension (normalized_dim) must be less than 2 for layout NW"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The normalized dimension (normalized_dim) must be less than 2 for layout NW");
     }
 }
 

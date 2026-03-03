@@ -73,6 +73,8 @@ namespace TensileLite
             gfx1103 = 1103,
             gfx1150 = 1150,
             gfx1151 = 1151,
+            gfx1152 = 1152,
+            gfx1153 = 1153,
             gfx1200 = 1200,
             gfx1201 = 1201
         };
@@ -155,6 +157,14 @@ namespace TensileLite
             {
                 return Processor::gfx1151;
             }
+            else if(archName.find("gfx1152") != std::string::npos)
+            {
+                return Processor::gfx1152;
+            }
+            else if(archName.find("gfx1153") != std::string::npos)
+            {
+                return Processor::gfx1153;
+            }
             else if(archName.find("gfx1200") != std::string::npos)
             {
                 return Processor::gfx1200;
@@ -208,6 +218,10 @@ namespace TensileLite
                 return "gfx1150";
             case AMDGPU::Processor::gfx1151:
                 return "gfx1151";
+            case AMDGPU::Processor::gfx1152:
+                return "gfx1152";
+            case AMDGPU::Processor::gfx1153:
+                return "gfx1153";
             case AMDGPU::Processor::gfx1200:
                 return "gfx1200";
             case AMDGPU::Processor::gfx1201:
@@ -222,19 +236,23 @@ namespace TensileLite
         AMDGPU(Processor p, int computeUnitCount, std::string const& deviceName);
         ~AMDGPU();
 
-        Processor   processor        = Processor::gfx900;
-        int         wavefrontSize    = 64;
-        int         simdPerCu        = 4;
-        int         computeUnitCount = 0;
-        int         skDynamicGrid    = 6;
-        int         skDynamicWGM     = 0;
-        int         fixedWGM         = std::numeric_limits<int>::max();
-        int         fixedWGMXCC      = std::numeric_limits<int>::max();
-        int         skMaxCUs         = 0;
-        int         skGridMultiplier = 1;
-        int         skFixedGrid      = 0;
-        int         skFullTiles      = 1;
-        mutable int isStandardCUs    = -1; // -1: unset, 0:false, 1:true
+        Processor   processor                = Processor::gfx900;
+        int         wavefrontSize            = 64;
+        int         simdPerCu                = 4;
+        int         computeUnitCount         = 0;
+        int         skDynamicGrid            = 6;
+        int         skDynamicWGM             = 0;
+        int         skMaxCUs                 = 0;
+        int         skGridMultiplier         = 1;
+        int         skFixedGrid              = 0;
+        int         skFullTiles              = 1;
+        int         fixedWGM                 = std::numeric_limits<int>::max();
+        size_t      fixedWGMXCC              = std::numeric_limits<size_t>::max();
+        size_t      fixedWGMXCCCHUNK         = std::numeric_limits<size_t>::max();
+        size_t      fixedStaggerUMapping     = std::numeric_limits<size_t>::max();
+        size_t      fixedStaggerU            = std::numeric_limits<size_t>::max();
+        size_t      fixedStaggerUStrideShift = std::numeric_limits<size_t>::max();
+        mutable int isStandardCUs            = -1; // -1: unset, 0:false, 1:true
         std::string deviceName;
 
         virtual bool   isStandardCU() const;
@@ -265,20 +283,6 @@ namespace TensileLite
             return value;
         }
 
-        const int getFixedWGM() const
-        {
-            static const char* envStr = std::getenv("TENSILE_FIXED_WGM");
-            static const int   value  = (envStr == NULL ? std::numeric_limits<int>::max() : std::atoi(envStr));
-            return value;
-        }
-
-        const int getFixedWGMXCC() const
-        {
-            static const char* envStr = std::getenv("TENSILE_FIXED_WGMXCC");
-            static const int   value  = (envStr == NULL ? std::numeric_limits<int>::max() : std::atoi(envStr));
-            return value;
-        }
-
         const int getSKMaxCUs() const
         {
             static const char* envStr = std::getenv("TENSILE_STREAMK_MAX_CUS");
@@ -304,6 +308,48 @@ namespace TensileLite
         {
             static const char* envStr = std::getenv("TENSILE_STREAMK_FULL_TILES");
             static const int   value  = (envStr == NULL ? 1 : std::atoi(envStr));
+            return value;
+        }
+
+        const int getFixedWGM() const
+        {
+            static const char* envStr = std::getenv("TENSILE_FIXED_WGM");
+            static const int   value  = (envStr == NULL ? std::numeric_limits<int>::max() : std::atoi(envStr));
+            return value;
+        }
+
+        const size_t getFixedWGMXCC() const
+        {
+            static const char*  envStr = std::getenv("TENSILE_FIXED_WGMXCC");
+            static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
+            return value;
+        }
+
+        const size_t getFixedWGMXCCCHUNK() const
+        {
+            static const char*  envStr = std::getenv("TENSILE_FIXED_WGMXCCCHUNK");
+            static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
+            return value;
+        }
+
+        const size_t getFixedStaggerUMapping() const
+        {
+            static const char*  envStr = std::getenv("TENSILE_FIXED_STAGGERU_MAPPING");
+            static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
+            return value;
+        }
+
+        const size_t getFixedStaggerU() const
+        {
+            static const char*  envStr = std::getenv("TENSILE_FIXED_STAGGERU");
+            static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
+            return value;
+        }
+
+        const size_t getFixedStaggerUStrideShift() const
+        {
+            static const char*  envStr = std::getenv("TENSILE_FIXED_STAGGERU_STRIDE_SHIFT");
+            static const size_t value  = (envStr == NULL ? std::numeric_limits<size_t>::max() : std::stoul(envStr));
             return value;
         }
 

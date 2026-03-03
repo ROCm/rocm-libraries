@@ -46,7 +46,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMPILE_ONLY)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE)
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_SEARCH_SKIP_PCT, 130)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
 
 namespace miopen {
 
@@ -264,15 +264,15 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
         float skip_time = core_result.find_search_best_time;
         if(skip_time < std::numeric_limits<float>::max())
         {
-            // skip Naive if another solver has been timed and solution took more than 50ns.
+            // skip Naive if another solver has been timed and solution took more than 5ms.
             if(using_search_cutoff && sol.solver_id.find("Naive") != std::string::npos &&
-               skip_time > 0.05f)
+               skip_time > 5.0f)
             {
                 MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
                                                        << sol.solver_id);
                 continue;
             }
-            skip_time *= env::value(MIOPEN_SEARCH_SKIP_PCT) / 100.0f;
+            skip_time *= env::value(MIOPEN_FIND_SKIP_PCT) / 100.0f;
         }
         MIOPEN_LOG_I("Evaluating Solver: " << algorithm_name.ToString() << ":" << sol.solver_id);
 
@@ -300,10 +300,12 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                 if(i > 0)
                 {
                     samples.push_back(handle.GetKernelTime());
-                    if(i == 1 && using_search_cutoff && samples.front() > skip_time)
+                    if(i == 1 && using_search_cutoff && samples.front() > 1.0f &&
+                       samples.front() > skip_time)
                     {
-                        MIOPEN_LOG_I("Skipping (Slow) Solver: " << algorithm_name.ToString() << ":"
-                                                                << sol.solver_id);
+                        MIOPEN_LOG_I("Skipping (Slow) Solver: "
+                                     << algorithm_name.ToString() << ":" << sol.solver_id << " "
+                                     << samples.front() << " > " << skip_time);
                         break;
                     }
                 }
@@ -328,13 +330,15 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
             MIOPEN_THROW_IF(elapsed <= 0, "Invalid elapsed time detected in EvaluateInvokers");
 
-            MIOPEN_LOG_I(sol << ": " << elapsed << (elapsed < best ? " < " : " >= ") << best);
+            MIOPEN_LOG_I("solution(current vs best):" << sol << ": " << elapsed
+                                                      << (elapsed < best ? " < " : " >= ") << best);
             if(elapsed < best)
             {
-                best                              = elapsed;
-                selected                          = sol;
-                best_invoker                      = invoker;
-                core_result.find_search_best_time = best;
+                best         = elapsed;
+                selected     = sol;
+                best_invoker = invoker;
+                if(best < core_result.find_search_best_time)
+                    core_result.find_search_best_time = best;
             }
 
             auto solution = Solution{solver::Id{sol.solver_id}, elapsed, sol.workspace_sz};
@@ -456,7 +460,8 @@ bool IsAlgorithmDisabled(miopenConvAlgorithm_t algo)
 bool IsEnoughWorkspace(std::string_view where,
                        const miopen::solver::Id& solver_id,
                        const std::size_t required_size,
-                       const miopen::AnyInvokeParams* const invokeParams)
+                       const miopen::AnyInvokeParams* const invokeParams,
+                       bool log_as_warning)
 {
     if(invokeParams != nullptr && required_size > 0)
     {
@@ -464,9 +469,14 @@ bool IsEnoughWorkspace(std::string_view where,
         const auto provided_ptr  = invokeParams->GetWorkspace();
         if(provided_ptr == nullptr || provided_size < required_size)
         {
-            MIOPEN_LOG_W("[" << where << "] Solver <" << solver_id.ToString() << ">"
-                             << ", workspace required: " << required_size
-                             << ", provided ptr: " << provided_ptr << " size: " << provided_size);
+            std::stringstream log;
+            log << "[" << where << "] Solver <" << solver_id.ToString() << ">"
+                << ", workspace required: " << required_size << ", provided ptr: " << provided_ptr
+                << " size: " << provided_size;
+            if(log_as_warning)
+                MIOPEN_LOG_W(log.str());
+            else
+                MIOPEN_LOG_I2(log.str());
             return false;
         }
     }

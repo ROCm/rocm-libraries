@@ -163,7 +163,7 @@ protected:
         kargs.append_size_t(N);
         kargs.append_ptr(device_data_ptr);
 
-        kernel.launch(kargs, dim3(numBlocks), dim3(blockSize), 0, deviceProp, stream);
+        kernel.get()->launch(kargs, dim3(numBlocks), dim3(blockSize), 0, deviceProp, stream);
 
         if(attach_halfN)
         {
@@ -201,7 +201,7 @@ protected:
         kargs.append_struct(radices_prod_device);
         kargs.append_struct(radices_sum_prod_device);
         kargs.append_ptr(output);
-        kernel.launch(
+        kernel.get()->launch(
             kargs, dim3(numBlocksX, numBlocksY), dim3(blockSize, blockSize), 0, deviceProp, stream);
     }
 
@@ -217,12 +217,12 @@ protected:
 
         auto numBlocks_N = DivRoundingUp<size_t>(N, blockSize);
 
-        kernel.launch(kargs,
-                      dim3(numBlocks_N, numBlocks_N),
-                      dim3(blockSize, blockSize, 1),
-                      0,
-                      deviceProp,
-                      stream);
+        kernel.get()->launch(kargs,
+                             dim3(numBlocks_N, numBlocks_N),
+                             dim3(blockSize, blockSize, 1),
+                             0,
+                             deviceProp,
+                             stream);
     }
 
     void launch_half_N_kernel(hipStream_t& stream, T* output, size_t half_N, size_t N)
@@ -238,7 +238,7 @@ protected:
 
         auto numBlocks_halfN = DivRoundingUp<size_t>(half_N, blockSize);
 
-        kernel.launch(kargs, dim3(numBlocks_halfN), dim3(blockSize), 0, deviceProp, stream);
+        kernel.get()->launch(kargs, dim3(numBlocks_halfN), dim3(blockSize), 0, deviceProp, stream);
     }
 
 public:
@@ -410,7 +410,7 @@ public:
         kargs.append_size_t(Y);
         kargs.append_ptr(output.data());
 
-        kernel.launch(
+        kernel.get()->launch(
             kargs, dim3(numBlocksX, numBlocksY), dim3(blockSize, blockSize), 0, deviceProp, stream);
     }
 };
@@ -438,7 +438,7 @@ protected:
         auto numBlocksX = DivRoundingUp<size_t>(N, blockSize);
         auto numBlocksY = DivRoundingUp<size_t>(N, blockSize);
 
-        kernel.launch(
+        kernel.get()->launch(
             kargs, dim3(numBlocksX, numBlocksY), dim3(blockSize, blockSize), 0, deviceProp, stream);
     }
 

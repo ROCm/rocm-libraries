@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -53,21 +30,21 @@ namespace rocRoller
 
             static void mapping(IO& io, AssemblyKernelArgument& arg)
             {
-                iot::mapRequired(io, ".name", arg.name);
-                iot::mapRequired(io, ".size", arg.size);
-                iot::mapRequired(io, ".offset", arg.offset);
+                iot::mapRequired(io, ".name", arg.m_name);
+                iot::mapRequired(io, ".size", arg.m_size);
+                iot::mapRequired(io, ".offset", arg.m_offset);
 
-                iot::mapOptional(io, ".expression", arg.expression);
-                iot::mapOptional(io, ".variableType", arg.variableType);
+                iot::mapOptional(io, ".expression", arg.m_expression);
+                iot::mapOptional(io, ".variableType", arg.m_variableType);
 
                 std::string valueKind = "by_value";
-                if(arg.variableType.isGlobalPointer())
+                if(arg.getVariableType().isGlobalPointer())
                 {
                     valueKind = "global_buffer";
 
                     std::string addressSpace = "global";
                     iot::mapRequired(io, ".address_space", addressSpace);
-                    iot::mapRequired(io, ".actual_access", arg.dataDirection);
+                    iot::mapRequired(io, ".actual_access", arg.m_dataDirection);
                 }
 
                 iot::mapRequired(io, ".value_kind", valueKind);
@@ -133,8 +110,14 @@ namespace rocRoller
                 iot::mapRequired(io, ".workgroup_size", workgroupSize);
                 if(not iot::outputting(io))
                 {
-                    AssertFatal(workgroupSize.size() == 3);
+                    AssertFatal(
+                        workgroupSize.size() == 3, "Expected 3, got ", workgroupSize.size());
                     kern.m_workgroupSize = {workgroupSize[0], workgroupSize[1], workgroupSize[2]};
+                    // The following fields are context-dependent and must be set here
+                    kern.m_sgprCount                = sgpr_count;
+                    kern.m_vgprCount                = vgpr_count;
+                    kern.m_agprCount                = agpr_count;
+                    kern.m_group_segment_fixed_size = group_segment_fixed_size;
                 }
                 iot::mapRequired(io, ".kernel_dimensions", kern.m_kernelDimensions);
                 iot::mapRequired(io, ".wavefront_size", kern.m_wavefrontSize);
@@ -195,7 +178,7 @@ namespace rocRoller
 
                 if(!iot::outputting(io))
                 {
-                    AssertFatal(hsa_version.size() == 2);
+                    AssertFatal(hsa_version.size() == 2, "Expected 2, got ", hsa_version.size());
                     // TODO: Set hsa_version from YAML input
                 }
             }

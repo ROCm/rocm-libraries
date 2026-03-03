@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,23 +31,10 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \addtogroup utilsmodule_functional
 /// @{
 
-/// \brief Prints the supplied error message only once (using only one of the active threads).
-/// \note Currently, this is not defined for Navi devices.
-#if ROCPRIM_NAVI
-ROCPRIM_PRAGMA_MESSAGE("GPU printf warnings for invalid rocPRIM warp operations on Navi GPUs "
-                       "temporarily disabled, due to performance issues with printf.")
-    #define ROCPRIM_PRINT_ERROR_ONCE(message) \
-        {}
-#else
-    #define ROCPRIM_PRINT_ERROR_ONCE(message)                           \
-        {                                                               \
-            unsigned int idx = threadIdx.x + (blockIdx.x * blockDim.x); \
-            idx += threadIdx.y + (blockIdx.y * blockDim.y);             \
-            idx += threadIdx.z + (blockIdx.z * blockDim.z);             \
-            if(idx == 0)                                                \
-                printf("%s\n", #message);                               \
-        }
-#endif
+/// \brief Unused macro.
+/// \deprecated Will be removed in ROCm 9.0
+#define ROCPRIM_PRINT_ERROR_ONCE(message) \
+    {}
 
 /// \brief Returns the maximum of its arguments.
 template<class T>
@@ -74,6 +61,47 @@ void swap(T& a, T& b)
     a = b;
     b = c;
 }
+
+namespace detail
+{
+
+enum class swap_method
+{
+    ternary  = 0,
+    branched = 1
+};
+
+/// \brief The ternary conditional swap and the branched conditional swap are optimized
+/// differently by the compiler, which can lead to performance variations. This internal API
+/// allows switching between these two swap implementations, enabling the selection of
+/// the most suitable one for a given algorithm.
+/// \tparam Method Enable or disable branched conditional swap
+/// \tparam T [inferred] the type of inputs
+template<swap_method Method, class T>
+ROCPRIM_HOST_DEVICE ROCPRIM_FORCE_INLINE
+void swap_if(bool cond, T& a, T& b)
+{
+    if constexpr(Method == rocprim::detail::swap_method::branched)
+    {
+        if(cond)
+        {
+            ::rocprim::swap(a, b);
+        }
+    }
+    else if constexpr(Method == rocprim::detail::swap_method::ternary)
+    {
+        T a_ = a;
+        T b_ = b;
+        a    = cond ? b_ : a_;
+        b    = cond ? a_ : b_;
+    }
+    else
+    {
+        static_assert(false, "This swap method is not supported yet");
+    }
+}
+
+} // namespace detail
 
 /// \brief Returns true if a < b. Otherwise returns false.
 template<class T = void>

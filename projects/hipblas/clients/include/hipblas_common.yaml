@@ -405,6 +405,33 @@ nrm2_ex precisions double: &nrm2_ex_precisions_double
   - *double_precision
   - *double_precision_complex_real_in_real_compute
 
+#############################################
+#               Used for syrk_ex            #
+#############################################
+syrk_ex precisions: &syrk_ex_precisions
+  - &half_out_precision_syrk_ex
+    { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f32_r, compute_type: f32_r }
+  - &bfloat_out_precision_syrk_ex
+    { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: f32_r, compute_type: f32_r }
+  - &half_precision_syrk_ex
+    { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: f32_r }
+  - &bfloat_precision_syrk_ex
+    { a_type: bf16_r, b_type: bf16_r, c_type: f32_r, d_type: f32_r, compute_type: f32_r }
+  - &float_precision_syrk_ex
+    { a_type: f32_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, compute_type: f64_r }
+  - &double_out_precision_syrk_ex
+    { a_type: f32_r, b_type: f32_r, c_type: f64_r, d_type: f32_r, compute_type: f64_r }
+
+#############################################
+#               Used for herk_ex            #
+#############################################
+herk_ex precisions: &herk_ex_precisions
+  - &float_precision_herk_ex
+    { a_type: f32_c, b_type: f32_c, c_type: f32_c, d_type: f32_c, compute_type: f64_c }
+  - &double_out_precision_herk_ex
+    { a_type: f32_c, b_type: f32_c, c_type: f64_c, d_type: f32_c, compute_type: f64_c }
+
+
 Definitions:
   - &c_pos_int64_t_value
    - [2147483649] # force looping over y/z chunks

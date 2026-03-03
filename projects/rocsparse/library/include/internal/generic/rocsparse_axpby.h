@@ -83,6 +83,9 @@ extern "C" {
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
 *  handle      handle to the rocsparse library context queue.
 *  @param[in]

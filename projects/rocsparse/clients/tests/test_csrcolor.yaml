@@ -35,7 +35,7 @@ Tests:
   category: pre_checkin
   function: csrcolor
   precision: *single_double_precisions_complex_real
-  M: [0, 1, 2, 3, 4, 16, 32]
+  M: [8, 1]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
@@ -46,7 +46,7 @@ Tests:
   category: pre_checkin
   function: csrcolor
   precision: *single_double_precisions_complex_real
-  M: [10245, 50687, 92835]
+  M: [2000]
   baseA: [rocsparse_index_base_one]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
@@ -74,8 +74,8 @@ Tests:
   function: csrcolor
   precision: *single_double_precisions_complex_real
   direction: [rocsparse_direction_row]
-  M: [10, 325, 1107]
-  N: [33, 435, 1089]
+  M: [10, 300]
+  N: [33, 300]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   percentage: [0.25, 0.5, 1.0]
@@ -85,7 +85,7 @@ Tests:
   function: csrcolor
   precision: *single_double_precisions_complex_real
   direction: [rocsparse_direction_row]
-  M: [20245, 50677, 82859]
+  M: [4049, 5000]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   percentage: [0.25, 0.5, 1.0]

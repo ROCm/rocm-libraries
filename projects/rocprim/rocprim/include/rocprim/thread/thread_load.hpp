@@ -85,14 +85,14 @@ T asm_thread_load(void* ptr)
         ROCPRIM_DEVICE ROCPRIM_INLINE type asm_thread_load<cache_modifier, type>(void* ptr) \
         {                                                                                   \
             interim_type retval;                                                            \
-            if ROCPRIM_AMDGCN_CONSTEXPR(IS_RDNA4())                                         \
+            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_RDNA4())                                 \
             {                                                                               \
                 asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"      \
                                            "s_wait_loadcnt_dscnt(%2)"                       \
                              : "=&v"(retval)                                                \
                              : "v"(ptr), "I"(0x00));                                        \
             }                                                                               \
-            else if ROCPRIM_AMDGCN_CONSTEXPR(IS_CDNA3())                                    \
+            else if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())                            \
             {                                                                               \
                 asm volatile(#asm_operator " %0, %1 sc0 nt\n\t"                             \
                                            "s_waitcnt(%2)"                                  \

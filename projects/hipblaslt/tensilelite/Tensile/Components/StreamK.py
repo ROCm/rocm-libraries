@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,7 @@ from rocisa.container import vgpr, sgpr, SMEMModifiers, MUBUFModifiers, replaceH
 from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SCmpGeU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
-    SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
+    SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCvtBF16toFP32, BufferStoreB32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
@@ -322,16 +322,30 @@ class StreamK(Component):
             loopChar = writer.states.indexChars[kernel["ProblemType"]["IndicesSummation"][unrollIdx]]
 
             assert kernel["DepthU"] % 2 == 0 # Assuming DepthU is power of 2, if odd DepthU were supported this divide would need 2 more temp registers for divide
-            if ((kernel["DepthU"] & (kernel["DepthU"] - 1)) == 0):
-                module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=None, doRemainder=2))
-            else:
-                with writer.allocTmpSgpr(4) as tmpSgpr1:
-                    module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=tmpSgpr1, doRemainder=2))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
-            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=1, comment="check if size uses tail loop"))
-            module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
-            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="this WG runs tail loop"))
-            module.add(SSubU32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), src1=sgpr(tmpSgpr), comment="Adjust loop counter for tail loop"))
+            maxUnit = writer.states.tailloopInNllmaxUnit
+            # tailloopInNll + maxUnit == 1 case, tailloopInNll is always used and no need to adjust loopCounter
+            if not (writer.states.tailloopInNll and maxUnit == 1):
+                if ((kernel["DepthU"] & (kernel["DepthU"] - 1)) == 0):
+                    module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=None, doRemainder=2))
+                else:
+                    with writer.allocTmpSgpr(4) as tmpSgpr1:
+                        module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=tmpSgpr1, doRemainder=2))
+                module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
+                module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=1, comment="check if size uses tail loop"))
+                module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
+                module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="this WG runs tail loop"))
+
+                if writer.states.tailloopInNll and maxUnit > 1:
+                    # tailloopInNll + maxUnit > 1 case, we need to check if SizesSum is multiple of maxUnit at runtime.
+                    # if SizesSum is not multiple of maxUnit, we do not use tailloopInNll and need to decrement loopCounter for StreamK
+                    # if SizesSum is multiple of maxUnit, we  use tailloopInNll and need to increment loopCounter by 1.
+                    # With considering both increment and decrement, we do not need to adjust loopCounter.
+                    module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("SizesSum+%u" % unrollIdx), src1=maxUnit-1, \
+                                       comment="if summation is not multiple of %u, skip tailloopInNll"%maxUnit))
+                    module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="do not decrement in tailloopInNll case"))
+
+                module.add(SSubU32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), src1=sgpr(tmpSgpr), comment="Adjust loop counter for tail loop"))
+                module.add(SMaxI32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), src1=0, comment="Avoid setting negative value to loopCounter"))
 
         return module
 
@@ -1729,12 +1743,6 @@ class StreamKOff(StreamK):
 
     def graWorkGroup(self, writer, kernel, tPA, tPB):
         module = Module("StreamK Off graWorkGroup")
-
-        if writer.states.archCaps["WorkGroupIdFromTTM"]:
-            module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
-            module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
-            module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
-
         return module
 
     def computeLoadSrd(self, writer, kernel, tc, sTmp):
@@ -1769,12 +1777,36 @@ class StreamKOff(StreamK):
         dividend = "SizesSum+%u" % loopIdx #sumSize = self.sumSize(kernel, loopIdx)
         divisor = kernel["DepthU"]
 
-        if kernel["NoTailLoop"] and kernel["AssertSummationElementMultiple"] % kernel["DepthU"] != 0:
-            # round up SizesSum/DepthU for noTailLoop case
-            module.add(SAddI32(dst=sgpr(quotient), src0=(divisor - 1), src1=sgpr(dividend), comment="round up SizeSum / DepthU" ))
-            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=quotient, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
-        else:
-            module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
+        module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
+        if writer.states.tailloopInNll:
+            maxUnit = writer.states.tailloopInNllmaxUnit
+            sgprSizesSum = sgpr("SizesSum+%u" % writer.states.unrollIdx)
+            depthU = kernel["DepthU"]
+            tmpSgpr = tmpSgprInfo.idx
+            assert (depthU > 1 and (depthU & (depthU - 1) == 0)), "DepthU should be power of 2 with tailloopInNll"
+            # We need to increment loop counter by 1 if we use tailloopInNll code
+            # We do not use tailloopInNll code if
+            #   summation is multiple of depthU, or
+            #   maxUnit > 1 and summation is not multiple of maxUnit
+            module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgprSizesSum, src1=depthU-1, \
+                               comment="tailloopInNll: check if summation is multiple of DepthU(%u)"%depthU))
+            module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=1, src1=0, \
+                                   comment="tailloopInNll: select loopcounter increment value (0 if summation is multiple of DepthU else 1"))
+            if maxUnit > 1:
+                # maxUnit > 1 case, check if summation is multiple of maxUnit or not
+                # if summation is multiple of maxUnit or not, tailloopInNll is used and increment loopCounter
+                module.add(SAndB32(dst=sgpr(tmpSgpr+1), src0=sgprSizesSum, src1=maxUnit-1, \
+                                   comment="if summation is multiple of %u, use tailloopInNll"%maxUnit))
+                module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=sgpr(tmpSgpr), \
+                                       comment="select loopcounter (0 if summation is multiple of %u)"%maxUnit))
+            if kernel["GlobalSplitU"] != 0:
+                # skip tailloopInNll code if GSU>1
+                module.add(SAndB32(dst=sgpr(tmpSgpr+1), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
+                module.add(SCmpGtU32(src0=sgpr(tmpSgpr+1), src1=1, comment="GSU > 1 ?"))
+                module.add(SCMovB32(dst=sgpr(tmpSgpr), src=0, comment="do not increment loopcounter if GSU > 1"))
+            module.add(SAddU32(dst=sgpr(loopCounterName), src0=sgpr(loopCounterName), \
+                               src1=sgpr(tmpSgpr), comment="increment loopcounter for tailloopInNll" ))
+
 
         return module
 

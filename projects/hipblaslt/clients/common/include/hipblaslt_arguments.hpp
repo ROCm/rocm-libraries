@@ -52,10 +52,11 @@ struct Arguments
 {
     enum ScalingFormat
     {
-        None   = 0,
-        Scalar = 1,
-        Vector = 2,
-        Block  = 3
+        None                    = 0,
+        Scalar                  = 1,
+        Vector                  = 2,
+        Block_32_UE8M0          = 3,
+        Block_32_UE8M0_32_8_EXT = 1001,
     };
 
     /*************************************************************************
@@ -158,11 +159,6 @@ struct Arguments
     bool                     swizzle_a;
     bool                     swizzle_b;
     bool                     dump_matrix;
-
-    uint32_t scaleABlockRowSize;
-    uint32_t scaleABlockColSize;
-    uint32_t scaleBBlockRowSize;
-    uint32_t scaleBBlockColSize;
 
     // API related
     bool    use_ext;
@@ -268,10 +264,6 @@ struct Arguments
     OPER(swizzle_a) SEP              \
     OPER(swizzle_b) SEP              \
     OPER(dump_matrix) SEP            \
-    OPER(scaleABlockRowSize) SEP     \
-    OPER(scaleABlockColSize) SEP     \
-    OPER(scaleBBlockRowSize) SEP     \
-    OPER(scaleBBlockColSize) SEP     \
     OPER(use_ext) SEP                \
     OPER(use_ext_setproblem) SEP     \
     OPER(algo_method) SEP            \
@@ -868,7 +860,7 @@ namespace ArgumentsHelper
             func("beta", arg.get_beta<decltype(T)>());
         };
 };
-    // clang-format on
+// clang-format on
 
 #else
 #error "Unsupported C++ version"

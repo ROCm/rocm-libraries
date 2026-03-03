@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,6 +51,9 @@ try
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(2, y, (y->data_type != x->data_type), rocsparse_status_not_implemented);
 
+    ROCSPARSE_CHECKARG(1, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, y, (y->batch_count != 1), rocsparse_status_not_implemented);
+
     rocsparse_status sctr(rocsparse_handle     handle,
                           int64_t              nnz,
                           rocsparse_datatype   x_datatype,
@@ -72,6 +75,7 @@ try
                                               x->idx_base));
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {

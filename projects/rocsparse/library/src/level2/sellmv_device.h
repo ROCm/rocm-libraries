@@ -84,10 +84,7 @@ namespace rocsparse
         {
             if(tidy < level && tidy + level < THREADS_PER_ROW)
             {
-                if(tidy < level && tidy + level < THREADS_PER_ROW)
-                {
-                    shared[idx] = shared[idx] + shared[idx + sell_slice_size * level];
-                }
+                shared[idx] = shared[idx] + shared[idx + sell_slice_size * level];
             }
             __syncthreads();
         }
@@ -218,7 +215,7 @@ namespace rocsparse
                     val = rocsparse::conj(val);
                 }
 
-                rocsparse::atomic_add(&y[col], static_cast<T>(val) * row_val);
+                rocsparse::atomic_add(y, col, n, static_cast<T>(val) * row_val);
             }
         }
     }
@@ -276,7 +273,7 @@ namespace rocsparse
                         val = rocsparse::conj(val);
                     }
 
-                    rocsparse::atomic_add(&y[col], static_cast<T>(val) * row_val);
+                    rocsparse::atomic_add(y, col, n, static_cast<T>(val) * row_val);
                 }
             }
         }

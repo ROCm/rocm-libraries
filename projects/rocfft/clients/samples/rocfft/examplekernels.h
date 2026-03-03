@@ -126,7 +126,7 @@ Tint1 ceildiv(const Tint1 nominator, const Tint2 denominator)
     return (nominator + denominator - 1) / denominator;
 }
 
-// The following functions call the above kernels to initalize the input data for the transform.
+// The following functions call the above kernels to initialize the input data for the transform.
 
 void initcomplex_cm(const std::vector<size_t>& length_cm,
                     const std::vector<size_t>& stride_cm,

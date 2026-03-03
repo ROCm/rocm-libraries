@@ -207,7 +207,7 @@ int main(int argc, char* argv[])
         0, // input batch distance
         ostride.size(), // output stride length
         ostride.data(), // output stride data
-        0); // ouptut batch distance
+        0); // output batch distance
     if(rc != rocfft_status_success)
         throw std::runtime_error("failed to set data layout");
 

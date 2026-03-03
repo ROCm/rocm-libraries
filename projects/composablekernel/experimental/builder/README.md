@@ -2,29 +2,31 @@
 
 This directory contains the experimental builder feature for composable_kernel.
 
-* Status: In development (October - December 2025)
+* Status: In development (October 2025 - March 2026)
 
 ## Overview
 
 The builder provides a high-level, semantically-clear interface for constructing composable kernel operations, with an initial focus on convolution kernels for MIOpen. It leverages modern C++20 features (such as POD structs as non-type template parameters, concepts, and designated initializers) to simplify kernel instantiation and improve developer experience.
 
-This project is a prototype for a more general builder pattern for all of composable_kernel (CK) and CKTile, but is currently limited to formalizing the interface between MIOpen and CK.
+This project is a prototype for a more general builder pattern for all of composable_kernel (CK) and CK Tile, but is currently limited to formalizing the interface between MIOpen and CK.
 
 ## Design descriptions
 
-- [CK Builder design description](include/ck_tile/builder/README.md) 
+- [CK Builder design description](include/ck_tile/builder/README.md)
+- [CK Builder factory design](include/ck_tile/builder/factory/README.md)
+- [CK Builder testing design](include/ck_tile/builder/testing/README.md)
 
 ## Directory Structure
 
-- `include/ck_tile/builder/`  
+- `include/ck_tile/builder/`
   Core builder headers and public API.
 - `include/ck_tile/builder/reflect`
   Reflection mechanism.
 - `include/ck_tile/builder/factory`
   Compile-time dispatch from builder descriptors to our exisitng specialized convolution kernel implementations.
-- `test/`  
+- `test/`
   Unit tests and example usage of the builder pattern.
-- `CMakeLists.txt`  
+- `CMakeLists.txt`
   CMake configuration for building the experimental builder and its tests.
 
 ## CMake Configuration
@@ -42,6 +44,11 @@ cmake                                                                           
   -G Ninja                                                                                        \
   ..
 ```
+
+Note: The tests for WMMA builders are only built when `CK_USE_WMMA` is enabled. Add e.g. 
+`gfx1121` or any of the other `gfx11`/`gfx12` architectures to the GPU targets. Alternatively, 
+one can add flag `-D CK_USE_WMMA=ON` to build the tests. For the end-to-end tests that use 
+the instances from builder, one needs an actual Navi card.
 
 ## Building and Testing
 

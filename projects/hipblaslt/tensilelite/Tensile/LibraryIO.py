@@ -66,6 +66,12 @@ except ImportError:
     printWarning("CSafeLoader not installed. Fallback to SafeLoader.")
 
 try:
+    from yaml import CSafeDumper as yamlDumper
+except ImportError:
+    from yaml import SafeDumper as yamlDumper
+    printWarning("CSafeDumper not installed. Fallback to SafeDumper.")
+
+try:
     import msgpack
 except ImportError:
     print("Message pack python library not detected. Must use YAML backend instead.")
@@ -97,7 +103,7 @@ def writeYAML(filename, data, **kwargs):
         kwargs["default_flow_style"] = None
 
     with open(filename, "w") as f:
-        yaml.dump(data, f, **kwargs)
+        yaml.dump(data, f, Dumper=yamlDumper, **kwargs)
 
 def writeJson(filename, data):
     """Writes data to file in json format."""
@@ -148,7 +154,7 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
             f.write("- ActivationArgs:\n")
             for setting in activationArgs.settingList:
                 f.write("  - [Enum: %s]\n"%(setting.activationEnum))
-        yaml.dump(solutionStates, f, default_flow_style=None)
+        yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
 
 
 ###############################
@@ -437,12 +443,21 @@ def getCUCount() -> int:
     """Return the number of CU Count in current Hardware."""
     CU = os.environ.get("CU", None)
     if CU is None:
-        res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={"ROCR_VISIBLE_DEVICES":"0"})
-        CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
-        match = re.search(CU_RE, res.stdout.decode("utf-8").split('\n')[-2])
-        if match:
-            CU = int(match.group('COMPUTE_UNIT').strip())
-    return CU
+        try:
+            res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={**os.environ, "ROCR_VISIBLE_DEVICES": "0"})
+            CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
+            lines = res.stdout.decode("utf-8").strip().split('\n')
+            if lines:
+                match = re.search(CU_RE, lines[-1])
+                if match:
+                    CU = int(match.group('COMPUTE_UNIT').strip())
+        except Exception:
+            pass
+
+    if CU is None:
+        printExit("Failed to get Compute Unit count from rocminfo or env variable 'CU'")
+
+    return int(CU)
 
 def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryType, logicTuple):
     """Creates the data for a library logic file suitable for writing to YAML."""

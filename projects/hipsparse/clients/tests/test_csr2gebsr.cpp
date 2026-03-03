@@ -32,4 +32,5 @@ TEST_ROUTINE(csr2gebsr,
              arg.col_block_dimA,
              arg.baseA,
              arg.baseB,
-             arg.dirA);
+             arg.dirA,
+             arg.graph_test);

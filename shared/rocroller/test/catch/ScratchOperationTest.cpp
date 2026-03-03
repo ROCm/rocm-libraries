@@ -1,29 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
+#include <rocRoller/Context.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Operations.hpp>
 #include <rocRoller/Operations/Scratch.hpp>
@@ -32,6 +12,9 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
+#include "TestContext.hpp"
+
+#include <set>
 #include <sstream>
 
 using namespace rocRoller;
@@ -224,6 +207,101 @@ namespace ScratchOperationTest
             CHECK(scratch1 != scratch2);
             CHECK(scratchOpTag1.uninitialized() == false);
             CHECK(scratchOpTag2.uninitialized() == false);
+        }
+    }
+
+    TEST_CASE("Scratch allocator per policy", "[scratch][context]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        SECTION("Context initializes all policies to zero")
+        {
+            for(size_t i = 0; i < static_cast<size_t>(ScratchPolicy::Count); ++i)
+            {
+                auto policy = static_cast<ScratchPolicy>(i);
+                auto amount = context->getScratchAmount(policy);
+                auto value  = rocRoller::Expression::evaluate(amount);
+                CHECK(rocRoller::getUnsignedInt(value) == 0);
+            }
+        }
+
+        SECTION("allocateScratch returns offset before allocation and accumulates size")
+        {
+            auto size1 = rocRoller::Expression::literal(100u);
+            auto size2 = rocRoller::Expression::literal(200u);
+
+            auto offset1 = context->allocateScratch(ScratchPolicy::None, size1);
+            auto offset2 = context->allocateScratch(ScratchPolicy::None, size2);
+
+            // First allocation should return offset 0
+            CHECK(rocRoller::getUnsignedInt(rocRoller::Expression::evaluate(offset1)) == 0);
+            // Second allocation should return offset 100 (after first allocation)
+            CHECK(rocRoller::getUnsignedInt(rocRoller::Expression::evaluate(offset2)) == 100);
+
+            // Total should now be 300
+            auto amount = context->getScratchAmount(ScratchPolicy::None);
+            auto value  = rocRoller::Expression::evaluate(amount);
+            CHECK(rocRoller::getUnsignedInt(value) == 300);
+        }
+
+        SECTION("allocateScratch returns correct offset per policy")
+        {
+            auto size   = rocRoller::Expression::literal(500u);
+            auto offset = context->allocateScratch(ScratchPolicy::ZeroedBeforeAndAfter, size);
+
+            // First allocation should return offset 0
+            CHECK(rocRoller::getUnsignedInt(rocRoller::Expression::evaluate(offset)) == 0);
+
+            // Query total should now be 500
+            auto amount = context->getScratchAmount(ScratchPolicy::ZeroedBeforeAndAfter);
+            auto value  = rocRoller::Expression::evaluate(amount);
+            CHECK(rocRoller::getUnsignedInt(value) == 500);
+        }
+
+        SECTION("Different policies have independent allocations")
+        {
+            auto sizeNone   = rocRoller::Expression::literal(100u);
+            auto sizeZeroed = rocRoller::Expression::literal(200u);
+
+            context->allocateScratch(ScratchPolicy::None, sizeNone);
+            context->allocateScratch(ScratchPolicy::ZeroedBeforeAndAfter, sizeZeroed);
+
+            auto amountNone   = context->getScratchAmount(ScratchPolicy::None);
+            auto amountZeroed = context->getScratchAmount(ScratchPolicy::ZeroedBeforeAndAfter);
+
+            auto valueNone   = rocRoller::Expression::evaluate(amountNone);
+            auto valueZeroed = rocRoller::Expression::evaluate(amountZeroed);
+
+            CHECK(rocRoller::getUnsignedInt(valueNone) == 100);
+            CHECK(rocRoller::getUnsignedInt(valueZeroed) == 200);
+        }
+    }
+
+    TEST_CASE("Utilities to get scratch policy name", "[scratch][utils]")
+    {
+        SECTION("Returns correct name for None policy")
+        {
+            auto name = rocRoller::getScratchName(ScratchPolicy::None);
+            CHECK(name == "SCRATCH_None");
+        }
+
+        SECTION("Returns correct name for ZeroedBeforeAndAfter policy")
+        {
+            auto name = rocRoller::getScratchName(ScratchPolicy::ZeroedBeforeAndAfter);
+            CHECK(name == "SCRATCH_ZeroedBeforeAndAfter");
+        }
+
+        SECTION("All policies have unique names")
+        {
+            std::set<std::string> names;
+            for(size_t i = 0; i < static_cast<size_t>(ScratchPolicy::Count); ++i)
+            {
+                auto policy = static_cast<ScratchPolicy>(i);
+                auto name   = rocRoller::getScratchName(policy);
+                CHECK(names.find(name) == names.end());
+                names.insert(name);
+            }
+            CHECK(names.size() == static_cast<size_t>(ScratchPolicy::Count));
         }
     }
 }

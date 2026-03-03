@@ -411,7 +411,7 @@ void testing_gbmv_batched(const Arguments& arg)
     size_t abs_incx = incx >= 0 ? incx : -incx;
     size_t abs_incy = incy >= 0 ? incy : -incy;
 
-    double hipblas_error_host, hipblas_error_device;
+    double hipblas_error_host{0}, hipblas_error_device{0};
 
     T h_alpha = arg.get_alpha<T>();
     T h_beta  = arg.get_beta<T>();
@@ -525,7 +525,7 @@ void testing_gbmv_batched(const Arguments& arg)
 
     if(arg.timing)
     {
-        double gpu_time_used;
+        double gpu_time_used{0};
         CHECK_HIP_ERROR(dy.transfer_from(hy));
         hipStream_t stream;
         CHECK_HIPBLAS_ERROR(hipblasGetStream(handle, &stream));

@@ -267,6 +267,7 @@ static std::string rocblas_capture_args(int argc, char** argv, std::string& filt
             rocblas_cout << "info: " << warning << filter_str << "\n" << std::endl;
         }
     }
+
     return cmdLine.str();
 }
 

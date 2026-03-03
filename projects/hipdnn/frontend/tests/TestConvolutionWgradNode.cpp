@@ -4,9 +4,18 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
+
+#include "fake_backend/MockHipdnnBackend.hpp"
+
+#include <gmock/gmock.h>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
+using namespace ::testing;
 
 TEST(TestConvolutionWgradNode, PreValidateNode)
 {
@@ -403,11 +412,11 @@ TEST(TestConvolutionWgradNode, PackNode)
 
     builder.Finish(offset);
     auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Node>(bufferPointer);
+    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
 
     EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "ConvolutionWgrad");
     EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes);
+              hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes);
 
     auto packedAttributes = nodeFlatbuffer->attributes_as_ConvolutionWrwAttributes();
     ASSERT_NE(packedAttributes, nullptr);
@@ -432,7 +441,8 @@ TEST(TestConvolutionWgradNode, PackNode)
     EXPECT_EQ(packedAttributes->dilation()->Get(0), 1);
     EXPECT_EQ(packedAttributes->dilation()->Get(1), 1);
 
-    EXPECT_EQ(packedAttributes->conv_mode(), hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    EXPECT_EQ(packedAttributes->conv_mode(),
+              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
 }
 
 TEST(TestConvolutionWgradNode, GatherHipdnnTensor)
@@ -1762,4 +1772,278 @@ TEST(TestConvolutionWgradNode, InferPropertiesStrideDimensionMismatch)
 
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestConvolutionWgradNode, InferPropertiesWithDroppedPixelsAndDilation)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 32, 16, 16});
+    xTensor->set_stride({8192, 256, 16, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 4, 5, 5});
+    dyTensor->set_stride({100, 25, 5, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({2, 2});
+    convAttributes.set_dilation({3, 3});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+
+    auto inferredDims = dwTensor->get_dim();
+    EXPECT_EQ(inferredDims.size(), 4);
+    EXPECT_EQ(inferredDims[0], 4); // Output channels
+    EXPECT_EQ(inferredDims[1], 32); // Input channels
+    EXPECT_EQ(inferredDims[2], 3);
+    EXPECT_EQ(inferredDims[3], 3);
+}
+
+TEST(TestConvolutionWgradNode, InferPropertiesIncompatibleStrideDilationCombination)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    // xSize = 5
+    xTensor->set_dim({1, 1, 5, 5});
+    xTensor->set_stride({25, 25, 5, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    // dySize = 2
+    dyTensor->set_dim({1, 1, 2, 2});
+    dyTensor->set_stride({4, 4, 2, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({2, 2});
+    convAttributes.set_dilation({3, 3});
+
+    // numerator = 5 + 0 + 0 - (2 * (2 - 1)) - 1 = 2
+    // remainder = 2 % 3 = 2
+    // remainder (2) >= stride (2) -> Error because dropped pixels cannot exceed stride
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeInvalidSpatialDimensions)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    xTensor->set_stride({3072, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 30, 30}); // Incorrect dy size (should be 32x32)
+    dyTensor->set_stride({57600, 900, 30, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3});
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeWithDroppedPixels)
+{
+    ConvWgradAttributes convAttributes;
+
+    // For each spatial dim Index (0, 1, 2) & (2, 3, 4) are the two 3x3 kernels
+    // applied with stride 2 on 6x6 dx 5th is dropped / unused due to stride
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 6, 6}); // Input 6x6
+    xTensor->set_stride({108, 36, 6, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 2, 2}); // Output 2x2
+    dyTensor->set_stride({256, 4, 2, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3}); // Kernel 3x3
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({2, 2});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+TEST(TestConvolutionWgradNode, PreValidateNodeInputTooSmall)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 2, 2}); // Input smaller than kernel
+    xTensor->set_stride({12, 4, 2, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 1, 1});
+    dyTensor->set_stride({64, 1, 1, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3}); // Kernel 3x3
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({0, 0});
+    convAttributes.set_post_padding({0, 0});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    GraphAttributes graphAttributes;
+    ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+// =============================================================================
+// create_operation() Tests
+// =============================================================================
+
+class TestConvolutionWgradNodeCreateOperation : public ::testing::Test
+{
+protected:
+    std::shared_ptr<Mock_hipdnn_backend> _mockBackend;
+
+    void SetUp() override
+    {
+        _mockBackend = std::make_shared<Mock_hipdnn_backend>();
+        detail::IHipdnnBackend::setInstance(_mockBackend);
+    }
+    void TearDown() override
+    {
+        detail::IHipdnnBackend::resetInstance();
+        _mockBackend.reset();
+    }
+
+    static ConvolutionWgradNode makeConvWgradNode()
+    {
+        ConvWgradAttributes attrs;
+        auto x = std::make_shared<TensorAttributes>();
+        x->set_uid(K_TENSOR_X_UID)
+            .set_name("X")
+            .set_data_type(DataType::FLOAT)
+            .set_dim(toVec(K_TENSOR_X_DIMS))
+            .set_stride(toVec(K_TENSOR_X_STRIDES));
+        auto dy = std::make_shared<TensorAttributes>();
+        dy->set_uid(K_TENSOR_Y_UID)
+            .set_name("DY")
+            .set_data_type(DataType::FLOAT)
+            .set_dim(toVec(K_TENSOR_Y_DIMS))
+            .set_stride(toVec(K_TENSOR_Y_STRIDES));
+        auto dw = std::make_shared<TensorAttributes>();
+        dw->set_uid(K_TENSOR_W_UID)
+            .set_name("DW")
+            .set_data_type(DataType::FLOAT)
+            .set_dim(toVec(K_TENSOR_W_DIMS))
+            .set_stride(toVec(K_TENSOR_W_STRIDES));
+
+        attrs.set_x(x);
+        attrs.set_dy(dy);
+        attrs.set_dw(dw);
+        attrs.set_pre_padding(toVec(K_CONV_PADDING));
+        attrs.set_post_padding(toVec(K_CONV_PADDING));
+        attrs.set_stride(toVec(K_CONV_STRIDE));
+        attrs.set_dilation(toVec(K_CONV_DILATION));
+        attrs.compute_data_type = DataType::FLOAT;
+
+        GraphAttributes graphAttrs;
+        return {std::move(attrs), graphAttrs};
+    }
+};
+
+TEST_F(TestConvolutionWgradNodeCreateOperation, PropagatesBackendError)
+{
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(
+        *_mockBackend,
+        backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto node = makeConvWgradNode();
+    std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+
+    auto err = node.create_operation(tensorDescs, operations);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestConvolutionWgradNodeCreateOperation, SuccessCreatesThreeTensorsAndOneOperation)
+{
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, _))
+        .Times(3)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(
+        *_mockBackend,
+        backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(_))
+        .Times(4)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto node = makeConvWgradNode();
+    std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+
+    auto err = node.create_operation(tensorDescs, operations);
+    EXPECT_TRUE(err.is_good()) << err.err_msg;
+    EXPECT_EQ(tensorDescs.size(), 3u);
+    EXPECT_EQ(operations.size(), 1u);
 }

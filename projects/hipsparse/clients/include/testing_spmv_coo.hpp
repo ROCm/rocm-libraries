@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -149,7 +149,7 @@ void testing_spmv_coo_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spmv_coo(Arguments argus)
+void testing_spmv_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -179,11 +179,11 @@ hipsparseStatus_t testing_spmv_coo(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base));
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hval, hval.size(), 1);
 
     std::vector<I> hrow_ind(nnz);
 
@@ -273,20 +273,16 @@ hipsparseStatus_t testing_spmv_coo(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
         // Host SpMV
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, 1024)
-#endif
-        for(I i = 0; i < m; ++i)
-        {
-            hy_gold[i] = testing_mult(h_beta, hy_gold[i]);
-        }
-
-        for(I i = 0; i < nnz; ++i)
-        {
-            hy_gold[hrow_ind[i] - idx_base] = testing_fma(testing_mult(h_alpha, hval[i]),
-                                                          hx[hcol_ind[i] - idx_base],
-                                                          hy_gold[hrow_ind[i] - idx_base]);
-        }
+        host_coomv(m,
+                   nnz,
+                   h_alpha,
+                   hrow_ind.data(),
+                   hcol_ind.data(),
+                   hval.data(),
+                   hx.data(),
+                   h_beta,
+                   hy_gold.data(),
+                   idx_base);
 
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
@@ -351,8 +347,6 @@ hipsparseStatus_t testing_spmv_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMV_COO_HPP

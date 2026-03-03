@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,8 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef TESTING_SPMV_SELL_HPP
-#define TESTING_SPMV_SELL_HPP
+#ifndef TESTING_SPMV_CSR_HPP
+#define TESTING_SPMV_CSR_HPP
 
 #include "display.hpp"
 #include "flops.hpp"
@@ -173,7 +173,7 @@ void testing_spmv_csr_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_spmv_csr(Arguments argus)
+void testing_spmv_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -204,19 +204,24 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcol_ind, hval, idx_base));
 
-    std::vector<T> hx(n);
-    std::vector<T> hy_1(m);
-    std::vector<T> hy_2(m);
-    std::vector<T> hy_gold(m);
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hval, hval.size(), 1);
 
-    hipsparseInit<T>(hx, 1, n);
-    hipsparseInit<T>(hy_1, 1, m);
+    // For non-transpose: y(m) = alpha * A(m x n) * x(n) + beta * y(m)
+    // For transpose/conj-transpose: y(n) = alpha * A^T/A^H(n x m) * x(m) + beta * y(n)
+    J x_size = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? n : m;
+    J y_size = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : n;
+
+    std::vector<T> hx(x_size);
+    std::vector<T> hy_1(y_size);
+    std::vector<T> hy_2(y_size);
+    std::vector<T> hy_gold(y_size);
+
+    hipsparseInit<T>(hx, 1, x_size);
+    hipsparseInit<T>(hy_1, 1, y_size);
 
     // copy vector is easy in STL; hy_gold = hx: save a copy in hy_gold which will be output of CPU
     hy_2    = hy_1;
@@ -226,9 +231,9 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
     auto dptr_managed    = hipsparse_unique_ptr{device_malloc(sizeof(I) * (m + 1)), device_free};
     auto dcol_managed    = hipsparse_unique_ptr{device_malloc(sizeof(J) * nnz), device_free};
     auto dval_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * nnz), device_free};
-    auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * n), device_free};
-    auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
-    auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * m), device_free};
+    auto dx_managed      = hipsparse_unique_ptr{device_malloc(sizeof(T) * x_size), device_free};
+    auto dy_1_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * y_size), device_free};
+    auto dy_2_managed    = hipsparse_unique_ptr{device_malloc(sizeof(T) * y_size), device_free};
     auto d_alpha_managed = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
     auto d_beta_managed  = hipsparse_unique_ptr{device_malloc(sizeof(T)), device_free};
 
@@ -246,9 +251,9 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
         hipMemcpy(dptr, hcsr_row_ptr.data(), sizeof(I) * (m + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcol, hcol_ind.data(), sizeof(J) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * n, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * m, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * m, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dx, hx.data(), sizeof(T) * x_size, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_1, hy_1.data(), sizeof(T) * y_size, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dy_2, hy_2.data(), sizeof(T) * y_size, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
@@ -259,9 +264,9 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
 
     // Create dense vectors
     hipsparseDnVecDescr_t x, y1, y2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, n, dx, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, x_size, dx, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, y_size, dy_1, typeT));
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, y_size, dy_2, typeT));
 
     // Query SpMV buffer
     size_t bufferSize;
@@ -288,86 +293,25 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
             hipsparseSpMV(handle, transA, d_alpha, A, x, d_beta, y2, typeT, alg, buffer));
 
         // copy output from device to CPU
-        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * y_size, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * y_size, hipMemcpyDeviceToHost));
 
-        // Query for warpSize
-        hipDeviceProp_t prop;
-        CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
+        // Host SpMV
+        host_csrmv(transA,
+                   m,
+                   n,
+                   nnz,
+                   h_alpha,
+                   hcsr_row_ptr.data(),
+                   hcol_ind.data(),
+                   hval.data(),
+                   hx.data(),
+                   h_beta,
+                   hy_gold.data(),
+                   idx_base);
 
-        int WF_SIZE;
-        I   nnz_per_row = nnz / m;
-
-        if(prop.warpSize == 32)
-        {
-            if(nnz_per_row < 4)
-                WF_SIZE = 2;
-            else if(nnz_per_row < 8)
-                WF_SIZE = 4;
-            else if(nnz_per_row < 16)
-                WF_SIZE = 8;
-            else if(nnz_per_row < 32)
-                WF_SIZE = 16;
-            else
-                WF_SIZE = 32;
-        }
-        else if(prop.warpSize == 64)
-        {
-            if(nnz_per_row < 4)
-                WF_SIZE = 2;
-            else if(nnz_per_row < 8)
-                WF_SIZE = 4;
-            else if(nnz_per_row < 16)
-                WF_SIZE = 8;
-            else if(nnz_per_row < 32)
-                WF_SIZE = 16;
-            else if(nnz_per_row < 64)
-                WF_SIZE = 32;
-            else
-                WF_SIZE = 64;
-        }
-        else
-        {
-            return HIPSPARSE_STATUS_INTERNAL_ERROR;
-        }
-
-        for(J i = 0; i < m; ++i)
-        {
-            std::vector<T> sum(WF_SIZE, make_DataType<T>(0.0));
-
-            for(I j = hcsr_row_ptr[i] - idx_base; j < hcsr_row_ptr[i + 1] - idx_base; j += WF_SIZE)
-            {
-                for(int k = 0; k < WF_SIZE; ++k)
-                {
-                    if(j + k < hcsr_row_ptr[i + 1] - idx_base)
-                    {
-                        sum[k] = testing_fma(testing_mult(h_alpha, hval[j + k]),
-                                             hx[hcol_ind[j + k] - idx_base],
-                                             sum[k]);
-                    }
-                }
-            }
-
-            for(int j = 1; j < WF_SIZE; j <<= 1)
-            {
-                for(int k = 0; k < WF_SIZE - j; ++k)
-                {
-                    sum[k] = sum[k] + sum[k + j];
-                }
-            }
-
-            if(h_beta == make_DataType<T>(0.0))
-            {
-                hy_gold[i] = sum[0];
-            }
-            else
-            {
-                hy_gold[i] = testing_fma(h_beta, hy_gold[i], sum[0]);
-            }
-        }
-
-        unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
-        unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
+        unit_check_near(1, y_size, 1, hy_gold.data(), hy_1.data());
+        unit_check_near(1, y_size, 1, hy_gold.data(), hy_2.data());
     }
 
     if(argus.timing)
@@ -429,8 +373,6 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMV_CSR_HPP

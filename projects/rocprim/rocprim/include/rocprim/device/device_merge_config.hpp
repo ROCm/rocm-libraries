@@ -39,40 +39,18 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// generic struct that instantiates custom configurations
-template<typename Config, typename, typename>
-struct wrapped_merge_config
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr merge_config_params params = Config();
-    };
-};
-
-// specialized for rocprim::default_config, which instantiates the default_ALGO_config
-template<typename KeyType, typename ValueType>
-struct wrapped_merge_config<default_config, KeyType, ValueType>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr merge_config_params params
-            = default_merge_config<static_cast<unsigned int>(Arch), KeyType, ValueType>{};
-    };
-};
-
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-template<typename Config, typename Key, typename Value>
-template<target_arch Arch>
-constexpr merge_config_params
-    wrapped_merge_config<Config, Key, Value>::architecture_config<Arch>::params;
-
 template<class Key, class Value>
-template<target_arch Arch>
-constexpr merge_config_params
-    wrapped_merge_config<rocprim::default_config, Key, Value>::architecture_config<Arch>::params;
-#endif // DOXYGEN_DOCUMENTATION_BUILD
+struct merge_config_selector
+{
+    using targets    = merge_targets;
+    using param_type = merge_config_params;
+
+    param_type params;
+
+    template<class Target>
+    constexpr merge_config_selector(Target) : params(merge_config_picker<Target, Key, Value>())
+    {}
+};
 
 } // namespace detail
 

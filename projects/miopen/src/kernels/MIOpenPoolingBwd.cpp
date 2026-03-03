@@ -258,7 +258,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
                          : (y + mlo_pad1 - MLO_POOLING_KERNEL_SZ1) / MLO_POOLING_STRIDE1 + 1;
     int top_df_off = b * mlo_topdf_batch_str + o * mlo_topdf_channel_str;
 
-    FLOAT res[MLO_POOLBWD_N_VERT_OUT_PIX][MLO_POOLBWD_N_HORIZ_OUT_PIX];
+    FLOAT_ACCUM res[MLO_POOLBWD_N_VERT_OUT_PIX][MLO_POOLBWD_N_HORIZ_OUT_PIX];
     FLOAT top_df_val;
     index_t mask_val;
     // load tiles
@@ -314,7 +314,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
             int lt_x = max(0, lt_x1);
 
             // find and sum up all tops that have been influenced by particular bot
-            res[k][l] = 0;
+            res[k][l] = FLOAT_ACCUM{0};
 
             for(int th = tt_y; th < tt_y + (MLO_POOLING_KERNEL_SZ1 + MLO_POOLING_STRIDE1 - 1) /
                                                MLO_POOLING_STRIDE1;
@@ -349,7 +349,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
 
                     if(match)
                     {
-                        FLOAT add_val = lcl_top_df[lcl_idx];
+                        FLOAT_ACCUM add_val = CVT_FLOAT2ACCUM(lcl_top_df[lcl_idx]);
                         res[k][l] += add_val;
                     }
                 }
@@ -365,7 +365,7 @@ extern "C" __global__ __launch_bounds__(block_size) //
         {
             if((bt_y + k) < mlo_bot_height && (bt_x + l) < mlo_bot_width)
             {
-                bot_df[bot_df_off + k * mlo_botdf_str + l] = res[k][l];
+                bot_df[bot_df_off + k * mlo_botdf_str + l] = CVT_ACCUM2FLOAT(res[k][l]);
             }
         }
     }

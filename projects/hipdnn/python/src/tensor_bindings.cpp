@@ -1,9 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
-#include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
@@ -23,8 +23,8 @@ void tensor_bindings(nb::module_& m)
             [](const std::vector<int64_t>& dims, DataType dataType) {
                 auto tensor = std::make_shared<TensorAttributes>();
                 tensor->set_dim(dims).set_data_type(dataType);
-                tensor->set_stride(hipdnn_sdk::utilities::generateStrides(
-                    dims, hipdnn_sdk::utilities::TensorLayout::NCHW.strideOrder));
+                tensor->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                    dims, hipdnn_data_sdk::utilities::TensorLayout::NCHW.strideOrder));
                 return tensor;
             },
             nb::arg("dims"),
@@ -45,8 +45,5 @@ void tensor_bindings(nb::module_& m)
         .def("get_volume", &TensorAttributes::get_volume)
         .def("has_uid", &TensorAttributes::has_uid)
         .def("clear_uid", &TensorAttributes::clear_uid, nb::rv_policy::reference_internal)
-        .def("validate", &TensorAttributes::validate)
-        .def("validate_dims_set_and_positive", &TensorAttributes::validate_dims_set_and_positive)
-        .def("validate_dims_and_strides_set_and_positive",
-             &TensorAttributes::validate_dims_and_strides_set_and_positive);
+        .def("validate", &TensorAttributes::validate);
 }

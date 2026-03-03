@@ -3,9 +3,9 @@
 
 set(INST_TARGETS ${SUPPORTED_GPU_TARGETS})
 # Currently only gfx9 and gfx12 archs are supported by FMHA
-list(FILTER INST_TARGETS INCLUDE REGEX "gfx9|gfx12")
+list(FILTER INST_TARGETS INCLUDE REGEX "gfx9|gfx1[12]")
 if(NOT INST_TARGETS)
-  message(WARNING "Skipping Tile Engine FMHA compilation: No supported GPU targets (gfx9, gfx12) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
+  message(WARNING "Skipping Tile Engine FMHA compilation: No supported GPU targets (gfx9, gfx11, gfx12) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
   return()
 endif()
 
@@ -47,7 +47,7 @@ set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
   --targets ${FMHA_TARGETS_ARG}
   --api ${FMHA_FWD_APIS}
-  --optdim 32,64,128,256
+  --optdim 32,64,80,128,256
   # --filter fmha_fwd...
 )
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
@@ -65,7 +65,7 @@ set(FMHA_BWD_CODE_GEN_COMMON_ARGS
 # there is no corresponding instance for parameters).
 if(BUILD_TESTING)
   # Filters are in the order of FMHA_FWD_KNOWN_APIS: fwd,fwd_splitkv_combine@fwd_splitkv,fwd_appendkv,pagedkv_prefill
-  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*,*@*_nlogits*_nbias*,*,*_nlogits*_nskip*_pagedkv)
+  list(APPEND FMHA_FWD_CODE_GEN_COMMON_ARGS --filter *_nlogits*_nskip*_nsink*,*@*_nlogits*_nbias*_nsink*,*,*_nlogits*_nskip*_pagedkv*)
 endif()
 
 # generate a list of kernels, but not actually emit files at config sta

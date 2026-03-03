@@ -156,6 +156,18 @@ namespace rocsparse
             os_ << separator_ << std::real(complex_value) << separator_ << std::imag(complex_value);
         }
 
+        /// Overload () operator for _Float16.
+        void operator()(const _Float16 val) const
+        {
+            os_ << separator_ << static_cast<float>(val);
+        }
+
+        /// Overload () operator for rocsparse_bfloat16.
+        void operator()(const rocsparse_bfloat16 val) const
+        {
+            os_ << separator_ << static_cast<float>(val);
+        }
+
     private:
         std::ostream& os_; ///< Output stream.
         std::string&  separator_; ///< Separator: output preceding argument.

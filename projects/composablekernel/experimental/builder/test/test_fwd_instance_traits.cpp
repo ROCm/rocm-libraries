@@ -83,7 +83,8 @@ TEST(InstanceTraits, V3ExtractsAllFieldsCorrectly)
             ck::BlockGemmPipelineVersion::v1,          // BlkGemmPipelineVer
             ck::half_t,                                // AComputeDataType
             ck::half_t,                                // BComputeDataType
-            false>;
+            false,                                     // DirectLoad
+            1>;                                        // NumGroupsToMerge
 
     // Use InstanceTraits to extract compile-time information
     using Traits = ck_tile::reflect::InstanceTraits<DeviceInstance>;
@@ -225,7 +226,8 @@ TEST(InstanceTraits, V3InstanceStringReturnsCorrectFormat)
             ck::BlockGemmPipelineVersion::v1,          // BlkGemmPipelineVer
             ck::half_t,                                // AComputeDataType
             ck::half_t,                                // BComputeDataType
-            false>;                                    // DirectLoad
+            false,                                     // DirectLoad
+            1>;                                        // NumGroupsToMerge
 
     std::string instance_str = ck_tile::reflect::instance_string<DeviceInstance>();
 
@@ -262,14 +264,14 @@ TEST(InstanceTraits, V3InstanceStringReturnsCorrectFormat)
                                ",2"             // ABlockTransferSrcVectorDim
                                ",8"             // ABlockTransferSrcScalarPerVector
                                ",8"             // ABlockTransferDstScalarPerVector_AK1
-                               ",1"             // ABlockLdsExtraM
+                               ",true"          // ABlockLdsExtraM
                                ",Seq(4,64,1)"   // BBlockTransferThreadClusterLengths
                                ",Seq(1,0,2)"    // BBlockTransferThreadClusterArrangeOrder
                                ",Seq(1,0,2)"    // BBlockTransferSrcAccessOrder
                                ",2"             // BBlockTransferSrcVectorDim
                                ",8"             // BBlockTransferSrcScalarPerVector
                                ",8"             // BBlockTransferDstScalarPerVector_BK1
-                               ",1"             // BBlockLdsExtraN
+                               ",true"          // BBlockLdsExtraN
                                ",1"             // CShuffleMXdlPerWavePerShuffle
                                ",1"             // CShuffleNXdlPerWavePerShuffle
                                ",Seq(1,32,1,8)" // CDEBlockTransferClusterLengths
@@ -278,7 +280,8 @@ TEST(InstanceTraits, V3InstanceStringReturnsCorrectFormat)
                                ",v1"            // BlkGemmPipelineVer
                                ",fp16"          // AComputeDataType
                                ",fp16"          // BComputeDataType
-                               ",false>";       // DirectLoad
+                               ",false"         // DirectLoad
+                               ",1>";           // NumGroupsToMerge
 
     EXPECT_EQ(instance_str, expected_str);
 }
@@ -377,14 +380,14 @@ TEST(InstanceTraits, BaseInstanceStringReturnsCorrectFormat)
                                ",2"             // ABlockTransferSrcVectorDim
                                ",8"             // ABlockTransferSrcScalarPerVector
                                ",8"             // ABlockTransferDstScalarPerVector_AK1
-                               ",1"             // ABlockLdsExtraM
+                               ",true"          // ABlockLdsExtraM
                                ",Seq(4,64,1)"   // BBlockTransferThreadClusterLengths
                                ",Seq(1,0,2)"    // BBlockTransferThreadClusterArrangeOrder
                                ",Seq(1,0,2)"    // BBlockTransferSrcAccessOrder
                                ",2"             // BBlockTransferSrcVectorDim
                                ",8"             // BBlockTransferSrcScalarPerVector
                                ",8"             // BBlockTransferDstScalarPerVector_BK1
-                               ",1"             // BBlockLdsExtraN
+                               ",true"          // BBlockLdsExtraN
                                ",1"             // CShuffleMXdlPerWavePerShuffle
                                ",1"             // CShuffleNXdlPerWavePerShuffle
                                ",Seq(1,32,1,8)" // CDEBlockTransferClusterLengths
@@ -492,14 +495,14 @@ TEST(InstanceTraits, LargeTensorInstanceStringReturnsCorrectFormat)
                                ",2"             // ABlockTransferSrcVectorDim
                                ",8"             // ABlockTransferSrcScalarPerVector
                                ",8"             // ABlockTransferDstScalarPerVector_AK1
-                               ",1"             // ABlockLdsExtraM
+                               ",true"          // ABlockLdsExtraM
                                ",Seq(4,64,1)"   // BBlockTransferThreadClusterLengths
                                ",Seq(1,0,2)"    // BBlockTransferThreadClusterArrangeOrder
                                ",Seq(1,0,2)"    // BBlockTransferSrcAccessOrder
                                ",2"             // BBlockTransferSrcVectorDim
                                ",8"             // BBlockTransferSrcScalarPerVector
                                ",8"             // BBlockTransferDstScalarPerVector_BK1
-                               ",1"             // BBlockLdsExtraN
+                               ",true"          // BBlockLdsExtraN
                                ",1"             // CShuffleMXdlPerWavePerShuffle
                                ",1"             // CShuffleNXdlPerWavePerShuffle
                                ",Seq(1,32,1,8)" // CDEBlockTransferClusterLengths
@@ -795,7 +798,6 @@ TEST(InstanceTraits, TileInstanceStringReturnsCorrectFormat)
                                          16 /*N_Warp_Tile*/,
                                          16 /*K_Warp_Tile*/,
                                          GroupedConvTraitsType::FixedGemmParams::TransposeC,
-                                         ck_tile::memory_operation_enum::set /*memory_operation*/,
                                          1 /*kNumWaveGroups*/,
                                          GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
                                          GroupedConvTraitsType::VectorSizeC>>;

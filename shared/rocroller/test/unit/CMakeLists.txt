@@ -37,9 +37,6 @@ target_link_libraries(rocroller-tests
         ${msgpack_libs}
 )
 
-if(ROCROLLER_ENABLE_LLD)
-    target_link_libraries(rocroller-tests PRIVATE lldELF)
-endif()
 
 target_sources(rocroller-tests
     PRIVATE
@@ -51,7 +48,6 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentValueTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AssemblerTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/BufferDescriptorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElimTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ComponentTest.cpp"
@@ -71,6 +67,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FastMultiplicationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FileWritingObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMBasicTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMDirectLDSTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF16Test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF8F6F4Test.cpp"
@@ -80,6 +77,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMStreamKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMSwizzleScaledTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMStorePathTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMUnrollKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMWMMATest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GPUArchitectureTest.cpp"
@@ -91,7 +89,6 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/Simplify.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/UpdateParameters.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelIndexTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/KernelOptionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSTileCopyTest.cpp"

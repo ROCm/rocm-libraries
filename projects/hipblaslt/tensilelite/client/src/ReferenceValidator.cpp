@@ -27,6 +27,7 @@
 #include "ReferenceValidator.hpp"
 #include "ResultComparison.hpp"
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "Reference.hpp"
 
@@ -81,9 +82,44 @@ namespace TensileLite
         {
             if(m_enabled)
             {
-                m_problem         = problem;
-                m_referenceInputs = m_dataInit->prepareCPUInputs(problem);
-                SolveCPU(problem, m_referenceInputs.get(), m_elementsToValidate);
+                m_problem = problem;
+
+                // Report problem context for timing correlation
+                if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem))
+                {
+                    size_t M          = gemm->freeSizeA(0);
+                    size_t N          = gemm->freeSizeB(0);
+                    size_t K          = gemm->boundSize(0);
+                    size_t batchCount = gemm->batchSize(0);
+                    reportProblemContext(M, N, K, batchCount,
+                                         TensileLite::ToString(gemm->a().dataType()),
+                                         TensileLite::ToString(gemm->d().dataType()));
+                }
+                else if(auto grouped = dynamic_cast<ContractionProblemGroupedGemm*>(problem))
+                {
+                    size_t totalGemms = grouped->gemms.size();
+                    for(size_t i = 0; i < totalGemms; i++)
+                    {
+                        auto&  g          = grouped->gemms[i];
+                        size_t M          = g.freeSizeA(0);
+                        size_t N          = g.freeSizeB(0);
+                        size_t K          = g.boundSize(0);
+                        size_t batchCount = g.batchSize(0);
+                        reportGroupedProblemContext(i, totalGemms, M, N, K, batchCount,
+                                                    TensileLite::ToString(g.a().dataType()),
+                                                    TensileLite::ToString(g.d().dataType()));
+                    }
+                }
+
+                {
+                    ScopedTimer timer("cpu_data_init");
+                    m_referenceInputs = m_dataInit->prepareCPUInputs(problem);
+                }
+
+                {
+                    ScopedTimer timer("cpu_reference_gemm");
+                    SolveCPU(problem, m_referenceInputs.get(), m_elementsToValidate);
+                }
             }
         }
 
@@ -172,7 +208,8 @@ namespace TensileLite
                                               void const*             resPtr,
                                               size_t                  maxElements,
                                               bool                    isgpu,
-                                              size_t                  validationStride)
+                                              size_t                  validationStride,
+                                              double                  threshold)
         {
             bool rv = false;
             switch(tensor.dataType())
@@ -184,7 +221,8 @@ namespace TensileLite
                                        (float const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Double:
@@ -194,7 +232,8 @@ namespace TensileLite
                                        (double const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::ComplexFloat:
@@ -204,7 +243,8 @@ namespace TensileLite
                                        (std::complex<float> const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::ComplexDouble:
@@ -214,7 +254,8 @@ namespace TensileLite
                                        (std::complex<double> const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Half:
@@ -224,7 +265,8 @@ namespace TensileLite
                                        (Half const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Float8:
@@ -234,7 +276,8 @@ namespace TensileLite
                                        (Float8 const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::BFloat8:
@@ -244,7 +287,8 @@ namespace TensileLite
                                        (BFloat8 const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Float8_fnuz:
@@ -254,7 +298,8 @@ namespace TensileLite
                                        (Float8_fnuz const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::BFloat8_fnuz:
@@ -264,7 +309,8 @@ namespace TensileLite
                                        (BFloat8_fnuz const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Int8x4:
@@ -279,7 +325,8 @@ namespace TensileLite
                                        (int32_t const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::BFloat16:
@@ -289,7 +336,8 @@ namespace TensileLite
                                        (BFloat16 const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Int8:
@@ -299,7 +347,8 @@ namespace TensileLite
                                        (int8_t const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             default:
@@ -323,6 +372,17 @@ namespace TensileLite
 
             if(m_printAny)
                 printTensors(problem, reference, result);
+
+            auto k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
+            bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
+            bool isTF32x1 = (problem.computeInputType() == rocisa::DataType::BFloat16
+                && problem.computeType() == rocisa::DataType::Float);
+            double threshold = -1.0;
+            if (isTF32) {
+                threshold = 0.01 * sqrt(double(k));
+            } else if (isTF32x1) {
+                threshold = 0.3 * sqrt(double(k));
+            }
 
             for(size_t i = 0; i < problem.tensors().size(); i++)
             {
@@ -424,9 +484,9 @@ namespace TensileLite
                     std::cout << "Validating tensor " << tensor.getName() << ", cpu pointer "
                               << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
-
+                
                 rv &= checkResults(
-                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride);
+                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
             }
             return rv;
         }
@@ -613,9 +673,10 @@ namespace TensileLite
                                                    ValidType const*        result,
                                                    size_t                  maxElement,
                                                    bool                    isgpu,
-                                                   size_t                  validationStride)
+                                                   size_t                  validationStride,
+                                                   double                  threshold)
         {
-            PointwiseComparison<ValidType> compareValid(m_printValids, m_printMax, m_printMax > 0);
+            PointwiseComparison<ValidType> compareValid(m_printValids, m_printMax, m_printMax > 0, threshold);
             InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
 
             size_t elementsToCopy       = tensor.totalAllocatedElements();

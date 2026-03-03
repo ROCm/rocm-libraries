@@ -23,8 +23,28 @@
 
 #include "test.hpp"
 #include "testing_spsm_coo.hpp"
+#include "testing_spsm_ex_coo.hpp"
 
 TEST_ROUTINE_WITH_CONFIG(spsm_coo,
+                         generic,
+                         hipsparse_test_config_it,
+                         arg.M,
+                         arg.N,
+                         arg.K,
+                         arg.alpha,
+                         arg.alphai,
+                         arg.beta,
+                         arg.betai,
+                         arg.transA,
+                         arg.transB,
+                         arg.orderB,
+                         arg.orderC,
+                         arg.diag_type,
+                         arg.fill_mode,
+                         arg.baseA,
+                         arg.spsm_alg);
+
+TEST_ROUTINE_WITH_CONFIG(spsm_ex_coo,
                          generic,
                          hipsparse_test_config_it,
                          arg.M,

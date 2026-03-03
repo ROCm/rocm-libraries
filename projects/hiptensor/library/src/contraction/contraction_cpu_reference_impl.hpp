@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,8 @@
 #include "contraction_meta_traits.hpp"
 #include "contraction_solution.hpp"
 
+using namespace ck;
+
 namespace hiptensor
 {
     // hardcoded for NumDimM == NumDimN == NumDimK == 6
@@ -63,8 +65,7 @@ namespace hiptensor
         typename ComputeDataType = ADataType,
         ck::enable_if_t<NumDimM == 6 && NumDimN == 6 && NumDimK == 6 && DsDataType::Size() <= 1
                             && !std::is_same_v<AccDataType, ck::bhalf_t>,
-                        bool>
-        = false>
+                        bool>    = false>
     struct ReferenceContraction_M2_N2_K2
         : public ck::tensor_operation::device::DeviceContractionMultipleD<NumDimM,
                                                                           NumDimN,
@@ -155,12 +156,13 @@ namespace hiptensor
                         indices.begin(), indices.end(), strides.begin(), std::size_t{0});
                 };
 
-                if constexpr((std::is_same_v<ADataType, hipFloatComplex>
-                              && std::is_same_v<BDataType, hipFloatComplex>
-                              && std::is_same_v<EDataType, hipFloatComplex>)
-                             || (std::is_same_v<ADataType, hipDoubleComplex>
-                                 && std::is_same_v<BDataType, hipDoubleComplex>
-                                 && std::is_same_v<EDataType, hipDoubleComplex>))
+                if constexpr(
+                    (std::is_same_v<
+                         ADataType,
+                         hipFloatComplex> && std::is_same_v<BDataType, hipFloatComplex> && std::is_same_v<EDataType, hipFloatComplex>)
+                    || (std::is_same_v<
+                            ADataType,
+                            hipDoubleComplex> && std::is_same_v<BDataType, hipDoubleComplex> && std::is_same_v<EDataType, hipDoubleComplex>))
                 {
                     auto f_ms_ns_complex = [&](auto m0,
                                                auto m1,
@@ -305,19 +307,19 @@ namespace hiptensor
                         }
                     };
 
-                    ck::make_ParallelTensorFunctor(f_ms_ns_complex,
-                                                   arg.mE_ms_ns_lengths[0],
-                                                   arg.mE_ms_ns_lengths[1],
-                                                   arg.mE_ms_ns_lengths[2],
-                                                   arg.mE_ms_ns_lengths[3],
-                                                   arg.mE_ms_ns_lengths[4],
-                                                   arg.mE_ms_ns_lengths[5],
-                                                   arg.mE_ms_ns_lengths[6],
-                                                   arg.mE_ms_ns_lengths[7],
-                                                   arg.mE_ms_ns_lengths[8],
-                                                   arg.mE_ms_ns_lengths[9],
-                                                   arg.mE_ms_ns_lengths[10],
-                                                   arg.mE_ms_ns_lengths[11])(
+                    make_ParallelTensorFunctor(f_ms_ns_complex,
+                                               arg.mE_ms_ns_lengths[0],
+                                               arg.mE_ms_ns_lengths[1],
+                                               arg.mE_ms_ns_lengths[2],
+                                               arg.mE_ms_ns_lengths[3],
+                                               arg.mE_ms_ns_lengths[4],
+                                               arg.mE_ms_ns_lengths[5],
+                                               arg.mE_ms_ns_lengths[6],
+                                               arg.mE_ms_ns_lengths[7],
+                                               arg.mE_ms_ns_lengths[8],
+                                               arg.mE_ms_ns_lengths[9],
+                                               arg.mE_ms_ns_lengths[10],
+                                               arg.mE_ms_ns_lengths[11])(
                         std::thread::hardware_concurrency());
                 }
                 else
@@ -424,19 +426,19 @@ namespace hiptensor
                         }
                     };
 
-                    ck::make_ParallelTensorFunctor(f_ms_ns,
-                                                   arg.mE_ms_ns_lengths[0],
-                                                   arg.mE_ms_ns_lengths[1],
-                                                   arg.mE_ms_ns_lengths[2],
-                                                   arg.mE_ms_ns_lengths[3],
-                                                   arg.mE_ms_ns_lengths[4],
-                                                   arg.mE_ms_ns_lengths[5],
-                                                   arg.mE_ms_ns_lengths[6],
-                                                   arg.mE_ms_ns_lengths[7],
-                                                   arg.mE_ms_ns_lengths[8],
-                                                   arg.mE_ms_ns_lengths[9],
-                                                   arg.mE_ms_ns_lengths[10],
-                                                   arg.mE_ms_ns_lengths[11])(
+                    make_ParallelTensorFunctor(f_ms_ns,
+                                               arg.mE_ms_ns_lengths[0],
+                                               arg.mE_ms_ns_lengths[1],
+                                               arg.mE_ms_ns_lengths[2],
+                                               arg.mE_ms_ns_lengths[3],
+                                               arg.mE_ms_ns_lengths[4],
+                                               arg.mE_ms_ns_lengths[5],
+                                               arg.mE_ms_ns_lengths[6],
+                                               arg.mE_ms_ns_lengths[7],
+                                               arg.mE_ms_ns_lengths[8],
+                                               arg.mE_ms_ns_lengths[9],
+                                               arg.mE_ms_ns_lengths[10],
+                                               arg.mE_ms_ns_lengths[11])(
                         std::thread::hardware_concurrency());
                 }
 

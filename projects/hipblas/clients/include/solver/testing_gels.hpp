@@ -192,7 +192,7 @@ void testing_gels(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dA.memcheck());
     CHECK_DEVICE_ALLOCATION(dB.memcheck());
 
-    double             gpu_time_used, hipblas_error;
+    double             gpu_time_used{0}, hipblas_error{0};
     hipblasLocalHandle handle(arg);
 
     // Initial hA, hB, hX on CPU

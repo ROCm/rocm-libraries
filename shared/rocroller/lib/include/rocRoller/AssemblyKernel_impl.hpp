@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /**
  */
@@ -109,6 +86,8 @@ namespace rocRoller
             r.reset();
         for(auto& r : m_workitemIndex)
             r.reset();
+
+        m_preloadedArgs.reset();
     }
 
     inline bool AssemblyKernel::startedCodeGeneration() const
@@ -145,12 +124,18 @@ namespace rocRoller
             return 0;
 
         auto const& lastArg = m_arguments.back();
-        return lastArg.offset + lastArg.size;
+        return lastArg.getOffset() + lastArg.getSize();
     }
 
     inline int AssemblyKernel::group_segment_fixed_size() const
     {
-        return m_context.lock()->ldsAllocator()->maxUsed();
+        auto ctx = m_context.lock();
+        if(ctx)
+        {
+            return ctx->ldsAllocator()->maxUsed();
+        }
+        AssertFatal(m_group_segment_fixed_size.has_value(), "Context is null or expired");
+        return m_group_segment_fixed_size.value();
     }
 
     inline int AssemblyKernel::private_segment_fixed_size() const
@@ -162,7 +147,7 @@ namespace rocRoller
     {
         size_t rv = 8;
         for(auto const& arg : m_arguments)
-            rv = std::max(rv, DataTypeInfo::Get(arg.variableType).alignment);
+            rv = std::max(rv, DataTypeInfo::Get(arg.getVariableType()).alignment);
 
         return rv;
     }
@@ -174,17 +159,35 @@ namespace rocRoller
 
     inline int AssemblyKernel::sgpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Scalar)->useCount();
+        auto ctx = m_context.lock();
+        if(ctx)
+        {
+            return ctx->allocator(Register::Type::Scalar)->useCount();
+        }
+        AssertFatal(m_sgprCount.has_value(), "Context is null or expired");
+        return m_sgprCount.value();
     }
 
     inline int AssemblyKernel::vgpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Vector)->useCount();
+        auto ctx = m_context.lock();
+        if(ctx)
+        {
+            return ctx->allocator(Register::Type::Vector)->useCount();
+        }
+        AssertFatal(m_vgprCount.has_value(), "Context is null or expired");
+        return m_vgprCount.value();
     }
 
     inline int AssemblyKernel::agpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Accumulator)->useCount();
+        auto ctx = m_context.lock();
+        if(ctx)
+        {
+            return ctx->allocator(Register::Type::Accumulator)->useCount();
+        }
+        AssertFatal(m_agprCount.has_value(), "Context is null or expired");
+        return m_agprCount.value();
     }
 
     inline int AssemblyKernel::accum_offset() const

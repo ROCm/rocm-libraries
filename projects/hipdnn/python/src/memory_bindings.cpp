@@ -175,6 +175,8 @@ void memory_bindings(nb::module_& m)
                 return sizeof(int32_t);
             else if(dtype_str == "<u1" || dtype_str == "uint8")
                 return sizeof(uint8_t);
+            else if(dtype_str == "<i1" || dtype_str == "int8")
+                return sizeof(int8_t);
             else
                 throw std::runtime_error("Unsupported dtype: " + dtype_str);
         },

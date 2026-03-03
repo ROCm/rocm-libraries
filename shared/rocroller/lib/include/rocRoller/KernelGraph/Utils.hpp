@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -62,6 +39,9 @@ namespace rocRoller
 
             bool operator()(int a, int b) const
             {
+                if(a == b)
+                    return false;
+
                 return m_graph->control.compareNodes(rocRoller::UpdateCache, a, b)
                        == ControlGraph::NodeOrdering::LeftFirst;
             }
@@ -98,6 +78,34 @@ namespace rocRoller
         };
 
         std::string toString(UnrollColouring const&);
+
+        /**
+         * @brief Colouring of operations and coordinates by NaryArgument.
+         *
+         * Return value of `colourByNaryArgument`.
+         */
+        struct NaryArgumentColouring
+        {
+            std::map<int, NaryArgument> coordinateColour; //< Coordinate colouring.
+            std::map<int, NaryArgument> operationColour; //< Control operation colouring.
+        };
+
+        /**
+         * @brief Colour coordinates and operations by NaryArgument
+         * based on Multiply operations.
+         *
+         * Traverses the graph starting from `start` (or the entire
+         * graph if `start` is -1) and finds all Multiply
+         * operations. For each multiply, determines which coordinates
+         * and control operations contribute to each argument (LHS,
+         * LHS_SCALE, RHS, RHS_SCALE) by tracing backward
+         * dependencies.
+         *
+         * @param graph The kernel graph to analyze
+         * @param start Starting control operation (-1 for entire graph)
+         * @return NaryArgumentColouring with coordinate and control mappings
+         */
+        NaryArgumentColouring colourByNaryArgument(KernelGraph const& graph, int start = -1);
 
         /**
          * @brief Colour operations and coordinates by unroll value.
@@ -138,6 +146,7 @@ namespace rocRoller
         /**
          * @brief Return DataFlowTag of LHS of binary expression in Assign node.
          */
+
         template <Expression::CBinary T>
         std::tuple<int, Expression::ExpressionPtr> getBinaryLHS(KernelGraph const& kgraph,
                                                                 int                assign);
@@ -148,6 +157,12 @@ namespace rocRoller
         template <Expression::CBinary T>
         std::tuple<int, Expression::ExpressionPtr> getBinaryRHS(KernelGraph const& kgraph,
                                                                 int                assign);
+
+        /**
+         * @brief Return the edge tag of type EdgeType connected to tag in direction Direction.
+         */
+        template <Graph::Direction Direction, typename EdgeType>
+        std::optional<int> GetEdgeTag(KernelGraph const& graph, int tag);
 
         /**
          * @brief Create a range-based for loop.
@@ -319,11 +334,15 @@ namespace rocRoller
          *
          * @param size
          * @param varType
+         * @param policy The scratch policy to use for allocation
          * @param context
          * @return User
          */
-        rocRoller::KernelGraph::CoordinateGraph::User newScratchCoordinate(
-            Expression::ExpressionPtr size, VariableType varType, ContextPtr context);
+        rocRoller::KernelGraph::CoordinateGraph::User
+            newScratchCoordinate(Expression::ExpressionPtr size,
+                                 VariableType              varType,
+                                 Operations::ScratchPolicy policy,
+                                 ContextPtr                context);
 
         /**
          * @brief Replace operation with a new operation.
@@ -356,16 +375,9 @@ namespace rocRoller
         void insertWithBody(KernelGraph& graph, int op, int newOp);
 
         /**
-         * @brief Find load/store operations that need their indexes
-         * precomputed by ComputeIndex.
+         * @brief Find load/store operations that need their indexes precomputed.
          */
-        std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph, int start);
-
-        /**
-         * Removes all CommandArgruments found within an expression
-         * with the appropriate AssemblyKernel Argument.
-         */
-        Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr, AssemblyKernelPtr);
+        std::vector<int> findIndexAssignmentCandidates(KernelGraph const& kgraph, int start);
 
         /**
          * @brief Get ForLoop and increment (Linear) dimensions
@@ -537,7 +549,7 @@ namespace rocRoller
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
-                                  bool                               useSwappedAccess,
+                                  bool                               rightmostFastest,
                                   bool                               isGlobalToLDS = false);
 
         /**
@@ -618,7 +630,7 @@ namespace rocRoller
          *   - The row index of a thread tile is fast wrt the VGPR
          *     index.
          *
-         * When `useSwappedAccess` is true, both of these orders are
+         * When `rightmostFastest` is true, both of these orders are
          * reversed.
          *
          * Required (deferred) connections are appended to
@@ -631,7 +643,7 @@ namespace rocRoller
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
-                                 bool                               useSwappedAccess,
+                                 bool                               rightmostFastest,
                                  bool                               isGlobalToLDS = false);
 
         /**
@@ -756,6 +768,11 @@ namespace rocRoller
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
                                                      bool isStorePartOfGlobalToLDSOp = false);
+
+        /**
+         * @brief Get the number of LDS elements for a given LDS tag.
+         */
+        int GetNumLDSElements(KernelGraph const& graph, int ldsTag);
 
         /**
          * @brief Get the first and last nodes from a set of nodes that are totally ordered

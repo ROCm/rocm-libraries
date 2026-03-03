@@ -29,10 +29,10 @@
 #include <set>
 #include <vector>
 
+#include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
 #include "../../../shared/rocfft_complex.h"
-#include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "callback_map.h"
@@ -62,7 +62,7 @@ enum FuseType
     FT_STOCKHAM_WITH_TRANS_XY_Z, // R_T-XY_Z
     FT_R2C_TRANSPOSE, // post-r2c + transpose
     FT_TRANSPOSE_C2R, // transpose + pre-c2r
-    FT_STOCKHAM_R2C_TRANSPOSE, // Stokham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
+    FT_STOCKHAM_R2C_TRANSPOSE, // Stockham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
 };
 
 struct GridParam
@@ -97,6 +97,10 @@ static std::string get_arch_name(const hipDeviceProp_t& prop)
                                                        "gfx1100",
                                                        "gfx1101",
                                                        "gfx1102",
+                                                       "gfx1150",
+                                                       "gfx1151",
+                                                       "gfx1152",
+                                                       "gfx1153",
                                                        "gfx1200",
                                                        "gfx1201"};
 
@@ -159,11 +163,11 @@ struct SchemeTree
 
 using SchemeTreeVec = std::vector<std::unique_ptr<SchemeTree>>;
 
-static SchemeTreeVec EmptySchemeTreeVec = {};
+extern SchemeTreeVec EmptySchemeTreeVec;
 
 using SchemeVec = std::vector<ComputeScheme>;
 
-static SchemeVec EmptySchemeVec = {};
+extern SchemeVec EmptySchemeVec;
 
 class TreeNode;
 class LeafNode;
@@ -389,14 +393,16 @@ public:
 
     // Device pointers:
     // twiddle memory is owned by the repo
-    void*            twiddles            = nullptr;
-    size_t           twiddles_size       = 0;
-    void*            twiddles_large      = nullptr;
-    size_t           twiddles_large_size = 0;
-    void*            twiddles_pp         = nullptr;
-    size_t           twiddles_pp_size    = 0;
-    void*            chirp               = nullptr;
-    size_t           chirp_size          = 0;
+    void*            twiddles              = nullptr;
+    size_t           twiddles_size         = 0;
+    void*            twiddles_off_dim      = nullptr;
+    size_t           twiddles_off_dim_size = 0;
+    void*            twiddles_large        = nullptr;
+    size_t           twiddles_large_size   = 0;
+    void*            twiddles_pp           = nullptr;
+    size_t           twiddles_pp_size      = 0;
+    void*            chirp                 = nullptr;
+    size_t           chirp_size            = 0;
     gpubuf_t<size_t> devKernArg;
 
     // callback parameters
@@ -794,7 +800,7 @@ public:
         // Since large twiddle multiply (i.e. middle T of L1D_TRTRT)
         // cannot be fused with an FFT kernel, we should not try too
         // hard to pad its output.  The other T nodes of that plan can
-        // keep their buffer assigments so that padding doesn't upset
+        // keep their buffer assignments so that padding doesn't upset
         // the current choice of which nodes we fuse.
         return large1D == 0;
     }

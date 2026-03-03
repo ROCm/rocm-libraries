@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include "BackendEnumStringUtils.hpp"
 #include "HipdnnException.hpp"
 #include "hipdnn_backend.h"
 #include <memory>
+#include <spdlog/fmt/fmt.h>
 
 // NOLINTBEGIN(portability-template-virtual-member-function)
 
@@ -28,6 +30,7 @@ struct IBackendDescriptor
         = 0;
 
     virtual hipdnnBackendDescriptorType_t getType() const = 0;
+    virtual std::string toString() const = 0;
 };
 
 // NOLINTEND(portability-template-virtual-member-function)
@@ -65,6 +68,11 @@ public:
     hipdnnBackendDescriptorType_t getType() const override
     {
         return _type;
+    }
+
+    std::string toString() const override
+    {
+        return hipdnn_backend::hipdnnGetBackendDescriptorTypeName(_type);
     }
 
     static hipdnnBackendDescriptorType_t getStaticType()
@@ -114,8 +122,18 @@ struct HipdnnBackendDescriptor : public IBackendDescriptor
     bool isValid();
 
     hipdnnBackendDescriptorType_t getType() const override;
+    std::string toString() const override;
 
     bool operator==(const HipdnnBackendDescriptor& other) const;
+
+    // Attempts to cast the wrapped impl to interface T via dynamic_pointer_cast.
+    // Returns nullptr if the impl does not implement T.
+    // Enables type-agnostic extraction (e.g., tryAsInterface<IGraphOperation>()).
+    template <typename T>
+    std::shared_ptr<T> tryAsInterface() const
+    {
+        return std::dynamic_pointer_cast<T>(_impl);
+    }
 
     // Unpacks a HipdnnBackendDescriptor into a shared_ptr of the specified type.
     // Throws an exception if the descriptor is null.
@@ -185,3 +203,12 @@ private:
     friend class hipdnn_backend::MockDescriptorUtility;
 };
 //NOLINTEND(readability-identifier-naming)
+
+template <>
+struct fmt::formatter<HipdnnBackendDescriptor> : fmt::formatter<std::string>
+{
+    auto format(const HipdnnBackendDescriptor& descriptor, format_context& ctx) const
+    {
+        return fmt::formatter<std::string>::format(descriptor.toString(), ctx);
+    }
+};

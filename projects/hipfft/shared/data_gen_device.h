@@ -23,13 +23,10 @@
 
 #include "../shared/rocfft_complex.h"
 #include <hip/hip_runtime_api.h>
-
-#ifdef USE_HIPRAND
-
 #include <vector>
-
 static const unsigned int DATA_GEN_THREADS = 8;
 
+#ifdef USE_HIPRAND
 template <typename Tint, typename Treal>
 void generate_random_interleaved_data(const Tint&            whole_length,
                                       const size_t           idist,
@@ -41,15 +38,6 @@ void generate_random_interleaved_data(const Tint&            whole_length,
                                       const size_t           field_lower_batch,
                                       const Tint&            field_contig_stride,
                                       const size_t           field_contig_dist);
-
-template <typename Tint, typename Treal>
-void generate_interleaved_data(const Tint&            whole_length,
-                               const size_t           idist,
-                               const size_t           isize,
-                               const Tint&            whole_stride,
-                               const size_t           nbatch,
-                               rocfft_complex<Treal>* input_data,
-                               const hipDeviceProp_t& deviceProp);
 
 template <typename Tint, typename Treal>
 void generate_random_planar_data(const Tint&            whole_length,
@@ -65,16 +53,6 @@ void generate_random_planar_data(const Tint&            whole_length,
                                  const size_t           field_contig_dist);
 
 template <typename Tint, typename Treal>
-void generate_planar_data(const Tint&            whole_length,
-                          const size_t           idist,
-                          const size_t           isize,
-                          const Tint&            whole_stride,
-                          const size_t           nbatch,
-                          Treal*                 real_data,
-                          Treal*                 imag_data,
-                          const hipDeviceProp_t& deviceProp);
-
-template <typename Tint, typename Treal>
 void generate_random_real_data(const Tint&            whole_length,
                                const size_t           idist,
                                const size_t           isize,
@@ -85,6 +63,26 @@ void generate_random_real_data(const Tint&            whole_length,
                                const size_t           field_lower_batch,
                                const Tint             field_contig_stride,
                                const size_t           field_contig_dist);
+#endif // USE_HIPRAND
+
+template <typename Tint, typename Treal>
+void generate_interleaved_data(const Tint&            whole_length,
+                               const size_t           idist,
+                               const size_t           isize,
+                               const Tint&            whole_stride,
+                               const size_t           nbatch,
+                               rocfft_complex<Treal>* input_data,
+                               const hipDeviceProp_t& deviceProp);
+
+template <typename Tint, typename Treal>
+void generate_planar_data(const Tint&            whole_length,
+                          const size_t           idist,
+                          const size_t           isize,
+                          const Tint&            whole_stride,
+                          const size_t           nbatch,
+                          Treal*                 real_data,
+                          Treal*                 imag_data,
+                          const hipDeviceProp_t& deviceProp);
 
 template <typename Tint, typename Treal>
 void generate_real_data(const Tint&            whole_length,
@@ -94,8 +92,6 @@ void generate_real_data(const Tint&            whole_length,
                         const size_t           nbatch,
                         Treal*                 input_data,
                         const hipDeviceProp_t& deviceProp);
-
-#endif // USE_HIPRAND
 
 template <typename Tcomplex>
 void impose_hermitian_symmetry_interleaved(const std::vector<size_t>& length,

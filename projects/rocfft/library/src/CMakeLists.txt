@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -82,7 +82,7 @@ target_include_directories( rocfft_rtc_helper
 # To find rocm libraries need the relative RPATH
 set(APPEND_ROCMLIB_RPATH "\$ORIGIN/../../../lib")
 target_link_libraries( rocfft_rtc_helper PRIVATE rocfft-rtc-compile )
-set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON
+set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON
                                          INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}" )
 target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
@@ -132,6 +132,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/shared/device_properties.h
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
+     ${CMAKE_SOURCE_DIR}/shared/hip_object_wrapper.h
      ${CMAKE_SOURCE_DIR}/library/src/include/rtc_kernel.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_kernel.cpp
      ${CMAKE_SOURCE_DIR}/library/src/rtc_test_harness_helper.cpp
@@ -151,7 +152,7 @@ set( kgen_logic_files
      # python code that decides kernel parameters
      ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
      ${CMAKE_SOURCE_DIR}/library/src/device/generator.py
-     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_lds.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_arch.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrr.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcc.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcr.py
@@ -213,7 +214,6 @@ set( solship_py ${CMAKE_SOURCE_DIR}/library/src/device/solution-shipping.py )
 
 # default folder of solution maps that will be built in library,
 # user can specify their own arch and folder
-set( sol_gpu_arch ${GPU_TARGETS} )
 if( NOT ROCFFT_SOLUTION_MAP_DIR )
   set( ROCFFT_SOLUTION_MAP_DIR ${CMAKE_SOURCE_DIR}/library/solution_map CACHE STRING "RocFFT solution map directory" )
 endif()
@@ -223,8 +223,7 @@ file(GLOB solution_map_files "${ROCFFT_SOLUTION_MAP_DIR}/*.dat")
 add_custom_command(
   OUTPUT ${gen_solutions}
   COMMAND ${Python3_EXECUTABLE} ${solship_py}
-  --gpu-arch="${sol_gpu_arch}"
-  --data-folder=${ROCFFT_SOLUTION_MAP_DIR}
+  --solution_files ${solution_map_files}
   DEPENDS ${solution_map_files}
   COMMENT "Put solution map from external text file into library"
 )
@@ -342,7 +341,7 @@ foreach( target
   set_target_properties( ${target} PROPERTIES
     CXX_VISIBILITY_PRESET "hidden"
     VISIBILITY_INLINES_HIDDEN ON
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
   )
@@ -449,7 +448,7 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
   set_target_properties( ${target} PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
   )
   rocfft_link_internal_lib( ${target} rocfft-rtc-cache )
@@ -554,7 +553,10 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1101 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1102 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1150 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1151 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
   add_custom_command(
     OUTPUT rocfft_kernel_cache.db

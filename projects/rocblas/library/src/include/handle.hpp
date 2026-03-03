@@ -100,6 +100,8 @@ enum class Processor : int
     gfx1103 = 1103,
     gfx1150 = 1150,
     gfx1151 = 1151,
+    gfx1152 = 1152,
+    gfx1153 = 1153,
     gfx1200 = 1200,
     gfx1201 = 1201
 };
@@ -567,6 +569,8 @@ private:
 
     // rocblas by default take the system default stream 0 users cannot create
     hipStream_t stream = 0;
+
+    rocblas_status set_stream(hipStream_t new_stream);
 
 #if ROCBLAS_REALLOC_ON_DEMAND
     // Helper for device memory allocator

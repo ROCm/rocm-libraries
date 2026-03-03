@@ -296,6 +296,7 @@ namespace rocsparse
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
             {
                 // LCOV_EXCL_START
@@ -328,6 +329,7 @@ namespace rocsparse
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
             {
                 // LCOV_EXCL_START
@@ -537,6 +539,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
             {
                 // LCOV_EXCL_START
@@ -606,6 +609,7 @@ namespace rocsparse
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             case rocsparse_format_coo_aos:
             {
                 // LCOV_EXCL_START
@@ -691,6 +695,10 @@ try
     ROCSPARSE_CHECKARG(3, x, (x->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(4, y, (y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
+
+    ROCSPARSE_CHECKARG(2, A, (A->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, x, (x->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, y, (y->batch_count != 1), rocsparse_status_not_implemented);
 
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(2,

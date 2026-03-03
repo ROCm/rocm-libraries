@@ -107,6 +107,11 @@ namespace rocsparse
 
     // Mixed precision
     INSTANTIATE_EXTRACT(int32_t, int32_t);
+    INSTANTIATE_EXTRACT(_Float16, float);
+    INSTANTIATE_EXTRACT(float, _Float16);
+    INSTANTIATE_EXTRACT(rocsparse_bfloat16, float);
+    INSTANTIATE_EXTRACT(float, rocsparse_bfloat16);
+    INSTANTIATE_EXTRACT(rocsparse_bfloat16, rocsparse_bfloat16);
 
 #undef INSTANTIATE_EXTRACT
 }
