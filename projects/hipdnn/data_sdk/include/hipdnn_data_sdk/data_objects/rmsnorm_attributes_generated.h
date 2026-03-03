@@ -25,39 +25,6 @@ struct RMSNormAttributesT;
 bool operator==(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs);
 bool operator!=(const RMSNormAttributesT &lhs, const RMSNormAttributesT &rhs);
 
-enum class NormFwdPhase : int8_t {
-  NOT_SET = 0,
-  INFERENCE = 1,
-  TRAINING = 2,
-  MIN = NOT_SET,
-  MAX = TRAINING
-};
-
-inline const NormFwdPhase (&EnumValuesNormFwdPhase())[3] {
-  static const NormFwdPhase values[] = {
-    NormFwdPhase::NOT_SET,
-    NormFwdPhase::INFERENCE,
-    NormFwdPhase::TRAINING
-  };
-  return values;
-}
-
-inline const char * const *EnumNamesNormFwdPhase() {
-  static const char * const names[4] = {
-    "NOT_SET",
-    "INFERENCE",
-    "TRAINING",
-    nullptr
-  };
-  return names;
-}
-
-inline const char *EnumNameNormFwdPhase(NormFwdPhase e) {
-  if (::flatbuffers::IsOutRange(e, NormFwdPhase::NOT_SET, NormFwdPhase::TRAINING)) return "";
-  const size_t index = static_cast<size_t>(e);
-  return EnumNamesNormFwdPhase()[index];
-}
-
 struct RMSNormAttributesT : public ::flatbuffers::NativeTable {
   typedef RMSNormAttributes TableType;
   int64_t x_tensor_uid = 0;

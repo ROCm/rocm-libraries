@@ -50,6 +50,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     rmsnormAttrs.set_name("rmsnorm_fwd");
     rmsnormAttrs.set_epsilon(epsilonTensor);
     rmsnormAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
+    rmsnormAttrs.set_forward_phase(hipdnn_frontend::NormFwdPhase::TRAINING);
 
     auto outputTensorsAttr = graph->rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
 
@@ -122,6 +123,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
     rmsnormAttrs.set_epsilon(epsilonTensor);
     rmsnormAttrs.set_bias(biasTensorAttr);
     rmsnormAttrs.set_compute_data_type(hipdnn_frontend::fromSdkType(computeDataType));
+    rmsnormAttrs.set_forward_phase(hipdnn_frontend::NormFwdPhase::TRAINING);
 
     auto outputTensorsAttr = graph->rmsnorm(xTensorAttr, scaleTensorAttr, rmsnormAttrs);
 

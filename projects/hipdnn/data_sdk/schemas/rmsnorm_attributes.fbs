@@ -5,12 +5,6 @@ include "norm_common.fbs";
 
 namespace hipdnn_data_sdk.data_objects;
 
-enum NormFwdPhase : byte {
-    NOT_SET = 0,
-    INFERENCE = 1,
-    TRAINING = 2
-}
-
 table RMSNormAttributes {
     x_tensor_uid: long;
     scale_tensor_uid: long;
