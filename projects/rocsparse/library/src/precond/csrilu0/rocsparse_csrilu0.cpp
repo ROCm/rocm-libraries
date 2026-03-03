@@ -39,12 +39,13 @@ rocsparse_status rocsparse::csrilu0(rocsparse_handle          handle,
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, A);
     ROCSPARSE_CHECKARG_ENUM(2, policy);
-    //    ROCSPARSE_CHECKARG_POINTER(3, csrilu0_info);
 
     if(A->rows == 0 || A->batch_count == 0)
     {
         return rocsparse_status_success;
     }
+
+    ROCSPARSE_CHECKARG_POINTER(3, csrilu0_info);
 
     ROCSPARSE_CHECKARG_POINTER(8, buffer);
 

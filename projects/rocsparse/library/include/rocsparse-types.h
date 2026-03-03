@@ -256,8 +256,8 @@ typedef struct _rocsparse_spmv_descr* rocsparse_spmv_descr;
 /*! \ingroup types_module
  * \brief rocsparse_sptrsv_descr is a structure holding the rocsparse sptrsv
  * descr data. It must be initialized using
- * the rocsparse_create_sptrsv_descr() routine. It should be destroyed at the
- * end using rocsparse_destroy_sptrsv_descr().
+ * the rocsparse_create_sptrsv_descr(), or rocsparse_sptrsv_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_destroy_sptrsv_descr(), or rocsparse_sptrsv_descr_destroy().
  */
 typedef struct _rocsparse_sptrsv_descr* rocsparse_sptrsv_descr;
 
@@ -272,16 +272,16 @@ typedef struct _rocsparse_sptrsm_descr* rocsparse_sptrsm_descr;
 /*! \ingroup types_module
  * \brief rocsparse_spic0_descr is a structure holding the rocsparse spic0
  * descr data. It must be initialized using
- * the rocsparse_create_spic0_descr() routine. It should be destroyed at the
- * end using rocsparse_destroy_spic0_descr().
+ * the rocsparse_spic0_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spic0_descr_destroy().
  */
 typedef struct _rocsparse_spic0_descr* rocsparse_spic0_descr;
 
 /*! \ingroup types_module
  * \brief rocsparse_spilu0_descr is a structure holding the rocsparse spilu0
  * descr data. It must be initialized using
- * the rocsparse_create_spilu0_descr() routine. It should be destroyed at the
- * end using rocsparse_destroy_spilu0_descr().
+ * the rocsparse_spilu0_descr_create() routine. It should be destroyed at the
+ * end using rocsparse_spilu0_descr_destroy().
  */
 typedef struct _rocsparse_spilu0_descr* rocsparse_spilu0_descr;
 

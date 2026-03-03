@@ -1776,7 +1776,7 @@ rocsparse_status rocsparse_sptrsm_get_output(rocsparse_handle        handle,
                                              rocsparse_error*        p_error);
 
 /*! \ingroup aux_module
-*  \brief Sparse matrix spic0.
+*  \brief Create SpIC0 descriptoor.
 *
 *  \details
 *  \p rocsparse_spic0_descr_create creates the descriptor of the configuration of the sparse Incomplete Cholesky of level 0.
@@ -1797,7 +1797,7 @@ rocsparse_status rocsparse_spic0_descr_create(rocsparse_handle       handle,
                                               rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
-*  \brief Sparse matrix spic0.
+*  \brief Destroy SpIC0 descriptoor.
 *
 *  \details
 *  \p rocsparse_spic0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete Cholesky of level 0.
@@ -1887,7 +1887,7 @@ rocsparse_status rocsparse_spic0_get_output(rocsparse_handle       handle,
                                             rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
-*  \brief Sparse matrix spilu0.
+*  \brief Create SpILU0 descriptoor.
 *
 *  \details
 *  \p rocsparse_spilu0_descr_create creates the descriptor of the configuration of the sparse Incomplete LU of level 0.
@@ -1909,7 +1909,7 @@ rocsparse_status rocsparse_spilu0_descr_create(rocsparse_handle        handle,
                                                rocsparse_error*        p_error);
 
 /*! \ingroup aux_module
-*  \brief Sparse matrix spilu0.
+*  \brief Destroy SpILU0 descriptoor.
 *
 *  \details
 *  \p rocsparse_spilu0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete LU of level 0.

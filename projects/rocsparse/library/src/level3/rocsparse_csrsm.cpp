@@ -84,6 +84,7 @@ namespace rocsparse
                                                    "rocsparse_indextype_u16 not supported");
         }
         }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     }
 }
 

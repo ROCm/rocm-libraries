@@ -58,6 +58,7 @@ try
     }
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {

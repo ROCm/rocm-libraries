@@ -70,7 +70,7 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle          hand
                                        handle->stream));
 
     //
-    //
+    // Launch gpu kernel.
     //
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, bsrilu0_info, A, boost, buffer_size, buffer));
     return rocsparse_status_success;

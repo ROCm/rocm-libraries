@@ -28,7 +28,7 @@
 namespace rocsparse
 {
 
-    template <uint32_t BLOCKSIZE, typename I, typename J = rocsparse_singularity>
+    template <uint32_t BLOCKSIZE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void markers2singularity(int64_t batch_count,
                              const void* __restrict__ symbolic_,
@@ -68,7 +68,7 @@ namespace rocsparse
                 if(near[tid] < value)
                 {
                     singularity = rocsparse_singularity_numeric_near;
-                    value       = exact[tid];
+                    value       = near[tid];
                 }
             }
 
@@ -124,10 +124,9 @@ namespace rocsparse
         if(determine_singularity)
         {
             sizeofelm = sizeof(rocsparse_singularity);
-            kernel    = rocsparse::markers2singularity<s_blocksize, int64_t, rocsparse_singularity>;
+            kernel    = rocsparse::markers2singularity<s_blocksize, int64_t>;
             if(indextype == rocsparse_indextype_i32)
-                kernel
-                    = rocsparse::markers2singularity<s_blocksize, int32_t, rocsparse_singularity>;
+                kernel = rocsparse::markers2singularity<s_blocksize, int32_t>;
         }
         else
         {
@@ -274,14 +273,14 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
             }
         }
-        else if(exact && exact->get_position())
+        if(exact && exact->get_position())
         {
             if(indextype != exact->get_indextype())
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
             }
         }
-        else if(near && near->get_position())
+        if(near && near->get_position())
         {
             if(indextype != near->get_indextype())
             {
@@ -354,14 +353,14 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
             }
         }
-        else if(exact && exact->get_position())
+        if(exact && exact->get_position())
         {
             if(indextype != exact->get_indextype())
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
             }
         }
-        else if(near && near->get_position())
+        if(near && near->get_position())
         {
             if(indextype != near->get_indextype())
             {
