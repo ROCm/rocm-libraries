@@ -60,6 +60,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -239,9 +240,17 @@ struct TestLoggerShutdown
     std::vector<std::thread> workers;
     std::atomic<bool> stopFlag{false};
     std::array<CallbackData, NUM_CALLBACK_WORKERS> callbackData;
+    bool testStarted = false; // Set to true when the test actually runs
 
     ~TestLoggerShutdown()
     {
+        // If the test never started (e.g., --gtest_list_tests was passed),
+        // skip all shutdown logic to avoid aborting on zero callback counts.
+        if(!testStarted)
+        {
+            return;
+        }
+
         std::cout << "\n[Test] === TestLoggerShutdown destructor running ===\n";
         std::cout << "[Test] At this point:\n";
         std::cout << "[Test]   - atexit handler has set log level to OFF\n";
@@ -322,8 +331,21 @@ struct TestLoggerShutdown
 
 static TestLoggerShutdown sTestLoggerShutdown;
 
-int main()
+int main(int argc, char* argv[])
 {
+    // Handle --gtest_list_tests for compatibility with test_name_validator.py.
+    // This test is not a gtest harness, but the validator script expects all test
+    // executables to respond to --gtest_list_tests with a list of test names.
+    for(int i = 1; i < argc; ++i)
+    {
+        if(std::strcmp(argv[i], "--gtest_list_tests") == 0)
+        {
+            std::cout << "TestBackendLogging.\n";
+            std::cout << "  ShutdownSafety\n";
+            return 0;
+        }
+    }
+
     // Set log level via environment variable so the backend logger will produce output.
     // Must be set before any hipDNN function is called (i.e., before worker threads start).
     setTestEnv("HIPDNN_LOG_LEVEL", "info");
@@ -347,6 +369,9 @@ int main()
     setTestEnv("HIPDNN_LOG_FILE", logFilePath.c_str());
     std::cout << "[Test] Created temp log file: " << logFilePath << "\n";
 #endif
+
+    // Mark the test as started so the destructor knows to run shutdown logic.
+    sTestLoggerShutdown.testStarted = true;
 
     std::cout << "[Test] main() starting\n";
     std::cout << "[Test] main() will NOT call any hipDNN functions directly.\n";
