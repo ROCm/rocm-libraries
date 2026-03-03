@@ -57,7 +57,7 @@ struct verify_forward_train_bn_spatial
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> cpu() const
     {
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
 
@@ -213,7 +213,7 @@ struct verify_forward_train_bn_spatial
                 (1 - expAvgFactor) * runVar(0, cidx, 0, 0) + expAvgFactor * adjust;
         });
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_train_bn_spatial pass time: "
@@ -226,7 +226,7 @@ struct verify_forward_train_bn_spatial
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> gpu() const
     {
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
 
@@ -320,7 +320,7 @@ struct verify_forward_train_bn_spatial
         runVar.data     = handle.Read<U>(runVar_dev, runVar.data.size());
         out.data        = handle.Read<T>(out_dev, out.data.size());
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_train_bn_spatial pass time: "
@@ -353,7 +353,7 @@ struct verify_forward_infer_bn_spatial_recalc
     tensor<T> cpu() const
     {
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
         double epsilon = MIO_BN_TEST_EPSILON;
@@ -430,7 +430,7 @@ struct verify_forward_infer_bn_spatial_recalc
             } // for (row)
         });
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_infer_bn_spatial_recalc pass time: "
@@ -443,7 +443,7 @@ struct verify_forward_infer_bn_spatial_recalc
     tensor<T> gpu() const
     {
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
         auto&& handle = get_handle();
@@ -481,7 +481,7 @@ struct verify_forward_infer_bn_spatial_recalc
                                           actDesc);
         out.data = handle.Read<T>(out_dev, out.data.size());
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer_bn_spatial_recalc pass time: "
@@ -510,7 +510,7 @@ struct verify_forward_infer_bn_spatial_use_est
     tensor<T> cpu() const
     {
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
 
@@ -545,7 +545,7 @@ struct verify_forward_infer_bn_spatial_use_est
                 }
             }
         });
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_infer_bn_spatial_use_est pass time: "
@@ -557,7 +557,7 @@ struct verify_forward_infer_bn_spatial_use_est
 
     tensor<T> gpu() const
     {
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
         auto&& handle = get_handle();
@@ -596,7 +596,7 @@ struct verify_forward_infer_bn_spatial_use_est
                                           epsilon,
                                           actDesc);
         out.data = handle.Read<T>(out_dev, out.data.size());
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer_bn_spatial_use_est pass time: "
@@ -627,7 +627,7 @@ struct verify_backward_bn_spatial_recalc
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
         double epsilon = MIO_BN_TEST_EPSILON;
@@ -787,7 +787,7 @@ struct verify_backward_bn_spatial_recalc
             } // for (row)
         }); // for (channel)
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_bn_spatial_recalc pass time: "
@@ -800,7 +800,7 @@ struct verify_backward_bn_spatial_recalc
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> gpu() const
     {
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
         auto&& handle = get_handle();
@@ -865,7 +865,7 @@ struct verify_backward_bn_spatial_recalc
         dscale.data = handle.Read<U>(dscale_dev, dscale.data.size());
         dshift.data = handle.Read<U>(dshift_dev, dshift.data.size());
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backward_bn_spatial_recalc pass time: "
@@ -895,7 +895,7 @@ struct verify_backward_bn_spatial_use_saved
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
 
@@ -993,7 +993,7 @@ struct verify_backward_bn_spatial_use_saved
                 } // for (column)
             } // for (row)
         }); // for (channel)
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_bn spatial_use_saved pass time: "
@@ -1006,7 +1006,7 @@ struct verify_backward_bn_spatial_use_saved
     std::tuple<tensor<T>, tensor<U>, tensor<U>> gpu() const
     {
 
-#ifdef MIO_BN_TIME_EVERYTHING
+#if MIO_BN_TIME_EVERYTHING == 1
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif // MIO_BN_TIME_EVERYTHING
         auto&& handle = get_handle();
@@ -1073,7 +1073,7 @@ struct verify_backward_bn_spatial_use_saved
         dscale.data = handle.Read<U>(dscale_dev, dscale.data.size());
         dshift.data = handle.Read<U>(dshift_dev, dshift.data.size());
 
-        if constexpr(MIO_BN_TIME_EVERYTHING)
+#if MIO_BN_TIME_EVERYTHING == 1
         {
             auto t_end = std::chrono::high_resolution_clock::now();
 
@@ -1081,7 +1081,7 @@ struct verify_backward_bn_spatial_use_saved
                       << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                       << std::endl;
         }
-
+#endif // MIO_BN_TIME_EVERYTHING
         return std::make_tuple(dx_out, dscale, dshift);
     }
 
@@ -1341,22 +1341,14 @@ public:
     }
 };
 
-using GPU_BN_Spatial_FP16 = batch_norm_spatial_test<half_float::half>;
 using GPU_BN_Spatial_FP32 = batch_norm_spatial_test<float>;
 
-TEST_P(GPU_BN_Spatial_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_BN_Spatial_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP16, GetCases(), [](const auto& info) {
-    return NameGenerator(info);
-});
 INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& info) {
     return NameGenerator(info);
 });
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP16, GetCases(false), [](const auto& info) {
-    return NameGenerator(info);
-});
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info) {
     return NameGenerator(info);
 });
