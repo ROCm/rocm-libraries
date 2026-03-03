@@ -35,8 +35,6 @@ namespace rocRoller
 
         Instruction();
 
-        static Generator<std::string> EscapeComment(std::string comment, int indent = 0);
-
         static Instruction Allocate(Register::ValuePtr reg);
         static Instruction Allocate(std::shared_ptr<Register::Allocation> reg);
         static Instruction

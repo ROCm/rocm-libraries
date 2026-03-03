@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -123,8 +123,7 @@ struct SQLiteSerializable
         for(auto& el : int_fields)
             ss << ",`" << el << "` INT NOT NULL";
         ss << ");";
-        ss << "CREATE UNIQUE INDEX IF NOT EXISTS "
-           << "`idx_" << Derived::table_name() << "` "
+        ss << "CREATE UNIQUE INDEX IF NOT EXISTS " << "`idx_" << Derived::table_name() << "` "
            << "ON " << Derived::table_name() << "( " << miopen::JoinStrings(str_fields, ",") << ", "
            << miopen::JoinStrings(int_fields, ",") << " );";
         return ss.str();
@@ -511,7 +510,7 @@ public:
     }
 
     /// Updates record under key PROBLEM_CONFIG with data ID:VALUES in database.
-    /// Returns updated record or boost::none if insertion failed
+    /// Returns updated record or std::optional equals to nullopt_t if insertion failed
     template <class T, class V>
     inline std::optional<DbRecord>
     UpdateUnsafe(const T& problem_config, const std::string& id, const V& values)

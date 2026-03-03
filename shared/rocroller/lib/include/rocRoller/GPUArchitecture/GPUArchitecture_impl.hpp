@@ -110,12 +110,6 @@ namespace rocRoller
         return is;
     }
 
-    inline std::ostream& operator<<(std::ostream& os, GPUWaitQueueType const& input)
-    {
-        os << input.toString();
-        return os;
-    }
-
     template <typename T>
     requires(std::is_pointer_v<T>) bool GPUArchitecture::isSupportedConstantValue(T value) const
     {

@@ -51,7 +51,7 @@ bool AddLayernormForward::IsApplicable(const ExecutionContext&,
         return false;
     if(!problem.IsRightNormDim())
         return false;
-    if(!(sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize()))
+    if(!(sizeof_local_memory(problem, LOCAL_SIZE) <= TargetProperties::GetMaxLocalMemorySize()))
         return false;
     return true;
 }
@@ -68,16 +68,9 @@ AddLayernormForward::GetSolution(const ExecutionContext& context,
         auto dtype        = problem.GetXDesc().GetType();
         auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
         auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
-        auto dims         = problem.GetXDesc().GetLengths();
-
-        size_t outer_size = 1;
-        for(size_t i = 0; i < problem.GetNormalizedDim(); i++)
-        {
-            outer_size *= dims[i];
-        }
 
         size_t xlocalsize = LOCAL_SIZE;
-        size_t xgridsize  = outer_size * xlocalsize;
+        size_t xgridsize  = problem.outer_size * xlocalsize;
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;
@@ -121,14 +114,6 @@ AddLayernormForward::GetSolution(const ExecutionContext& context,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::layernorm::AddInvokeParams>();
 
-            auto dims         = params.xDesc->GetLengths();
-            size_t inner_size = 1;
-
-            for(size_t i = params.normalized_dim; i < dims.size(); i++)
-            {
-                inner_size *= dims[i];
-            }
-
             kernel(params.x,
                    params.x2,
                    params.weight,
@@ -137,7 +122,7 @@ AddLayernormForward::GetSolution(const ExecutionContext& context,
                    params.mean,
                    params.rstd,
                    params.epsilon,
-                   inner_size,
+                   params.inner_size,
                    static_cast<int32_t>(params.mode));
         };
     };
