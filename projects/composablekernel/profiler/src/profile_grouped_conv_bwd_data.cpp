@@ -52,7 +52,9 @@ static void print_helper_msg()
     // clang-format on
 }
 
-void print_bwd_data_instances(ConvDataType data_type, ConvLayout layout, ck::index_t num_dim_spatial)
+void print_bwd_data_instances(ConvDataType data_type,
+                              ConvLayout layout,
+                              ck::index_t num_dim_spatial)
 {
     auto print_available_instances = [&](auto num_dim_spatial_tmp,
                                          auto in_layout,
