@@ -62,13 +62,14 @@ struct pk_fp6_t
         const int bit_offset = bit_pos % num_bits_vec_elem;
         const int overhang   = bit_offset + num_bits_elem - num_bits_vec_elem;
 
-        int32_t bits = pk.data_[arr_idx] >> bit_offset;
+        uint32_t bits = static_cast<uint32_t>(pk.data_[arr_idx]) >> bit_offset;
         if(overhang > 0 && (arr_idx + 1) < vector_size)
         {
-            bits |= (pk.data_[arr_idx + 1] & ((1u << overhang) - 1)) << (num_bits_elem - overhang);
+            bits |= (static_cast<uint32_t>(pk.data_[arr_idx + 1]) & ((1u << overhang) - 1))
+                    << (num_bits_elem - overhang);
         }
 
-        return bits & 0x3F;
+        return static_cast<int32_t>(bits & 0x3F);
     }
 
     CK_TILE_HOST_DEVICE int32_t unpack(const index_t i) const { return unpack(*this, i); }
@@ -99,6 +100,22 @@ struct pk_fp6_t
             result = mantissa / 8.0f;
         }
         return sign == 1 ? -1 * result : result;
+    }
+
+    CK_TILE_HOST static int32_t float_to_fp6_e2m3(float val)
+    {
+        int32_t best     = 0;
+        float best_err   = 1e30f;
+        for(int32_t i = 0; i < 64; i++)
+        {
+            float err = std::fabs(val - fp6_e2m3_to_float(i));
+            if(err < best_err)
+            {
+                best     = i;
+                best_err = err;
+            }
+        }
+        return best;
     }
 };
 
