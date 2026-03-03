@@ -1,6 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+include(FetchContent)
+include(ExternalProject)
+
 # Multi-version FlatBuffers header generation.
 #
 # Provides hipdnn_generate_flatbuffer_headers() which generates C++ headers from .fbs schema
@@ -145,8 +148,6 @@ function(hipdnn_generate_flatbuffer_headers)
     # We can't use FetchContent_MakeAvailable / add_subdirectory because both FlatBuffers
     # versions define a "flatc" target and CMake targets are global (no scoping).
     # ExternalProject builds in its own CMake instance, avoiding target name collisions.
-    include(FetchContent)
-    include(ExternalProject)
 
     foreach(_version IN LISTS ARG_SUPPORTED_VERSIONS)
         if(_version STREQUAL ARG_PRIMARY_VERSION)

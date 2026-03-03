@@ -215,11 +215,9 @@ struct verify_backward_data_lstm
                 std::cout << batch_seq.at(i);
             }
         }
-        std::cout << " -m lstm "
-                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
-                  << nLayers << " -F 0 "
-                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode << " -q "
-                  << use_seqPadding << std::endl;
+        std::cout << " -m lstm " << " -k " << seqLength << " -H " << hiddenSize << " -W "
+                  << inputVecLen << " -l " << nLayers << " -F 0 " << " -r " << dirMode << " -b "
+                  << biasMode << " -p " << inputMode << " -q " << use_seqPadding << std::endl;
 
         std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
                   << " dirMode: " << dirMode << std::endl;
@@ -334,11 +332,9 @@ struct verify_backward_weights_lstm
                 std::cout << batch_seq.at(i);
             }
         }
-        std::cout << " -m lstm "
-                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
-                  << nLayers << " -F 0 "
-                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode << " -q "
-                  << use_seqPadding << std::endl;
+        std::cout << " -m lstm " << " -k " << seqLength << " -H " << hiddenSize << " -W "
+                  << inputVecLen << " -l " << nLayers << " -F 0 " << " -r " << dirMode << " -b "
+                  << biasMode << " -p " << inputMode << " -q " << use_seqPadding << std::endl;
 
         std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
                   << " dirMode: " << dirMode << std::endl;
@@ -1010,11 +1006,9 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
                 std::cout << batch_seq.at(i);
             }
         }
-        std::cout << " -m lstm "
-                  << " -k " << seqLength << " -H " << hiddenSize << " -W " << inputVecLen << " -l "
-                  << nLayers << " -F 0 "
-                  << " -r " << dirMode << " -b " << biasMode << " -p " << inputMode << " -q "
-                  << use_seqPadding << std::endl;
+        std::cout << " -m lstm " << " -k " << seqLength << " -H " << hiddenSize << " -W "
+                  << inputVecLen << " -l " << nLayers << " -F 0 " << " -r " << dirMode << " -b "
+                  << biasMode << " -p " << inputMode << " -q " << use_seqPadding << std::endl;
 
         std::cout << "inputMode: " << inputMode << " biasMode: " << biasMode
                   << " dirMode: " << dirMode << std::endl;

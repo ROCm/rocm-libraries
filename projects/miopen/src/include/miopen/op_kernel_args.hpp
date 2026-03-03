@@ -4,11 +4,12 @@
 #ifndef MIOPEN_GUARD_MLOPEN_OP_KERNEL_ARGS_HPP
 #define MIOPEN_GUARD_MLOPEN_OP_KERNEL_ARGS_HPP
 
-#include <type_traits>
 #include <cstdint>
+#include <type_traits>
+#include <vector>
+
 #include <half/half.hpp>
 #include <miopen/bfloat16.hpp>
-#include <boost/container/small_vector.hpp>
 
 struct OpKernelArg
 {
@@ -33,7 +34,7 @@ struct OpKernelArg
     }
 
     std::size_t size() const { return buffer.size(); };
-    boost::container::small_vector<char, 8> buffer;
+    std::vector<char> buffer{8};
     bool is_ptr = false;
 };
 
