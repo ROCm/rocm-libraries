@@ -30,6 +30,7 @@ LAPACK auxiliary functions
     :header: "Function", "single", "double", "single complex", "double complex"
 
     :ref:`rocsolver_lange <lange>`, x, x, x, x
+    :ref:`rocsolver_gecon <gecon>`, x, x, x, x
 
 .. csv-table:: Householder reflections
     :header: "Function", "single", "double", "single complex", "double complex"
