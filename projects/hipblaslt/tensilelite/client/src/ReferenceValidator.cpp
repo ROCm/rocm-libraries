@@ -768,9 +768,10 @@ namespace TensileLite
                     std::vector<size_t> coord(tensor.dimensions());
                     size_t outerCount = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
 
-                    size_t       prevBaseIndex = 0;
-                    const size_t innerDimSize  = tensor.sizes()[0];
-                    const size_t initialStride = tensor.strides()[0];
+                    size_t       prevBaseIndex  = 0;
+                    size_t       elemNumberBase = 0;
+                    const size_t innerDimSize   = tensor.sizes()[0];
+                    const size_t initialStride  = tensor.strides()[0];
 
                     for(size_t i = 0; i < outerCount; i++)
                     {
@@ -803,8 +804,9 @@ namespace TensileLite
                             ValidType resultValue    = resultData[elemIndex];
 
                             compareValid(
-                                referenceValue, resultValue, elemIndex, (i * tensor.sizes()[0]) + j);
+                                referenceValue, resultValue, elemIndex, elemNumberBase + j);
                         }
+                        elemNumberBase += innerDimSize;
                     }
                 }
                 else
