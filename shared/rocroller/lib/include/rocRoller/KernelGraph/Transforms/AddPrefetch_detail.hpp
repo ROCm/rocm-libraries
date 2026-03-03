@@ -23,6 +23,16 @@ namespace rocRoller::KernelGraph
         };
 
         /**
+         * @brief Container for info for LoadTiled operations
+         */
+        struct LoadTiledInfo
+        {
+            int user; // User coordinate
+            int tag; // LoadTiled operation tag
+            int top; // Top SetCoordinate of in the chain for this load
+        };
+
+        /**
          * @brief Find loops (and loads in them) that can be prefetched.
          *
          * To find prefetch candidates:
@@ -53,5 +63,7 @@ namespace rocRoller::KernelGraph
          * connected to an Exchange.
          */
         bool isLoadForExchange(int loadTag, KernelGraph const& graph);
+
+        bool IsDirectLoadToVGPR(KernelGraph const& k, int loadTag);
     }
 }

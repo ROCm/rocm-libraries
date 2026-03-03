@@ -191,9 +191,6 @@ namespace rocRoller::KernelGraph
                                      arg.getDataDirection(),
                                      arg.getExpression()});
             }
-
-            // Store launch-time-only args so ArgumentLoader can elide the load
-            kernel->setLaunchTimeOnlyArguments(argTracer.launchTimeOnlyArguments());
         }
     }
 

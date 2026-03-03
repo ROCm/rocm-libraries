@@ -1,5 +1,15 @@
 # Changelog for Tensile
 
+## Tensile 4.46.0 (Unreleased)
+
+## Changed
+
+- Disable optimizations for `RunGEMMKernel_test`.
+
+## Resolved issues
+
+- Fixed how the toolchain handles an empty Windows ROCm directory.
+
 ## Tensile 4.45.0 for ROCm 7.2.0
 
 ### Removed

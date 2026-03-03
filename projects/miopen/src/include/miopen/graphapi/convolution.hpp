@@ -186,7 +186,7 @@ public:
     Convolution build() &&;
 
 private:
-    bool validate() const;
+    MIOPEN_INTERNALS_NO_EXPORT bool validate() const;
 };
 
 class MIOPEN_INTERNALS_EXPORT BackendConvolutionDescriptor : public BackendDescriptor
@@ -410,7 +410,7 @@ public:
     }
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationConvolutionDescriptor : public BackendDescriptor
+class BackendOperationConvolutionDescriptor : public BackendDescriptor
 {
 protected:
     miopenBackendDescriptor_t mConvolutionDescriptor = nullptr;
@@ -462,8 +462,7 @@ protected:
                  void* arrayOfElements);
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationConvolutionForwardDescriptor
-    : public BackendOperationConvolutionDescriptor
+class BackendOperationConvolutionForwardDescriptor : public BackendOperationConvolutionDescriptor
 {
 private:
     OperationConvolutionForwardBuilder mBuilder;
@@ -554,7 +553,7 @@ public:
     }
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationConvolutionBackwardDataDescriptor
+class BackendOperationConvolutionBackwardDataDescriptor
     : public BackendOperationConvolutionDescriptor
 {
 private:
@@ -646,7 +645,7 @@ public:
     }
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationConvolutionBackwardFilterDescriptor
+class BackendOperationConvolutionBackwardFilterDescriptor
     : public BackendOperationConvolutionDescriptor
 {
 private:
