@@ -716,8 +716,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # previous iter 2nd half (not final)
             dstPackItems += carryOverPackItems.pop(0)
             if prefetch and mfma:
-              # add s_nop 0
-              dstPackItems.append(SNop(waitState=0, comment="nop for x32f emulation"))
+              # add s_nop 1
+              dstPackItems.append(SNop(waitState=1, comment="nop for x32f emulation"))
           else:
             # carry over current item to the next iteration
             carryOverPackItems.append(tmpPackItems)
