@@ -74,9 +74,9 @@ template <index_t NumAccesses,
           typename DimAccessOrder,
           typename ScalarsPerAccess>
 __host__ __device__ constexpr auto compute_all_indices(Strides strides,
-                                                        OrderedAccessLengths ordered_lengths,
-                                                        DimAccessOrder dim_order,
-                                                        ScalarsPerAccess scalars)
+                                                       OrderedAccessLengths ordered_lengths,
+                                                       DimAccessOrder dim_order,
+                                                       ScalarsPerAccess scalars)
 {
     IndexLookupTable<NumAccesses, nDim> table{};
 
@@ -86,7 +86,7 @@ __host__ __device__ constexpr auto compute_all_indices(Strides strides,
             compute_single_index<nDim, SnakeCurved>(idx_1d, strides, ordered_lengths);
 
         // Reorder and scale
-        auto reordered = container_reorder_given_old2new(ordered_idx, dim_order);
+        auto reordered     = container_reorder_given_old2new(ordered_idx, dim_order);
         table.data[idx_1d] = reordered * scalars;
     }
 
@@ -122,12 +122,8 @@ struct SpaceFillingCurve
         reduce_on_sequence(TensorLengths{}, math::multiplies{}, Number<1>{}) / ScalarPerVector;
 
     // Precompute ALL indices into a lookup table - computed once at class instantiation
-    static constexpr auto index_table =
-        detail::compute_all_indices<NumAccesses, nDim, SnakeCurved>(
-            access_strides,
-            ordered_access_lengths,
-            dim_access_order,
-            ScalarsPerAccess{});
+    static constexpr auto index_table = detail::compute_all_indices<NumAccesses, nDim, SnakeCurved>(
+        access_strides, ordered_access_lengths, dim_access_order, ScalarsPerAccess{});
 
     static constexpr auto to_index_adaptor = make_single_stage_tensor_adaptor(
         make_tuple(make_merge_transform(ordered_access_lengths)),
