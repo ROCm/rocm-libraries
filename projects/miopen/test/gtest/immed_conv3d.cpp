@@ -118,7 +118,8 @@ auto GetDataset()
 } // namespace
 
 template <class T>
-struct immed_conv3d_test : miopen::test::conv::conv_test_base<T, miopen::test::conv::ConvApi::Immediate>
+struct immed_conv3d_test
+    : miopen::test::conv::conv_test_base<T, miopen::test::conv::ConvApi::Immediate>
 {
 };
 

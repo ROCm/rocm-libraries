@@ -115,7 +115,8 @@ auto GetDataset()
 } // namespace
 
 template <class T>
-struct conv2d_find2_test : miopen::test::conv::conv_test_base<T, miopen::test::conv::ConvApi::Find_2_0>
+struct conv2d_find2_test
+    : miopen::test::conv::conv_test_base<T, miopen::test::conv::ConvApi::Find_2_0>
 {
 };
 
