@@ -3,67 +3,68 @@
 
 #pragma once
 
-#include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 
 namespace hipdnn_frontend::detail
 {
 
-// Builds a convolution forward operation descriptor from ConvFpropAttributes.
-// Tensor descriptors are created/deduplicated via createOrFindTensorDesc.
-inline Error createConvFpropOperation(
-    const graph::ConvFpropAttributes& attributes,
+// Builds a convolutionwrw operation descriptor from ConvWgradAttributes.
+// Tensor descriptors are created/deduplicated via ensureAndSetTensorRef.
+inline Error createConvWgradOperation(
+    const graph::ConvWgradAttributes& attributes,
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
+    ScopedHipdnnBackendDescriptor opDesc(
+        HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                "Failed to create convolution forward operation descriptor"};
+                "Failed to create convolutionwrw operation descriptor"};
     }
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
                                              attributes.get_x(),
                                              tensorDescs,
-                                             "conv X"));
+                                             "convolutionwrw X"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
-                                             attributes.get_w(),
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
+                                             attributes.get_dy(),
                                              tensorDescs,
-                                             "conv W"));
+                                             "convolutionwrw DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
-                                             attributes.get_y(),
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
+                                             attributes.get_dw(),
                                              tensorDescs,
-                                             "conv Y"));
+                                             "convolutionwrw DW"));
 
-    // Set convolution parameters
+    // Set convolutionwrw parameters
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_pre_padding(),
-                                            "conv pre_padding"));
+                                            "convolutionwrw pre_padding"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_post_padding(),
-                                            "conv post_padding"));
+                                            "convolutionwrw post_padding"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_stride(),
-                                            "conv stride"));
+                                            "convolutionwrw stride"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_DILATIONS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_dilation(),
-                                            "conv dilation"));
+                                            "convolutionwrw dilation"));
 
-    // Set conv mode and compute data type
+    // Set convolutionwrw mode and compute data type
     auto convMode = hipdnn_frontend::toBackendConvMode(attributes.get_convolution_mode());
     if(!convMode.has_value())
     {
@@ -75,15 +76,15 @@ inline Error createConvFpropOperation(
                                                HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
                                                HIPDNN_TYPE_CONVOLUTION_MODE,
                                                *convMode,
-                                               "conv mode"));
+                                               "convolutionwrw mode"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
                                                  attributes.compute_data_type,
-                                                 "conv compute data type"));
+                                                 "convolutionwrw compute data type"));
 
     // Finalize operation descriptor
-    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "convolution operation descriptor"));
+    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "convolutionwrw operation descriptor"));
 
     operations.push_back(std::move(opDesc));
     return {};

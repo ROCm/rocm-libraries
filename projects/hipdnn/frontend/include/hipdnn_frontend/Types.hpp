@@ -672,6 +672,32 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
     }
 }
 
+/**
+ * @brief Convert ConvolutionMode to a human-readable string
+ * @param mode The convolution mode to convert
+ * @return A C-string representation of the convolution mode
+ */
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const ConvolutionMode& mode)
+{
+    switch(mode)
+    {
+    case ConvolutionMode::NOT_SET:
+        return "not_set";
+    case ConvolutionMode::CROSS_CORRELATION:
+        return "cross_correlation";
+    case ConvolutionMode::CONVOLUTION:
+        return "convolution";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const ConvolutionMode& mode)
+{
+    return os << to_string(mode);
+}
+
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const DataType& type)
 {
