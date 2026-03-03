@@ -65,16 +65,6 @@ double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_acti
 size_t round_elements_to_128B(size_t elements, size_t element_size_bits);
 
 /**
- * @brief Rounds elements up to the smallest value aligned to the configured vector width.
- *
- * @param elements Number of elements (e.g., macro tile dimension)
- * @param element_size_bits Element size in bits
- * @param vector_width Number of elements per vector load/store
- * @return size_t Rounded element count
- */
-size_t round_elements_to_vw(size_t elements, size_t element_size_bits, size_t vector_width);
-
-/**
  * @brief L2 hit rate from a global (problem-wide) perspective using the refactored API.
  *        Computes in BYTES to correctly handle differing A/B dtypes.
  * @param problem Problem description (M, N, K, etc.)

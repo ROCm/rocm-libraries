@@ -559,22 +559,6 @@ double compute_l2_hit_rate_global(const problem_t& problem,
 
 inline size_t round_up_mul(size_t x, size_t m) { return (x + m - 1) / m * m; }
 
-size_t round_elements_to_vw(size_t elements, size_t element_size_bits, size_t vector_width) {
-  // Guard against invalid element sizes (e.g., when dtype is None)
-  if (element_size_bits == 0 || element_size_bits > 1024) {
-    return round_elements_to_128B(elements, 16);  // Fallback to 16-bit elements
-  }
-  // Default (0 or 1) means use 128-bit transactions for backward compatibility
-  constexpr size_t default_transaction_bits = 128u * 8u;  // 1024 bits = 128 bytes
-  const size_t effective_vw = (vector_width <= 1)
-                                  ? (default_transaction_bits / element_size_bits)
-                                  : vector_width;
-  const size_t transaction_bits = effective_vw * element_size_bits;
-  const size_t g                = std::gcd(element_size_bits, transaction_bits);
-  const size_t E_block          = transaction_bits / g;  // elements per vector-aligned chunk
-  return round_up_mul(elements, E_block);
-}
-
 size_t round_elements_to_128B(size_t elements, size_t element_size_bits) {
   const size_t transaction_bits = 128u * 8u;  // 1024 bits = 128 bytes
   const size_t g                = std::gcd(element_size_bits, transaction_bits);
@@ -626,11 +610,10 @@ double compute_memory_latency(const problem_t& problem,
           : 0.0;  // MALL is not supported, so we emulate every read as a miss
 
   // 3) Total loads are loads from A and loads from B
-  // Use configured vector widths (grvw_a/grvw_b) for load alignment calculations
-  size_t Ld_A_value = a_trans ? MT_M * round_elements_to_vw(MT_K, a_bits, config.grvw_a)
-                              : round_elements_to_vw(MT_M, a_bits, config.grvw_a) * MT_K;
-  size_t Ld_B_value = b_trans ? round_elements_to_vw(MT_N, b_bits, config.grvw_b) * MT_K
-                              : MT_N * round_elements_to_vw(MT_K, b_bits, config.grvw_b);
+  size_t Ld_A_value = a_trans ? MT_M * round_elements_to_128B(MT_K, a_bits)
+                              : round_elements_to_128B(MT_M, a_bits) * MT_K;
+  size_t Ld_B_value = b_trans ? round_elements_to_128B(MT_N, b_bits) * MT_K
+                              : MT_N * round_elements_to_128B(MT_K, b_bits);
   auto Ld_CU_bytes  = (Ld_A_value * a_bytes)    // A Bytes
                      + (Ld_B_value * b_bytes);  // B Bytes
 
@@ -793,8 +776,10 @@ double compute_tile_latency(const problem_t& problem,
   // 3-2) Epilogue: writes from all active CUs with limited bandwidth
   double mem_bw_occ         = compute_mem_bw_from_occupancy(hardware, num_active_cus);
   double mem_bw_occ_limited = hardware.mem3_perf_ratio * mem_bw_occ;
-  // Use gwvw_d for output matrix store alignment
-  size_t MT_M_rounded = round_elements_to_vw(MT_M, datatype_to_bits(problem.d_dtype), config.gwvw_d);
+  // Round to cache line (128B) for memory system alignment
+  int d_bits = datatype_to_bits(problem.d_dtype);
+  size_t MT_M_rounded = (d_bits > 0) ? round_elements_to_128B(MT_M, static_cast<size_t>(d_bits))
+                                     : round_elements_to_128B(MT_M, 16);  // fallback to 16-bit
 
   // Each block can be independently calculated and reordered
   epilogue_components_t epilogue_comp = {};
