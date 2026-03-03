@@ -67,7 +67,9 @@ inline Error createConvFpropOperation(
     auto convMode = hipdnn_frontend::toBackendConvMode(attributes.get_convolution_mode());
     if(!convMode.has_value())
     {
-        return {ErrorCode::INVALID_VALUE, "Unsupported convolution mode"};
+        return {ErrorCode::INVALID_VALUE,
+                std::string("Unsupported convolution mode: ")
+                    + to_string(attributes.get_convolution_mode())};
     }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_CONVOLUTION_CONV_MODE,

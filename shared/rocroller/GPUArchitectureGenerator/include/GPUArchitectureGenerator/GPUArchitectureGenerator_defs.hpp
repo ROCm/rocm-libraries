@@ -107,9 +107,12 @@ namespace GPUArchitectureGenerator
              {{"v_wmma_f32_16x16x16_fp8_fp8 v[0:7], v[32:33], v[34:35], v[0:7]"}, ""}},
 
             {rocRoller::GPUCapability::HasAccumOffset,
-             {{".amdhsa_kernel hello_world\n  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n  "
-               ".amdhsa_next_free_sgpr .amdgcn.next_free_sgpr\n  .amdhsa_accum_offset "
-               "4\n.end_amdhsa_kernel"},
+             {{R"(
+                .amdhsa_kernel hello_world
+                .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
+                .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
+                .amdhsa_accum_offset 4
+                .end_amdhsa_kernel)"},
               ""}},
 
             {rocRoller::GPUCapability::HasGlobalOffset,

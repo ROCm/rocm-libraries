@@ -40,7 +40,7 @@ from Tensile.Common.Utilities import printWarning
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Tuple
 from enum import Enum, auto
 import Tensile.Components.CMSValidator as cmsv
 from typing import Callable
@@ -55,7 +55,6 @@ class ScheduleMatchStatus(Enum):
 # Global registry for schedule functions
 _SCHEDULE_REGISTRY = []
 
-# Global registry for schedule metadata (parallel to _SCHEDULE_REGISTRY)
 _SCHEDULE_METADATA: list["CMSKernelInfo"] = []
 
 # Map dtype predicate functions to human-readable names
@@ -77,7 +76,6 @@ class CMSKernelInfo:
     """
     name: str
     dtype: str
-    supported_layouts: list[str]
     MacroTile0: int
     MacroTile1: int
     DepthU: int
@@ -92,6 +90,10 @@ class CMSKernelInfo:
     LocalReadVectorWidth: int
     MatrixInstruction: list[int]
     MIWaveGroup: list[int]
+    LDSTrInst: bool
+    TransposeLDS: int
+    TransposeA: bool
+    TransposeB: bool
 
     def matches(self, dtype: Optional[str] = None, layout: Optional[str] = None) -> bool:
         """Check if this kernel info matches the given dtype and/or layout filter.
@@ -105,8 +107,10 @@ class CMSKernelInfo:
         """
         if dtype is not None and self.dtype.lower() != dtype.lower():
             return False
-        if layout is not None and layout.upper() not in (l.upper() for l in self.supported_layouts):
-            return False
+        if layout is not None:
+            layout = layout.upper()
+            if self.TransposeA != (layout[0] == "T") or self.TransposeB != (layout[1] == "T"):
+                return False
         return True
 
 
@@ -536,15 +540,7 @@ def query_cms_kernels(dtype: Optional[str] = None, layout: Optional[str] = None)
 
     Returns:
         A list of dicts, each containing the minimum parameter combination
-        needed for a matching CMS kernel. Each dict includes:
-            - name:                     Schedule function name
-            - dtype:                    Data type string
-            - supported_layouts:        List of all layouts this kernel supports
-            - MacroTile0, MacroTile1, DepthU
-            - PrefetchGlobalRead, PrefetchLocalRead, DirectToLds
-            - WaveSeparateGlobalReadA, WaveSeparateGlobalReadB
-            - GlobalReadVectorWidthA, GlobalReadVectorWidthB, LocalReadVectorWidth
-            - MatrixInstruction, MIWaveGroup
+        needed for a matching CMS kernel. Each dict includes the minimal parameters/values combinations needed for using each CMS kernel.
 
     """
     results = []
@@ -570,13 +566,13 @@ def get_cms_kernel_info_objects(dtype: Optional[str] = None, layout: Optional[st
     return [info for info in _SCHEDULE_METADATA if info.matches(dtype=dtype, layout=layout)]
 
 
-def get_available_dtypes() -> list[str]:
-    """Return a sorted list of all data type strings that have at least one CMS kernel."""
-    return sorted({info.dtype for info in _SCHEDULE_METADATA})
+def get_available_dtypes() -> set[str]:
+    """Return set of all data type strings that have at least one CMS kernel."""
+    return {info.dtype for info in _SCHEDULE_METADATA}
 
 
-def get_available_layouts(dtype: Optional[str] = None) -> list[str]:
-    """Return a sorted list of all layout strings available for the given data type.
+def get_available_layouts(dtype: Optional[str] = None) -> set[str]:
+    """Return a set of all layout strings available for the given data type.
 
     Args:
         dtype: Optional data type filter, or None for all data types.
@@ -584,11 +580,14 @@ def get_available_layouts(dtype: Optional[str] = None) -> list[str]:
     Returns:
         Sorted list of unique layout strings (e.g. ["NN", "NT", "TN", "TT"]).
     """
+    def as_str(transpose: bool) -> str:
+        return "T" if transpose else "N"
+
     layouts: set[str] = set()
     for info in _SCHEDULE_METADATA:
         if dtype is None or info.dtype.lower() == dtype.lower():
-            layouts.update(info.supported_layouts)
-    return sorted(layouts)
+            layouts.add(as_str(info.TransposeA) + as_str(info.TransposeB))
+    return layouts
 
 @CallableGuard
 def isNN(kernel):
@@ -728,7 +727,7 @@ class RegisterSchedule:
             "MfmaInitCVgprs": False,
         }
 
-    def _detect_supported_layouts(self, func: Callable) -> list[str]:
+    def _detect_supported_layouts(self, func: Callable) -> list[Tuple[bool, bool, bool, int]]:
         """Probe the inner function to discover which layouts it actually handles."""
         def as_str(transpose: bool) -> str:
             return "T" if transpose else "N"
@@ -742,7 +741,8 @@ class RegisterSchedule:
                     try:
                         found, _ = func(probe, useLDSTr, TLDS)
                         if found:
-                            detected.add(as_str(transA) + as_str(transB))
+                            detected_info_tuple = (transA, transB, useLDSTr, TLDS)
+                            detected.add(detected_info_tuple)
                     except (ValueError, KeyError) as e:
                         layout = as_str(transA) + as_str(transB)
                         printWarning(
@@ -796,30 +796,35 @@ class RegisterSchedule:
         _SCHEDULE_REGISTRY.append(wrapped_func)
 
         # Auto-detect supported layouts by probing the inner function
-        detected_layouts = self._detect_supported_layouts(func)
+        detected_infos = self._detect_supported_layouts(func)
 
         # Store metadata for query API
         dtype_name = _DTYPE_PREDICATE_NAMES.get(self.dtype_predicate, str(self.dtype_predicate))
         tc = self.tile_config
-        _SCHEDULE_METADATA.append(CMSKernelInfo(
-            name=func.__name__,
-            dtype=dtype_name,
-            supported_layouts=detected_layouts,
-            MacroTile0=tc.macro_tile_size_0,
-            MacroTile1=tc.macro_tile_size_1,
-            DepthU=tc.depth_u,
-            PrefetchGlobalRead=tc.prefetch_global_read,
-            PrefetchLocalRead=tc.prefetch_local_read,
-            DirectToLds=tc.direct_to_lds,
-            DtlPlusLdsBuf=tc.dtl_plus_lds_buf,
-            WaveSeparateGlobalReadA=tc.wave_separate_global_read_a,
-            WaveSeparateGlobalReadB=tc.wave_separate_global_read_b,
-            GlobalReadVectorWidthA=self.vector_widths[0],
-            GlobalReadVectorWidthB=self.vector_widths[1],
-            LocalReadVectorWidth=self.vector_widths[2],
-            MatrixInstruction=list(self.matrix_inst),
-            MIWaveGroup=list(self.mfma_wave_group),
-        ))
+        for detected_info in detected_infos:
+            _transA, _transB, _useLDSTr, _TLDS = detected_info
+            _SCHEDULE_METADATA.append(CMSKernelInfo(
+                name=func.__name__,
+                dtype=dtype_name,
+                TransposeA=_transA,
+                TransposeB=_transB,
+                MacroTile0=tc.macro_tile_size_0,
+                MacroTile1=tc.macro_tile_size_1,
+                DepthU=tc.depth_u,
+                PrefetchGlobalRead=tc.prefetch_global_read,
+                PrefetchLocalRead=tc.prefetch_local_read,
+                DirectToLds=tc.direct_to_lds,
+                DtlPlusLdsBuf=tc.dtl_plus_lds_buf,
+                WaveSeparateGlobalReadA=tc.wave_separate_global_read_a,
+                WaveSeparateGlobalReadB=tc.wave_separate_global_read_b,
+                GlobalReadVectorWidthA=self.vector_widths[0],
+                GlobalReadVectorWidthB=self.vector_widths[1],
+                LocalReadVectorWidth=self.vector_widths[2],
+                MatrixInstruction=list(self.matrix_inst),
+                MIWaveGroup=list(self.mfma_wave_group),
+                LDSTrInst=_useLDSTr,
+                TransposeLDS=_TLDS,
+            ))
         
         # Return original function unchanged (so it can still be called directly)
         return func
