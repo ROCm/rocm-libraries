@@ -44,23 +44,44 @@ if(ENABLE_CLANG_FORMAT)
     # Find and check clang-format version using unified function
     findandcheckclangformat()
 
+    # Use prefixed target names in superbuild to avoid collisions
+    if(ROCM_LIBS_SUPERBUILD)
+        set(_CHECK_FORMAT_TARGET ${PROJECT_NAME}_check_format)
+        set(_FORMAT_TARGET ${PROJECT_NAME}_format)
+    else()
+        set(_CHECK_FORMAT_TARGET check_format)
+        set(_FORMAT_TARGET format)
+    endif()
+
     add_custom_target(
-        check_format
+        ${_CHECK_FORMAT_TARGET}
         COMMAND find . ${CLANG_FORMAT_PRUNE}
                 \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \)
                 -exec ${CLANG_FORMAT_BINARY} --dry-run --Werror {} +
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM
-        COMMENT "Checking code format"
+        COMMENT "Checking code format (${PROJECT_NAME})"
     )
 
     add_custom_target(
-        format
+        ${_FORMAT_TARGET}
         COMMAND find . ${CLANG_FORMAT_PRUNE}
                 \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \)
                 -exec ${CLANG_FORMAT_BINARY} --verbose -i {} +
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM
-        COMMENT "Formatting code"
+        COMMENT "Formatting code (${PROJECT_NAME})"
+    )
+
+    # Alias targets with consistent hyphenated naming
+    add_custom_target(
+        ${PROJECT_NAME}-check-format
+        DEPENDS ${_CHECK_FORMAT_TARGET}
+        COMMENT "Alias for ${_CHECK_FORMAT_TARGET}"
+    )
+    add_custom_target(
+        ${PROJECT_NAME}-format
+        DEPENDS ${_FORMAT_TARGET}
+        COMMENT "Alias for ${_FORMAT_TARGET}"
     )
 endif() # ENABLE_CLANG_FORMAT
