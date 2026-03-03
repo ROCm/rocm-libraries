@@ -101,12 +101,6 @@ namespace rocRoller::KernelGraph::ControlGraph
         Throw<FatalError>("Invalid NodeOrdering");
     }
 
-    //inline void ControlGraph::checkOrderCache() const
-    //{
-    //    if(m_orderCache.empty())
-    //        populateOrderCache();
-    //}
-
     inline NodeOrdering ControlGraph::lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const
     {
         auto it = m_orderCache.find(nodeA);
@@ -123,18 +117,6 @@ namespace rocRoller::KernelGraph::ControlGraph
             return NodeOrdering::LeftInBodyOfRight;
         return NodeOrdering::Undefined;
     }
-
-    //inline NodeOrdering ControlGraph::lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const
-    //{
-    //    if(nodeA > nodeB)
-    //        return opposite(lookupOrder(CacheOnly, nodeB, nodeA));
-
-    //    if(not m_orderCache.contains(nodeA))
-    //        return NodeOrdering::Undefined;
-
-    //    auto const& nodeOrderPairs = m_orderCache.at(nodeA);
-    //    return nodeOrderPairs.contains(nodeB) ? nodeOrderPairs.at(nodeB) : NodeOrdering::Undefined;
-    //}
 
     inline Generator<int> ControlGraph::nodesAfter(int node) const
     {
@@ -168,100 +150,6 @@ namespace rocRoller::KernelGraph::ControlGraph
             for(int n : it->second.containing)
                 co_yield n;
     }
-
-    //inline Generator<int> ControlGraph::nodesAfter(int node) const
-    //{
-    //    populateOrderCache();
-
-    //    if(m_orderCache.contains(node))
-    //    {
-    //        for(auto const& [otherNode, order] : m_orderCache.at(node))
-    //        {
-    //            if(order == NodeOrdering::LeftFirst)
-    //                co_yield otherNode;
-    //        }
-    //    }
-
-    //    for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
-    //    {
-    //        if(otherNode >= node)
-    //            continue;
-
-    //        if(nodeOrderPairs.contains(node) && nodeOrderPairs.at(node) == NodeOrdering::RightFirst)
-    //            co_yield otherNode;
-    //    }
-    //}
-
-    //inline Generator<int> ControlGraph::nodesBefore(int node) const
-    //{
-    //    populateOrderCache();
-
-    //    if(m_orderCache.contains(node))
-    //    {
-    //        for(auto const& [otherNode, order] : m_orderCache.at(node))
-    //        {
-    //            if(order == NodeOrdering::RightFirst)
-    //                co_yield otherNode;
-    //        }
-    //    }
-
-    //    for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
-    //    {
-    //        if(otherNode >= node)
-    //            continue;
-
-    //        if(nodeOrderPairs.contains(node) && nodeOrderPairs.at(node) == NodeOrdering::LeftFirst)
-    //            co_yield otherNode;
-    //    }
-    //}
-
-    //inline Generator<int> ControlGraph::nodesInBody(int node) const
-    //{
-    //    populateOrderCache();
-
-    //    if(m_orderCache.contains(node))
-    //    {
-    //        for(auto const& [otherNode, order] : m_orderCache.at(node))
-    //        {
-    //            if(order == NodeOrdering::RightInBodyOfLeft)
-    //                co_yield otherNode;
-    //        }
-    //    }
-
-    //    for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
-    //    {
-    //        if(otherNode >= node)
-    //            continue;
-
-    //        if(nodeOrderPairs.contains(node)
-    //           && nodeOrderPairs.at(node) == NodeOrdering::LeftInBodyOfRight)
-    //            co_yield otherNode;
-    //    }
-    //}
-
-    //inline Generator<int> ControlGraph::nodesContaining(int node) const
-    //{
-    //    populateOrderCache();
-
-    //    if(m_orderCache.contains(node))
-    //    {
-    //        for(auto const& [otherNode, order] : m_orderCache.at(node))
-    //        {
-    //            if(order == NodeOrdering::LeftInBodyOfRight)
-    //                co_yield otherNode;
-    //        }
-    //    }
-
-    //    for(auto const& [otherNode, nodeOrderPairs] : m_orderCache)
-    //    {
-    //        if(otherNode >= node)
-    //            continue;
-
-    //        if(nodeOrderPairs.contains(node)
-    //           && nodeOrderPairs.at(node) == NodeOrdering::RightInBodyOfLeft)
-    //            co_yield otherNode;
-    //    }
-    //}
 
     template <typename T>
     requires(std::constructible_from<Operation, T>) inline std::set<
