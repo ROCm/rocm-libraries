@@ -2775,7 +2775,31 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       luIdx = u % self.states.numVgprBuffer # local to use for MACs
       if kernel["EnableMatrixInstruction"]:
-        macIterCode.add(self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollIdx = u, tail = useTailloopInNll))
+        postShiftK = Module()
+        if kernel["UseF32XEmulation"] and useTailloopInNll:
+          # useTailloopInNll case, we need to generate TF32 pack code after ShiftK
+          packItems = []
+          for iui in range(kernel["InnerUnroll"]):
+            # schedule both packPre and pack
+            packAPre = pack[packIdx].findNamedItem("packA_I%s Pre"%(iui))
+            packBPre = pack[packIdx].findNamedItem("packB_I%s Pre"%(iui))
+            packA = pack[packIdx].findNamedItem("packA_I%s"%(iui))
+            packB = pack[packIdx].findNamedItem("packB_I%s"%(iui))
+            if packAPre == None:
+              packAPre = Module()
+            if packBPre == None:
+              packBPre = Module()
+            packAItems = packA.flatitems()
+            packBItems = packB.flatitems()
+            # Gather A, B conversion code based on scheduling order
+            self._interleavePackAB(kernel, packAItems, packBItems, packItems, prefetch=True, searchStrings=["__TF32_1", "__TF32_2"])
+            # put packPre back to pack[packIdx]
+            pack[packIdx] = Module()
+            pack[packIdx].add(packAPre)
+            pack[packIdx].add(packBPre)
+          for item in packItems:
+            postShiftK.add(item)
+        macIterCode.add(self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollIdx = u, tail = useTailloopInNll, postShiftK = postShiftK))
       else:
         macIterCode.add(self.macIter(kernel, tensorParametersA, tensorParametersB, luIdx, kernel["InnerUnroll"], True))
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
@@ -5592,6 +5616,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # do packPre scheduling for This loop only not CLR or SubIter
           self.states.doPackPreSchedulingThisLoop = (not kernel["ClusterLocalRead"]) or kernel["ForceUnrollSubIter"]
         self.states.doPackPreSchedulingNextLoop = True
+      if self.states.tailloopInNll:
+        # disable all TF32 scheduling if tailloopInNll is enabled
+        self.states.doFullPackCodePrefetch = False
+        self.states.doPackPreSchedulingThisLoop = False
+        self.states.doPackPreSchedulingNextLoop = False
       numVgprsEmuA = initTF32EmuAB(self.states.a, self.states.lrvwTileA)
       numVgprsEmuB = initTF32EmuAB(self.states.b, self.states.lrvwTileB)
       return numVgprsEmuA, numVgprsEmuB
