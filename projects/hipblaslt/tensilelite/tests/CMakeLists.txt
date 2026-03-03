@@ -20,6 +20,7 @@ endforeach()
 target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
@@ -33,6 +34,7 @@ target_sources(tensilelite-tests
 )
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")
 
 if(HIPBLASLT_ENABLE_LLVM OR HIPBLASLT_ENABLE_MSGPACK)
     target_sources(tensilelite-tests

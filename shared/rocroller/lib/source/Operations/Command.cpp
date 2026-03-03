@@ -224,7 +224,7 @@ namespace rocRoller
 
     std::string Command::argInfo() const
     {
-        std::string rv;
+        std::string rv = "Command arguments:\n";
 
         for(auto const& arg : m_commandArgs)
         {

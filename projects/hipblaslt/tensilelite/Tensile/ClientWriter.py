@@ -47,6 +47,7 @@ from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientEx
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
 from .TensileCreateLibrary import copyStaticFiles
+from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
 
@@ -227,10 +228,30 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
   import time
 
   buildPath = ensurePath(outputPath / "build")
+  timingEnabled = globalParameters.get("TimingInstrumentation", False)
+  parallelGpus = globalParameters.get("ParallelGpuExecution", 1)
 
+  # Compute default configPaths if not provided (same logic as writeRunScript)
+  if configPaths is None:
+    configPaths = []
+    configPaths.append(os.path.join(buildPath, "../source/ClientParameters.ini"))
+    if enableTileSelection:
+      configPaths.append(os.path.join(buildPath, "../source/ClientParameters_Granularity.ini"))
+
+  # Determine number of GPUs to use
+  if parallelGpus == 0:
+    numGpus = detectAvailableGpus()
+    print1(f"# Auto-detected {numGpus} GPUs for parallel execution")
+  else:
+    numGpus = parallelGpus
+
+  # Use parallel execution only for benchmarking with multiple GPUs
+  if numGpus > 1 and forBenchmark:
+    return runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientExecutablePath)
+
+  # Original single-GPU path
   runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 
-  timingEnabled = globalParameters.get("TimingInstrumentation", False)
   # Using time_ns() for better precision: https://docs.python.org/3/library/time.html#time.time
   startTime = time.time_ns()
 
@@ -246,6 +267,7 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     printWarning("ClientWriter Benchmark Process exited with code %u" % process.returncode)
 
   return process.returncode
+
 
 def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, targetGfx):
   import io

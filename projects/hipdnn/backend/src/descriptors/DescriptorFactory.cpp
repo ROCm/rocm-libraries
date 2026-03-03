@@ -4,6 +4,7 @@
 #include "DescriptorFactory.hpp"
 #include "BackendEnumStringUtils.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
+#include "ConvolutionWrwOperationDescriptor.hpp"
 #include "EngineConfigDescriptor.hpp"
 #include "EngineDescriptor.hpp"
 #include "EngineHeuristicDescriptor.hpp"
@@ -52,6 +53,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionFwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR:
+        privateDesc = std::make_shared<ConvolutionWrwOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
