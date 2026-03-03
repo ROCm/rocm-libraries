@@ -107,13 +107,13 @@ namespace rocRoller::KernelGraph::ControlGraph
         if(it == m_orderCache.end())
             return NodeOrdering::Undefined;
         auto const& orders = it->second;
-        if(std::binary_search(orders.after.begin(), orders.after.end(), nodeB))
+        if(std::ranges::binary_search(orders.after, nodeB))
             return NodeOrdering::LeftFirst;
-        if(std::binary_search(orders.before.begin(), orders.before.end(), nodeB))
+        if(std::ranges::binary_search(orders.before, nodeB))
             return NodeOrdering::RightFirst;
-        if(std::binary_search(orders.inBody.begin(), orders.inBody.end(), nodeB))
+        if(std::ranges::binary_search(orders.inBody, nodeB))
             return NodeOrdering::RightInBodyOfLeft;
-        if(std::binary_search(orders.containing.begin(), orders.containing.end(), nodeB))
+        if(std::ranges::binary_search(orders.containing, nodeB))
             return NodeOrdering::LeftInBodyOfRight;
         return NodeOrdering::Undefined;
     }

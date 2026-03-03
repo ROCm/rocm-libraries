@@ -5,10 +5,9 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
+#include <bitset>
 #include <cmath>
 #include <iomanip>
-
-#include <bitset>
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
@@ -180,9 +179,7 @@ namespace rocRoller::KernelGraph::ControlGraph
                     }
                 }(),
                 ...);
-
-            for(auto& bit : bits)
-                bit.reset();
+            std::ranges::fill(bits, std::bitset<64>{});
         };
 
         for(auto& [node, orders] : m_orderCache)

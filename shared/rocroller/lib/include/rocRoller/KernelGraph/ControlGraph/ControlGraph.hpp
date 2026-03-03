@@ -263,7 +263,6 @@ namespace rocRoller
 
             virtual void clearCache(Graph::GraphModification modification) override;
             void         populateOrderCache() const;
-            void         checkOrderCache() const;
             void         sortOrderCache() const;
 
             NodeOrdering lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const;
