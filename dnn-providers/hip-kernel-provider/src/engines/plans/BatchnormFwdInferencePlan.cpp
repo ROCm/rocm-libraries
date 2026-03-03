@@ -3,6 +3,8 @@
 
 #include "BatchnormFwdInferencePlan.hpp"
 
+#include "HipKernelUtils.hpp"
+
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <stdexcept>
@@ -20,23 +22,6 @@ BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
     , _bias(tensorMap.at(attributes.bias_tensor_uid()))
     , _estMean(tensorMap.at(attributes.mean_tensor_uid()))
     , _invVariance(tensorMap.at(attributes.inv_variance_tensor_uid()))
-    , _activationOut(nullptr)
-{
-}
-
-BatchnormFwdInferenceParams::BatchnormFwdInferenceParams(
-    const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-    : _x(tensorMap.at(inferenceAttributes.x_tensor_uid()))
-    , _y(tensorMap.at(inferenceAttributes.y_tensor_uid()))
-    , _scale(tensorMap.at(inferenceAttributes.scale_tensor_uid()))
-    , _bias(tensorMap.at(inferenceAttributes.bias_tensor_uid()))
-    , _estMean(tensorMap.at(inferenceAttributes.mean_tensor_uid()))
-    , _invVariance(tensorMap.at(inferenceAttributes.inv_variance_tensor_uid()))
-    , _optActivation(hip_kernel_utils::parseActivation(pointwiseAttributes))
-    , _activationOut(tensorMap.at(pointwiseAttributes.out_0_tensor_uid()))
 {
 }
 
@@ -69,18 +54,6 @@ const hipdnn_data_sdk::data_objects::TensorAttributes*
     BatchnormFwdInferenceParams::invVariance() const
 {
     return _invVariance;
-}
-
-const std::optional<hip_kernel_utils::ActivationParams>&
-    BatchnormFwdInferenceParams::optActivation() const
-{
-    return _optActivation;
-}
-
-const hipdnn_data_sdk::data_objects::TensorAttributes*
-    BatchnormFwdInferenceParams::activationOut() const
-{
-    return _activationOut;
 }
 
 BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
@@ -231,17 +204,6 @@ void BatchnormFwdInferencePlan::compile(const hipDeviceProp_t& deviceProperties)
     bool isGfx120x = (archName.find("gfx120") == 0);
     bool isGfx115x = (archName.find("gfx115") == 0);
 
-    // Get activation parameters
-    int nrnOpId = 0;
-
-    if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
-    {
-        const auto& activation = *_inferenceParams.optActivation();
-        nrnOpId = static_cast<int>(activation.mode);
-        _activationAlpha = static_cast<float>(activation.alpha);
-        _activationBeta = static_cast<float>(activation.beta);
-    }
-
     // Prepare compilation options
     std::vector<std::string> options;
     options.emplace_back("-I/opt/rocm/include");
@@ -260,7 +222,7 @@ void BatchnormFwdInferencePlan::compile(const hipDeviceProp_t& deviceProperties)
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX110X=") + (isGfx110x ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX120X=") + (isGfx120x ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_BN_GFX115X=") + (isGfx115x ? "1" : "0"));
-    options.emplace_back(std::string("-DHIP_PLUGIN_NRN_OP_ID=") + std::to_string(nrnOpId));
+    options.emplace_back("-DHIP_PLUGIN_NRN_OP_ID=0");
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
     // Compile kernel and configure launch dimensions
@@ -305,49 +267,27 @@ void BatchnormFwdInferencePlan::execute(const HipKernelHandle& handle,
     auto invVarianceBuffer = hip_kernel_utils::findDeviceBuffer(
         _inferenceParams.invVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
-    // Launch kernel with appropriate output buffer
-    if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
-    {
-        auto activationOutBuffer = hip_kernel_utils::findDeviceBuffer(
-            _inferenceParams.activationOut()->uid(), deviceBuffers, numDeviceBuffers);
+    auto yBuffer = hip_kernel_utils::findDeviceBuffer(
+        _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
 
-        _runnableKernel->launch(handle.getStream(),
-                                xBuffer.ptr,
-                                activationOutBuffer.ptr,
-                                estMeanBuffer.ptr,
-                                invVarianceBuffer.ptr,
-                                scaleBuffer.ptr,
-                                biasBuffer.ptr,
-                                _channels,
-                                _inCstride,
-                                _batchCount,
-                                _cStride,
-                                _hwStride,
-                                _batchStride,
-                                _activationAlpha,
-                                _activationBeta);
-    }
-    else
-    {
-        auto yBuffer = hip_kernel_utils::findDeviceBuffer(
-            _inferenceParams.y()->uid(), deviceBuffers, numDeviceBuffers);
+    float activationAlpha = 0.0f;
+    float activationBeta = 0.0f;
 
-        _runnableKernel->launch(handle.getStream(),
-                                xBuffer.ptr,
-                                yBuffer.ptr,
-                                estMeanBuffer.ptr,
-                                invVarianceBuffer.ptr,
-                                scaleBuffer.ptr,
-                                biasBuffer.ptr,
-                                _channels,
-                                _inCstride,
-                                _batchCount,
-                                _cStride,
-                                _hwStride,
-                                _batchStride,
-                                _activationAlpha,
-                                _activationBeta);
-    }
+    _runnableKernel->launch(handle.getStream(),
+                            xBuffer.ptr,
+                            yBuffer.ptr,
+                            estMeanBuffer.ptr,
+                            invVarianceBuffer.ptr,
+                            scaleBuffer.ptr,
+                            biasBuffer.ptr,
+                            _channels,
+                            _inCstride,
+                            _batchCount,
+                            _cStride,
+                            _hwStride,
+                            _batchStride,
+                            activationAlpha,
+                            activationBeta);
 }
 
 }

@@ -8,7 +8,6 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipKernelHandle.hpp"
-#include "HipKernelUtils.hpp"
 #include "hip/ICompiledProgram.hpp"
 #include "hip/IKernelCompiler.hpp"
 #include "hip/IRunnableKernel.hpp"
@@ -26,12 +25,6 @@ public:
         const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    BatchnormFwdInferenceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes& inferenceAttributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-            tensorMap);
-
     BatchnormFwdInferenceParams(const BatchnormFwdInferenceParams&) = delete;
     BatchnormFwdInferenceParams& operator=(const BatchnormFwdInferenceParams&) = delete;
 
@@ -45,9 +38,6 @@ public:
     const hipdnn_data_sdk::data_objects::TensorAttributes* estMean() const;
     const hipdnn_data_sdk::data_objects::TensorAttributes* invVariance() const;
 
-    const std::optional<hip_kernel_utils::ActivationParams>& optActivation() const;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* activationOut() const;
-
 private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _x;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _y;
@@ -55,9 +45,6 @@ private:
     const hipdnn_data_sdk::data_objects::TensorAttributes* _bias;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _estMean;
     const hipdnn_data_sdk::data_objects::TensorAttributes* _invVariance;
-
-    std::optional<hip_kernel_utils::ActivationParams> _optActivation;
-    const hipdnn_data_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
 class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
@@ -96,8 +83,6 @@ private:
     unsigned int _cStride = 0;
     unsigned int _hwStride = 0;
     unsigned int _batchStride = 0;
-    float _activationAlpha = 0.0f;
-    float _activationBeta = 0.0f;
 };
 
 }

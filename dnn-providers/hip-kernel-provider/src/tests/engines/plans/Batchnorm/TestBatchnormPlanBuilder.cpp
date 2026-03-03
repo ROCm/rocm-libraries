@@ -65,15 +65,6 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
-TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedInferenceActivationGraph)
-{
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-
-    EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
-}
-
 // ============================================================================
 // isApplicable - invalid graphs
 // ============================================================================
@@ -96,19 +87,6 @@ TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForSingleNodeInference)
     setupMockCompileChain();
 
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
-    hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                              builder.GetSize());
-    HipKernelContext ctx;
-
-    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
-    EXPECT_TRUE(ctx.hasValidPlan());
-}
-
-TEST_F(TestBatchnormPlanBuilder, BuildPlanSetsPlanForFusedInferenceActivation)
-{
-    setupMockCompileChain();
-
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
     hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
                                                               builder.GetSize());
     HipKernelContext ctx;
