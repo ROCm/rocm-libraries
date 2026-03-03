@@ -36,6 +36,7 @@
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
+#include <miopen/errors.hpp>
 #include <miopen/miopen.h>
 #include <miopen/pooling.hpp>
 #include <miopen/tensor.hpp>
@@ -354,8 +355,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Pooling Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Pooling Mode");
     }
 
     if((inflags.GetValueStr("pad_mode")) == "same")
@@ -372,8 +372,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Padding Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Padding Mode");
     }
 
     if((inflags.GetValueStr("index_type")) == "miopenIndexUint8")
@@ -394,8 +393,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::SetPoolDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect Index Data Type\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Index Data Type");
     }
 
     in_filename  = inflags.GetValueStr("in_data");

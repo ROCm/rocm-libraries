@@ -783,7 +783,7 @@ namespace rocisa
         int previousLW = 0;
         std::queue<int> hwLRFIFO;
         std::queue<int> lgkmLRFIFO;
-        std::queue<int> hwGRFIFO;
+        std::deque<int> hwGRFIFO;
         bool isEndOfLoop  = false;
         int numPreviousLRs = 0;
         bool isPreviousMFMA = false;
@@ -909,7 +909,13 @@ namespace rocisa
                     } else if (auto gr64 = std::dynamic_pointer_cast<BufferLoadB64>(grInst)) {
                         bpr = 8;
                     }
-                    cycles = formocast.getGlobalReadQueueFullStallCycles(currCycles, hwGRFIFO, bpr, numWaves, false);
+
+                    bool hasSgprOffset = false;
+                    auto soffsetStr = InstructionInputToString(grInst->soffset);
+                    if (soffsetStr.find("s") != std::string::npos) {
+                        hasSgprOffset = true;
+                    }
+                    cycles = formocast.getGlobalReadQueueFullStallCycles(currCycles, hwGRFIFO, bpr, numWaves, (rocIsa::getInstance().getKernel().isaVersion[0] == 9), hasSgprOffset);
                 }
                 if(auto wInst = std::dynamic_pointer_cast<DSStoreB128>(item))
                 {
@@ -1208,7 +1214,7 @@ namespace rocisa
         }
         else {
             // not supported
-            formocast.setHardware(origami::hardware_t::architecture_t::gfx950);
+            return 0;
         }
         // Calculate local read bytes
         auto localReadBytes = _calculateLocalReadBytes(module, numWaves);

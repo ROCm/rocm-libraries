@@ -10,6 +10,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Computation of different matrix norms
     * LANGE
     * LANGE_64
+* Computation of different matrix condition numbers
+    * GECON
+    * GECON_64
 
 ### Changed
 ### Removed
