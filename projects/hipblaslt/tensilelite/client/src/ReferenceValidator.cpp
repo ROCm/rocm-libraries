@@ -705,6 +705,63 @@ namespace TensileLite
             }
         }
 
+        template <typename ValidType, typename Comparator>
+        void forEachElement(TensorDescriptor const& tensor,
+                            ValidType const*        reference,
+                            ValidType const*        resultData,
+                            size_t                  validationStride,
+                            Comparator&             compare)
+        {
+            if(validationStride == 1)
+            {
+                std::vector<size_t> coord(tensor.dimensions());
+                size_t outerCount
+                    = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
+
+                size_t       elemNumberBase = 0;
+                const size_t innerDimSize   = tensor.sizes()[0];
+                const size_t initialStride  = tensor.strides()[0];
+
+                for(size_t i = 0; i < outerCount; i++)
+                {
+                    CoordNumbered(i,
+                                  coord.begin() + 1,
+                                  coord.end(),
+                                  tensor.sizes().begin() + 1,
+                                  tensor.sizes().end());
+                    size_t baseElemIndex = tensor.index(coord);
+
+                    for(size_t j = 0; j < innerDimSize; j++)
+                    {
+                        size_t elemIndex  = baseElemIndex + (j * initialStride);
+                        size_t elemNumber = elemNumberBase + j;
+
+                        compare(reference[elemIndex], resultData[elemIndex],
+                                elemIndex, elemNumber);
+                    }
+                    elemNumberBase += innerDimSize;
+                }
+            }
+            else
+            {
+                std::vector<size_t> coord(tensor.dimensions());
+                for(size_t elemNumber = 0;
+                    elemNumber < tensor.totalLogicalElements();
+                    elemNumber += validationStride)
+                {
+                    CoordNumbered(elemNumber,
+                                  coord.begin(),
+                                  coord.end(),
+                                  tensor.sizes().begin(),
+                                  tensor.sizes().end());
+                    size_t elemIndex = tensor.index(coord);
+
+                    compare(reference[elemIndex], resultData[elemIndex],
+                            elemIndex, elemNumber);
+                }
+            }
+        }
+
         template <typename ValidType>
         bool ReferenceValidator::checkResultsTyped(TensorDescriptor const& tensor,
                                                    ValidType const*        reference,
@@ -766,27 +823,27 @@ namespace TensileLite
                     compareInvalid.before(resultBuffer[i], i, elementsBeforeData);
                 }
 
-                if(validationStride == 1)
+                forEachElement(tensor, reference, resultData, validationStride, compareValid);
+
+                if(boundsCheck == BoundsCheckMode::NaN && validationStride == 1)
                 {
                     std::vector<size_t> coord(tensor.dimensions());
-                    size_t outerCount = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
-
-                    size_t       prevBaseIndex  = 0;
-                    size_t       elemNumberBase = 0;
-                    const size_t innerDimSize   = tensor.sizes()[0];
-                    const size_t initialStride  = tensor.strides()[0];
+                    size_t outerCount
+                        = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
+                    size_t       prevBaseIndex = 0;
+                    const size_t innerDimSize  = tensor.sizes()[0];
 
                     for(size_t i = 0; i < outerCount; i++)
                     {
                         CoordNumbered(i,
-                                    coord.begin() + 1,
-                                    coord.end(),
-                                    tensor.sizes().begin() + 1,
-                                    tensor.sizes().end());
+                                      coord.begin() + 1,
+                                      coord.end(),
+                                      tensor.sizes().begin() + 1,
+                                      tensor.sizes().end());
                         size_t baseElemIndex = tensor.index(coord);
 
-                        if(boundsCheck == BoundsCheckMode::NaN && baseElemIndex != 0
-                        && baseElemIndex != prevBaseIndex + innerDimSize)
+                        if(baseElemIndex != 0
+                           && baseElemIndex != prevBaseIndex + innerDimSize)
                         {
                             for(auto innerIndex = prevBaseIndex + innerDimSize;
                                 innerIndex < baseElemIndex;
@@ -796,39 +853,7 @@ namespace TensileLite
                                     resultData[innerIndex], innerIndex, baseElemIndex);
                             }
                         }
-
                         prevBaseIndex = baseElemIndex;
-
-                        for(size_t j = 0; j < innerDimSize; j++)
-                        {
-                            size_t elemIndex = baseElemIndex + (j * initialStride);
-
-                            ValidType referenceValue = reference[elemIndex];
-                            ValidType resultValue    = resultData[elemIndex];
-
-                            compareValid(
-                                referenceValue, resultValue, elemIndex, elemNumberBase + j);
-                        }
-                        elemNumberBase += innerDimSize;
-                    }
-                }
-                else
-                {
-                    std::vector<size_t> coord(tensor.dimensions());
-                    for(size_t elemNumber = 0; elemNumber < tensor.totalLogicalElements();
-                        elemNumber += validationStride)
-                    {
-                        CoordNumbered(elemNumber,
-                                    coord.begin(),
-                                    coord.end(),
-                                    tensor.sizes().begin(),
-                                    tensor.sizes().end());
-                        size_t elemIndex = tensor.index(coord);
-
-                        ValidType referenceValue = reference[elemIndex];
-                        ValidType resultValue    = resultData[elemIndex];
-
-                        compareValid(referenceValue, resultValue, elemIndex, elemNumber);
                     }
                 }
 
@@ -846,49 +871,10 @@ namespace TensileLite
             {
                 ScopedTimer timer("validate_mismatch_printing");
 
-                size_t printed = 0;
-                std::cout << "Index:  Device | Reference" << std::endl;
+                PointwiseComparison<ValidType> comparePrint(
+                    false, m_printMax, false, threshold);
 
-                std::vector<size_t> printCoord(tensor.dimensions());
-                for(size_t elemNumber = 0;
-                    elemNumber < tensor.totalLogicalElements() && printed < static_cast<size_t>(m_printMax);
-                    elemNumber++)
-                {
-                    CoordNumbered(elemNumber,
-                                  printCoord.begin(),
-                                  printCoord.end(),
-                                  tensor.sizes().begin(),
-                                  tensor.sizes().end());
-                    size_t    elemIndex = tensor.index(printCoord);
-                    ValidType ref       = reference[elemIndex];
-                    ValidType res       = resultData[elemIndex];
-
-                    if(!AlmostEqual(ref, res, threshold))
-                    {
-                        if constexpr(std::is_same<int8_t, ValidType>())
-                        {
-                            std::cout << "[" << printed << "]  elem=" << elemNumber
-                                      << " idx=" << elemIndex << ": "
-                                      << static_cast<int>(res) << "!="
-                                      << static_cast<int>(ref) << std::endl;
-                        }
-                        else if constexpr(std::is_same<Float8, ValidType>()
-                                          || std::is_same<BFloat8, ValidType>())
-                        {
-                            std::cout << "[" << printed << "]  elem=" << elemNumber
-                                      << " idx=" << elemIndex << ": "
-                                      << static_cast<float>(res) << "!="
-                                      << static_cast<float>(ref) << std::endl;
-                        }
-                        else
-                        {
-                            std::cout << "[" << printed << "]  elem=" << elemNumber
-                                      << " idx=" << elemIndex << ": "
-                                      << res << "!=" << ref << std::endl;
-                        }
-                        printed++;
-                    }
-                }
+                forEachElement(tensor, reference, resultData, validationStride, comparePrint);
             }
 
             compareValid.report();
