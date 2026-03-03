@@ -64,7 +64,7 @@ static void print_helper_msg()
               << std::endl;
 }
 
-void print_bwd_weight_instances(auto data_type, auto layout, auto num_dim_spatial)
+void print_bwd_weight_instances(ConvDataType data_type, ConvLayout layout, ck::index_t num_dim_spatial)
 {
 
     auto print_available_instances = [&](auto num_dim_spatial_tmp,
