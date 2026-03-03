@@ -163,8 +163,8 @@ class TestCustomScheduleBF16:
     @pytest.mark.parametrize(
         # fmt: off
         "transA, transB, lds_tr_inst, tr_lds, dtl_plus_lds_buf", [
-        (  True,  False,        True,      1,                 0),
-        ( False,   True,        True,      0,                 1),
+        (  True,  False,        True,      1,             None),
+        ( False,   True,        True,      0,                1),
         # fmt: on
         ])
     def test_schedule_256x96x64_16bit(self, transA, transB, lds_tr_inst, tr_lds, dtl_plus_lds_buf):
@@ -180,9 +180,12 @@ class TestCustomScheduleBF16:
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 3,
-            "LDSTrInst": lds_tr_inst, "DtlPlusLdsBuf": dtl_plus_lds_buf,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds,
+            "MIWaveTileA": 8, "MIWaveTileB": 3,
         })
+
+        if dtl_plus_lds_buf is not None:
+            kernel.update({"DtlPlusLdsBuf": dtl_plus_lds_buf })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
