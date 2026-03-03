@@ -45,6 +45,7 @@ from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
 from .SolutionStructs import Solution, isPackedIndex
+from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -6115,16 +6116,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["EnableMatrixInstruction"]:
       from rocisa.instruction import getMFMAIssueLatency, getSMFMAIssueLatency
-      datatype = kernel["ProblemType"]["DataType"]
-      if kernel["UseF32XEmulation"]:
-        datatype = DataType(DataTypeEnum.BFloat16)
-      self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(datatype.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"]) if kernel["ProblemType"]["Sparse"] else \
-                                              getMFMAIssueLatency(datatype.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
+      miInputType = getMiInputType(kernel)
+
+      if kernel["ProblemType"]["Sparse"]:
+        self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(
+            miInputType.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
+      else:
+        self.states.miLatency, miIssueLatency = getMFMAIssueLatency(
+            miInputType.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
       # TODO: Avoid the logic which does not make sense.
       # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
       # Changed the value based on this and also to mitigate some instruction scheduling issues.
       # Invalidate this adjustment if ExtraMiLatencyLeft is >= 0
-      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and datatype.numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
+      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and miInputType.numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
         self.states.miLatency = kernel["MatrixInstM"] // 2
         miIssueLatency = 2
 
