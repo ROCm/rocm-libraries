@@ -247,28 +247,24 @@ namespace rocRoller
             }
 
         private:
-            template <CForwardRangeOf<int> Range>
-            std::vector<int> populateOrderCacheImpl(Range const& startingNodes) const;
-            std::vector<int> populateOrderCacheImpl(int startingNode) const;
-
-            virtual void clearCache(Graph::GraphModification modification) override;
-            void         populateOrderCache() const;
-            void         checkOrderCache() const;
-            void         sortOrderCache() const;
-
             /**
              * Populates m_orderCache for startingNodes relative to their descendents, and the
              * descendents of each relative to each other. Returns the descendents of
              * startingNodes.
              */
             template <CForwardRangeOf<int> Range>
-            std::set<int> populateOrderCache(Range const& startingNodes) const;
+            std::vector<int> populateOrderCache(Range const& startingNodes) const;
 
             /**
              * Populates m_orderCache for startingNode relative to its descendents, and the
              * descendents relative to each other. Returns the descendents of startingNode.
              */
-            std::set<int> populateOrderCache(int startingNode) const;
+            std::vector<int> populateOrderCache(int startingNode) const;
+
+            virtual void clearCache(Graph::GraphModification modification) override;
+            void         populateOrderCache() const;
+            void         checkOrderCache() const;
+            void         sortOrderCache() const;
 
             NodeOrdering lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const;
             NodeOrdering lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const;

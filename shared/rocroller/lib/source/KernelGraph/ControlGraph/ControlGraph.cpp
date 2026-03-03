@@ -206,7 +206,7 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         auto rootNodes = roots().to<std::vector>();
 
-        populateOrderCacheImpl(rootNodes);
+        populateOrderCache(rootNodes);
         sortOrderCache();
 
         m_cacheStatus = CacheStatus::Valid;
@@ -214,18 +214,18 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     template <CForwardRangeOf<int> Range>
-    std::vector<int> ControlGraph::populateOrderCacheImpl(Range const& startingNodes) const
+    std::vector<int> ControlGraph::populateOrderCache(Range const& startingNodes) const
     {
         std::vector<int> rv;
         for(auto it = startingNodes.begin(); it != startingNodes.end(); ++it)
         {
-            auto nodes = populateOrderCacheImpl(*it);
+            auto nodes = populateOrderCache(*it);
             rv.insert(rv.end(), nodes.begin(), nodes.end());
         }
         return rv;
     }
 
-    std::vector<int> ControlGraph::populateOrderCacheImpl(int startingNode) const
+    std::vector<int> ControlGraph::populateOrderCache(int startingNode) const
     {
         auto ccEntry = m_descendentCache.find(startingNode);
         if(ccEntry != m_descendentCache.end())
@@ -247,7 +247,7 @@ namespace rocRoller::KernelGraph::ControlGraph
         }
 
         auto addDescendents = [this](std::vector<int> const& children) -> std::vector<int> {
-            auto             descendents = populateOrderCacheImpl(children);
+            auto             descendents = populateOrderCache(children);
             std::vector<int> result;
             result.reserve(children.size() + descendents.size());
             result.insert(result.end(), children.begin(), children.end());
