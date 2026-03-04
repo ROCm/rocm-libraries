@@ -167,7 +167,7 @@ typedef enum
      * mean, inverse variance, scale, bias, and output (Y) tensors.
      */
     HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_EXT_DESCRIPTOR,
-  
+
     /**
      * @brief Convolution backward data (Dgrad) operation descriptor
      *

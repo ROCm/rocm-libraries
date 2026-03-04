@@ -426,9 +426,9 @@ typedef enum
 
     /** @brief Compute data type for batchnorm inference */
     HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE = 1806,
-  
+
     /** @} */
-  
+
     /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
