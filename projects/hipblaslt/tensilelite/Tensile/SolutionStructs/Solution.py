@@ -3071,7 +3071,9 @@ class Solution(collections.abc.Mapping):
         reject(state, "dot2 kernel requires InnerUnroll = 1,2 or 4")
       if state["NumWaveSplitK"] not in [1,2,4,8,16,32,64]:
         reject(state, "Unsupported NumWaveSplitK value. Need to be power of 2 and does not exceed 64.")
-      if state["DepthU"] % (state["LocalReadVectorWidth"] * state["NumWaveSplitK"]) != 0:
+      if state["_DepthUA"] % (state["LocalReadVectorWidthA"] * state["NumWaveSplitK"]) != 0:
+        reject(state, "Non-valid DepthU for dot2 kernel, need to be multiple of (LocalReadVectorWidth * InnerUnroll * NumWaveSplitK) for atomics")
+      if state["_DepthUB"] % (state["LocalReadVectorWidthB"] * state["NumWaveSplitK"]) != 0:
         reject(state, "Non-valid DepthU for dot2 kernel, need to be multiple of (LocalReadVectorWidth * InnerUnroll * NumWaveSplitK) for atomics")
       # TODO: Need to consider VectorWidth in LraTileAssignmentVALU
       if state["VectorWidthA"] != 1 or state["VectorWidthB"] != 1:
@@ -4120,11 +4122,11 @@ class Solution(collections.abc.Mapping):
     # reject iterations are not enough to use wider local read
     if state["EnableMatrixInstruction"] and state["PrefetchLocalRead"] > 0:
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
-      wlrMultiple = state["LocalReadVectorWidth"]//state["MIInputPerThread"]
+      wlrMultiple = state["LocalReadVectorWidthA"]//state["MIInputPerThreadA"]
       # NOTE: wlrmultiple can be 0 for new MFMA
       if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         if wlrMultiple == 0:
-          reject(state, printRejectionReason, "LocalReadVectorWidth %u is less than MIInput" % (state["LocalReadVectorWidth"]))
+          reject(state, printRejectionReason, "LocalReadVectorWidth %u is less than MIInputA" % (state["LocalReadVectorWidthA"]))
           return
       # for example, if the original ds_read is b32...
       #   1. if LoopIters = 5 (b32 x 5 times), WLR-Multiple = 2 (b64), then we can fit the WLR
@@ -4132,11 +4134,30 @@ class Solution(collections.abc.Mapping):
       #   3. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 2 (b64), this is allowed
       if wlrMultiple and state["LoopIters"] % wlrMultiple != 0:
         reject(state, printRejectionReason, "LocalReadVectorWidth %u cannot be distributed evenly, LoopIters %u should be divisible by WLR-Multiple %u" \
-          % (state["LocalReadVectorWidth"], state["LoopIters"], wlrMultiple))
+          % (state["LocalReadVectorWidthA"], state["LoopIters"], wlrMultiple))
 
       if state["LoopIters"] - (state["PrefetchLocalRead"] * wlrMultiple) < 0 :
         reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidth %u, not enough LoopIters to prefetch %ux%u iterations, " \
-          % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidth"], state["PrefetchLocalRead"] , wlrMultiple) )
+          % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthA"], state["PrefetchLocalRead"] , wlrMultiple) )
+
+      # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
+      wlrMultiple = state["LocalReadVectorWidthB"]//state["MIInputPerThreadB"]
+      # NOTE: wlrmultiple can be 0 for new MFMA
+      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+        if wlrMultiple == 0:
+          reject(state, printRejectionReason, "LocalReadVectorWidthB %u is less than MIInputB" % (state["LocalReadVectorWidthB"]))
+          return
+      # for example, if the original ds_read is b32...
+      #   1. if LoopIters = 5 (b32 x 5 times), WLR-Multiple = 2 (b64), then we can fit the WLR
+      #   2. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 4 (b128), this is not allowed
+      #   3. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 2 (b64), this is allowed
+      if wlrMultiple and state["LoopIters"] % wlrMultiple != 0:
+        reject(state, printRejectionReason, "LocalReadVectorWidth %u cannot be distributed evenly, LoopIters %u should be divisible by WLR-Multiple %u" \
+          % (state["LocalReadVectorWidthB"], state["LoopIters"], wlrMultiple))
+
+      if state["LoopIters"] - (state["PrefetchLocalRead"] * wlrMultiple) < 0 :
+        reject(state, printRejectionReason, "with PrefetchLocalRead %u LoopIters %u LocalReadVectorWidthB %u, not enough LoopIters to prefetch %ux%u iterations, " \
+          % (state["PrefetchLocalRead"],state["LoopIters"],state["LocalReadVectorWidthB"], state["PrefetchLocalRead"] , wlrMultiple) )
 
     # # reject conditions with lower performance
     # if state["ScheduleIterAlg"] == 2 and \
@@ -4165,13 +4186,21 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "TransposeLds requires TLUA=0 or TLUB=0")
     if state["EnableMatrixInstruction"]:
       # enable widerLocalRead
-      if state["LocalReadVectorWidth"] > state["MIInputPerThread"]:
+      if state["LocalReadVectorWidthA"] > state["MIInputPerThreadA"]:
         # wider localRead support 2 types
         # 1. prefetch all lds to register
         # 2. using larger InnerUnroll
         if not (state["PrefetchLocalRead"] >= state["LoopIters"] and state["InnerUnroll"] == 1) and \
             not state["ClusterLocalRead"] and \
-            not state["InnerUnroll"] >= state["LocalReadVectorWidth"] // state["MIInputPerThread"]:
+            not state["InnerUnroll"] >= state["LocalReadVectorWidthA"] // state["MIInputPerThreadA"]:
+          reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
+      if state["LocalReadVectorWidthB"] > state["MIInputPerThreadB"]:
+        # wider localRead support 2 types
+        # 1. prefetch all lds to register
+        # 2. using larger InnerUnroll
+        if not (state["PrefetchLocalRead"] >= state["LoopIters"] and state["InnerUnroll"] == 1) and \
+            not state["ClusterLocalRead"] and \
+            not state["InnerUnroll"] >= state["LocalReadVectorWidthB"] // state["MIInputPerThreadB"]:
           reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
 
     if state["GlobalReadPerMfma"] > 1 and state["PrefetchGlobalRead"] >= 2:
