@@ -539,9 +539,9 @@ GetCachedPrediction(const conv::ProblemDescription& problem, const std::string& 
  */
 void StorePredictionCache(const conv::ProblemDescription& problem,
                           const std::string& device,
-                          bool is3d,
                           std::vector<std::any>& any_sol)
 {
+    const bool is3d = problem.Is3d();
     std::string est_name = is3d ? (":memory:3d_" + device) : (":memory:" + device);
     auto& db             = AnyRamDb::GetCached(est_name);
     db.StoreRecord(problem, any_sol);
@@ -565,10 +565,10 @@ struct PredictionResult
  */
 PredictionResult ProcessPredictions(const std::vector<float>& predictions,
                                     const std::unordered_map<size_t, std::string>& solver_map,
-                                    bool is3d)
+                                    bool use_nd)
 {
     // Debug: Print raw prediction probabilities
-    const std::string model_type = is3d ? "3D " : "";
+    const std::string model_type = use_nd ? "ND " : "";
 
     // Log individual solver predictions with scores
     if(miopen::IsLogging(LoggingLevel::Info2) && !solver_map.empty())
@@ -653,17 +653,17 @@ PredictionResult ProcessPredictions(const std::vector<float>& predictions,
 static std::vector<uint64_t>
 ProcessAndCachePredictions(const conv::ProblemDescription& problem,
                            const std::string& device,
-                           bool is3d,
+                           const bool& use_nd,
                            const std::vector<float>& predictions,
                            const std::unordered_map<size_t, std::string>& solver_map)
 {
-    const std::string model_type = is3d ? "3D " : "";
+    const std::string model_type = use_nd ? "ND " : "";
 
     // Process predictions (sort by probability, filter invalid solvers)
-    auto result = ProcessPredictions(predictions, solver_map, is3d);
+    auto result = ProcessPredictions(predictions, solver_map, use_nd);
 
     // Cache results for future use
-    StorePredictionCache(problem, device, is3d, result.any_solver_ids);
+    StorePredictionCache(problem, device, result.any_solver_ids);
 
     // Log results if verbose logging enabled
     if(miopen::IsLogging(LoggingLevel::Info2))
@@ -695,7 +695,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     if( use_nd )
     {
         int dim = is3d ? 3 : 2;
-        // 3D or 2D path: Use TunaNetMD model
+        // 3D or 2D path: Use TunaNetND model
         std::unique_ptr<convnd::ModelND> model = convnd::GetNDModel(device, dim);
         if(!model || !model->IsProblemSupported(problem, ctx))
         {
@@ -706,7 +706,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         std::vector<float> predictions = model->Forward(problem);
 
         return ProcessAndCachePredictions(
-            problem, device, true, predictions, model->GetSolverMap());
+            problem, device, use_nd, predictions, model->GetSolverMap());
     }
     else
     {
@@ -749,7 +749,7 @@ public:
     explicit TunaNetNDModel(const std::string& device, const int& dim)
         : device_name(device), metadata(MetadataND(device,dim))
     {
-        MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name << "dim:" << dim);
+        MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name << " dim: " << dim);
     }
 
     std::vector<float> Forward(const conv::ProblemDescription& problem) const override
@@ -1206,6 +1206,8 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
     std::string key = arch + "_" + solver + "_input_encoder";
     std::string path =
         (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
+
+    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path );
     auto tensors = GetFdeepModel(path, key).predict({input_tensor});
     if(tensors.empty())
         MIOPEN_THROW(miopenStatusInternalError, "Input encoder returned empty tensor list");
@@ -1226,6 +1228,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
     std::string path =
         (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
 
+    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path );
     const auto& model = GetFdeepModel(path, key);
 
     // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is
