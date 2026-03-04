@@ -34,6 +34,9 @@
  * - 1000-1099: Engine attributes
  * - 1100-1199: Kernel cache attributes
  * - 1200-1299: Device properties attributes
+ * - 1700-1799: Convolution backward data operation attributes
+ * - 1900-1999: Pointwise operation attributes
+ * - 2000-2099: Shared pointwise descriptor attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -384,7 +387,7 @@ typedef enum
     /** @} */
 
     /**
-     * @name Convolution Backward Operation Attributes (1700-1799)
+     * @name Convolution Backward Data Operation Attributes (1700-1799)
      * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR
      * @{
      */
@@ -426,6 +429,62 @@ typedef enum
 
     /** @brief Compute data type for batchnorm inference */
     HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT = 1806,
+
+    /** @} */
+
+    /**
+     * @name Pointwise Operation Attributes (1900-1999)
+     * Attributes for HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Primary input tensor for pointwise operation */
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT = 1900,
+
+    /** @brief Output tensor for pointwise operation */
+    HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT = 1901,
+
+    /** @brief Secondary input tensor for pointwise operation (binary/ternary) */
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT = 1902,
+
+    /** @brief Tertiary input tensor for pointwise operation (ternary) */
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT = 1903,
+
+    /** @brief Axis tensor for pointwise operation */
+    HIPDNN_ATTR_OPERATION_POINTWISE_AXIS = 1904,
+
+    /** @} */
+
+    /**
+     * @name Shared Pointwise Descriptor Attributes (2000-2099)
+     * Attributes shared across pointwise operation descriptors.
+     * These are set directly on the operation descriptor.
+     * @{
+     */
+
+    /** @brief Pointwise operation mode */
+    HIPDNN_ATTR_POINTWISE_MODE = 2000,
+
+    /** @brief Lower clip value for ReLU activation */
+    HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP = 2001,
+
+    /** @brief Upper clip value for ReLU activation */
+    HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP = 2002,
+
+    /** @brief Lower clip slope for leaky ReLU activation */
+    HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE = 2003,
+
+    /** @brief Beta parameter for Swish activation */
+    HIPDNN_ATTR_POINTWISE_SWISH_BETA = 2004,
+
+    /** @brief Alpha parameter for ELU activation */
+    HIPDNN_ATTR_POINTWISE_ELU_ALPHA = 2005,
+
+    /** @brief Beta parameter for Softplus activation */
+    HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA = 2006,
+
+    /** @brief Compute data type for pointwise operation */
+    HIPDNN_ATTR_POINTWISE_MATH_PREC = 2007,
 
     /** @} */
 

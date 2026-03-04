@@ -169,6 +169,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT,
 
     /**
+     * @brief Pointwise operation descriptor
+     *
+     * Represents a pointwise (element-wise) operation with 1-3 input tensors
+     * and activation parameters. Supports unary, binary, and ternary operations.
+     */
+    HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR,
+
+    /**
      * @brief Convolution backward data (Dgrad) operation descriptor
      *
      * Represents a backward data convolution operation with output gradient (DY),
