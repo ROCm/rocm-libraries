@@ -1135,9 +1135,6 @@ struct gfx103_t
 struct gfx11_t
 {
 };
-struct gfx115_t
-{
-};
 struct gfx12_t
 {
 };
