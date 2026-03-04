@@ -401,6 +401,38 @@ typedef enum
     /** @} */
 
     /**
+     * @name Batchnorm Inference Variance Ext Operation Attributes (1900-1999)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_X = 1900,
+
+    /** @brief Mean tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_MEAN = 1901,
+
+    /** @brief Variance tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_VARIANCE = 1902,
+
+    /** @brief Scale tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_SCALE = 1903,
+
+    /** @brief Bias tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_BIAS = 1904,
+
+    /** @brief Output tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_Y = 1905,
+
+    /** @brief Epsilon tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_EPSILON = 1906,
+
+    /** @brief Compute data type for batchnorm inference variance ext */
+    HIPDNN_ATTR_BATCHNORM_INF_VAR_EXT_COMP_TYPE = 1907,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
