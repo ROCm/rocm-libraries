@@ -1897,7 +1897,8 @@ inline flatbuffers::FlatBufferBuilder
                                        hipdnn_data_sdk::data_objects::DataType inputDataType
                                        = hipdnn_data_sdk::data_objects::DataType::FLOAT,
                                        hipdnn_data_sdk::data_objects::DataType computeDataType
-                                       = hipdnn_data_sdk::data_objects::DataType::FLOAT)
+                                       = hipdnn_data_sdk::data_objects::DataType::FLOAT,
+                                       flatbuffers::Optional<int64_t> axis = 1)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
@@ -1916,14 +1917,13 @@ inline flatbuffers::FlatBufferBuilder
         builder, 3, "scale", inputDataType, &scaleStrides, &scaleDims));
 
     auto blockScaleQuantizeAttributes
-        = hipdnn_data_sdk::data_objects::CreateBlockScaleQuantizeAttributes(
-            builder,
-            1, // x uid
-            2, // y uid
-            3, // scale uid
-            32, // block_size
-            flatbuffers::nullopt, // axis
-            false // transpose
+        = hipdnn_data_sdk::data_objects::CreateBlockScaleQuantizeAttributes(builder,
+                                                                            1, // x uid
+                                                                            2, // y uid
+                                                                            3, // scale uid
+                                                                            32, // block_size
+                                                                            axis,
+                                                                            false // transpose
         );
 
     std::vector<::flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> nodes;

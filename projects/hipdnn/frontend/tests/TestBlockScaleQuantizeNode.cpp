@@ -208,6 +208,80 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeXDimsNotSetSkipsDimChecks)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisNegative)
+{
+    BlockScaleQuantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_axis(-1);
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisExceedsRank)
+{
+    BlockScaleQuantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_axis(4); // rank is 4, so axis=4 is out of bounds
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisValid)
+{
+    BlockScaleQuantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_axis(1);
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisWithoutXDimsSkipsCheck)
+{
+    // When X dims are not set, axis validation is deferred
+    BlockScaleQuantizeAttributes attrs;
+
+    attrs.set_x(std::make_shared<TensorAttributes>()); // No dims
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_axis(100); // Would be invalid if dims were set
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
 TEST(TestBlockScaleQuantizeNode, InferPropertiesNode)
 {
     BlockScaleQuantizeAttributes attrs;
