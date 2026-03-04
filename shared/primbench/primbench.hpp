@@ -1484,12 +1484,12 @@ static constexpr const char* horizontal_bar          = u8"─";
  * \brief Prints the table header for dry-run mode output.
  *
  * \param algo_name Algorithm name to display.
- * \param spec_col_width Width of the specialization column.
+ * \param specialization_col_width Width of the specialization column.
  * \param family_col_width Width of the family column.
  * \param specialization_count Total number of specializations.
  */
 inline void print_dry_header(std::string_view algo_name,
-                             size_t           spec_col_width,
+                             size_t           specialization_col_width,
                              size_t           family_col_width,
                              size_t           specialization_count)
 {
@@ -1497,10 +1497,10 @@ inline void print_dry_header(std::string_view algo_name,
     size_t      status_col_width = status_header.size();
 
     std::cout << std::setw(status_col_width) << std::left << status_header << "  "
-              << std::setw(spec_col_width) << std::left << "Specialization" << "  " << "Index/"
+              << std::setw(specialization_col_width) << std::left << "Specialization" << "  " << "Index/"
               << specialization_count << "\n";
 
-    size_t underline_width = status_col_width + 2 + spec_col_width + 2 + family_col_width;
+    size_t underline_width = status_col_width + 2 + specialization_col_width + 2 + family_col_width;
 
     for(size_t i = 0; i < underline_width; ++i)
         std::cout << horizontal_bar;
@@ -1511,13 +1511,13 @@ inline void print_dry_header(std::string_view algo_name,
  * \brief Prints the table header for algorithm progress output.
  *
  * \param algo_name Algorithm name to display.
- * \param spec_col_width Width of the specialization column.
+ * \param specialization_col_width Width of the specialization column.
  * \param family_col_width Width of the family column.
  * \param specialization_count Total number of specializations.
  * \param noise_timeout_secs Duration before noisy timeout.
  */
 inline void print_header(std::string_view          algo_name,
-                         size_t                    spec_col_width,
+                         size_t                    specialization_col_width,
                          size_t                    family_col_width,
                          size_t                    specialization_count,
                          std::chrono::seconds::rep noise_timeout_secs)
@@ -1531,11 +1531,11 @@ inline void print_header(std::string_view          algo_name,
               << std::setw(noise_col_width) << std::left << "Noise" << "  "
               << std::setw(gpu_temp_col_width) << std::left << "GPU °C" << "  "
               << std::setw(bytes_per_sec_col_width) << std::left << "Bytes/sec" << "  "
-              << std::setw(spec_col_width) << std::left << "Specialization" << "  " << "Index/"
+              << std::setw(specialization_col_width) << std::left << "Specialization" << "  " << "Index/"
               << specialization_count << "\n";
 
     size_t underline_width = status_col_width + 2 + noise_col_width + 2 + gpu_temp_col_width + 2
-                             + bytes_per_sec_col_width + 2 + spec_col_width + 2 + family_col_width;
+                             + bytes_per_sec_col_width + 2 + specialization_col_width + 2 + family_col_width;
 
     for(size_t i = 0; i < underline_width; ++i)
         std::cout << horizontal_bar;
@@ -1575,7 +1575,7 @@ inline void print_cooling(uint16_t gpu_temp, uint16_t max_gpu_temp)
 inline void print_dry_progress(std::string_view specialization,
                                std::string_view algo_name,
                                size_t           family_index,
-                               size_t           spec_col_width,
+                               size_t           specialization_col_width,
                                size_t           family_col_width)
 {
     std::ostringstream line;
@@ -1585,7 +1585,7 @@ inline void print_dry_progress(std::string_view specialization,
 
     line << clearline << green << std::setw(status_col_width) << std::left << "Success" << reset;
 
-    line << "  " << std::setw(spec_col_width) << std::left << specialization;
+    line << "  " << std::setw(specialization_col_width) << std::left << specialization;
     line << "  " << std::setw(family_col_width) << std::right << family_index;
 
     std::cout << line.str() << "\n" << std::flush;
@@ -1605,7 +1605,7 @@ inline void print_progress(uint64_t         iteration,
                            std::string_view algo_name,
                            uint64_t         batch_window_size,
                            size_t           family_index,
-                           size_t           spec_col_width,
+                           size_t           specialization_col_width,
                            size_t           family_col_width,
                            double           elapsed_host_secs,
                            double           noise_timeout_secs,
@@ -1691,7 +1691,7 @@ inline void print_progress(uint64_t         iteration,
          << std::setprecision(2) << bytes_per_sec;
 
     // Specialization and index
-    line << "  " << std::setw(spec_col_width) << std::left << specialization;
+    line << "  " << std::setw(specialization_col_width) << std::left << specialization;
     line << "  " << std::setw(family_col_width) << std::right << family_index;
 
     // Colorized status messages
@@ -2216,7 +2216,7 @@ public:
           stream_blocker&  stream_blocker,
           const settings&  settings,
           flags::FlagTag   flags,
-          size_t           spec_col_width,
+          size_t           specialization_col_width,
           size_t           family_col_width,
           cache_thrasher&  cache,
           gpu_warmer&      warmer)
@@ -2231,7 +2231,7 @@ public:
         , m_stream_blocker(stream_blocker)
         , m_settings(settings)
         , m_flags(flags)
-        , m_spec_col_width(spec_col_width)
+        , m_specialization_col_width(specialization_col_width)
         , m_family_col_width(family_col_width)
         , m_cache(cache)
         , m_warmer(warmer)
@@ -2428,7 +2428,7 @@ public:
                                      m_algo,
                                      s.batch_window_size,
                                      m_family_index,
-                                     m_spec_col_width,
+                                     m_specialization_col_width,
                                      m_family_col_width,
                                      elapsed_host_secs,
                                      s.noise_timeout_secs,
@@ -2693,7 +2693,7 @@ private:
 
     flags::FlagTag m_flags;
 
-    size_t m_spec_col_width;
+    size_t m_specialization_col_width;
     size_t m_family_col_width;
 
     cache_thrasher& m_cache;
@@ -3307,27 +3307,9 @@ public:
 
         get_logger().init(algorithm, specializations.size(), m_settings, m_flags, get_monitor());
 
-        // Determine max specialization width, and validate that every name is unique.
-        m_spec_col_width = 0;
-        std::unordered_set<std::string> seen_names;
+        m_specialization_col_width = compute_max_specialization_width(algorithm);
 
-        for(const auto& bp : specializations)
-        {
-            std::string name = bp->meta().serialize_name();
-            size_t      len  = name.size();
-            if(len > m_spec_col_width)
-                m_spec_col_width = len;
-
-            if(!seen_names.insert(name).second)
-            {
-                std::cerr << "Error: Algorithm '" << algorithm
-                          << "' has multiple specializations with the name '" << name << "'\n";
-                exit(EXIT_FAILURE);
-            }
-        }
-
-        m_family_col_width
-            = std::string("Index/").size() + std::to_string(specializations.size()).size();
+        m_family_col_width = std::string("Index/").size() + std::to_string(specializations.size()).size();
 
         print_header(algorithm);
 
@@ -3550,20 +3532,9 @@ private:
     ///
     /// Validates that every specialization in `specializations` has
     /// the same `"algo"` value in its meta data. Exits with an error
-    /// message if the `"algo"` key is missing or if values differ.
+    /// message if the `"algo"` key is missing or if algo values differ.
     std::string get_common_algorithm()
     {
-        if(specializations.size() == 0)
-        {
-            std::cerr << "Error: At least one benchmark must be queued\n";
-            if(!m_settings.filter.empty())
-            {
-                std::cerr << "Hint: The currently used --filter '" << m_settings.filter
-                          << "' is likely incorrect\n";
-            }
-            exit(EXIT_FAILURE);
-        }
-
         std::string algorithm;
         try
         {
@@ -3591,20 +3562,45 @@ private:
         return algorithm;
     }
 
+    /// Computes the maximum column width of specialization names
+    /// and ensures all specialization names are unique.
+    size_t compute_max_specialization_width(std::string_view algorithm)
+    {
+        size_t max_width = 0;
+        std::unordered_set<std::string> seen_names;
+
+        for(const auto& bp : specializations)
+        {
+            std::string name = bp->meta().serialize_name();
+            size_t      len  = name.size();
+            if(len > max_width)
+                max_width = len;
+
+            if(!seen_names.insert(name).second)
+            {
+                std::cerr << "Error: Algorithm '" << algorithm
+                          << "' has multiple specializations with the name '" << name << "'\n";
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        return max_width;
+    }
+
     /// Prints a (dry) header.
     void print_header(std::string_view algorithm)
     {
         if(m_settings.dry)
         {
             detail::progress::print_dry_header(algorithm,
-                                               m_spec_col_width,
+                                               m_specialization_col_width,
                                                m_family_col_width,
                                                specializations.size());
         }
         else
         {
             detail::progress::print_header(algorithm,
-                                           m_spec_col_width,
+                                           m_specialization_col_width,
                                            m_family_col_width,
                                            specializations.size(),
                                            m_settings.noise_timeout_secs);
@@ -3653,7 +3649,7 @@ private:
                      *m_stream_blocker,
                      m_settings,
                      m_flags,
-                     m_spec_col_width,
+                     m_specialization_col_width,
                      m_family_col_width,
                      m_cache,
                      m_warmer);
@@ -3684,7 +3680,7 @@ private:
         detail::progress::print_dry_progress(name,
                                              algo,
                                              family_index,
-                                             m_spec_col_width,
+                                             m_specialization_col_width,
                                              m_family_col_width);
 
         get_logger().output_specialization(family_index,
@@ -3738,7 +3734,7 @@ private:
     std::unique_ptr<detail::stream_blocker>
         m_stream_blocker; /**< Stream blocker to serialize output */
 
-    size_t m_spec_col_width; /**< Column width for specialization names */
+    size_t m_specialization_col_width; /**< Column width for specialization names */
     size_t m_family_col_width; /**< Column width for family index */
 
     detail::cache_thrasher m_cache = detail::cache_thrasher(); /**< Cache clearing utility */
