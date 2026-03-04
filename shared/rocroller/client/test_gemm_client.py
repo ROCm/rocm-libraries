@@ -629,6 +629,19 @@ def test_gemm_options(tmp_path):
             check=True,
         )
 
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--wgs=128x2",
+                "--workgroup_size_x=256",
+            ],
+            check=True,
+        )
+
     # PreSwizzleScaleGFX950 requires pretileScale; client must assert and exit non-zero
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.run(

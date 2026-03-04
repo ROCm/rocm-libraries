@@ -1373,12 +1373,8 @@ namespace rocRoller::Client::GEMMClient::CLI
         // Workgroup size
 
         bool wgsXYSet = false;
-        wgsXYSet |= update(SN(&SP::macM), solution.macM);
-        wgsXYSet |= update(SN(&SP::macN), solution.macN);
-        wgsXYSet |= update(SN(&SP::macK), solution.macK);
-
-        update(SN(&SP::workgroupSizeX), solution.workgroupSizeX);
-        update(SN(&SP::workgroupSizeY), solution.workgroupSizeY);
+        wgsXYSet |= update(SN(&SP::workgroupSizeX), solution.workgroupSizeX);
+        wgsXYSet |= update(SN(&SP::workgroupSizeY), solution.workgroupSizeY);
 
         bool wgsSet = false;
         if(app.get_option("--wgs")->count())
