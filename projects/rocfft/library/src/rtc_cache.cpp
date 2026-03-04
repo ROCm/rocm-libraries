@@ -152,7 +152,8 @@ static std::set<std::string> get_visible_gpu_arches()
     std::set<std::string> arches;
     int                   deviceCount = 0;
     if(hipGetDeviceCount(&deviceCount) != hipSuccess)
-        throw std::runtime_error("hipGetDeviceCount failed");
+        // this can mean no devices are visible
+        return arches;
 
     for(int device = 0; device < deviceCount; ++device)
     {
