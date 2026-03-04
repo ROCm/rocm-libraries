@@ -221,7 +221,10 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
         std::tie(nchw, alpha, beta, gamma, amode, batchnormMode) = GetParam();
         input = tensor<T>{nchw[0], nchw[1], nchw[2], nchw[3]};
         input.generate(tensor_elem_gen_integer{max_value});
+    }
 
+    void Run()
+    {
         amode = transform_mode(amode);
 
         // NOLINTBEGIN(*-braces-around-statements)
@@ -246,10 +249,7 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
         else if(amode == "ELU")
             activ_mode = miopenActivationELU;
         // NOLINTEND(*-braces-around-statements)
-    }
 
-    void Run()
-    {
         int input_c, input_h, input_w;
         std::tie(std::ignore, input_c, input_h, input_w) = miopen::tien<4>(input.desc.GetLengths());
         ptr_activdesc                                    = GetManagedActivDesc();
