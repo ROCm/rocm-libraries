@@ -42,12 +42,14 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 9, 4, 1]
+          - [16, 16, 32, 1, 1, 3, 2, 4, 1]
           - [16, 16, 32, 1, 1, 6, 2, 2, 2]
           - [16, 16, 32, 1, 1, 2, 6, 2, 2]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2]
           - [16, 16, 32, 1, 1, 4,16, 4, 1]
           - [16, 16, 32, 1, 1,16, 4, 1, 4]
-        - DepthU: [ 32 ]
+        - DepthU: [ 32, 64 ]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -59,6 +61,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [4]
         - VectorWidthA: [-1,4,1]
         - VectorWidthB: [-1,4,1]
+        - TailloopInNll: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -161,6 +164,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
+        - TailloopInNll: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -267,6 +271,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
         - DirectToLds: [0,1]
+        - TailloopInNll: [0,1]
+        - ClusterLocalRead: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -331,6 +337,7 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - ScheduleIterAlg: [3]
         - SourceSwap: [1]
+        - TailloopInNll: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
