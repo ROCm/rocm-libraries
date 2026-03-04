@@ -6232,8 +6232,8 @@ class KernelWriterAssembly(KernelWriter):
         jumpLabel(tP, sLoadTileIdx, checkAddrLabel)
         imod.add(checkAddrLabel)
         imod.add(VSubU32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr),
-                         src1=self.states.srdShiftLeft[tc] * tP["bpeGR"], comment="sub prepad"))
-        loadRangePerThread = tP["glvw"] * tP["bpeGR"] - 1
+                         src1=int(self.states.srdShiftLeft[tc] * tP["bpeGR"]), comment="sub prepad"))
+        loadRangePerThread = int(tP["glvw"] * tP["bpeGR"] - 1)
         imod.add(VAddU32(dst=vgpr(tmpVgpr+1), src0=vgpr(tmpVgpr), src1=loadRangePerThread, \
                          comment="Calculate load range per thread"))
         imod.add(VCmpLtI32(dst=sgpr(sCmpLoadStartAddrStatusx2, 2), src0=vgpr(tmpVgpr), \
