@@ -25,7 +25,6 @@
 
 #include <cstring>
 #include <string>
-#include <string_view>
 #include <vector>
 
 // Label distinguishing between input and output data layouts where or
@@ -36,14 +35,6 @@ enum class io_data_label
     OUTPUT
 };
 
-// Convenience labeling strings, e.g., for constructing exceptions' info
-template <io_data_label io>
-struct io_label_str
-{
-    static_assert(io == io_data_label::INPUT || io == io_data_label::OUTPUT);
-    static constexpr std::string_view str = io == io_data_label::INPUT ? "input" : "output";
-};
-
 /**
  * @return An `std::string` of value "input" (resp. "output") if `io` is
  * `io_data_label::INPUT` (resp. `io_data_label::OUTPUT`).
@@ -51,7 +42,7 @@ struct io_label_str
  * @throw An `std::invalid_argument` is thrown if `io` is not `io_data_label::INPUT`
  * nor `io_data_label::OUTPUT`.
  */
-std::string to_str(const io_data_label& io);
+std::string to_str(io_data_label io);
 
 /**
  * @brief Helper structure encapsulating the details pertaining to the description

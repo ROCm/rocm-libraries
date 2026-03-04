@@ -46,12 +46,17 @@ namespace
     }
 }
 
-std::string to_str(const io_data_label& io)
+std::string to_str(io_data_label io)
 {
-    if(io != io_data_label::INPUT && io != io_data_label::OUTPUT)
+    switch(io)
+    {
+    case io_data_label::INPUT:
+        return "input";
+    case io_data_label::OUTPUT:
+        return "output";
+    default:
         throw std::invalid_argument("Unknown io data label given to " + ROCFFT_CURRENT_FUNCTION);
-    return io == io_data_label::INPUT ? std::string{io_label_str<io_data_label::INPUT>::str}
-                                      : std::string{io_label_str<io_data_label::OUTPUT>::str};
+    }
 }
 
 #define IO_DATA_LAYOUT_ACCESSOR_BODY(AXIS_IDX)                                        \
