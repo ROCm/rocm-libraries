@@ -47,7 +47,8 @@ context_t::context_t(const problem_t& problem,
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
 
-  heuristic_params_t heuristic = get_heuristic_params(problem, hardware, config);
+  // Heuristic parameters
+  heuristic = get_heuristic_params(problem, hardware, config);
 
   // Element sizes
   a_bytes = data_type_to_bytes(problem.a_dtype);
@@ -648,13 +649,6 @@ dim4_t count_unique_tiles(const dim4_t& grid, const workgroup_mapping_t& wgm_map
   } else if (signed_wgm == 0) {
     unique.m = 0; unique.n = 0;
   } else {
-    const size_t abs_wgm           = static_cast<size_t>(std::abs(signed_wgm));
-    const size_t first_mn          = (first_tile % tiles_per_batch) / grid.k;
-    const size_t tiles_per_slab    = grid.m * abs_wgm;
-    const size_t num_full_slabs    = grid.n / abs_wgm;
-    const size_t full_slabs_total  = num_full_slabs * tiles_per_slab;
-    const size_t remainder_width   = grid.n - num_full_slabs * abs_wgm;
-
     unique.m = std::min(unique_mn, grid.m);
     unique.n = std::min(unique_mn, grid.n);
   }
@@ -1042,7 +1036,6 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
   // Setup
   const dim4_t grid = {context.splitting_factor, context.grid_m, context.grid_n, problem.batch};
   const size_t total = grid.total();
-  const size_t tiles_per_batch = grid.mnk();
   const size_t cus_per_xcd     = N_CU / num_xcd;
   const size_t tiles_per_xcd   = total / num_xcd;
   const double k_iters_sq      = k_iters * k_iters;
@@ -1210,8 +1203,7 @@ double compute_memory_latency(const problem_t& problem,
   const auto b_bytes = context.b_bytes;
   const size_t num_active_cus = context.active_cus;
   double bw_limited = context.mem_bw_limited;
-
-  heuristic_params_t heuristic = get_heuristic_params(problem, hardware, config);
+  auto heuristic = context.heuristic;
 
   // 1) Estimate MALL and L2 hit-rates using the two-timestep analytical model
   auto [H_mem_mall, H_mem_l2] = estimate_cache_hit_rates(problem, hardware, config, context);
@@ -1310,7 +1302,6 @@ double compute_epilogue_latency(const problem_t& problem,
   // Extract parameters
   const size_t M = problem.size.m;
   const size_t N = problem.size.n;
-  const size_t batch = problem.batch;
 
   const size_t N_CU = hardware.N_CU;
 
@@ -1340,10 +1331,6 @@ double compute_epilogue_latency(const problem_t& problem,
   constexpr size_t threads_per_wave = 64;
   constexpr size_t bytes_per_vectorized_store = 16; // buffer_store_dwordx4 = 16 bytes
   constexpr size_t cache_line_bytes = 128;
-
-  // Adaptive sync cost inputs (MI-relative, scales across architectures)
-  const size_t L_MI = hardware.get_mi_latency(config.mi.m, config.mi.n, config.mi.k, problem.mi_dtype);
-  const size_t k_iters = context.k_iters;
 
   // Common setup
   const size_t total_mfmas = math::safe_ceil_div(MT_M, config.mi.m) *
@@ -1476,7 +1463,6 @@ double compute_tile_latency(const problem_t& problem,
                             const context_t& context) {
   // Extract parameters from structured types
   const size_t K = problem.size.k;
-  size_t batch   = problem.batch;
 
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
@@ -1486,27 +1472,17 @@ double compute_tile_latency(const problem_t& problem,
   const auto b_bits  = datatype_to_bits(problem.b_dtype);
   
   // Extract parameters from context
-  const size_t grid_m = context.grid_m;
-  const size_t grid_n = context.grid_n;
-  const size_t num_active_cus = context.active_cus;
   const size_t splitting_factor = context.splitting_factor;
-  const double mem_bw_occ = context.mem_bw_limited;
-  const size_t d_bytes = context.d_bytes;
   const size_t k_per_split = context.k_per_split;
-  const size_t k_iters = context.k_iters;
+  auto heuristic = context.heuristic;
   const bool debug = context.debug;
-
-  heuristic_params_t heuristic = get_heuristic_params(problem, hardware, config);
 
   // 1) Compute per-tile latencies
   double L_compute = compute_mt_compute_latency(problem, hardware, config);
   double L_mem = compute_memory_latency(problem, hardware, config, context);
 
   double utilization        = calculate_work_utilization(problem, config);
-  double output_utilization = calculate_output_utilization(problem, config, 1UL);
   double effective_tile_penalty = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
-  double output_utilization_penalty =
-      (output_utilization > 1e-9) ? (1.0 / (output_utilization)) : 1.0;
 
   // 2) Work-group setup & iteration latencies
   double L_WG_setup = 1;
@@ -1694,7 +1670,6 @@ double compute_total_latency(const problem_t& problem,
 
   const int a_bits  = datatype_to_bits(problem.a_dtype);
   const int b_bits  = datatype_to_bits(problem.b_dtype);
-  const int a_bytes = data_type_to_bytes(problem.a_dtype);
 
   // 0) Short-circuit
   // We don't need to compute latency for all MTs. With this, we can shortcut.

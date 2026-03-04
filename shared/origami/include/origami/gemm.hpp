@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 #include "origami/hardware.hpp"
+#include "origami/heuristics.hpp"
 #include "origami/types.hpp"
 
 namespace origami {
@@ -18,6 +19,9 @@ namespace origami {
  * values computed from problem, config, and hardware.
  */
 struct context_t {
+  /// Heuristic parameters (cached to avoid repeated lookups).
+  heuristic_params_t heuristic{};
+
   /// Element sizes
   size_t a_bytes = 0;
   size_t b_bytes = 0;
