@@ -106,7 +106,7 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
         }
     }
 
-    const auto b_shuffled_host  = preShuffleWeight<MXFlatmmArchTraits::GetNLane()>(b_origin_host);
+    const auto b_shuffled_host  = MXFlatmmArchTraits::preShuffleWeight(b_origin_host);
     const auto scale_a_shuffled = MXFlatmmArchTraits::template preShuffleScale<true>(scale_a);
     const auto scale_b_shuffled = MXFlatmmArchTraits::template preShuffleScale<false>(scale_b);
 
