@@ -59,7 +59,7 @@ class GSU(Component):
     def graIncrementsRestore(self, writer, kernel, loopCounterName):
         pass
 
-    def graIncrementsCommon(self, writer, loopIdx, tc, stride, M):
+    def graIncrementsCommon(self, writer, loopIdx, tc, stride, m):
         module = Module("GSU Common graIncrements")
 
         # multiply by stride, optimizing if unit stride
@@ -202,10 +202,9 @@ class GSUOff(GSU):
         loopChar = writer.states.indexChars[dimIdx]
         stride = writer.strideRef(tc, dimIdx)
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
-
-        m = "DepthU*Bpe%s"%(tcGR)
+        m = int(kernel["_DepthU%s"%tc] * tP["bpeGR"])
         if isMirrorIdx:
-          m = "-%s"%(m)
+          m = -m
 
         if writer.states.globalReadIncsUseVgpr:
             with writer.allocTmpSgpr(2) as tmpSgprInfo:
