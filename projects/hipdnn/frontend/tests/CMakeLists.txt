@@ -34,6 +34,7 @@ add_executable(
     TestConvolutionWgradNode.cpp
     TestEngineOverrideConfig.cpp
     TestError.cpp
+    TestFrontendLogging.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
