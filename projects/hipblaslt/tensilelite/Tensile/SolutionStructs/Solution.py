@@ -2321,6 +2321,10 @@ class Solution(collections.abc.Mapping):
                 curGRVW *= 2
         if state["ProblemType"]["MXBlockA"]:
           state["GlobalReadVectorWidthMXSA"] = max(state["MacroTile0"] * state["_DepthUMXSA"] // state["NumThreads"], 1)
+          # workaround for DTL
+          # use 32bit load for DTL if GlobalReadVectorWidthMXS is 8
+          if state["DirectToLdsMXSA"] and state["GlobalReadVectorWidthMXSA"] == 8:
+            state["GlobalReadVectorWidthMXSA"] = 4
       else:
         # dot2
         if state["UseDotInstruction"]:
@@ -2365,6 +2369,10 @@ class Solution(collections.abc.Mapping):
                 curGRVW *= 2
         if state["ProblemType"]["MXBlockB"]:
           state["GlobalReadVectorWidthMXSB"] = max(state["MacroTile1"] * state["_DepthUMXSB"] // state["NumThreads"], 1)
+          # workaround for DTL
+          # use 32bit load for DTL if GlobalReadVectorWidthMXS is 8
+          if state["DirectToLdsMXSB"] and state["GlobalReadVectorWidthMXSB"] == 8:
+            state["GlobalReadVectorWidthMXSB"] = 4
       else:
         # dot2
         if state["UseDotInstruction"]:
@@ -3462,13 +3470,10 @@ class Solution(collections.abc.Mapping):
       # TODO:
       # Disable StoreSwapAddr to ensure LdsOffsetA_Blk is always a power of 2
       # This is consistent with referenc implementation which doesn't have StoreSwapAddr
-      if state["ProblemType"]["MXBlockA"]:
-        state["StoreSwapAddr"] = False
-      else:
-        # Original logic:
-        state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
-          (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
-          (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
+      # Original logic:
+      state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
+        (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
+        (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
 
       if offsetBlk > 0 and not state["StoreSwapAddr"] and numLdsBlk == 2:
         # Rounds offsetBlk to a power of two to enable inlining {s,v}_xor constants for swapping offsets

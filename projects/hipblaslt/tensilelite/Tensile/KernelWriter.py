@@ -5481,13 +5481,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.a.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprA"] else 1 * self.states.rpla
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.mxsa.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprMXSA"] else 1 * self.states.rpla
+      self.states.mxsa.numVgprLocalWriteSwapAddr = 0
     self.states.b.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprB"] else 1 * self.states.rpla
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprMXSB"] else 1 * self.states.rpla
+      self.states.mxsb.numVgprLocalWriteSwapAddr = 0
     self.states.m.numVgprLocalWriteAddr = 0 if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"] else 1 * self.states.rpla
     self.states.a.numVgprLocalReadSwapAddr = 0
     self.states.b.numVgprLocalReadSwapAddr = 0
     self.states.m.numVgprLocalReadSwapAddr = 0
+    if kernel["ProblemType"]["MXBlockA"]:
+      self.states.mxsa.numVgprLocalReadSwapAddr = 0
+    if kernel["ProblemType"]["MXBlockB"]:
+      self.states.mxsb.numVgprLocalReadSwapAddr = 0
     self.states.a.numVgprLocalWriteSwapAddr = 0
     self.states.b.numVgprLocalWriteSwapAddr = 0
     self.states.m.numVgprLocalWriteSwapAddr = 0
@@ -5559,8 +5565,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["StoreSwapAddr"]:
       if self.states.a.numVgprLocalReadAddr > 0:
         self.states.a.numVgprLocalReadSwapAddr = 1
+      if kernel["ProblemType"]["MXBlockA"]:
+        if self.states.mxsa.numVgprLocalReadAddr > 0:
+          self.states.mxsa.numVgprLocalReadSwapAddr = 1
       if self.states.b.numVgprLocalReadAddr > 0:
         self.states.b.numVgprLocalReadSwapAddr = 1
+      if kernel["ProblemType"]["MXBlockB"]:
+        if self.states.mxsb.numVgprLocalReadAddr > 0:
+          self.states.mxsb.numVgprLocalReadSwapAddr = 1
       if self.states.m.numVgprLocalReadAddr > 0:
         self.states.m.numVgprLocalReadSwapAddr = 1
       if not kernel["LocalWriteUseSgprA"] and self.states.a.numVgprLocalWriteAddr > 0:
@@ -5569,6 +5581,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.b.numVgprLocalWriteSwapAddr = 1
       if kernel["ProblemType"]["Sparse"] and not kernel["LocalWriteUseSgprMetadata"] and self.states.m.numVgprLocalWriteAddr > 0:
         self.states.m.numVgprLocalWriteSwapAddr = 1
+      if kernel["ProblemType"]["MXBlockA"]:
+        if not kernel["LocalWriteUseSgprMXSA"] and self.states.mxsa.numVgprLocalWriteAddr > 0:
+          self.states.mxsa.numVgprLocalWriteSwapAddr = 1
+      if kernel["ProblemType"]["MXBlockB"]:
+        if not kernel["LocalWriteUseSgprMXSB"] and self.states.mxsb.numVgprLocalWriteAddr > 0:
+          self.states.mxsb.numVgprLocalWriteSwapAddr = 1
       # Note: MXSA/MXSB do not use swap addresses
 
     ####################################
@@ -6147,6 +6165,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.b.numVgprLocalReadSwapAddr > 0:
       self.states.b.startVgprLocalReadSwapAddr = vgprIdx
       vgprIdx += 1
+    if kernel["ProblemType"]["MXBlockA"]:
+      if self.states.mxsa.numVgprLocalReadSwapAddr > 0:
+        self.states.mxsa.startVgprLocalReadSwapAddr = vgprIdx
+        vgprIdx += 1
+    if kernel["ProblemType"]["MXBlockB"]:
+      if self.states.mxsb.numVgprLocalReadSwapAddr > 0:
+        self.states.mxsb.startVgprLocalReadSwapAddr = vgprIdx
+        vgprIdx += 1
     if self.states.a.numVgprLocalWriteSwapAddr > 0:
       self.states.a.startVgprLocalWriteSwapAddr = vgprIdx
       vgprIdx += 1
@@ -6156,6 +6182,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.b.numVgprLocalWriteSwapAddr > 0:
       self.states.b.startVgprLocalWriteSwapAddr = vgprIdx
       vgprIdx += 1
+    if kernel["ProblemType"]["MXBlockA"]:
+      if self.states.mxsa.numVgprLocalWriteSwapAddr > 0:
+        self.states.mxsa.startVgprLocalWriteSwapAddr = vgprIdx
+        vgprIdx += 1
+    if kernel["ProblemType"]["MXBlockB"]:
+      if self.states.mxsb.numVgprLocalWriteSwapAddr > 0:
+        self.states.mxsb.startVgprLocalWriteSwapAddr = vgprIdx
+        vgprIdx += 1
 
     # X32F Emulation initializations
     # meaning of variables
@@ -6583,6 +6617,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.defineSgpr("SwapA", 1)
       if kernel["LocalWriteUseSgprB"]:
         self.defineSgpr("SwapB", 1)
+      if kernel["ProblemType"]["MXBlockA"] and kernel["LocalWriteUseSgprMXSA"]:
+          self.defineSgpr("SwapMXSA", 1)
+      if kernel["ProblemType"]["MXBlockB"] and kernel["LocalWriteUseSgprMXSB"]:
+          self.defineSgpr("SwapMXSB", 1)
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         self.defineSgpr("SwapMetadata", 1)
 
