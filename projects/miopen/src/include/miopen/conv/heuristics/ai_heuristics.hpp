@@ -329,7 +329,7 @@ public:
 protected:
     /**
      * @brief Extract numerical features from ND convolution problem
-     * @param problem 3D convolution problem description
+     * @param problem ND convolution problem description
      * @return Feature vector for TunaNetND input
      */
     virtual std::vector<float> ToFeatures(const conv::ProblemDescription& problem) const = 0;
@@ -340,7 +340,7 @@ protected:
  * @param device GPU device name (e.g., "gfx942", "gfx950")
  * @return Device-specific 3D model instance, or nullptr if unsupported
  */
-MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device);
+MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device, const int& dim);
 } // namespace convnd
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK

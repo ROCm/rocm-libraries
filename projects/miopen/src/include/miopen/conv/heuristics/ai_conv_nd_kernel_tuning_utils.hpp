@@ -44,7 +44,7 @@ namespace conv {
 const miopen::ExecutionContext& GetDummyCtx();
 
 MIOPEN_INTERNALS_EXPORT std::map<std::string, float>
-GetFeatures3D(const miopen::conv::ProblemDescription&, int max_cu, const std::string& arch);
+GetFeaturesND(const miopen::conv::ProblemDescription&, int max_cu, const std::string& arch);
 
 MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetKernelAsTokens(const std::string& kernel);
 MIOPEN_INTERNALS_EXPORT std::vector<std::string>
@@ -83,7 +83,7 @@ RunParameterPredictionModel(
     try
     {
         std::map<std::string, float> features =
-            GetFeatures3D(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+            GetFeaturesND(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
 
         bool use_split_k = split_k != 0;
         if(split_k > 1)

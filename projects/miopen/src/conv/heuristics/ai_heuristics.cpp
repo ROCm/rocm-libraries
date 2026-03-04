@@ -694,8 +694,9 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 
     if( use_nd )
     {
+        int dim = is3d ? 3 : 2;
         // 3D or 2D path: Use TunaNetMD model
-        std::unique_ptr<convnd::ModelND> model = convnd::GetNDModel(device);
+        std::unique_ptr<convnd::ModelND> model = convnd::GetNDModel(device, dim);
         if(!model || !model->IsProblemSupported(problem, ctx))
         {
             return {}; // Fallback: empty vector
@@ -748,7 +749,7 @@ public:
     explicit TunaNetNDModel(const std::string& device, const int& dim)
         : device_name(device), metadata(MetadataND(device,dim))
     {
-        MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name);
+        MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name << "dim:" << dim);
     }
 
     std::vector<float> Forward(const conv::ProblemDescription& problem) const override
@@ -757,7 +758,8 @@ public:
         MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
 
         // Use fdeep to run TunaNetND inference
-        const std::string model_path = ModelNDPath(device_name);
+	const int dim = problem.Is3d() ? 3 : 2;
+        const std::string model_path = ModelNDPath(device_name, dim);
         const auto model             = fdeep::load_model(model_path);
         MIOPEN_LOG_I2("TunaNetNDModel: Loaded fdeep model from " << model_path << ".");
 
@@ -898,11 +900,21 @@ protected:
         return features;
     }
 
-    static std::string ModelNDPath(const std::string& device)
+    static std::string ModelNDPath(const std::string& device, const int& dim)
     {
-        // const auto file_path = GetSystemDbPath() / (device + "_3d.tn.model");
-        const auto file_path = GetSystemDbPath() / (device + ".tn.model");
-        if(!fs::exists(file_path))
+	auto file_path = GetSystemDbPath();
+
+        if ( dim == 3 )
+	{
+		file_path = file_path / (device + "_3d.tn.model");
+        } else if ( dim == 2 )
+	{
+		file_path = file_path / (device + ".tn.model");
+        } else {
+		MIOPEN_LOG_I2("Unsupported dim:" << dim);
+	}
+
+	if(!fs::exists(file_path))
         {
             MIOPEN_THROW(miopenStatusInternalError,
                          "Unable to load ND AI model file: " + file_path.string());
@@ -915,13 +927,12 @@ std::unique_ptr<ModelND> GetNDModel(const std::string& device, const int& dim)
 {
     MIOPEN_LOG_I2("GetNDModel called for device: " << device);
 
-    // List of devices with 3D TunaNet models
-    // Note: gfx942 included for testing purposes (no dedicated 3D model yet)
+    // List of devices with ND TunaNet models
     if(device == "gfx942" || device == "gfx950")
     {
         try
         {
-            // Pass device name to constructor - it will append "_3d" internally
+            // Pass device name to constructor - it will append "_3d" internally if 3D
             auto model = std::make_unique<TunaNetNDModel>(device, dim);
             MIOPEN_LOG_I2("Successfully created ND model for device: " << device);
             return model;

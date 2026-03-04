@@ -1,3 +1,4 @@
+
 /*******************************************************************************
  *
  * MIT License
@@ -340,7 +341,7 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
 
     if(miopen::IsLogging(LoggingLevel::Info2))
     {
-        MIOPEN_LOG_I2("Metadata3D loaded successfully for arch: "
+        MIOPEN_LOG_I2("MetadataND loaded successfully for arch: "
                       << model_prefix << ", num_inputs=" << num_inputs
                       << ", num_solvers=" << num_solvers);
     }
@@ -440,7 +441,7 @@ size_t MetadataND::EncodeOutLayout(const std::string& layout) const
     return (it != out_layout_encodings.end()) ? it->second : 0;
 }
 
-} // namespace conv3d
+} // namespace convnd
 } // namespace ai
 } // namespace miopen
 
