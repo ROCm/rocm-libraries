@@ -3329,21 +3329,7 @@ public:
         m_family_col_width
             = std::string("Index/").size() + std::to_string(specializations.size()).size();
 
-        if(m_settings.dry)
-        {
-            detail::progress::print_dry_header(algorithm,
-                                               m_spec_col_width,
-                                               m_family_col_width,
-                                               specializations.size());
-        }
-        else
-        {
-            detail::progress::print_header(algorithm,
-                                           m_spec_col_width,
-                                           m_family_col_width,
-                                           specializations.size(),
-                                           m_settings.noise_timeout_secs);
-        }
+        print_header(algorithm);
 
         // Run all benchmarks.
         size_t family_index = 0;
@@ -3622,6 +3608,26 @@ private:
         }
 
         return algorithm;
+    }
+
+    /// Prints a (dry) header.
+    void print_header(std::string_view algorithm)
+    {
+        if(m_settings.dry)
+        {
+            detail::progress::print_dry_header(algorithm,
+                                               m_spec_col_width,
+                                               m_family_col_width,
+                                               specializations.size());
+        }
+        else
+        {
+            detail::progress::print_header(algorithm,
+                                           m_spec_col_width,
+                                           m_family_col_width,
+                                           specializations.size(),
+                                           m_settings.noise_timeout_secs);
+        }
     }
 
     /**
