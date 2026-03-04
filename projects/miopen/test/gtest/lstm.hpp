@@ -1666,22 +1666,6 @@ struct LSTM_test : Verifier
     const double dataScale{0.001};
     miopenDataType_t dataType{miopenFloat};
 
-    LSTM_test()
-    {
-        if constexpr(std::is_same_v<T, half_float::half>)
-        {
-            dataType = miopenHalf;
-        }
-        else if constexpr(std::is_same_v<T, double>)
-        {
-            dataType = miopenDouble;
-        }
-        else
-        {
-            dataType = miopenFloat;
-        }
-    }
-
     void RunTest()
     {
         if(batchSeq.empty() || 0 == batchSeq[0])

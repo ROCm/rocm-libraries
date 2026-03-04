@@ -53,80 +53,45 @@ std::vector<TestCase> GetTestCases()
 
 } // namespace
 
-struct GPU_LSTM_dropout_FP16 : LSTM_test<half_float::half>, testing::TestWithParam<TestCase>
+template <typename T>
+struct GPU_LSTM_dropout_test : LSTM_test<T>, testing::TestWithParam<TestCase>
 {
+protected:
+    void SetUp() override
+    {
+        this->dataType = miopen_type<T>{};
+
+        auto [dirMode, flatBatchFill] = GetParam();
+
+        int useDropout{1};
+        int batchSize{17};
+        int seqLength{25};
+        this->useDropout    = useDropout;
+        this->batchSize     = batchSize;
+        this->seqLength     = seqLength;
+        this->inVecLen      = batchSize;
+        this->batchSeq      = generate_batchSeq(batchSize, seqLength)[0];
+        this->numLayers     = 3;
+        this->hiddenSize    = 67;
+        this->dirMode       = dirMode;
+        this->flatBatchFill = flatBatchFill;
+    }
 };
 
-TEST_P(GPU_LSTM_dropout_FP16, HalfTest)
-{
-    auto [dirMode, flatBatchFill] = GetParam();
+using GPU_LSTM_dropout_FP16 = GPU_LSTM_dropout_test<half_float::half>;
 
-    int useDropout{1};
-    int batchSize{17};
-    int seqLength{25};
-    this->useDropout    = useDropout;
-    this->batchSize     = batchSize;
-    this->seqLength     = seqLength;
-    this->inVecLen      = batchSize;
-    this->batchSeq      = generate_batchSeq(batchSize, seqLength)[0];
-    this->numLayers     = 3;
-    this->hiddenSize    = 67;
-    this->dirMode       = dirMode;
-    this->flatBatchFill = flatBatchFill;
-
-    RunTest();
-}
+TEST_P(GPU_LSTM_dropout_FP16, HalfTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_dropout_FP16, testing::ValuesIn(GetTestCases()));
 
-struct GPU_LSTM_dropout_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
-{
-};
+using GPU_LSTM_dropout_FP32 = GPU_LSTM_dropout_test<float>;
 
-TEST_P(GPU_LSTM_dropout_FP32, FloatTest)
-{
-    auto [dirMode, flatBatchFill] = GetParam();
-
-    int useDropout{1};
-    int batchSize{17};
-    int seqLength{25};
-    this->useDropout    = useDropout;
-    this->batchSize     = batchSize;
-    this->seqLength     = seqLength;
-    this->inVecLen      = batchSize;
-    this->batchSeq      = generate_batchSeq(batchSize, seqLength)[0];
-    this->numLayers     = 3;
-    this->hiddenSize    = 67;
-    this->dirMode       = dirMode;
-    this->flatBatchFill = flatBatchFill;
-
-    RunTest();
-}
+TEST_P(GPU_LSTM_dropout_FP32, FloatTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_dropout_FP32, testing::ValuesIn(GetTestCases()));
 
-struct GPU_LSTM_dropout_FP64 : LSTM_test<double>, testing::TestWithParam<TestCase>
-{
-};
+using GPU_LSTM_dropout_FP64 = GPU_LSTM_dropout_test<double>;
 
-TEST_P(GPU_LSTM_dropout_FP64, DoubleTest)
-{
-    auto [dirMode, flatBatchFill] = GetParam();
-
-    int useDropout{1};
-    int batchSize{17};
-    int seqLength{25};
-    this->useDropout    = useDropout;
-    this->batchSize     = batchSize;
-    this->seqLength     = seqLength;
-    this->inVecLen      = batchSize;
-    this->batchSeq      = generate_batchSeq(batchSize, seqLength)[0];
-    this->numLayers     = 3;
-    this->hiddenSize    = 67;
-    this->dirMode       = dirMode;
-    this->flatBatchFill = flatBatchFill;
-
-    RunTest();
-}
+TEST_P(GPU_LSTM_dropout_FP64, DoubleTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_dropout_FP64, testing::ValuesIn(GetTestCases()));

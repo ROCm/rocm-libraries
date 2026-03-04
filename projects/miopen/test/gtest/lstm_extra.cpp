@@ -90,95 +90,50 @@ std::vector<TestCase> GetTestCases()
 
 } // namespace
 
-struct GPU_LSTM_extra_FP16 : LSTM_test<half_float::half>, testing::TestWithParam<TestCase>
+template <typename T>
+struct GPU_LSTM_extra_test : LSTM_test<T>, testing::TestWithParam<TestCase>
 {
+protected:
+    void SetUp() override
+    {
+        this->dataType = miopen_type<T>{};
+
+        auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
+
+        this->batchSize  = 32;
+        this->seqLength  = 3;
+        this->batchSeq   = {32, 32, 32};
+        this->inVecLen   = 128;
+        this->hiddenSize = 128;
+        this->numLayers  = 1;
+        this->inputMode  = 0;
+        this->biasMode   = 0;
+        this->dirMode    = dirMode;
+        this->nohx       = bool(nohx);
+        this->nodhy      = bool(nodhy);
+        this->nocx       = bool(nocx);
+        this->nodcy      = bool(nodcy);
+        this->nohy       = bool(nohy);
+        this->nodhx      = bool(nodhx);
+        this->nocy       = bool(nocy);
+        this->nodcx      = bool(nodcx);
+    }
 };
 
-TEST_P(GPU_LSTM_extra_FP16, HalfTest)
-{
-    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
+using GPU_LSTM_extra_FP16 = GPU_LSTM_extra_test<half_float::half>;
 
-    this->batchSize  = 32;
-    this->seqLength  = 3;
-    this->batchSeq   = {32, 32, 32};
-    this->inVecLen   = 128;
-    this->hiddenSize = 128;
-    this->numLayers  = 1;
-    this->inputMode  = 0;
-    this->biasMode   = 0;
-    this->dirMode    = dirMode;
-    this->nohx       = bool(nohx);
-    this->nodhy      = bool(nodhy);
-    this->nocx       = bool(nocx);
-    this->nodcy      = bool(nodcy);
-    this->nohy       = bool(nohy);
-    this->nodhx      = bool(nodhx);
-    this->nocy       = bool(nocy);
-    this->nodcx      = bool(nodcx);
-
-    RunTest();
-};
+TEST_P(GPU_LSTM_extra_FP16, HalfTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP16, testing::ValuesIn(GetTestCases()));
 
-struct GPU_LSTM_extra_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
-{
-};
+using GPU_LSTM_extra_FP32 = GPU_LSTM_extra_test<float>;
 
-TEST_P(GPU_LSTM_extra_FP32, FloatTest)
-{
-    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
-
-    this->batchSize  = 32;
-    this->seqLength  = 3;
-    this->batchSeq   = {32, 32, 32};
-    this->inVecLen   = 128;
-    this->hiddenSize = 128;
-    this->numLayers  = 1;
-    this->inputMode  = 0;
-    this->biasMode   = 0;
-    this->dirMode    = dirMode;
-    this->nohx       = bool(nohx);
-    this->nodhy      = bool(nodhy);
-    this->nocx       = bool(nocx);
-    this->nodcy      = bool(nodcy);
-    this->nohy       = bool(nohy);
-    this->nodhx      = bool(nodhx);
-    this->nocy       = bool(nocy);
-    this->nodcx      = bool(nodcx);
-
-    RunTest();
-};
+TEST_P(GPU_LSTM_extra_FP32, FloatTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP32, testing::ValuesIn(GetTestCases()));
 
-struct GPU_LSTM_extra_FP64 : LSTM_test<double>, testing::TestWithParam<TestCase>
-{
-};
+using GPU_LSTM_extra_FP64 = GPU_LSTM_extra_test<double>;
 
-TEST_P(GPU_LSTM_extra_FP64, DoubleTest)
-{
-    auto [dirMode, nohx, nodhy, nocx, nodcy, nohy, nodhx, nocy, nodcx] = GetParam();
-
-    this->batchSize  = 32;
-    this->seqLength  = 3;
-    this->batchSeq   = {32, 32, 32};
-    this->inVecLen   = 128;
-    this->hiddenSize = 128;
-    this->numLayers  = 1;
-    this->inputMode  = 0;
-    this->biasMode   = 0;
-    this->dirMode    = dirMode;
-    this->nohx       = bool(nohx);
-    this->nodhy      = bool(nodhy);
-    this->nocx       = bool(nocx);
-    this->nodcy      = bool(nodcy);
-    this->nohy       = bool(nohy);
-    this->nodhx      = bool(nodhx);
-    this->nocy       = bool(nocy);
-    this->nodcx      = bool(nodcx);
-
-    RunTest();
-};
+TEST_P(GPU_LSTM_extra_FP64, DoubleTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_extra_FP64, testing::ValuesIn(GetTestCases()));

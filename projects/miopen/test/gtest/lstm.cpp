@@ -86,80 +86,45 @@ std::vector<TestCase> GetTestCases()
 
 } // namespace
 
-struct GPU_LSTM_FP16 : LSTM_test<half_float::half>, testing::TestWithParam<TestCase>
+template <typename T>
+struct GPU_LSTM_test : LSTM_test<T>, testing::TestWithParam<TestCase>
 {
+protected:
+    void SetUp() override
+    {
+        this->dataType = miopen_type<T>{};
+
+        auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
+
+        int batchSize{17};
+        int seqLength{2};
+        this->batchSize  = batchSize;
+        this->seqLength  = seqLength;
+        this->inVecLen   = batchSize;
+        this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
+        this->hiddenSize = 67;
+        this->usePadding = usePadding;
+        this->inputMode  = inputMode;
+        this->biasMode   = biasMode;
+        this->dirMode    = dirMode;
+        this->algoMode   = algoMode;
+    }
 };
 
-TEST_P(GPU_LSTM_FP16, HalfTest)
-{
-    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
+using GPU_LSTM_FP16 = GPU_LSTM_test<half_float::half>;
 
-    int batchSize{17};
-    int seqLength{2};
-    this->batchSize  = batchSize;
-    this->seqLength  = seqLength;
-    this->inVecLen   = batchSize;
-    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
-    this->hiddenSize = 67;
-    this->usePadding = usePadding;
-    this->inputMode  = inputMode;
-    this->biasMode   = biasMode;
-    this->dirMode    = dirMode;
-    this->algoMode   = algoMode;
-
-    RunTest();
-}
+TEST_P(GPU_LSTM_FP16, HalfTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_FP16, testing::ValuesIn(GetTestCases()));
 
-struct GPU_LSTM_FP32 : LSTM_test<float>, testing::TestWithParam<TestCase>
-{
-};
+using GPU_LSTM_FP32 = GPU_LSTM_test<float>;
 
-TEST_P(GPU_LSTM_FP32, FloatTest)
-{
-    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
-
-    int batchSize{17};
-    int seqLength{2};
-    this->batchSize  = batchSize;
-    this->seqLength  = seqLength;
-    this->inVecLen   = batchSize;
-    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
-    this->hiddenSize = 67;
-    this->usePadding = usePadding;
-    this->inputMode  = inputMode;
-    this->biasMode   = biasMode;
-    this->dirMode    = dirMode;
-    this->algoMode   = algoMode;
-
-    RunTest();
-}
+TEST_P(GPU_LSTM_FP32, FloatTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_FP32, testing::ValuesIn(GetTestCases()));
 
-struct GPU_LSTM_FP64 : LSTM_test<double>, testing::TestWithParam<TestCase>
-{
-};
+using GPU_LSTM_FP64 = GPU_LSTM_test<double>;
 
-TEST_P(GPU_LSTM_FP64, DoubleTest)
-{
-    auto [usePadding, inputMode, biasMode, dirMode, algoMode] = GetParam();
-
-    int batchSize{17};
-    int seqLength{2};
-    this->batchSize  = batchSize;
-    this->seqLength  = seqLength;
-    this->inVecLen   = batchSize;
-    this->batchSeq   = generate_batchSeq(batchSize, seqLength)[0];
-    this->hiddenSize = 67;
-    this->usePadding = usePadding;
-    this->inputMode  = inputMode;
-    this->biasMode   = biasMode;
-    this->dirMode    = dirMode;
-    this->algoMode   = algoMode;
-
-    RunTest();
-}
+TEST_P(GPU_LSTM_FP64, DoubleTest) { RunTest(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_FP64, testing::ValuesIn(GetTestCases()));
