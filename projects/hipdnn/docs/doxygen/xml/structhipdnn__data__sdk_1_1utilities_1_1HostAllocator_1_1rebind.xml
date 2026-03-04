@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1_1rebind" kind="struct" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::HostAllocator::rebind</compoundname>
+    <includes refid="Allocators_8hpp" local="no">Allocators.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>typename U</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="public-type">
+      <memberdef kind="typedef" id="structhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1_1rebind_1a569da59a856d6758aeb48c8cdb684bdb" prot="public" static="no">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">HostAllocator</ref>&lt; U &gt;</type>
+        <definition>using hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::rebind&lt; U &gt;::other =  HostAllocator&lt;U&gt;</definition>
+        <argsstring></argsstring>
+        <name>other</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::rebind::other</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="114" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="114" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="112" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="113" bodyend="115"/>
+    <listofallmembers>
+      <member refid="structhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1_1rebind_1a569da59a856d6758aeb48c8cdb684bdb" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator::rebind</scope><name>other</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

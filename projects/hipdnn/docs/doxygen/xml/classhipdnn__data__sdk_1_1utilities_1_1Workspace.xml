@@ -1,0 +1,193 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1utilities_1_1Workspace" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::Workspace</compoundname>
+    <includes refid="Workspace_8hpp" local="no">Workspace.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>class DeviceAlloc</type>
+        <defval><ref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" kindref="compound">DeviceAllocator</ref>&lt;char&gt;</defval>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a4630ee0726978c485d8ed3c9a00dc379" prot="private" static="no" mutable="no">
+        <type>DeviceAlloc</type>
+        <definition>DeviceAlloc hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::_allocator</definition>
+        <argsstring></argsstring>
+        <name>_allocator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::_allocator</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="73" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="73" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a5b313b4ad55a9d06b8b804b8b81c00b4" prot="private" static="no" mutable="no">
+        <type>void *</type>
+        <definition>void* hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::_ptr</definition>
+        <argsstring></argsstring>
+        <name>_ptr</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::_ptr</qualifiedname>
+        <initializer>= nullptr</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="74" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="74" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1ac08feedd02bec866a2a66a8aed1d199d" prot="private" static="no" mutable="no">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::_size</definition>
+        <argsstring></argsstring>
+        <name>_size</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::_size</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="75" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="75" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a4af0642f9a573da8ae44ed4cc360ded0" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::Workspace</definition>
+        <argsstring>(size_t size)</argsstring>
+        <name>Workspace</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::Workspace</qualifiedname>
+        <param>
+          <type>size_t</type>
+          <declname>size</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="21" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="21" bodyend="28"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a08503affe90d6876322384f4f2b5bb8e" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::~Workspace</definition>
+        <argsstring>()</argsstring>
+        <name>~Workspace</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::~Workspace</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="30" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="30" bodyend="36"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a846248ecf4210013b0be35cd37a5b485" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::Workspace</definition>
+        <argsstring>(Workspace &amp;&amp;other) noexcept</argsstring>
+        <name>Workspace</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::Workspace</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace" kindref="compound">Workspace</ref> &amp;&amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="38" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="38" bodyend="44"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1aba5f8c153e65c55fc02b1018d3def388" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace" kindref="compound">Workspace</ref> &amp;</type>
+        <definition>Workspace &amp; hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::operator=</definition>
+        <argsstring>(Workspace &amp;&amp;other) noexcept</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::operator=</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace" kindref="compound">Workspace</ref> &amp;&amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="46" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="46" bodyend="62"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1aa2655c5682c26b17e7c350f285de0470" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::Workspace</definition>
+        <argsstring>(const Workspace &amp;)=delete</argsstring>
+        <name>Workspace</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::Workspace</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace" kindref="compound">Workspace</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="64" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1ae821d2857a1844707a5daa96fb52a220" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace" kindref="compound">Workspace</ref> &amp;</type>
+        <definition>Workspace &amp; hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::operator=</definition>
+        <argsstring>(const Workspace &amp;)=delete</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::operator=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace" kindref="compound">Workspace</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="65" column="15"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1acbcfd4bbd4346ad197cf76abbb9b23f9" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>void *</type>
+        <definition>void * hipdnn_data_sdk::utilities::Workspace&lt; DeviceAlloc &gt;::get</definition>
+        <argsstring>() const</argsstring>
+        <name>get</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Workspace::get</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="67" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="67" bodyend="70"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" line="15" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Workspace.hpp" bodystart="16" bodyend="76"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a4630ee0726978c485d8ed3c9a00dc379" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>_allocator</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a5b313b4ad55a9d06b8b804b8b81c00b4" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>_ptr</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1ac08feedd02bec866a2a66a8aed1d199d" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>_size</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1acbcfd4bbd4346ad197cf76abbb9b23f9" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>get</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1aba5f8c153e65c55fc02b1018d3def388" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>operator=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1ae821d2857a1844707a5daa96fb52a220" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>operator=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a4af0642f9a573da8ae44ed4cc360ded0" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>Workspace</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a846248ecf4210013b0be35cd37a5b485" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>Workspace</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1aa2655c5682c26b17e7c350f285de0470" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>Workspace</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace_1a08503affe90d6876322384f4f2b5bb8e" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::Workspace</scope><name>~Workspace</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

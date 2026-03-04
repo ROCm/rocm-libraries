@@ -1,0 +1,1877 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__frontend" kind="namespace" language="C++">
+    <compoundname>hipdnn_frontend</compoundname>
+    <innerclass refid="classhipdnn__frontend_1_1EmptyConstraint" prot="public">hipdnn_frontend::EmptyConstraint</innerclass>
+    <innerclass refid="structhipdnn__frontend_1_1Error" prot="public">hipdnn_frontend::Error</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1FloatConstraint" prot="public">hipdnn_frontend::FloatConstraint</innerclass>
+    <innerclass refid="structhipdnn__frontend_1_1GraphStructure" prot="public">hipdnn_frontend::GraphStructure</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1HipdnnBackendWrapper" prot="public">hipdnn_frontend::HipdnnBackendWrapper</innerclass>
+    <innerclass refid="structhipdnn__frontend_1_1HipdnnHandleDeleter" prot="public">hipdnn_frontend::HipdnnHandleDeleter</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1IConstraint" prot="public">hipdnn_frontend::IConstraint</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1IHipdnnBackend" prot="public">hipdnn_frontend::IHipdnnBackend</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1IntConstraint" prot="public">hipdnn_frontend::IntConstraint</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1Knob" prot="public">hipdnn_frontend::Knob</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1KnobSetting" prot="public">hipdnn_frontend::KnobSetting</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor" prot="public">hipdnn_frontend::ScopedHipdnnBackendDescriptor</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1StringConstraint" prot="public">hipdnn_frontend::StringConstraint</innerclass>
+    <innerclass refid="structhipdnn__frontend_1_1TopologicalSortResult" prot="public">hipdnn_frontend::TopologicalSortResult</innerclass>
+    <innernamespace refid="namespacehipdnn__frontend_1_1detail">hipdnn_frontend::detail</innernamespace>
+    <innernamespace refid="namespacehipdnn__frontend_1_1graph">hipdnn_frontend::graph</innernamespace>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>ErrorCode</name>
+        <qualifiedname>hipdnn_frontend::ErrorCode</qualifiedname>
+        <enumvalue id="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" prot="public">
+          <name>OK</name>
+          <briefdescription>
+<para>Operation completed successfully. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bad8f24f388e990b9ccf8905b7993b99ae" prot="public">
+          <name>INVALID_VALUE</name>
+          <briefdescription>
+<para>An invalid value was provided. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bafdc6240981fc7cdc8b9c9dfd3f497804" prot="public">
+          <name>HIPDNN_BACKEND_ERROR</name>
+          <briefdescription>
+<para>An error occurred in the hipDNN backend. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40ba6343d8fb9d5bf854631654ab7d405976" prot="public">
+          <name>ATTRIBUTE_NOT_SET</name>
+          <briefdescription>
+<para>A required attribute was not set. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> codes returned by hipDNN Frontend operations. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="41" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="42" bodyend="47"/>
+      </memberdef>
+      <memberdef kind="enum" id="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>ConvolutionMode</name>
+        <qualifiedname>hipdnn_frontend::ConvolutionMode</qualifiedname>
+        <enumvalue id="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16a1c250a21210b7b88a14db9a0cbe71162" prot="public">
+          <name>NOT_SET</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Mode not specified. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16a959e923799a82a4f7e11f7ae57586617" prot="public">
+          <name>CROSS_CORRELATION</name>
+          <initializer>= 1</initializer>
+          <briefdescription>
+<para>Cross-correlation mode (standard deep learning convolution) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16af7fb587bad912d390b57a5d6e7ccc55d" prot="public">
+          <name>CONVOLUTION</name>
+          <initializer>= 2</initializer>
+          <briefdescription>
+<para>Mathematical convolution (filter is flipped) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Specifies the convolution algorithm mode. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Determines how the convolution filter is applied to the input tensor. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="42" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="43" bodyend="47"/>
+      </memberdef>
+      <memberdef kind="enum" id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>PointwiseMode</name>
+        <qualifiedname>hipdnn_frontend::PointwiseMode</qualifiedname>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea1c250a21210b7b88a14db9a0cbe71162" prot="public">
+          <name>NOT_SET</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Mode not specified. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea7d8a220d2262f9d6c658d549ee12cf2c" prot="public">
+          <name>ABS</name>
+          <initializer>= 1</initializer>
+          <briefdescription>
+<para>Absolute value: |x|. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea9eeb52badb613229884838847294b90d" prot="public">
+          <name>ADD</name>
+          <initializer>= 2</initializer>
+          <briefdescription>
+<para>Addition: x + y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea6a9984687dffbb1b0628c83cebc3a06f" prot="public">
+          <name>ADD_SQUARE</name>
+          <initializer>= 3</initializer>
+          <briefdescription>
+<para>Add and square: (x + y)² </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea144ed1c63231f39694922d286eacb47b" prot="public">
+          <name>BINARY_SELECT</name>
+          <initializer>= 4</initializer>
+          <briefdescription>
+<para>Ternary select based on condition. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea5bdce8e6d9dc3efbbd31e90a8a181dff" prot="public">
+          <name>CEIL</name>
+          <initializer>= 5</initializer>
+          <briefdescription>
+<para>Ceiling function. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eae6bc9fd613008310e319ac5a737e7b1e" prot="public">
+          <name>CMP_EQ</name>
+          <initializer>= 6</initializer>
+          <briefdescription>
+<para>Compare equal: x == y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea5756748d9271cb132df84e98265c2b04" prot="public">
+          <name>CMP_GE</name>
+          <initializer>= 7</initializer>
+          <briefdescription>
+<para>Compare greater or equal: x &gt;= y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea26aa03005294e4f61a8410d47e282fe5" prot="public">
+          <name>CMP_GT</name>
+          <initializer>= 8</initializer>
+          <briefdescription>
+<para>Compare greater than: x &gt; y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea2b6769419b6e2c1ebbef84f436c4658f" prot="public">
+          <name>CMP_LE</name>
+          <initializer>= 9</initializer>
+          <briefdescription>
+<para>Compare less or equal: x &lt;= y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea3963922f78eb11955793e4d680a5b2cf" prot="public">
+          <name>CMP_LT</name>
+          <initializer>= 10</initializer>
+          <briefdescription>
+<para>Compare less than: x &lt; y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eabc6ccd89f0dbee81f401729e2462b6ba" prot="public">
+          <name>CMP_NEQ</name>
+          <initializer>= 11</initializer>
+          <briefdescription>
+<para>Compare not equal: x != y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea29bbf66f7f8529ec47e394fb5a36c646" prot="public">
+          <name>DIV</name>
+          <initializer>= 12</initializer>
+          <briefdescription>
+<para>Division: x / y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea5ddd1382e9593e8021fa4a945888b3c0" prot="public">
+          <name>ELU_BWD</name>
+          <initializer>= 13</initializer>
+          <briefdescription>
+<para>ELU activation backward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea91ea9178ccb1269a48174eb0b1ff7473" prot="public">
+          <name>ELU_FWD</name>
+          <initializer>= 14</initializer>
+          <briefdescription>
+<para>ELU activation forward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea37a5fe612ac8fe5cc64e84d2d10694e6" prot="public">
+          <name>ERF</name>
+          <initializer>= 15</initializer>
+          <briefdescription>
+<para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> function. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea8c670f8c37b95e1ed14a0ce414b049c7" prot="public">
+          <name>EXP</name>
+          <initializer>= 16</initializer>
+          <briefdescription>
+<para>Exponential: e^x. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea56c1e354d36beb85b0d881c5b2e24cbe" prot="public">
+          <name>FLOOR</name>
+          <initializer>= 17</initializer>
+          <briefdescription>
+<para>Floor function. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea3afd75efb64e13ba20fa46f9a06d203d" prot="public">
+          <name>GELU_APPROX_TANH_BWD</name>
+          <initializer>= 18</initializer>
+          <briefdescription>
+<para>GELU (tanh approximation) backward. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eabaab94a2629fae870bb33620a403badc" prot="public">
+          <name>GELU_APPROX_TANH_FWD</name>
+          <initializer>= 19</initializer>
+          <briefdescription>
+<para>GELU (tanh approximation) forward. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eadcb23c445659954667e1d70b7db09502" prot="public">
+          <name>GELU_BWD</name>
+          <initializer>= 20</initializer>
+          <briefdescription>
+<para>GELU activation backward. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea30fbf7607ba761c27a1ea5abbfe56aea" prot="public">
+          <name>GELU_FWD</name>
+          <initializer>= 21</initializer>
+          <briefdescription>
+<para>GELU activation forward. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea0e1e7fa89dc92ea58cea9d29f90455d5" prot="public">
+          <name>GEN_INDEX</name>
+          <initializer>= 22</initializer>
+          <briefdescription>
+<para>Generate index tensor. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ead8156d3c6735d75d8a1b8dedd0e79c8b" prot="public">
+          <name>IDENTITY</name>
+          <initializer>= 23</initializer>
+          <briefdescription>
+<para>Identity: y = x. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea4b5ffcdaf38ce4d463171f5c977c5ab3" prot="public">
+          <name>LOG</name>
+          <initializer>= 24</initializer>
+          <briefdescription>
+<para>Natural logarithm. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eaa770916377f618641eccd6783b13503a" prot="public">
+          <name>LOGICAL_AND</name>
+          <initializer>= 25</initializer>
+          <briefdescription>
+<para>Logical AND. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea330c6551c4bc9acbc0a7363dc8f68680" prot="public">
+          <name>LOGICAL_NOT</name>
+          <initializer>= 26</initializer>
+          <briefdescription>
+<para>Logical NOT. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea0d0389dd347e259ac16a47fc9db81c18" prot="public">
+          <name>LOGICAL_OR</name>
+          <initializer>= 27</initializer>
+          <briefdescription>
+<para>Logical OR. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea26a4b44a837bf97b972628509912b4a5" prot="public">
+          <name>MAX</name>
+          <initializer>= 28</initializer>
+          <briefdescription>
+<para>Element-wise maximum. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eace31e2a082d17e038fcc6e3006166653" prot="public">
+          <name>MIN</name>
+          <initializer>= 29</initializer>
+          <briefdescription>
+<para>Element-wise minimum. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea2cdf52a55876063ec93b7d18bc741f6c" prot="public">
+          <name>MUL</name>
+          <initializer>= 30</initializer>
+          <briefdescription>
+<para>Multiplication: x * y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea5dd68b1a7db42a1cce4dce09dbaa179e" prot="public">
+          <name>NEG</name>
+          <initializer>= 31</initializer>
+          <briefdescription>
+<para>Negation: -x. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea4d98346f3d5cc5fa5666f0715abf25b1" prot="public">
+          <name>RECIPROCAL</name>
+          <initializer>= 32</initializer>
+          <briefdescription>
+<para>Reciprocal: 1/x. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea48636cc1f03a0f38e57dc44e57368c7f" prot="public">
+          <name>RELU_BWD</name>
+          <initializer>= 33</initializer>
+          <briefdescription>
+<para>ReLU backward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eab35e8587053a3e5f15f23398fe293aad" prot="public">
+          <name>RELU_FWD</name>
+          <initializer>= 34</initializer>
+          <briefdescription>
+<para>ReLU forward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea66bac724670f51e77f3688d33ca0d781" prot="public">
+          <name>RSQRT</name>
+          <initializer>= 35</initializer>
+          <briefdescription>
+<para>Reciprocal square root: 1/sqrt(x) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ead0a5ca5af7eb34564abd0062e3f12fc8" prot="public">
+          <name>SIGMOID_BWD</name>
+          <initializer>= 36</initializer>
+          <briefdescription>
+<para>Sigmoid backward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eae81b8521a41fc53b03ab163785575f35" prot="public">
+          <name>SIGMOID_FWD</name>
+          <initializer>= 37</initializer>
+          <briefdescription>
+<para>Sigmoid forward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea5b001d63db54e7383587771eeb2018a1" prot="public">
+          <name>SIN</name>
+          <initializer>= 38</initializer>
+          <briefdescription>
+<para>Sine function. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eab19188e851d28fc98162788d291f92a8" prot="public">
+          <name>SOFTPLUS_BWD</name>
+          <initializer>= 39</initializer>
+          <briefdescription>
+<para>Softplus backward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea53b9ca3c6da0a598416dc3c464ea18b2" prot="public">
+          <name>SOFTPLUS_FWD</name>
+          <initializer>= 40</initializer>
+          <briefdescription>
+<para>Softplus forward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea36875f2500a09ee35d0bb7eb8c0b91b0" prot="public">
+          <name>SQRT</name>
+          <initializer>= 41</initializer>
+          <briefdescription>
+<para>Square root. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea241dd841abade20fcb27b8a9f494e1eb" prot="public">
+          <name>SUB</name>
+          <initializer>= 42</initializer>
+          <briefdescription>
+<para>Subtraction: x - y. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea23f94a743b9169fc826f2248f11bdea9" prot="public">
+          <name>SWISH_BWD</name>
+          <initializer>= 43</initializer>
+          <briefdescription>
+<para>Swish activation backward. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4eab4952fbb90412c32c1b83c6594dce91b" prot="public">
+          <name>SWISH_FWD</name>
+          <initializer>= 44</initializer>
+          <briefdescription>
+<para>Swish activation forward. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea71211c96ad35b40178446956e22be10e" prot="public">
+          <name>TAN</name>
+          <initializer>= 45</initializer>
+          <briefdescription>
+<para>Tangent function. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea30b5755773d02971b891f915954946a2" prot="public">
+          <name>TANH_BWD</name>
+          <initializer>= 46</initializer>
+          <briefdescription>
+<para>Tanh backward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea75a42858051960a8cf6e5c3eed95f16d" prot="public">
+          <name>TANH_FWD</name>
+          <initializer>= 47</initializer>
+          <briefdescription>
+<para>Tanh forward pass. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Specifies the type of element-wise (pointwise) operation. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Pointwise operations are applied element-by-element to tensors. They can be unary (1 input), binary (2 inputs), or ternary (3 inputs).</para>
+<para><simplesect kind="see"><para><ref refid="namespacehipdnn__frontend_1ab7900b9bcfca166e1fc5329ee9b54a66" kindref="member">isUnaryPointwiseMode()</ref>, <ref refid="namespacehipdnn__frontend_1a5c9afa58e70c66aa2bf2755158ac725f" kindref="member">isBinaryPointwiseMode()</ref>, <ref refid="namespacehipdnn__frontend_1ad2c421ddf43805caf7de0e21527aa712" kindref="member">isTernaryPointwiseMode()</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="59" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="60" bodyend="109"/>
+      </memberdef>
+      <memberdef kind="enum" id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>DataType</name>
+        <qualifiedname>hipdnn_frontend::DataType</qualifiedname>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca1c250a21210b7b88a14db9a0cbe71162" prot="public">
+          <name>NOT_SET</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Data type not specified. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7becae738c26bf4ce1037fa81b039a915cbf6" prot="public">
+          <name>FLOAT</name>
+          <initializer>= 1</initializer>
+          <briefdescription>
+<para>32-bit floating point (fp32) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca87e955627b59c274ec4cbdd3a130f9bb" prot="public">
+          <name>HALF</name>
+          <initializer>= 2</initializer>
+          <briefdescription>
+<para>16-bit floating point (fp16, IEEE 754) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7becaa4b19a06b5361a32b32759aa26ffdbab" prot="public">
+          <name>BFLOAT16</name>
+          <initializer>= 3</initializer>
+          <briefdescription>
+<para>16-bit brain floating point (bf16) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7becafd3e4ece78a7d422280d5ed379482229" prot="public">
+          <name>DOUBLE</name>
+          <initializer>= 4</initializer>
+          <briefdescription>
+<para>64-bit floating point (fp64) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7becaecfc091ed2a607335524c8389cfa41b5" prot="public">
+          <name>UINT8</name>
+          <initializer>= 5</initializer>
+          <briefdescription>
+<para>8-bit unsigned integer </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca6495adba09844fac8eeb0aba86e6f1bf" prot="public">
+          <name>INT32</name>
+          <initializer>= 6</initializer>
+          <briefdescription>
+<para>32-bit signed integer </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7becaee9d73311ff0658494edfff14c3ec1e3" prot="public">
+          <name>INT8</name>
+          <initializer>= 7</initializer>
+          <briefdescription>
+<para>8-bit signed integer </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7becaa9e737aae381249fe47b92a0cab0117e" prot="public">
+          <name>FP8_E4M3</name>
+          <initializer>= 8</initializer>
+          <briefdescription>
+<para>8-bit floating point (4 exponent, 3 mantissa bits) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca6d1c1d420dbc65fe91ff188df5b480cf" prot="public">
+          <name>FP8_E5M2</name>
+          <initializer>= 9</initializer>
+          <briefdescription>
+<para>8-bit floating point (5 exponent, 2 mantissa bits) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Specifies the data type for tensor elements. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Defines the numeric precision and format for tensor data. Different operations may support different subsets of data types. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="119" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="120" bodyend="131"/>
+      </memberdef>
+      <memberdef kind="enum" id="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>HeuristicMode</name>
+        <qualifiedname>hipdnn_frontend::HeuristicMode</qualifiedname>
+        <enumvalue id="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9af35b388d8d4adeab05bce916c73d7a72" prot="public">
+          <name>FALLBACK</name>
+          <briefdescription>
+<para>Use fallback heuristics for engine selection. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Specifies the heuristic mode for engine selection. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Controls how the hipDNN backend selects execution plans and engines. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="140" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="141" bodyend="143"/>
+      </memberdef>
+      <memberdef kind="enum" id="namespacehipdnn__frontend_1ae16a963c279ec068c5ec825ef2dbd345" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>BuildPlanPolicy</name>
+        <qualifiedname>hipdnn_frontend::BuildPlanPolicy</qualifiedname>
+        <enumvalue id="namespacehipdnn__frontend_1ae16a963c279ec068c5ec825ef2dbd345a2354ac555eda3ac09572d8a4c16a3c8f" prot="public">
+          <name>HEURISTICS_CHOICE</name>
+          <briefdescription>
+<para>Use heuristics to select the best plan. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1ae16a963c279ec068c5ec825ef2dbd345a5fb1f955b45e38e31789286a1790398d" prot="public">
+          <name>ALL</name>
+          <briefdescription>
+<para>Build all available plans (currently unused) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Specifies how execution plans are selected during graph building. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="150" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="151" bodyend="154"/>
+      </memberdef>
+      <memberdef kind="enum" id="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>KnobValueType</name>
+        <qualifiedname>hipdnn_frontend::KnobValueType</qualifiedname>
+        <enumvalue id="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6ca1c250a21210b7b88a14db9a0cbe71162" prot="public">
+          <name>NOT_SET</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Value type not specified. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6ca4e866b275c85fbb439f6484251cfb31c" prot="public">
+          <name>INT64</name>
+          <initializer>= 1</initializer>
+          <briefdescription>
+<para>64-bit signed integer value </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6ca139882c654db8a57f7c3092de1dd0b02" prot="public">
+          <name>FLOAT64</name>
+          <initializer>= 2</initializer>
+          <briefdescription>
+<para>64-bit floating point value </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6ca63b588d5559f64f89a416e656880b949" prot="public">
+          <name>STRING</name>
+          <initializer>= 3</initializer>
+          <briefdescription>
+<para>String value. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Specifies the data type of a knob value. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Knobs are configuration parameters for engine execution. This enum indicates what type of value a particular knob expects.</para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref>, <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="166" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="167" bodyend="172"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="typedef">
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1a4f96388faa00596822326d9e6e3421e7" prot="public" static="no">
+        <type><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" kindref="member">ErrorCode</ref></type>
+        <definition>typedef ErrorCode hipdnn_frontend::error_code_t</definition>
+        <argsstring></argsstring>
+        <name>error_code_t</name>
+        <qualifiedname>hipdnn_frontend::error_code_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for ErrorCode. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="63" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="63" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1add5ae2ec55fdd79c064ccfafa7e2a290" prot="public" static="no">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>typedef Error hipdnn_frontend::error_object</definition>
+        <argsstring></argsstring>
+        <name>error_object</name>
+        <qualifiedname>hipdnn_frontend::error_object</qualifiedname>
+        <briefdescription>
+<para>Type alias for <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> (cuDNN compatibility) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="168" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="168" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1a74d305c3adc02f826e2986946713cdc1" prot="public" static="no">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>typedef Error hipdnn_frontend::error_t</definition>
+        <argsstring></argsstring>
+        <name>error_t</name>
+        <qualifiedname>hipdnn_frontend::error_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="169" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="169" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" prot="public" static="no">
+        <type>std::unique_ptr&lt; <ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref>, <ref refid="structhipdnn__frontend_1_1HipdnnHandleDeleter" kindref="compound">HipdnnHandleDeleter</ref> &gt;</type>
+        <definition>using hipdnn_frontend::HipdnnHandlePtr = typedef std::unique_ptr&lt;hipdnnHandle_t, HipdnnHandleDeleter&gt;</definition>
+        <argsstring></argsstring>
+        <name>HipdnnHandlePtr</name>
+        <qualifiedname>hipdnn_frontend::HipdnnHandlePtr</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="39" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="39" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1a3a9f08f1cca4dd154e35bb1f8ae5dd35" prot="public" static="no">
+        <type><ref refid="structhipdnn__frontend_1_1HipdnnHandleDeleter" kindref="compound">HipdnnHandleDeleter</ref></type>
+        <definition>using hipdnn_frontend::hipdnn_handle_deleter = typedef HipdnnHandleDeleter</definition>
+        <argsstring></argsstring>
+        <name>hipdnn_handle_deleter</name>
+        <qualifiedname>hipdnn_frontend::hipdnn_handle_deleter</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="104" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="104" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1aa6500928ccda003320ca1d5af2a8a42e" prot="public" static="no">
+        <type><ref refid="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" kindref="member">HipdnnHandlePtr</ref></type>
+        <definition>using hipdnn_frontend::hipdnn_handle_ptr = typedef HipdnnHandlePtr</definition>
+        <argsstring></argsstring>
+        <name>hipdnn_handle_ptr</name>
+        <qualifiedname>hipdnn_frontend::hipdnn_handle_ptr</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="105" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="105" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" prot="public" static="no">
+        <type>std::variant&lt; int64_t, double, std::string &gt;</type>
+        <definition>using hipdnn_frontend::KnobValueVariant = typedef std::variant&lt;int64_t, double, std::string&gt;</definition>
+        <argsstring></argsstring>
+        <name>KnobValueVariant</name>
+        <qualifiedname>hipdnn_frontend::KnobValueVariant</qualifiedname>
+        <briefdescription>
+<para>Variant type for knob values (integer, float, or string) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="24" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="24" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1aac81fbb89e1355ef993b6d3375c79d85" prot="public" static="no">
+        <type>std::string</type>
+        <definition>typedef std::string hipdnn_frontend::KnobType_t</definition>
+        <argsstring></argsstring>
+        <name>KnobType_t</name>
+        <qualifiedname>hipdnn_frontend::KnobType_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for knob identifiers. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="27" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="27" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1ac3d18f7f47f43046e273009ad39cb234" prot="public" static="no">
+        <type><ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">ConvolutionMode</ref></type>
+        <definition>typedef ConvolutionMode hipdnn_frontend::ConvolutionMode_t</definition>
+        <argsstring></argsstring>
+        <name>ConvolutionMode_t</name>
+        <qualifiedname>hipdnn_frontend::ConvolutionMode_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for ConvolutionMode. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="48" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="48" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1a4ada7d66fbe9d473966571bdc4adc6d7" prot="public" static="no">
+        <type><ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">PointwiseMode</ref></type>
+        <definition>typedef PointwiseMode hipdnn_frontend::PointwiseMode_t</definition>
+        <argsstring></argsstring>
+        <name>PointwiseMode_t</name>
+        <qualifiedname>hipdnn_frontend::PointwiseMode_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for PointwiseMode. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="110" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="110" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1a37e84effa01b7ee00b4d43642db71f60" prot="public" static="no">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>typedef DataType hipdnn_frontend::DataType_t</definition>
+        <argsstring></argsstring>
+        <name>DataType_t</name>
+        <qualifiedname>hipdnn_frontend::DataType_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for DataType. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="132" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="132" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1ab663a99d53fb285f6495d6b3c6949871" prot="public" static="no">
+        <type><ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9" kindref="member">HeuristicMode</ref></type>
+        <definition>typedef HeuristicMode hipdnn_frontend::HeurMode_t</definition>
+        <argsstring></argsstring>
+        <name>HeurMode_t</name>
+        <qualifiedname>hipdnn_frontend::HeurMode_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for HeuristicMode. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="144" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="144" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1a792f5701633081c40bccd0ee3af72c16" prot="public" static="no">
+        <type><ref refid="namespacehipdnn__frontend_1ae16a963c279ec068c5ec825ef2dbd345" kindref="member">BuildPlanPolicy</ref></type>
+        <definition>typedef BuildPlanPolicy hipdnn_frontend::BuildPlanPolicy_t</definition>
+        <argsstring></argsstring>
+        <name>BuildPlanPolicy_t</name>
+        <qualifiedname>hipdnn_frontend::BuildPlanPolicy_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for BuildPlanPolicy. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="155" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="155" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1a06cb959af6e5853aa21c104a69655e04" prot="public" static="no">
+        <type><ref refid="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" kindref="member">KnobValueType</ref></type>
+        <definition>typedef KnobValueType hipdnn_frontend::KnobValueType_t</definition>
+        <argsstring></argsstring>
+        <name>KnobValueType_t</name>
+        <qualifiedname>hipdnn_frontend::KnobValueType_t</qualifiedname>
+        <briefdescription>
+<para>Type alias for KnobValueType. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="173" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="173" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="var">
+      <memberdef kind="variable" id="namespacehipdnn__frontend_1a40e004431c26aeab70c3b00c806ac959" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>constexpr const char *</type>
+        <definition>constexpr const char* hipdnn_frontend::K_COMPONENT_NAME</definition>
+        <argsstring></argsstring>
+        <name>K_COMPONENT_NAME</name>
+        <qualifiedname>hipdnn_frontend::K_COMPONENT_NAME</qualifiedname>
+        <initializer>= &quot;hipdnn_frontend&quot;</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Logging.hpp" line="12" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Logging.hpp" bodystart="12" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a1b406b5a5510fc1d73a0b477f8cdc332" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1IHipdnnBackend" kindref="compound">IHipdnnBackend</ref> &gt;</type>
+        <definition>static std::shared_ptr&lt; IHipdnnBackend &gt; hipdnn_frontend::hipdnnBackend</definition>
+        <argsstring>()</argsstring>
+        <name>hipdnnBackend</name>
+        <qualifiedname>hipdnn_frontend::hipdnnBackend</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendWrapper.hpp" line="114" column="31" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendWrapper.hpp" bodystart="114" bodyend="122"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a0448146b91c95a593fd8e5cace37976a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::to_string</definition>
+        <argsstring>(ErrorCode code)</argsstring>
+        <name>to_string</name>
+        <qualifiedname>hipdnn_frontend::to_string</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" kindref="member">ErrorCode</ref></type>
+          <declname>code</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="50" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="50" bodyend="56"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a0dfe269368eb22e704222c5eff54af1e" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; hipdnn_frontend::operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, const ErrorCode &amp;error)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <qualifiedname>hipdnn_frontend::operator&lt;&lt;</qualifiedname>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" kindref="member">ErrorCode</ref> &amp;</type>
+          <declname>error</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="58" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="58" bodyend="61"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a0f86d79c7eeb1435519740d5a871e523" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; hipdnn_frontend::operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, const Error &amp;error)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <qualifiedname>hipdnn_frontend::operator&lt;&lt;</qualifiedname>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>const <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> &amp;</type>
+          <declname>error</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="163" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="163" bodyend="166"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a231d673ad39c296078e3c07d22d5b614" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::createHipdnnHandle</definition>
+        <argsstring>(HipdnnHandlePtr &amp;handle, hipStream_t stream=nullptr)</argsstring>
+        <name>createHipdnnHandle</name>
+        <qualifiedname>hipdnn_frontend::createHipdnnHandle</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" kindref="member">HipdnnHandlePtr</ref> &amp;</type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>hipStream_t</type>
+          <declname>stream</declname>
+          <defval>nullptr</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="43" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="43" bodyend="64"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1ad802fab25cb36c4989132bf3f0e7a5eb" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::pair&lt; <ref refid="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" kindref="member">HipdnnHandlePtr</ref>, <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> &gt;</type>
+        <definition>std::pair&lt; HipdnnHandlePtr, Error &gt; hipdnn_frontend::createHipdnnHandle</definition>
+        <argsstring>(hipStream_t stream=nullptr)</argsstring>
+        <name>createHipdnnHandle</name>
+        <qualifiedname>hipdnn_frontend::createHipdnnHandle</qualifiedname>
+        <param>
+          <type>hipStream_t</type>
+          <declname>stream</declname>
+          <defval>nullptr</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="68" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="68" bodyend="73"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a0c3315bd21e7cdc025e7af39466d0296" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::setHipdnnHandleStream</definition>
+        <argsstring>(const HipdnnHandlePtr &amp;handle, hipStream_t stream)</argsstring>
+        <name>setHipdnnHandleStream</name>
+        <qualifiedname>hipdnn_frontend::setHipdnnHandleStream</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" kindref="member">HipdnnHandlePtr</ref> &amp;</type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>hipStream_t</type>
+          <declname>stream</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="77" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="77" bodyend="86"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1ae9cfdb0ba92181d4dad126e7ef2bf2ed" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::getHipdnnHandleStream</definition>
+        <argsstring>(const HipdnnHandlePtr &amp;handle, hipStream_t *stream)</argsstring>
+        <name>getHipdnnHandleStream</name>
+        <qualifiedname>hipdnn_frontend::getHipdnnHandleStream</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" kindref="member">HipdnnHandlePtr</ref> &amp;</type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>hipStream_t *</type>
+          <declname>stream</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="88" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="88" bodyend="101"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1ac558ddd95c0d84bad0779104c5a0f99c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>auto</type>
+        <definition>auto hipdnn_frontend::create_hipdnn_handle</definition>
+        <argsstring>(hipStream_t stream=nullptr)</argsstring>
+        <name>create_hipdnn_handle</name>
+        <qualifiedname>hipdnn_frontend::create_hipdnn_handle</qualifiedname>
+        <param>
+          <type>hipStream_t</type>
+          <declname>stream</declname>
+          <defval>nullptr</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="107" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="107" bodyend="111"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a8bcaf3cf5c4e162085d34b0eaf9ca830" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::create_hipdnn_handle</definition>
+        <argsstring>(HipdnnHandlePtr &amp;handle, hipStream_t stream=nullptr)</argsstring>
+        <name>create_hipdnn_handle</name>
+        <qualifiedname>hipdnn_frontend::create_hipdnn_handle</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" kindref="member">HipdnnHandlePtr</ref> &amp;</type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>hipStream_t</type>
+          <declname>stream</declname>
+          <defval>nullptr</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="112" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="112" bodyend="116"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a5bd69a4b96be15c88ebdf4186d4fea0f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::set_hipdnn_handle_stream</definition>
+        <argsstring>(const HipdnnHandlePtr &amp;h, hipStream_t s)</argsstring>
+        <name>set_hipdnn_handle_stream</name>
+        <qualifiedname>hipdnn_frontend::set_hipdnn_handle_stream</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" kindref="member">HipdnnHandlePtr</ref> &amp;</type>
+          <declname>h</declname>
+        </param>
+        <param>
+          <type>hipStream_t</type>
+          <declname>s</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="118" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="118" bodyend="122"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a3e629f5fb4dc1888bca9102de4aeafcb" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::get_hipdnn_handle_stream</definition>
+        <argsstring>(const HipdnnHandlePtr &amp;h, hipStream_t *s)</argsstring>
+        <name>get_hipdnn_handle_stream</name>
+        <qualifiedname>hipdnn_frontend::get_hipdnn_handle_stream</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1ab712db61325c777875a7b2e8762301fb" kindref="member">HipdnnHandlePtr</ref> &amp;</type>
+          <declname>h</declname>
+        </param>
+        <param>
+          <type>hipStream_t *</type>
+          <declname>s</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" line="124" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp" bodystart="124" bodyend="128"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1af08c26b4551b36a34561290780e05e3e" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>HIPDNN_HIDDEN int32_t</type>
+        <definition>HIPDNN_HIDDEN int32_t hipdnn_frontend::initializeFrontendLogging</definition>
+        <argsstring>(hipdnnCallback_t fn=hipdnnLoggingCallback_ext)</argsstring>
+        <name>initializeFrontendLogging</name>
+        <qualifiedname>hipdnn_frontend::initializeFrontendLogging</qualifiedname>
+        <param>
+          <type><ref refid="HipdnnBackendCallbackTypes_8h_1a89c1a24875bd3c5cf12c73dd64689906" kindref="member">hipdnnCallback_t</ref></type>
+          <declname>fn</declname>
+          <defval><ref refid="hipdnn__backend_8h_1a442118a1f9d3cec7c467671fca0e32bc" kindref="member">hipdnnLoggingCallback_ext</ref></defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Logging.hpp" line="15" column="30" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Logging.hpp" bodystart="15" bodyend="42"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a7fc3823225928122f9511cc4ac8c9297" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; int &gt;</type>
+        <definition>std::vector&lt; int &gt; hipdnn_frontend::computeInDegrees</definition>
+        <argsstring>(const GraphStructure &amp;structure)</argsstring>
+        <name>computeInDegrees</name>
+        <qualifiedname>hipdnn_frontend::computeInDegrees</qualifiedname>
+        <param>
+          <type>const <ref refid="structhipdnn__frontend_1_1GraphStructure" kindref="compound">GraphStructure</ref> &amp;</type>
+          <declname>structure</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="27" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="27" bodyend="39"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a11a53c38d90999ccb9b740f2ab2669ff" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; size_t &gt;</type>
+        <definition>std::vector&lt; size_t &gt; hipdnn_frontend::performTopologicalSort</definition>
+        <argsstring>(const GraphStructure &amp;structure)</argsstring>
+        <name>performTopologicalSort</name>
+        <qualifiedname>hipdnn_frontend::performTopologicalSort</qualifiedname>
+        <param>
+          <type>const <ref refid="structhipdnn__frontend_1_1GraphStructure" kindref="compound">GraphStructure</ref> &amp;</type>
+          <declname>structure</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="41" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="41" bodyend="75"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1aaa4c48a020334980a6d2912a4c7de548" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>int</type>
+        <definition>int hipdnn_frontend::countConnectedComponents</definition>
+        <argsstring>(const GraphStructure &amp;structure)</argsstring>
+        <name>countConnectedComponents</name>
+        <qualifiedname>hipdnn_frontend::countConnectedComponents</qualifiedname>
+        <param>
+          <type>const <ref refid="structhipdnn__frontend_1_1GraphStructure" kindref="compound">GraphStructure</ref> &amp;</type>
+          <declname>structure</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="77" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="77" bodyend="135"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1ad1280be50345e1b8fa835af935a7f7a7" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::detectCycle</definition>
+        <argsstring>(const std::vector&lt; size_t &gt; &amp;topologicalOrder, const GraphStructure &amp;structure)</argsstring>
+        <name>detectCycle</name>
+        <qualifiedname>hipdnn_frontend::detectCycle</qualifiedname>
+        <param>
+          <type>const std::vector&lt; size_t &gt; &amp;</type>
+          <declname>topologicalOrder</declname>
+        </param>
+        <param>
+          <type>const <ref refid="structhipdnn__frontend_1_1GraphStructure" kindref="compound">GraphStructure</ref> &amp;</type>
+          <declname>structure</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="137" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="137" bodyend="189"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1aca5a253a47e5abf033c5655c4c0f8154" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1TopologicalSortResult" kindref="compound">TopologicalSortResult</ref></type>
+        <definition>TopologicalSortResult hipdnn_frontend::performTopologicalSortWithComponentDetection</definition>
+        <argsstring>(const GraphStructure &amp;structure)</argsstring>
+        <name>performTopologicalSortWithComponentDetection</name>
+        <qualifiedname>hipdnn_frontend::performTopologicalSortWithComponentDetection</qualifiedname>
+        <param>
+          <type>const <ref refid="structhipdnn__frontend_1_1GraphStructure" kindref="compound">GraphStructure</ref> &amp;</type>
+          <declname>structure</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="192" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="192" bodyend="199"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a9f20f921905b9dee86742eb43baaae8c" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::getDataTypeEnumFromType</definition>
+        <argsstring>()</argsstring>
+        <name>getDataTypeEnumFromType</name>
+        <qualifiedname>hipdnn_frontend::getDataTypeEnumFromType</qualifiedname>
+        <briefdescription>
+<para>Get the DataType enum value corresponding to a C++ type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>T</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The C++ type (float, half, hip_bfloat16, double, etc.) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>The corresponding DataType enum value</para>
+</simplesect>
+<programlisting filename=".cpp"><codeline><highlight class="normal"><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref><sp/>dt<sp/>=<sp/>getDataTypeEnumFromType&lt;float&gt;();<sp/><sp/></highlight><highlight class="comment">//<sp/>Returns<sp/>DataType::FLOAT</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref><sp/>dt2<sp/>=<sp/>getDataTypeEnumFromType&lt;half&gt;();<sp/><sp/></highlight><highlight class="comment">//<sp/>Returns<sp/>DataType::HALF</highlight></codeline>
+</programlisting> </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="187" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="187" bodyend="229"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a8dc29abe15fbba5da61a6b72889233b1" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>hipdnn_data_sdk::data_objects::ConvMode</type>
+        <definition>hipdnn_data_sdk::data_objects::ConvMode hipdnn_frontend::toSdkType</definition>
+        <argsstring>(const ConvolutionMode &amp;type)</argsstring>
+        <name>toSdkType</name>
+        <qualifiedname>hipdnn_frontend::toSdkType</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">ConvolutionMode</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="231" column="48" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="231" bodyend="242"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a2bbcec4847cbe1a280221e9e8e9181f8" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">hipdnn_frontend::ConvolutionMode</ref></type>
+        <definition>hipdnn_frontend::ConvolutionMode hipdnn_frontend::fromSdkType</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::ConvMode &amp;type)</argsstring>
+        <name>fromSdkType</name>
+        <qualifiedname>hipdnn_frontend::fromSdkType</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::ConvMode &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="245" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="245" bodyend="256"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a1f7dc89ae96a5b3a611ccc38dcf889dc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>hipdnn_data_sdk::data_objects::DataType</type>
+        <definition>hipdnn_data_sdk::data_objects::DataType hipdnn_frontend::toSdkType</definition>
+        <argsstring>(const DataType &amp;type)</argsstring>
+        <name>toSdkType</name>
+        <qualifiedname>hipdnn_frontend::toSdkType</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="258" column="48" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="258" bodyend="283"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1ac295090e8c666bd1561c872248a0fdb2" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">hipdnn_frontend::DataType</ref></type>
+        <definition>hipdnn_frontend::DataType hipdnn_frontend::fromSdkType</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::DataType &amp;type)</argsstring>
+        <name>fromSdkType</name>
+        <qualifiedname>hipdnn_frontend::fromSdkType</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::DataType &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="285" column="34" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="285" bodyend="310"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a9e878823cbdb95ca4f6fad087f7f32ee" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>hipdnn_data_sdk::data_objects::PointwiseMode</type>
+        <definition>hipdnn_data_sdk::data_objects::PointwiseMode hipdnn_frontend::toSdkType</definition>
+        <argsstring>(const PointwiseMode &amp;type)</argsstring>
+        <name>toSdkType</name>
+        <qualifiedname>hipdnn_frontend::toSdkType</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">PointwiseMode</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="312" column="53" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="312" bodyend="413"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1aa0978e4d360fdee68de882dc0c4fbd5f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">hipdnn_frontend::PointwiseMode</ref></type>
+        <definition>hipdnn_frontend::PointwiseMode hipdnn_frontend::fromSdkType</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::PointwiseMode &amp;type)</argsstring>
+        <name>fromSdkType</name>
+        <qualifiedname>hipdnn_frontend::fromSdkType</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::PointwiseMode &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="416" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="416" bodyend="517"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a86bddca390d2f673ce00d1cc685d8784" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="HipdnnBackendHeuristicType_8h_1a883b30cf3ad9f52bcadfdeb9cc11b155" kindref="member">hipdnnBackendHeurMode_t</ref></type>
+        <definition>hipdnnBackendHeurMode_t hipdnn_frontend::toBackendType</definition>
+        <argsstring>(const HeuristicMode &amp;type)</argsstring>
+        <name>toBackendType</name>
+        <qualifiedname>hipdnn_frontend::toBackendType</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9" kindref="member">HeuristicMode</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="519" column="32" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="519" bodyend="528"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1add8869109353bac6fa7c449e5396311c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const char *</type>
+        <definition>const char * hipdnn_frontend::to_string</definition>
+        <argsstring>(const DataType &amp;type)</argsstring>
+        <name>to_string</name>
+        <qualifiedname>hipdnn_frontend::to_string</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="531" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="531" bodyend="556"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1abb0f468b13def2edcc39faa0c4ebf3a1" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; hipdnn_frontend::operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, const DataType &amp;type)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <qualifiedname>hipdnn_frontend::operator&lt;&lt;</qualifiedname>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="558" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="558" bodyend="561"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a400a3220900c806481f3aa882c44fd7c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const char *</type>
+        <definition>const char * hipdnn_frontend::to_string</definition>
+        <argsstring>(const BuildPlanPolicy &amp;policy)</argsstring>
+        <name>to_string</name>
+        <qualifiedname>hipdnn_frontend::to_string</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1ae16a963c279ec068c5ec825ef2dbd345" kindref="member">BuildPlanPolicy</ref> &amp;</type>
+          <declname>policy</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="564" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="564" bodyend="575"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a9ecaa185b7deb6fab47a1615577d858f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; hipdnn_frontend::operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, const BuildPlanPolicy &amp;policy)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <qualifiedname>hipdnn_frontend::operator&lt;&lt;</qualifiedname>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1ae16a963c279ec068c5ec825ef2dbd345" kindref="member">BuildPlanPolicy</ref> &amp;</type>
+          <declname>policy</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="577" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="577" bodyend="580"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1aff56d4b6627ac92a02a841e629617667" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const char *</type>
+        <definition>const char * hipdnn_frontend::to_string</definition>
+        <argsstring>(const HeuristicMode &amp;mode)</argsstring>
+        <name>to_string</name>
+        <qualifiedname>hipdnn_frontend::to_string</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9" kindref="member">HeuristicMode</ref> &amp;</type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="583" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="583" bodyend="592"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a998d6e1228c850e9ab890b88396ad7a1" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; hipdnn_frontend::operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, const HeuristicMode &amp;mode)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <qualifiedname>hipdnn_frontend::operator&lt;&lt;</qualifiedname>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9" kindref="member">HeuristicMode</ref> &amp;</type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="594" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="594" bodyend="597"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a5c74069c7a42c31ba58b7f0fa1d67477" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>hipdnn_data_sdk::data_objects::KnobValue</type>
+        <definition>hipdnn_data_sdk::data_objects::KnobValue hipdnn_frontend::toSdkType</definition>
+        <argsstring>(const KnobValueType &amp;type)</argsstring>
+        <name>toSdkType</name>
+        <qualifiedname>hipdnn_frontend::toSdkType</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" kindref="member">KnobValueType</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="599" column="49" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="599" bodyend="612"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a0efc7a3ca01ac15437526467cd9a6ae4" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" kindref="member">hipdnn_frontend::KnobValueType</ref></type>
+        <definition>hipdnn_frontend::KnobValueType hipdnn_frontend::fromSdkType</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::KnobValue &amp;type)</argsstring>
+        <name>fromSdkType</name>
+        <qualifiedname>hipdnn_frontend::fromSdkType</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::KnobValue &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="615" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="615" bodyend="628"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a1ee2ba3fc0840486ad87d9e84afbac34" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const char *</type>
+        <definition>const char * hipdnn_frontend::to_string</definition>
+        <argsstring>(const KnobValueType &amp;type)</argsstring>
+        <name>to_string</name>
+        <qualifiedname>hipdnn_frontend::to_string</qualifiedname>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" kindref="member">KnobValueType</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="631" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="631" bodyend="644"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a2860f57360b90c49728d728cb9a436ec" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; hipdnn_frontend::operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, const KnobValueType &amp;type)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <qualifiedname>hipdnn_frontend::operator&lt;&lt;</qualifiedname>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" kindref="member">KnobValueType</ref> &amp;</type>
+          <declname>type</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="646" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="646" bodyend="649"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a8dc12eab2721cdce9fe8fd49d2fc8bfa" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename...</type>
+            <declname>Ts</declname>
+            <defname>Ts</defname>
+          </param>
+        </templateparamlist>
+        <type><ref refid="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" kindref="member">KnobValueType</ref></type>
+        <definition>KnobValueType hipdnn_frontend::getKnobValueTypeFromVariant</definition>
+        <argsstring>(const std::variant&lt; Ts... &gt; &amp;value)</argsstring>
+        <name>getKnobValueTypeFromVariant</name>
+        <qualifiedname>hipdnn_frontend::getKnobValueTypeFromVariant</qualifiedname>
+        <param>
+          <type>const std::variant&lt; Ts... &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="653" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="653" bodyend="671"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1ab7900b9bcfca166e1fc5329ee9b54a66" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::isUnaryPointwiseMode</definition>
+        <argsstring>(PointwiseMode mode)</argsstring>
+        <name>isUnaryPointwiseMode</name>
+        <qualifiedname>hipdnn_frontend::isUnaryPointwiseMode</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">PointwiseMode</ref></type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+<para>Check if a pointwise mode is a unary operation (1 input) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>mode</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The pointwise mode to check </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>true if the mode is unary, false otherwise </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="678" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="678" bodyend="681"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a5c9afa58e70c66aa2bf2755158ac725f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::isBinaryPointwiseMode</definition>
+        <argsstring>(PointwiseMode mode)</argsstring>
+        <name>isBinaryPointwiseMode</name>
+        <qualifiedname>hipdnn_frontend::isBinaryPointwiseMode</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">PointwiseMode</ref></type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+<para>Check if a pointwise mode is a binary operation (2 inputs) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>mode</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The pointwise mode to check </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>true if the mode is binary, false otherwise </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="688" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="688" bodyend="691"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1ad2c421ddf43805caf7de0e21527aa712" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::isTernaryPointwiseMode</definition>
+        <argsstring>(PointwiseMode mode)</argsstring>
+        <name>isTernaryPointwiseMode</name>
+        <qualifiedname>hipdnn_frontend::isTernaryPointwiseMode</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">PointwiseMode</ref></type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+<para>Check if a pointwise mode is a ternary operation (3 inputs) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>mode</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The pointwise mode to check </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>true if the mode is ternary, false otherwise </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="698" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="698" bodyend="701"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1ab678d8f704748a1be836bf70b535a717" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const auto &amp;</type>
+        <definition>const auto &amp; hipdnn_frontend::getUnaryModesBitset</definition>
+        <argsstring>()</argsstring>
+        <name>getUnaryModesBitset</name>
+        <qualifiedname>hipdnn_frontend::getUnaryModesBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="704" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="704" bodyend="707"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1a1634721f8355189c65fd7e0970c2fad1" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const auto &amp;</type>
+        <definition>const auto &amp; hipdnn_frontend::getBinaryModesBitset</definition>
+        <argsstring>()</argsstring>
+        <name>getBinaryModesBitset</name>
+        <qualifiedname>hipdnn_frontend::getBinaryModesBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="709" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="709" bodyend="712"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1abcd30fecd1d4e51cf107c17a50f312ef" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const auto &amp;</type>
+        <definition>const auto &amp; hipdnn_frontend::getTernaryModesBitset</definition>
+        <argsstring>()</argsstring>
+        <name>getTernaryModesBitset</name>
+        <qualifiedname>hipdnn_frontend::getTernaryModesBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" line="714" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp" bodystart="714" bodyend="717"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="24" column="1"/>
+  </compounddef>
+</doxygen>

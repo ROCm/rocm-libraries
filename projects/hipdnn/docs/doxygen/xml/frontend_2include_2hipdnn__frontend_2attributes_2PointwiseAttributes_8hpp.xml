@@ -1,0 +1,597 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="frontend_2include_2hipdnn__frontend_2attributes_2PointwiseAttributes_8hpp" kind="file" language="C++">
+    <compoundname>PointwiseAttributes.hpp</compoundname>
+    <includes refid="Attributes_8hpp" local="yes">Attributes.hpp</includes>
+    <includes refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" local="yes">TensorAttributes.hpp</includes>
+    <includes local="no">hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</includes>
+    <includes refid="Types_8hpp" local="no">hipdnn_frontend/Types.hpp</includes>
+    <includes local="no">memory</includes>
+    <includes local="no">optional</includes>
+    <includes local="no">unordered_map</includes>
+    <includedby refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</includedby>
+    <includedby refid="PointwiseNode_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/PointwiseNode.hpp</includedby>
+    <incdepgraph>
+      <node id="5">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="HipdnnBackendHeuristicType_8h"/>
+      </node>
+      <node id="11">
+        <label>hipdnn_data_sdk/utilities/PointwiseValidation.hpp</label>
+        <link refid="PointwiseValidation_8hpp"/>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+      </node>
+      <node id="23">
+        <label>hipdnn_frontend/Error.hpp</label>
+        <link refid="Error_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_frontend/Types.hpp</label>
+        <link refid="Types_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>Attributes.hpp</label>
+        <link refid="Attributes_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>GraphAttributes.hpp</label>
+        <link refid="GraphAttributes_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/PointwiseAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2PointwiseAttributes_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="19">
+        <label>TensorAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+      </node>
+      <node id="12">
+        <label>bitset</label>
+      </node>
+      <node id="20">
+        <label>flatbuffers/flatbuffers.h</label>
+      </node>
+      <node id="6">
+        <label>hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h</label>
+      </node>
+      <node id="7">
+        <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
+      </node>
+      <node id="21">
+        <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
+      </node>
+      <node id="8">
+        <label>hipdnn_data_sdk/data_objects/knob_value_generated.h</label>
+      </node>
+      <node id="9">
+        <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
+      </node>
+      <node id="22">
+        <label>hipdnn_data_sdk/data_objects/tensor_attributes_generated.h</label>
+      </node>
+      <node id="10">
+        <label>hipdnn_data_sdk/types.hpp</label>
+      </node>
+      <node id="17">
+        <label>memory</label>
+      </node>
+      <node id="24">
+        <label>optional</label>
+      </node>
+      <node id="13">
+        <label>ostream</label>
+      </node>
+      <node id="14">
+        <label>set</label>
+      </node>
+      <node id="15">
+        <label>string</label>
+      </node>
+      <node id="25">
+        <label>type_traits</label>
+      </node>
+      <node id="18">
+        <label>unordered_map</label>
+      </node>
+      <node id="27">
+        <label>utility</label>
+      </node>
+      <node id="16">
+        <label>variant</label>
+      </node>
+      <node id="26">
+        <label>vector</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/PointwiseAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2PointwiseAttributes_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="15">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/PointwiseNode.hpp</label>
+        <link refid="PointwiseNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" prot="public">hipdnn_frontend::graph::PointwiseAttributes</innerclass>
+    <innernamespace refid="namespacehipdnn__frontend">hipdnn_frontend</innernamespace>
+    <innernamespace refid="namespacehipdnn__frontend_1_1graph">hipdnn_frontend::graph</innernamespace>
+    <briefdescription>
+<para>Attributes for element-wise (pointwise) operations. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the PointwiseAttributes class for configuring pointwise operations including activation functions, arithmetic, and other element-wise ops. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="Attributes_8hpp" kindref="compound">Attributes.hpp</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" kindref="compound">TensorAttributes.hpp</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Types_8hpp" kindref="compound">hipdnn_frontend/Types.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;memory&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="19"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;optional&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="20"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;unordered_map&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="21"><highlight class="normal"></highlight></codeline>
+<codeline lineno="22"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__frontend_1_1graph" kindref="compound">hipdnn_frontend::graph</ref></highlight></codeline>
+<codeline lineno="23"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="24"><highlight class="normal"></highlight></codeline>
+<codeline lineno="53" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">class<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref><sp/>:<sp/></highlight><highlight class="keyword">public</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes" kindref="compound">Attributes</ref>&lt;PointwiseAttributes&gt;</highlight></codeline>
+<codeline lineno="54"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="55"><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="57"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="58" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ab2f48322b3242eab74908fd5ad82fa89" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">PointwiseMode</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ab2f48322b3242eab74908fd5ad82fa89" kindref="member">get_mode</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="59"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="60"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a707f2513fc05be721229f89694784617" kindref="member">mode</ref>;</highlight></codeline>
+<codeline lineno="61"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="63"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="64" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a0bf0e1a1bbb3fd9d4a80231ef8638c72" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a0bf0e1a1bbb3fd9d4a80231ef8638c72" kindref="member">get_relu_lower_clip</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="65"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="66"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1b008f9cb942194f63e0bcb6c92659ef" kindref="member">relu_lower_clip</ref>;</highlight></codeline>
+<codeline lineno="67"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="69"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="70" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a2e3a8e271083de8de28e146478423483" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a2e3a8e271083de8de28e146478423483" kindref="member">get_relu_upper_clip</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="71"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="72"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a04384a0e17ce8c6cf5248abbf3399a9d" kindref="member">relu_upper_clip</ref>;</highlight></codeline>
+<codeline lineno="73"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="75"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="76" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ad882f53b7f3e8c49d57993c6a65975c7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ad882f53b7f3e8c49d57993c6a65975c7" kindref="member">get_relu_lower_clip_slope</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="77"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="78"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a720e959b2d68a3f3d4ff3cc0c8c55dfa" kindref="member">relu_lower_clip_slope</ref>;</highlight></codeline>
+<codeline lineno="79"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="82" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a46a6c9ba614d8625c54e90cfe3b3a930" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a46a6c9ba614d8625c54e90cfe3b3a930" kindref="member">get_swish_beta</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="83"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="84"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a083fc00a50ec3e7bfdf3e0f8d8b96027" kindref="member">swish_beta</ref>;</highlight></codeline>
+<codeline lineno="85"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="87"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="88" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a3ce805db1a7a5fe088e162f1cade83cf" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a3ce805db1a7a5fe088e162f1cade83cf" kindref="member">get_elu_alpha</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="89"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="90"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a41a11d6a0793341189bea16fe7c38c5a" kindref="member">elu_alpha</ref>;</highlight></codeline>
+<codeline lineno="91"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="93"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="94" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac6e11f46bbfffe1a461a1f8907c16456" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac6e11f46bbfffe1a461a1f8907c16456" kindref="member">get_softplus_beta</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="95"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="96"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a5a47d506fe5f41cb0c011ad1e8d6981d" kindref="member">softplus_beta</ref>;</highlight></codeline>
+<codeline lineno="97"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="99"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="100" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1abd3bb8e71ab8088fa086c9f08a3c0835" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;int64_t&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1abd3bb8e71ab8088fa086c9f08a3c0835" kindref="member">get_axis</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="101"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="102"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1aa4dc60aab12f7d56e6ed4265fcb2b41d" kindref="member">axis</ref>;</highlight></codeline>
+<codeline lineno="103"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="106" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ae25e830e87da7758c3cf883150c25dda" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ae25e830e87da7758c3cf883150c25dda" kindref="member">get_input_0</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="107"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="108"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a6be962671b01b6aef10116ad55ef3c78" kindref="member">InputNames::IN_0</ref>);</highlight></codeline>
+<codeline lineno="109"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="111"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="112" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ab3c01ad40539191f99ab03dee86ec9fc" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ab3c01ad40539191f99ab03dee86ec9fc" kindref="member">get_input_1</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="113"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a6528556f3d9a3c656ae378177fde7615" kindref="member">InputNames::IN_1</ref>);</highlight></codeline>
+<codeline lineno="115"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="117"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="118" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a53dc4255cf81e0ac155060dfe2010e8d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a53dc4255cf81e0ac155060dfe2010e8d" kindref="member">get_input_2</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="119"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="120"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a47368f4a25190c287da5b5581ece062d" kindref="member">InputNames::IN_2</ref>);</highlight></codeline>
+<codeline lineno="121"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="123"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="124" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ab796b40478171b2d193d29e6f0577a5d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ab796b40478171b2d193d29e6f0577a5d" kindref="member">get_output_0</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="125"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="126"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" kindref="member">getOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac533abc3074228c1300ce672b0a0f0a5a190c4c024f08d3505c995f2080838733" kindref="member">OutputNames::OUT_0</ref>);</highlight></codeline>
+<codeline lineno="127"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="128"><highlight class="normal"></highlight></codeline>
+<codeline lineno="134"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="135" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a58d54995c41b79f56f99a96a28d076cf" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a58d54995c41b79f56f99a96a28d076cf" kindref="member">set_mode</ref>(<ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">PointwiseMode</ref><sp/>value)</highlight></codeline>
+<codeline lineno="136"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="137"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a707f2513fc05be721229f89694784617" kindref="member">mode</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="138"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="139"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="140"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="141" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a0752c503a6b601c4dcb4534c656f7734" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a0752c503a6b601c4dcb4534c656f7734" kindref="member">set_relu_lower_clip</ref>(</highlight><highlight class="keywordtype">float</highlight><highlight class="normal"><sp/>value)</highlight></codeline>
+<codeline lineno="142"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="143"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1b008f9cb942194f63e0bcb6c92659ef" kindref="member">relu_lower_clip</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="144"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="145"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="146"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="147" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a0e6a7aa2223f4cecf635094a16608a6d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a0e6a7aa2223f4cecf635094a16608a6d" kindref="member">set_relu_upper_clip</ref>(</highlight><highlight class="keywordtype">float</highlight><highlight class="normal"><sp/>value)</highlight></codeline>
+<codeline lineno="148"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="149"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a04384a0e17ce8c6cf5248abbf3399a9d" kindref="member">relu_upper_clip</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="150"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="151"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="152"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="153" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a9c6d6673134ab52a04ef9b1d8e6353bc" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a9c6d6673134ab52a04ef9b1d8e6353bc" kindref="member">set_relu_lower_clip_slope</ref>(</highlight><highlight class="keywordtype">float</highlight><highlight class="normal"><sp/>value)</highlight></codeline>
+<codeline lineno="154"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="155"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a720e959b2d68a3f3d4ff3cc0c8c55dfa" kindref="member">relu_lower_clip_slope</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="156"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="157"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="158"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="159" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a82c8baddaefc517513c82208874b1674" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a82c8baddaefc517513c82208874b1674" kindref="member">set_swish_beta</ref>(</highlight><highlight class="keywordtype">float</highlight><highlight class="normal"><sp/>value)</highlight></codeline>
+<codeline lineno="160"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="161"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a083fc00a50ec3e7bfdf3e0f8d8b96027" kindref="member">swish_beta</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="162"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="163"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="164"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="165" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a6348889ed8d6bb407f42f30f37eb65fe" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a6348889ed8d6bb407f42f30f37eb65fe" kindref="member">set_elu_alpha</ref>(</highlight><highlight class="keywordtype">float</highlight><highlight class="normal"><sp/>value)</highlight></codeline>
+<codeline lineno="166"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="167"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a41a11d6a0793341189bea16fe7c38c5a" kindref="member">elu_alpha</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="168"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="169"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="170"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="171" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ad34fad63bc1245a5319e059b3ad3e416" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ad34fad63bc1245a5319e059b3ad3e416" kindref="member">set_softplus_beta</ref>(</highlight><highlight class="keywordtype">float</highlight><highlight class="normal"><sp/>value)</highlight></codeline>
+<codeline lineno="172"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="173"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a5a47d506fe5f41cb0c011ad1e8d6981d" kindref="member">softplus_beta</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="174"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="175"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="176"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="177" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a71ef7732fd8f94fce8244fbf9173627d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a71ef7732fd8f94fce8244fbf9173627d" kindref="member">set_axis</ref>(int64_t<sp/>value)</highlight></codeline>
+<codeline lineno="178"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="179"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1aa4dc60aab12f7d56e6ed4265fcb2b41d" kindref="member">axis</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="180"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="181"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="182"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="183" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a7a2b8a09a279b44d36159e7211bdd0ff" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a7a2b8a09a279b44d36159e7211bdd0ff" kindref="member">set_input_0</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>input0)</highlight></codeline>
+<codeline lineno="184"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="185"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a6be962671b01b6aef10116ad55ef3c78" kindref="member">InputNames::IN_0</ref>,<sp/>input0);</highlight></codeline>
+<codeline lineno="186"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="187"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="188" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1d13f3f9ef2360f475f1db2e371223fa" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1d13f3f9ef2360f475f1db2e371223fa" kindref="member">set_input_0</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>input0)</highlight></codeline>
+<codeline lineno="189"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="190"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a6be962671b01b6aef10116ad55ef3c78" kindref="member">InputNames::IN_0</ref>,<sp/>std::move(input0));</highlight></codeline>
+<codeline lineno="191"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="192"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="193" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ad01af31b8e5682d126fd4d9edd5a1500" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ad01af31b8e5682d126fd4d9edd5a1500" kindref="member">set_input_1</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>input1)</highlight></codeline>
+<codeline lineno="194"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="195"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a6528556f3d9a3c656ae378177fde7615" kindref="member">InputNames::IN_1</ref>,<sp/>input1);</highlight></codeline>
+<codeline lineno="196"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="197"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="198" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a90f7a2a5dca47e5fa2ce4eda53eb68d1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a90f7a2a5dca47e5fa2ce4eda53eb68d1" kindref="member">set_input_1</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>input1)</highlight></codeline>
+<codeline lineno="199"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="200"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a6528556f3d9a3c656ae378177fde7615" kindref="member">InputNames::IN_1</ref>,<sp/>std::move(input1));</highlight></codeline>
+<codeline lineno="201"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="202"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="203" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a2540698d61d43e42f818162fe8eaada7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a2540698d61d43e42f818162fe8eaada7" kindref="member">set_input_2</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>input2)</highlight></codeline>
+<codeline lineno="204"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="205"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a47368f4a25190c287da5b5581ece062d" kindref="member">InputNames::IN_2</ref>,<sp/>input2);</highlight></codeline>
+<codeline lineno="206"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="207"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="208" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a9d00d7bbdb398f8ea31d13f0a0a835d2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a9d00d7bbdb398f8ea31d13f0a0a835d2" kindref="member">set_input_2</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>input2)</highlight></codeline>
+<codeline lineno="209"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="210"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a47368f4a25190c287da5b5581ece062d" kindref="member">InputNames::IN_2</ref>,<sp/>std::move(input2));</highlight></codeline>
+<codeline lineno="211"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="212"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="213" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a93bfe8b9c8ac69e0da706a22d1350046" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a93bfe8b9c8ac69e0da706a22d1350046" kindref="member">set_output_0</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>output0)</highlight></codeline>
+<codeline lineno="214"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="215"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac533abc3074228c1300ce672b0a0f0a5a190c4c024f08d3505c995f2080838733" kindref="member">OutputNames::OUT_0</ref>,<sp/>output0);</highlight></codeline>
+<codeline lineno="216"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="217"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="218" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1af28e36e1c4b9c23fb46c18d6e8d37169" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1af28e36e1c4b9c23fb46c18d6e8d37169" kindref="member">set_output_0</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>output0)</highlight></codeline>
+<codeline lineno="219"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="220"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac533abc3074228c1300ce672b0a0f0a5a190c4c024f08d3505c995f2080838733" kindref="member">OutputNames::OUT_0</ref>,<sp/>std::move(output0));</highlight></codeline>
+<codeline lineno="221"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="222"><highlight class="normal"></highlight></codeline>
+<codeline lineno="224" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">enum<sp/>class</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6" kindref="member">InputNames</ref></highlight></codeline>
+<codeline lineno="225"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="226"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a6be962671b01b6aef10116ad55ef3c78" kindref="member">IN_0</ref><sp/>=<sp/>0,<sp/></highlight></codeline>
+<codeline lineno="227"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a6528556f3d9a3c656ae378177fde7615" kindref="member">IN_1</ref><sp/>=<sp/>1,<sp/></highlight></codeline>
+<codeline lineno="228"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6a47368f4a25190c287da5b5581ece062d" kindref="member">IN_2</ref><sp/>=<sp/>2,<sp/></highlight></codeline>
+<codeline lineno="229"><highlight class="normal"><sp/><sp/><sp/><sp/>};</highlight></codeline>
+<codeline lineno="230" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a4ccde976d079529dbf60709fad7e11ec" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1adc21b20a495d15442df8aa52bdadcbd6" kindref="member">InputNames</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a4ccde976d079529dbf60709fad7e11ec" kindref="member">input_names</ref>;<sp/></highlight></codeline>
+<codeline lineno="231"><highlight class="normal"></highlight></codeline>
+<codeline lineno="233" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac533abc3074228c1300ce672b0a0f0a5" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">enum<sp/>class</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac533abc3074228c1300ce672b0a0f0a5" kindref="member">OutputNames</ref></highlight></codeline>
+<codeline lineno="234"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="235"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac533abc3074228c1300ce672b0a0f0a5a190c4c024f08d3505c995f2080838733" kindref="member">OUT_0</ref><sp/>=<sp/>0,<sp/></highlight></codeline>
+<codeline lineno="236"><highlight class="normal"><sp/><sp/><sp/><sp/>};</highlight></codeline>
+<codeline lineno="237" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a541f8bebb4973da5af957d5cb4ff3107" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ac533abc3074228c1300ce672b0a0f0a5" kindref="member">OutputNames</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a541f8bebb4973da5af957d5cb4ff3107" kindref="member">output_names</ref>;<sp/></highlight></codeline>
+<codeline lineno="238"><highlight class="normal"></highlight></codeline>
+<codeline lineno="239" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ae96e2465ccc7f52e6a81cb726881d1ca" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;InputNames,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ae96e2465ccc7f52e6a81cb726881d1ca" kindref="member">inputs</ref>;<sp/></highlight></codeline>
+<codeline lineno="240" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1172a2f09bb24ae2fe5086f91766fa6b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;OutputNames,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1172a2f09bb24ae2fe5086f91766fa6b" kindref="member">outputs</ref>;<sp/></highlight></codeline>
+<codeline lineno="241"><highlight class="normal"></highlight></codeline>
+<codeline lineno="242"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTBEGIN(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="243" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a707f2513fc05be721229f89694784617" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4e" kindref="member">PointwiseMode</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a707f2513fc05be721229f89694784617" kindref="member">mode</ref><sp/>=<sp/><ref refid="namespacehipdnn__frontend_1abd87a03140b984e0de80a5187cce8f4ea1c250a21210b7b88a14db9a0cbe71162" kindref="member">PointwiseMode::NOT_SET</ref>;<sp/></highlight></codeline>
+<codeline lineno="244" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1b008f9cb942194f63e0bcb6c92659ef" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1b008f9cb942194f63e0bcb6c92659ef" kindref="member">relu_lower_clip</ref><sp/>=<sp/>std::nullopt;<sp/></highlight></codeline>
+<codeline lineno="245" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a04384a0e17ce8c6cf5248abbf3399a9d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a04384a0e17ce8c6cf5248abbf3399a9d" kindref="member">relu_upper_clip</ref><sp/>=<sp/>std::nullopt;<sp/></highlight></codeline>
+<codeline lineno="246" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a720e959b2d68a3f3d4ff3cc0c8c55dfa" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a720e959b2d68a3f3d4ff3cc0c8c55dfa" kindref="member">relu_lower_clip_slope</ref><sp/>=<sp/>std::nullopt;<sp/></highlight></codeline>
+<codeline lineno="247" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1aa4dc60aab12f7d56e6ed4265fcb2b41d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;int64_t&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1aa4dc60aab12f7d56e6ed4265fcb2b41d" kindref="member">axis</ref><sp/>=<sp/>std::nullopt;<sp/></highlight></codeline>
+<codeline lineno="248" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a083fc00a50ec3e7bfdf3e0f8d8b96027" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a083fc00a50ec3e7bfdf3e0f8d8b96027" kindref="member">swish_beta</ref><sp/>=<sp/>std::nullopt;<sp/></highlight></codeline>
+<codeline lineno="249" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a41a11d6a0793341189bea16fe7c38c5a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a41a11d6a0793341189bea16fe7c38c5a" kindref="member">elu_alpha</ref><sp/>=<sp/>std::nullopt;<sp/></highlight></codeline>
+<codeline lineno="250" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a5a47d506fe5f41cb0c011ad1e8d6981d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::optional&lt;float&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a5a47d506fe5f41cb0c011ad1e8d6981d" kindref="member">softplus_beta</ref><sp/>=<sp/>std::nullopt;<sp/></highlight></codeline>
+<codeline lineno="251"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTEND(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="252"><highlight class="normal"></highlight></codeline>
+<codeline lineno="253"><highlight class="normal"><sp/><sp/><sp/><sp/>flatbuffers::Offset&lt;hipdnn_data_sdk::data_objects::PointwiseAttributes&gt;</highlight></codeline>
+<codeline lineno="254" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a20a9511ea6e51211861c1cf6f10ad8bb" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a20a9511ea6e51211861c1cf6f10ad8bb" kindref="member">pack_attributes</ref>(flatbuffers::FlatBufferBuilder&amp;<sp/>builder)<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="comment">//<sp/>NOLINT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="255"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="256"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>in0<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ae25e830e87da7758c3cf883150c25dda" kindref="member">get_input_0</ref>();</highlight></codeline>
+<codeline lineno="257"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>in1<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ab3c01ad40539191f99ab03dee86ec9fc" kindref="member">get_input_1</ref>();</highlight></codeline>
+<codeline lineno="258"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>in2<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a53dc4255cf81e0ac155060dfe2010e8d" kindref="member">get_input_2</ref>();</highlight></codeline>
+<codeline lineno="259"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>ot0<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ab796b40478171b2d193d29e6f0577a5d" kindref="member">get_output_0</ref>();</highlight></codeline>
+<codeline lineno="260"><highlight class="normal"></highlight></codeline>
+<codeline lineno="261"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::CreatePointwiseAttributes(</highlight></codeline>
+<codeline lineno="262"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>builder,</highlight></codeline>
+<codeline lineno="263"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1a8dc29abe15fbba5da61a6b72889233b1" kindref="member">toSdkType</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a707f2513fc05be721229f89694784617" kindref="member">mode</ref>),</highlight></codeline>
+<codeline lineno="264"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a1b008f9cb942194f63e0bcb6c92659ef" kindref="member">relu_lower_clip</ref>,</highlight></codeline>
+<codeline lineno="265"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a04384a0e17ce8c6cf5248abbf3399a9d" kindref="member">relu_upper_clip</ref>,</highlight></codeline>
+<codeline lineno="266"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a720e959b2d68a3f3d4ff3cc0c8c55dfa" kindref="member">relu_lower_clip_slope</ref>,</highlight></codeline>
+<codeline lineno="267"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1aa4dc60aab12f7d56e6ed4265fcb2b41d" kindref="member">axis</ref>,</highlight></codeline>
+<codeline lineno="268"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>in0-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="269"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>in1<sp/>?<sp/>flatbuffers::Optional&lt;int64_t&gt;(in1-&gt;get_uid())<sp/>:<sp/>flatbuffers::nullopt,</highlight></codeline>
+<codeline lineno="270"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>in2<sp/>?<sp/>flatbuffers::Optional&lt;int64_t&gt;(in2-&gt;get_uid())<sp/>:<sp/>flatbuffers::nullopt,</highlight></codeline>
+<codeline lineno="271"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>ot0-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="272"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a083fc00a50ec3e7bfdf3e0f8d8b96027" kindref="member">swish_beta</ref>,</highlight></codeline>
+<codeline lineno="273"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a41a11d6a0793341189bea16fe7c38c5a" kindref="member">elu_alpha</ref>,</highlight></codeline>
+<codeline lineno="274"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a5a47d506fe5f41cb0c011ad1e8d6981d" kindref="member">softplus_beta</ref>);</highlight></codeline>
+<codeline lineno="275"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="276"><highlight class="normal"></highlight></codeline>
+<codeline lineno="277" refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1aa25f9d449a04b84756e184c8b1e0fc63" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1aa25f9d449a04b84756e184c8b1e0fc63" kindref="member">fromFlatBuffer</ref>(</highlight></codeline>
+<codeline lineno="278"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::PointwiseAttributes*<sp/>fb,</highlight></codeline>
+<codeline lineno="279"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::unordered_map&lt;int64_t,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;&amp;<sp/>tensorMap)</highlight></codeline>
+<codeline lineno="280"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="281"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref><sp/>attr;</highlight></codeline>
+<codeline lineno="282"><highlight class="normal"></highlight></codeline>
+<codeline lineno="283"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a58d54995c41b79f56f99a96a28d076cf" kindref="member">set_mode</ref>(<ref refid="namespacehipdnn__frontend_1a2bbcec4847cbe1a280221e9e8e9181f8" kindref="member">fromSdkType</ref>(fb-&gt;operation()));</highlight></codeline>
+<codeline lineno="284"><highlight class="normal"></highlight></codeline>
+<codeline lineno="285"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;relu_lower_clip().has_value())</highlight></codeline>
+<codeline lineno="286"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="287"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a0752c503a6b601c4dcb4534c656f7734" kindref="member">set_relu_lower_clip</ref>(fb-&gt;relu_lower_clip().value());</highlight></codeline>
+<codeline lineno="288"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="289"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;relu_upper_clip().has_value())</highlight></codeline>
+<codeline lineno="290"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="291"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a0e6a7aa2223f4cecf635094a16608a6d" kindref="member">set_relu_upper_clip</ref>(fb-&gt;relu_upper_clip().value());</highlight></codeline>
+<codeline lineno="292"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="293"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;relu_lower_clip_slope().has_value())</highlight></codeline>
+<codeline lineno="294"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="295"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a9c6d6673134ab52a04ef9b1d8e6353bc" kindref="member">set_relu_lower_clip_slope</ref>(fb-&gt;relu_lower_clip_slope().value());</highlight></codeline>
+<codeline lineno="296"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="297"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;swish_beta().has_value())</highlight></codeline>
+<codeline lineno="298"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="299"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a82c8baddaefc517513c82208874b1674" kindref="member">set_swish_beta</ref>(fb-&gt;swish_beta().value());</highlight></codeline>
+<codeline lineno="300"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="301"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;elu_alpha().has_value())</highlight></codeline>
+<codeline lineno="302"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="303"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a6348889ed8d6bb407f42f30f37eb65fe" kindref="member">set_elu_alpha</ref>(fb-&gt;elu_alpha().value());</highlight></codeline>
+<codeline lineno="304"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="305"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;softplus_beta().has_value())</highlight></codeline>
+<codeline lineno="306"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="307"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ad34fad63bc1245a5319e059b3ad3e416" kindref="member">set_softplus_beta</ref>(fb-&gt;softplus_beta().value());</highlight></codeline>
+<codeline lineno="308"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="309"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;axis_tensor_uid().has_value())</highlight></codeline>
+<codeline lineno="310"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="311"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a71ef7732fd8f94fce8244fbf9173627d" kindref="member">set_axis</ref>(fb-&gt;axis_tensor_uid().value());</highlight></codeline>
+<codeline lineno="312"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="313"><highlight class="normal"></highlight></codeline>
+<codeline lineno="314"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a7a2b8a09a279b44d36159e7211bdd0ff" kindref="member">set_input_0</ref>(tensorMap.at(fb-&gt;in_0_tensor_uid()));</highlight></codeline>
+<codeline lineno="315"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;in_1_tensor_uid().has_value())</highlight></codeline>
+<codeline lineno="316"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="317"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1ad01af31b8e5682d126fd4d9edd5a1500" kindref="member">set_input_1</ref>(tensorMap.at(fb-&gt;in_1_tensor_uid().value()));</highlight></codeline>
+<codeline lineno="318"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="319"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;in_2_tensor_uid().has_value())</highlight></codeline>
+<codeline lineno="320"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="321"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a2540698d61d43e42f818162fe8eaada7" kindref="member">set_input_2</ref>(tensorMap.at(fb-&gt;in_2_tensor_uid().value()));</highlight></codeline>
+<codeline lineno="322"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="323"><highlight class="normal"></highlight></codeline>
+<codeline lineno="324"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes_1a93bfe8b9c8ac69e0da706a22d1350046" kindref="member">set_output_0</ref>(tensorMap.at(fb-&gt;out_0_tensor_uid()));</highlight></codeline>
+<codeline lineno="325"><highlight class="normal"></highlight></codeline>
+<codeline lineno="326"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>attr;</highlight></codeline>
+<codeline lineno="327"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="328"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="329" refid="namespacehipdnn__frontend_1_1graph_1ac36389fd40715a5d322628d266a3cb06" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref><sp/><ref refid="namespacehipdnn__frontend_1_1graph_1ac36389fd40715a5d322628d266a3cb06" kindref="member">Pointwise_attributes</ref>;<sp/></highlight></codeline>
+<codeline lineno="330"><highlight class="normal">}<sp/></highlight><highlight class="comment">//<sp/>namespace<sp/>hipdnn_frontend::graph</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/PointwiseAttributes.hpp"/>
+  </compounddef>
+</doxygen>

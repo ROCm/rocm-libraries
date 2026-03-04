@@ -1,0 +1,778 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::ConvWgradAttributes</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1graph_1_1Attributes" prot="public" virt="non-virtual">hipdnn_frontend::graph::Attributes&lt; ConvWgradAttributes &gt;</basecompoundref>
+    <includes refid="ConvolutionWgradAttributes_8hpp" local="no">ConvolutionWgradAttributes.hpp</includes>
+    <sectiondef kind="public-type">
+      <memberdef kind="enum" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa9f4e257e67a0da92e96962caaf18048" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>InputNames</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::InputNames</qualifiedname>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa9f4e257e67a0da92e96962caaf18048a8e33631037901075c85616c9b60441e4" prot="public">
+          <name>DY</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Gradient of output tensor. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa9f4e257e67a0da92e96962caaf18048a02129bb861061d1a052c592e2dc6b383" prot="public">
+          <name>X</name>
+          <initializer>= 1</initializer>
+          <briefdescription>
+<para>Input activation tensor. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Input tensor identifiers. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="45" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="46" bodyend="49"/>
+      </memberdef>
+      <memberdef kind="enum" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a4ad88f74f007bfdb5562500f2fc041fc" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>OutputNames</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::OutputNames</qualifiedname>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a4ad88f74f007bfdb5562500f2fc041fca0bdfe2e55090d6be70793778d0d8e147" prot="public">
+          <name>DW</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Gradient of weights tensor. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Output tensor identifiers. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="53" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="54" bodyend="56"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1add8b415d1867dfc1510eb4f1380b064b" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa9f4e257e67a0da92e96962caaf18048" kindref="member">InputNames</ref></type>
+        <definition>typedef InputNames hipdnn_frontend::graph::ConvWgradAttributes::input_names</definition>
+        <argsstring></argsstring>
+        <name>input_names</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::input_names</qualifiedname>
+        <briefdescription>
+<para>Type alias for InputNames. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="50" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="50" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ab99418f76354decb50b141a844d7e49a" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a4ad88f74f007bfdb5562500f2fc041fc" kindref="member">OutputNames</ref></type>
+        <definition>typedef OutputNames hipdnn_frontend::graph::ConvWgradAttributes::output_names</definition>
+        <argsstring></argsstring>
+        <name>output_names</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::output_names</qualifiedname>
+        <briefdescription>
+<para>Type alias for OutputNames. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="57" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="57" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a4a8564ac461b29caf16bce7a99c74b16" prot="public" static="no" mutable="no">
+        <type>std::unordered_map&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa9f4e257e67a0da92e96962caaf18048" kindref="member">InputNames</ref>, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>std::unordered_map&lt;InputNames, std::shared_ptr&lt;TensorAttributes&gt; &gt; hipdnn_frontend::graph::ConvWgradAttributes::inputs</definition>
+        <argsstring></argsstring>
+        <name>inputs</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::inputs</qualifiedname>
+        <briefdescription>
+<para>Input tensors. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="59" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="59" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a2ab33162b6e29e4c672d358d63405a79" prot="public" static="no" mutable="no">
+        <type>std::unordered_map&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a4ad88f74f007bfdb5562500f2fc041fc" kindref="member">OutputNames</ref>, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>std::unordered_map&lt;OutputNames, std::shared_ptr&lt;TensorAttributes&gt; &gt; hipdnn_frontend::graph::ConvWgradAttributes::outputs</definition>
+        <argsstring></argsstring>
+        <name>outputs</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::outputs</qualifiedname>
+        <briefdescription>
+<para>Output tensors. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="60" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="60" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a484fe98528e4a79677a284f2aa1610bb" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_frontend::graph::ConvWgradAttributes::pre_padding</definition>
+        <argsstring></argsstring>
+        <name>pre_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::pre_padding</qualifiedname>
+        <briefdescription>
+<para>Padding before convolution (per spatial dim) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="63" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="63" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1af81bd6cda9700e49e793c981ae4e0ffa" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_frontend::graph::ConvWgradAttributes::post_padding</definition>
+        <argsstring></argsstring>
+        <name>post_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::post_padding</qualifiedname>
+        <briefdescription>
+<para>Padding after convolution (per spatial dim) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="64" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="64" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0530bc20f078280d528adaabb7b63cf0" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_frontend::graph::ConvWgradAttributes::stride</definition>
+        <argsstring></argsstring>
+        <name>stride</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::stride</qualifiedname>
+        <briefdescription>
+<para>Stride (per spatial dim) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="65" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="65" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aaf3cac415549c17b310ebd50c44c2ea9" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_frontend::graph::ConvWgradAttributes::dilation</definition>
+        <argsstring></argsstring>
+        <name>dilation</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::dilation</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Dilation (per spatial dim) </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="66" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="66" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ae739721d589b276199fd48b8ec06672b" prot="public" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">ConvolutionMode</ref></type>
+        <definition>ConvolutionMode hipdnn_frontend::graph::ConvWgradAttributes::math_mode</definition>
+        <argsstring></argsstring>
+        <name>math_mode</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::math_mode</qualifiedname>
+        <initializer>= <ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16a959e923799a82a4f7e11f7ae57586617" kindref="member">ConvolutionMode::CROSS_CORRELATION</ref></initializer>
+        <briefdescription>
+<para>Convolution mode (CROSS_CORRELATION or CONVOLUTION) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="68" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="68" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1abc66de64b1cd1d8cab4dfa017f3b9a6f" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::ConvWgradAttributes::get_x</definition>
+        <argsstring>() const</argsstring>
+        <name>get_x</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::get_x</qualifiedname>
+        <briefdescription>
+<para>Get the input activation tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="73" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="73" bodyend="76"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ac91984a66817874b6b36b07fa32f4991" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::ConvWgradAttributes::get_dy</definition>
+        <argsstring>() const</argsstring>
+        <name>get_dy</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::get_dy</qualifiedname>
+        <briefdescription>
+<para>Get the output gradient tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="79" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="79" bodyend="82"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a3fee191f62285eb046adb4bba12da2f3" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::ConvWgradAttributes::get_dw</definition>
+        <argsstring>() const</argsstring>
+        <name>get_dw</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::get_dw</qualifiedname>
+        <briefdescription>
+<para>Get the weight gradient tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="85" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="85" bodyend="88"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ac9f141020fa1113373db8517d7cd3656" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_x</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_x</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_x</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="92" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="92" bodyend="95"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0357b300856a958af9ae6c7fde155291" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_x</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_x</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_x</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="97" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="97" bodyend="100"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a7a410aa46f661302b2c95ed28d7d9fa0" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_dy</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_dy</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_dy</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="102" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="102" bodyend="105"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a58b3125dce4a6320c50e07fb06cdd260" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_dy</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_dy</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_dy</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="107" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="107" bodyend="110"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a802878137eac2dc89402d06942eeafe2" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_dw</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_dw</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_dw</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="112" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="112" bodyend="115"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ac5a387937a9453aa09825afea07cf08c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_dw</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_dw</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_dw</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="117" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="117" bodyend="120"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a874a017e61f70a7afb03fc601a2f90e0" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_padding</definition>
+        <argsstring>(std::vector&lt; int64_t &gt; padding)</argsstring>
+        <name>set_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_padding</qualifiedname>
+        <param>
+          <type>std::vector&lt; int64_t &gt;</type>
+          <declname>padding</declname>
+        </param>
+        <briefdescription>
+<para>Set symmetric padding (same for pre and post) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>padding</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Padding values for each spatial dimension </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="128" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="128" bodyend="133"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a2e82963398c79842dcdc67be1dbc5c37" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_pre_padding</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;padding)</argsstring>
+        <name>set_pre_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_pre_padding</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>padding</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="136" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="136" bodyend="140"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a12cf2b4ca8ca181264cfa5be8de41dbb" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_pre_padding</definition>
+        <argsstring>(std::vector&lt; int64_t &gt; &amp;&amp;padding)</argsstring>
+        <name>set_pre_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_pre_padding</qualifiedname>
+        <param>
+          <type>std::vector&lt; int64_t &gt; &amp;&amp;</type>
+          <declname>padding</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="143" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="143" bodyend="147"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0e34dd5d00d1bc7073bc7d2970872d84" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_post_padding</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;padding)</argsstring>
+        <name>set_post_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_post_padding</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>padding</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="150" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="150" bodyend="154"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a3a6deb3554a2e32677c23c1329a28dbd" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_post_padding</definition>
+        <argsstring>(std::vector&lt; int64_t &gt; &amp;&amp;padding)</argsstring>
+        <name>set_post_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_post_padding</qualifiedname>
+        <param>
+          <type>std::vector&lt; int64_t &gt; &amp;&amp;</type>
+          <declname>padding</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="157" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="157" bodyend="161"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa3e93fdb42923b5631047d22d173aa47" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_stride</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;strideVals)</argsstring>
+        <name>set_stride</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_stride</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>strideVals</declname>
+        </param>
+        <briefdescription>
+<para>Set convolution stride. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>strideVals</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Stride values for each spatial dimension </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="169" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="169" bodyend="173"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a9bbfb8b29ca7f7c27453bd240e753853" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_stride</definition>
+        <argsstring>(std::vector&lt; int64_t &gt; &amp;&amp;strideVals)</argsstring>
+        <name>set_stride</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_stride</qualifiedname>
+        <param>
+          <type>std::vector&lt; int64_t &gt; &amp;&amp;</type>
+          <declname>strideVals</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="176" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="176" bodyend="180"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0fdecc24545f17f559eaaa560bcdc480" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_dilation</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;dilationVals)</argsstring>
+        <name>set_dilation</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_dilation</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dilationVals</declname>
+        </param>
+        <briefdescription>
+<para>Set filter dilation. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>dilationVals</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Dilation values for each spatial dimension </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="188" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="188" bodyend="192"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a77a2aad2e5396d9de175f987b7023bbf" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_dilation</definition>
+        <argsstring>(std::vector&lt; int64_t &gt; &amp;&amp;dilationVals)</argsstring>
+        <name>set_dilation</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_dilation</qualifiedname>
+        <param>
+          <type>std::vector&lt; int64_t &gt; &amp;&amp;</type>
+          <declname>dilationVals</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="195" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="195" bodyend="199"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ae7bfc3763b70865505aab96c02acde03" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> &amp;</type>
+        <definition>ConvWgradAttributes &amp; hipdnn_frontend::graph::ConvWgradAttributes::set_convolution_mode</definition>
+        <argsstring>(ConvolutionMode mode)</argsstring>
+        <name>set_convolution_mode</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::set_convolution_mode</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">ConvolutionMode</ref></type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="202" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="202" bodyend="206"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1af67359d536ab286adaf94a9b47d48eac" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>const std::vector&lt; int64_t &gt; &amp; hipdnn_frontend::graph::ConvWgradAttributes::get_pre_padding</definition>
+        <argsstring>() const</argsstring>
+        <name>get_pre_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::get_pre_padding</qualifiedname>
+        <briefdescription>
+<para>Get pre-convolution padding. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="210" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="210" bodyend="213"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0e42d99aa06d17f40c908a4c9372bd77" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>const std::vector&lt; int64_t &gt; &amp; hipdnn_frontend::graph::ConvWgradAttributes::get_post_padding</definition>
+        <argsstring>() const</argsstring>
+        <name>get_post_padding</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::get_post_padding</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="215" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="215" bodyend="218"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa4acc4697f021d16b0270ba6347592f6" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>const std::vector&lt; int64_t &gt; &amp; hipdnn_frontend::graph::ConvWgradAttributes::get_stride</definition>
+        <argsstring>() const</argsstring>
+        <name>get_stride</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::get_stride</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="220" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="220" bodyend="223"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a3b3307f652cfa2221c64490f1f1a4942" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>const std::vector&lt; int64_t &gt; &amp; hipdnn_frontend::graph::ConvWgradAttributes::get_dilation</definition>
+        <argsstring>() const</argsstring>
+        <name>get_dilation</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::get_dilation</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="225" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="225" bodyend="228"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aac1fb77fe21ecb69d02620466293bf05" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">ConvolutionMode</ref></type>
+        <definition>ConvolutionMode hipdnn_frontend::graph::ConvWgradAttributes::get_convolution_mode</definition>
+        <argsstring>() const</argsstring>
+        <name>get_convolution_mode</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::get_convolution_mode</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="230" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="230" bodyend="233"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aadb8a83541bcdd460a491df7d1b9017d" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes &gt;</type>
+        <definition>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes &gt; hipdnn_frontend::graph::ConvWgradAttributes::pack_attributes</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder) const</argsstring>
+        <name>pack_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::pack_attributes</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="236" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="236" bodyend="248"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-static-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ae0a784f946c796bbfdb65a4660a91792" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref></type>
+        <definition>static ConvWgradAttributes hipdnn_frontend::graph::ConvWgradAttributes::fromFlatBuffer</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes *fb, const std::unordered_map&lt; int64_t, std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;tensorMap)</argsstring>
+        <name>fromFlatBuffer</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvWgradAttributes::fromFlatBuffer</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes *</type>
+          <declname>fb</declname>
+        </param>
+        <param>
+          <type>const std::unordered_map&lt; int64_t, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+          <declname>tensorMap</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="250" column="32" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="250" bodyend="284"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Configuration for convolution weight gradient (backward filter) operations. </para>
+    </briefdescription>
+    <detaileddescription>
+<para><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref> specifies the parameters for computing the gradient of the convolution with respect to the weights (wgrad operation): dw = conv_wrw(x, dy)</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>dw<sp/>=<sp/>graph.conv_wgrad(dy,<sp/>x,<sp/>ConvWgradAttributes()</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a874a017e61f70a7afb03fc601a2f90e0" kindref="member">set_padding</ref>({1,<sp/>1})</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa3e93fdb42923b5631047d22d173aa47" kindref="member">set_stride</ref>({1,<sp/>1}));</highlight></codeline>
+</programlisting></para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a4e849e0638bd68c3bd6013f7f01710d6" kindref="member">Graph::conv_wgrad()</ref>, <ref refid="classhipdnn__frontend_1_1graph_1_1ConvFpropAttributes" kindref="compound">ConvFpropAttributes</ref>, <ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref> </para>
+</simplesect>
+</para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_frontend::graph::Attributes&lt; ConvWgradAttributes &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Attributes"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::ConvWgradAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="2">
+        <label>hipdnn_frontend::graph::Attributes&lt; ConvWgradAttributes &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Attributes"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::ConvWgradAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="41" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="42" bodyend="285"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a1f611be5dadd5ac864d57e70426bc657" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aaf3cac415549c17b310ebd50c44c2ea9" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>dilation</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7e777086ef899eb3e8111f8d37a769e5" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>fill_from_context</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ae0a784f946c796bbfdb65a4660a91792" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>fromFlatBuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a72744d6c95d6b80eb370354717065da2" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aac1fb77fe21ecb69d02620466293bf05" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_convolution_mode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a3b3307f652cfa2221c64490f1f1a4942" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_dilation</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a3fee191f62285eb046adb4bba12da2f3" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_dw</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ac91984a66817874b6b36b07fa32f4991" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_dy</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a2a9ace69e5f920fb4daf7af96bffefc1" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0e42d99aa06d17f40c908a4c9372bd77" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_post_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1af67359d536ab286adaf94a9b47d48eac" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_pre_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa4acc4697f021d16b0270ba6347592f6" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_stride</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1abc66de64b1cd1d8cab4dfa017f3b9a6f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>get_x</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>getInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>getOutput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1add8b415d1867dfc1510eb4f1380b064b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>input_names</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa9f4e257e67a0da92e96962caaf18048" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>InputNames</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a4a8564ac461b29caf16bce7a99c74b16" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>inputs</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ae739721d589b276199fd48b8ec06672b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>math_mode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a35a15e675ee8564745405e8c791303d8" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ab99418f76354decb50b141a844d7e49a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>output_names</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a4ad88f74f007bfdb5562500f2fc041fc" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>OutputNames</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a2ab33162b6e29e4c672d358d63405a79" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>outputs</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aadb8a83541bcdd460a491df7d1b9017d" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>pack_attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1af81bd6cda9700e49e793c981ae4e0ffa" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>post_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a484fe98528e4a79677a284f2aa1610bb" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>pre_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ac066abf7d7a6b2a45cebfe233fb15213" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ae7bfc3763b70865505aab96c02acde03" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_convolution_mode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0fdecc24545f17f559eaaa560bcdc480" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_dilation</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a77a2aad2e5396d9de175f987b7023bbf" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_dilation</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a802878137eac2dc89402d06942eeafe2" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_dw</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ac5a387937a9453aa09825afea07cf08c" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_dw</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a7a410aa46f661302b2c95ed28d7d9fa0" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_dy</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a58b3125dce4a6320c50e07fb06cdd260" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_dy</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a3a6b6b3fa84673526d14abb73441a477" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a874a017e61f70a7afb03fc601a2f90e0" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0e34dd5d00d1bc7073bc7d2970872d84" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_post_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a3a6deb3554a2e32677c23c1329a28dbd" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_post_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a2e82963398c79842dcdc67be1dbc5c37" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_pre_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a12cf2b4ca8ca181264cfa5be8de41dbb" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_pre_padding</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1aa3e93fdb42923b5631047d22d173aa47" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_stride</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a9bbfb8b29ca7f7c27453bd240e753853" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_stride</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1ac9f141020fa1113373db8517d7cd3656" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_x</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0357b300856a958af9ae6c7fde155291" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>set_x</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>setInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a70ec6d24e78284d214aa983fd02bfbbb" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>setInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>setOutput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a5f49c2c19da1ca5f648ae0e4d8e89b55" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>setOutput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes_1a0530bc20f078280d528adaabb7b63cf0" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvWgradAttributes</scope><name>stride</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

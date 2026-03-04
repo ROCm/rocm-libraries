@@ -1,0 +1,1061 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="Knob_8hpp" kind="file" language="C++">
+    <compoundname>Knob.hpp</compoundname>
+    <includes refid="HipdnnBackendFlatbufferData_8h" local="no">HipdnnBackendFlatbufferData.h</includes>
+    <includes refid="KnobConstraint_8hpp" local="no">hipdnn_frontend/knob/KnobConstraint.hpp</includes>
+    <includes refid="KnobSetting_8hpp" local="no">hipdnn_frontend/knob/KnobSetting.hpp</includes>
+    <includes refid="Utilities_8hpp" local="no">hipdnn_frontend/Utilities.hpp</includes>
+    <includes local="no">hipdnn_data_sdk/data_objects/engine_config_generated.h</includes>
+    <includes local="no">hipdnn_data_sdk/flatbuffer_utilities/KnobWrapper.hpp</includes>
+    <includes refid="FlatbufferUtils_8hpp" local="no">hipdnn_data_sdk/utilities/FlatbufferUtils.hpp</includes>
+    <includes refid="StringUtil_8hpp" local="no">hipdnn_data_sdk/utilities/StringUtil.hpp</includes>
+    <includes local="no">algorithm</includes>
+    <includes local="no">cstdint</includes>
+    <includes local="no">functional</includes>
+    <includes local="no">memory</includes>
+    <includes local="no">optional</includes>
+    <includes local="no">sstream</includes>
+    <includes local="no">string</includes>
+    <includes local="no">unordered_set</includes>
+    <includes local="no">variant</includes>
+    <includes local="no">vector</includes>
+    <includedby refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</includedby>
+    <incdepgraph>
+      <node id="34">
+        <label>HipdnnBackendAttributeName.h</label>
+        <link refid="HipdnnBackendAttributeName_8h"/>
+      </node>
+      <node id="35">
+        <label>HipdnnBackendAttributeType.h</label>
+        <link refid="HipdnnBackendAttributeType_8h"/>
+      </node>
+      <node id="36">
+        <label>HipdnnBackendCallbackTypes.h</label>
+        <link refid="HipdnnBackendCallbackTypes_8h"/>
+      </node>
+      <node id="37">
+        <label>HipdnnBackendDescriptorType.h</label>
+        <link refid="HipdnnBackendDescriptorType_8h"/>
+      </node>
+      <node id="2">
+        <label>HipdnnBackendFlatbufferData.h</label>
+        <link refid="HipdnnBackendFlatbufferData_8h"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="8">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="HipdnnBackendHeuristicType_8h"/>
+      </node>
+      <node id="38">
+        <label>HipdnnBackendLimits.h</label>
+        <link refid="HipdnnBackendLimits_8h"/>
+      </node>
+      <node id="39">
+        <label>HipdnnBackendPluginLoadingMode.h</label>
+        <link refid="HipdnnBackendPluginLoadingMode_8h"/>
+      </node>
+      <node id="40">
+        <label>HipdnnBackendPluginUnloadingMode.h</label>
+        <link refid="HipdnnBackendPluginUnloadingMode_8h"/>
+      </node>
+      <node id="41">
+        <label>HipdnnStatus.h</label>
+        <link refid="HipdnnStatus_8h"/>
+      </node>
+      <node id="31">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+        <childnode refid="32" relation="include">
+        </childnode>
+        <childnode refid="33" relation="include">
+        </childnode>
+        <childnode refid="34" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+        <childnode refid="36" relation="include">
+        </childnode>
+        <childnode refid="37" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+        <childnode refid="39" relation="include">
+        </childnode>
+        <childnode refid="40" relation="include">
+        </childnode>
+        <childnode refid="41" relation="include">
+        </childnode>
+      </node>
+      <node id="47">
+        <label>CallbackSink.hpp</label>
+        <link refid="CallbackSink_8hpp"/>
+        <childnode refid="48" relation="include">
+        </childnode>
+        <childnode refid="49" relation="include">
+        </childnode>
+        <childnode refid="52" relation="include">
+        </childnode>
+        <childnode refid="53" relation="include">
+        </childnode>
+        <childnode refid="54" relation="include">
+        </childnode>
+        <childnode refid="55" relation="include">
+        </childnode>
+        <childnode refid="56" relation="include">
+        </childnode>
+        <childnode refid="57" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="48">
+        <label>CallbackTypes.h</label>
+        <link refid="CallbackTypes_8h"/>
+      </node>
+      <node id="46">
+        <label>hipdnn_data_sdk/logging/Logger.hpp</label>
+        <link refid="Logger_8hpp"/>
+        <childnode refid="47" relation="include">
+        </childnode>
+        <childnode refid="48" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="53" relation="include">
+        </childnode>
+        <childnode refid="54" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="60" relation="include">
+        </childnode>
+        <childnode refid="61" relation="include">
+        </childnode>
+      </node>
+      <node id="49">
+        <label>LoggingUtils.hpp</label>
+        <link refid="LoggingUtils_8hpp"/>
+        <childnode refid="50" relation="include">
+        </childnode>
+        <childnode refid="51" relation="include">
+        </childnode>
+        <childnode refid="42" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="62">
+        <label>hipdnn_data_sdk/utilities/Allocators.hpp</label>
+        <link refid="Allocators_8hpp"/>
+        <childnode refid="63" relation="include">
+        </childnode>
+        <childnode refid="45" relation="include">
+        </childnode>
+        <childnode refid="64" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="65" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+      </node>
+      <node id="84">
+        <label>hipdnn_data_sdk/utilities/FlatbufferUtils.hpp</label>
+        <link refid="FlatbufferUtils_8hpp"/>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="66" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="44">
+        <label>hipdnn_data_sdk/utilities/MigratableMemory.hpp</label>
+        <link refid="MigratableMemory_8hpp"/>
+        <childnode refid="45" relation="include">
+        </childnode>
+        <childnode refid="46" relation="include">
+        </childnode>
+        <childnode refid="62" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="66" relation="include">
+        </childnode>
+      </node>
+      <node id="42">
+        <label>hipdnn_data_sdk/utilities/PlatformUtils.hpp</label>
+        <link refid="PlatformUtils_8hpp"/>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="14">
+        <label>hipdnn_data_sdk/utilities/PointwiseValidation.hpp</label>
+        <link refid="PointwiseValidation_8hpp"/>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+      </node>
+      <node id="67">
+        <label>hipdnn_data_sdk/utilities/ShapeUtilities.hpp</label>
+        <link refid="ShapeUtilities_8hpp"/>
+        <childnode refid="50" relation="include">
+        </childnode>
+        <childnode refid="46" relation="include">
+        </childnode>
+        <childnode refid="68" relation="include">
+        </childnode>
+        <childnode refid="71" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="66" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="68">
+        <label>hipdnn_data_sdk/utilities/StringUtil.hpp</label>
+        <link refid="StringUtil_8hpp"/>
+        <childnode refid="50" relation="include">
+        </childnode>
+        <childnode refid="69" relation="include">
+        </childnode>
+        <childnode refid="70" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="43">
+        <label>hipdnn_data_sdk/utilities/Tensor.hpp</label>
+        <link refid="Tensor_8hpp"/>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="44" relation="include">
+        </childnode>
+        <childnode refid="67" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="71" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="78" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="73">
+        <label>hipdnn_data_sdk/utilities/UtilsBfp16.hpp</label>
+        <link refid="UtilsBfp16_8hpp"/>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+        <childnode refid="46" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="75">
+        <label>hipdnn_data_sdk/utilities/UtilsFp16.hpp</label>
+        <link refid="UtilsFp16_8hpp"/>
+        <childnode refid="76" relation="include">
+        </childnode>
+        <childnode refid="46" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="6">
+        <label>hipdnn_frontend/Error.hpp</label>
+        <link refid="Error_8hpp"/>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="79">
+        <label>hipdnn_frontend/Logging.hpp</label>
+        <link refid="Logging_8hpp"/>
+        <childnode refid="48" relation="include">
+        </childnode>
+        <childnode refid="80" relation="include">
+        </childnode>
+        <childnode refid="46" relation="include">
+        </childnode>
+      </node>
+      <node id="7">
+        <label>Types.hpp</label>
+        <link refid="Types_8hpp"/>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="20">
+        <label>hipdnn_frontend/Utilities.hpp</label>
+        <link refid="Utilities_8hpp"/>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="42" relation="include">
+        </childnode>
+        <childnode refid="43" relation="include">
+        </childnode>
+        <childnode refid="71" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="79" relation="include">
+        </childnode>
+        <childnode refid="81" relation="include">
+        </childnode>
+      </node>
+      <node id="22">
+        <label>GraphAttributes.hpp</label>
+        <link refid="GraphAttributes_8hpp"/>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+      </node>
+      <node id="21">
+        <label>attributes/TensorAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp"/>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>
+        <link refid="Knob_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="82" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="83" relation="include">
+        </childnode>
+        <childnode refid="85" relation="include">
+        </childnode>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="68" relation="include">
+        </childnode>
+        <childnode refid="50" relation="include">
+        </childnode>
+        <childnode refid="86" relation="include">
+        </childnode>
+        <childnode refid="52" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="70" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="87" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="5">
+        <label>hipdnn_frontend/knob/KnobConstraint.hpp</label>
+        <link refid="KnobConstraint_8hpp"/>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="82" relation="include">
+        </childnode>
+      </node>
+      <node id="82">
+        <label>hipdnn_frontend/knob/KnobSetting.hpp</label>
+        <link refid="KnobSetting_8hpp"/>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="83" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="84" relation="include">
+        </childnode>
+      </node>
+      <node id="50">
+        <label>algorithm</label>
+      </node>
+      <node id="51">
+        <label>array</label>
+      </node>
+      <node id="15">
+        <label>bitset</label>
+      </node>
+      <node id="86">
+        <label>cstdint</label>
+      </node>
+      <node id="63">
+        <label>cstdlib</label>
+      </node>
+      <node id="69">
+        <label>cstring</label>
+      </node>
+      <node id="25">
+        <label>flatbuffers/flatbuffers.h</label>
+      </node>
+      <node id="52">
+        <label>functional</label>
+      </node>
+      <node id="74">
+        <label>hip/hip_bfloat16.h</label>
+      </node>
+      <node id="76">
+        <label>hip/hip_fp16.h</label>
+      </node>
+      <node id="45">
+        <label>hip/hip_runtime.h</label>
+      </node>
+      <node id="32">
+        <label>hip/hip_runtime_api.h</label>
+      </node>
+      <node id="33">
+        <label>hipdnn_backend_export.h</label>
+      </node>
+      <node id="9">
+        <label>hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h</label>
+      </node>
+      <node id="10">
+        <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
+      </node>
+      <node id="83">
+        <label>hipdnn_data_sdk/data_objects/engine_config_generated.h</label>
+      </node>
+      <node id="26">
+        <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
+      </node>
+      <node id="11">
+        <label>hipdnn_data_sdk/data_objects/knob_value_generated.h</label>
+      </node>
+      <node id="12">
+        <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
+      </node>
+      <node id="27">
+        <label>hipdnn_data_sdk/data_objects/tensor_attributes_generated.h</label>
+      </node>
+      <node id="85">
+        <label>hipdnn_data_sdk/flatbuffer_utilities/KnobWrapper.hpp</label>
+      </node>
+      <node id="80">
+        <label>hipdnn_data_sdk/logging/LogLevel.hpp</label>
+      </node>
+      <node id="13">
+        <label>hipdnn_data_sdk/types.hpp</label>
+      </node>
+      <node id="81">
+        <label>hipdnn_frontend/detail/BackendWrapper.hpp</label>
+      </node>
+      <node id="58">
+        <label>iostream</label>
+      </node>
+      <node id="64">
+        <label>limits</label>
+      </node>
+      <node id="23">
+        <label>memory</label>
+      </node>
+      <node id="53">
+        <label>mutex</label>
+      </node>
+      <node id="65">
+        <label>new</label>
+      </node>
+      <node id="71">
+        <label>numeric</label>
+      </node>
+      <node id="28">
+        <label>optional</label>
+      </node>
+      <node id="16">
+        <label>ostream</label>
+      </node>
+      <node id="77">
+        <label>random</label>
+      </node>
+      <node id="72">
+        <label>ranges</label>
+      </node>
+      <node id="17">
+        <label>set</label>
+      </node>
+      <node id="54">
+        <label>spdlog/async.h</label>
+      </node>
+      <node id="55">
+        <label>spdlog/details/null_mutex.h</label>
+      </node>
+      <node id="56">
+        <label>spdlog/details/synchronous_factory.h</label>
+      </node>
+      <node id="57">
+        <label>spdlog/sinks/base_sink.h</label>
+      </node>
+      <node id="59">
+        <label>spdlog/sinks/basic_file_sink.h</label>
+      </node>
+      <node id="60">
+        <label>spdlog/sinks/stdout_color_sinks.h</label>
+      </node>
+      <node id="61">
+        <label>spdlog/spdlog.h</label>
+      </node>
+      <node id="70">
+        <label>sstream</label>
+      </node>
+      <node id="3">
+        <label>stddef.h</label>
+      </node>
+      <node id="66">
+        <label>stdexcept</label>
+      </node>
+      <node id="4">
+        <label>stdint.h</label>
+      </node>
+      <node id="18">
+        <label>string</label>
+      </node>
+      <node id="29">
+        <label>type_traits</label>
+      </node>
+      <node id="78">
+        <label>typeindex</label>
+      </node>
+      <node id="24">
+        <label>unordered_map</label>
+      </node>
+      <node id="87">
+        <label>unordered_set</label>
+      </node>
+      <node id="19">
+        <label>variant</label>
+      </node>
+      <node id="30">
+        <label>vector</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>
+        <link refid="Knob_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <innerclass refid="classhipdnn__frontend_1_1Knob" prot="public">hipdnn_frontend::Knob</innerclass>
+    <innernamespace refid="namespacehipdnn__frontend">hipdnn_frontend</innernamespace>
+    <innernamespace refid="namespacehipdnn__frontend_1_1detail">hipdnn_frontend::detail</innernamespace>
+    <briefdescription>
+<para>Engine configuration knobs for hipDNN execution plans. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the Knob class which describes tunable configuration parameters for execution engines. Knobs allow fine-grained control over how operations are executed on the GPU. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="HipdnnBackendFlatbufferData_8h" kindref="compound">HipdnnBackendFlatbufferData.h</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="KnobConstraint_8hpp" kindref="compound">hipdnn_frontend/knob/KnobConstraint.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="KnobSetting_8hpp" kindref="compound">hipdnn_frontend/knob/KnobSetting.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="19"><highlight class="normal"></highlight></codeline>
+<codeline lineno="20"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Utilities_8hpp" kindref="compound">hipdnn_frontend/Utilities.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="21"><highlight class="normal"></highlight></codeline>
+<codeline lineno="22"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/data_objects/engine_config_generated.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="23"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/flatbuffer_utilities/KnobWrapper.hpp&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="24"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="FlatbufferUtils_8hpp" kindref="compound">hipdnn_data_sdk/utilities/FlatbufferUtils.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="25"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="StringUtil_8hpp" kindref="compound">hipdnn_data_sdk/utilities/StringUtil.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="26"><highlight class="normal"></highlight></codeline>
+<codeline lineno="27"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;algorithm&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="28"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;cstdint&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="29"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;functional&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="30"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;memory&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="31"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;optional&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="32"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;sstream&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="33"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;string&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="34"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;unordered_set&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="35"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;variant&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="36"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;vector&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="37"><highlight class="normal"></highlight></codeline>
+<codeline lineno="38"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__frontend" kindref="compound">hipdnn_frontend</ref></highlight></codeline>
+<codeline lineno="39"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="40"><highlight class="normal"></highlight></codeline>
+<codeline lineno="68" refid="classhipdnn__frontend_1_1Knob" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">class<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref></highlight></codeline>
+<codeline lineno="69"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="70"><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="71"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Factory<sp/>function<sp/>to<sp/>create<sp/>from<sp/>flatbuffer</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="72"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Returns<sp/>{Error,<sp/>Knob}.<sp/>On<sp/>error,<sp/>the<sp/>Knob<sp/>is<sp/>default-constructed<sp/>(should<sp/>be<sp/>ignored).</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="73"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/>std::pair&lt;Error,<sp/>Knob&gt;<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a45b1ed6885cdf92321a3e45aa3a1e13d" kindref="member">tryFromFlatbuffer</ref>(<ref refid="structhipdnnBackendFlatbufferData__t" kindref="compound">hipdnnBackendFlatbufferData_t</ref><sp/>fbData);</highlight></codeline>
+<codeline lineno="74"><highlight class="normal"></highlight></codeline>
+<codeline lineno="79" refid="classhipdnn__frontend_1_1Knob_1a9ddf41e1b669b33e105dfd4cee434fce" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::string&amp;<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a9ddf41e1b669b33e105dfd4cee434fce" kindref="member">knobId</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="80"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>_knobId;</highlight></codeline>
+<codeline lineno="82"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="83"><highlight class="normal"></highlight></codeline>
+<codeline lineno="88" refid="classhipdnn__frontend_1_1Knob_1a33d5e6503f02f351202f9f30e539af49" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::string&amp;<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a33d5e6503f02f351202f9f30e539af49" kindref="member">description</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="89"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="90"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>_description;</highlight></codeline>
+<codeline lineno="91"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"></highlight></codeline>
+<codeline lineno="97" refid="classhipdnn__frontend_1_1Knob_1a28f86a190846f1d4c05736e63e605229" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1Knob_1a28f86a190846f1d4c05736e63e605229" kindref="member">isDeprecated</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="98"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="99"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>_deprecated;</highlight></codeline>
+<codeline lineno="100"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="101"><highlight class="normal"></highlight></codeline>
+<codeline lineno="106" refid="classhipdnn__frontend_1_1Knob_1a2ab63871ee4cb2f7ec9b3f019f2481ce" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" kindref="member">KnobValueType</ref><sp/><ref refid="classhipdnn__frontend_1_1Knob_1a2ab63871ee4cb2f7ec9b3f019f2481ce" kindref="member">valueType</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="107"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="108"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__frontend_1a8dc12eab2721cdce9fe8fd49d2fc8bfa" kindref="member">getKnobValueTypeFromVariant</ref>(_defaultValue);</highlight></codeline>
+<codeline lineno="109"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="110"><highlight class="normal"></highlight></codeline>
+<codeline lineno="115" refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" kindref="member">defaultValue</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="116"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="117"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>_defaultValue;</highlight></codeline>
+<codeline lineno="118"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="119"><highlight class="normal"></highlight></codeline>
+<codeline lineno="124" refid="classhipdnn__frontend_1_1Knob_1a18d3d4ffc94f5f58739a88bf1d5683bc" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IConstraint" kindref="compound">IConstraint</ref>*<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a18d3d4ffc94f5f58739a88bf1d5683bc" kindref="member">constraint</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="125"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="126"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>_constraint.get();</highlight></codeline>
+<codeline lineno="127"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="128"><highlight class="normal"></highlight></codeline>
+<codeline lineno="134" refid="classhipdnn__frontend_1_1Knob_1a37e3f7d77e48ac0975fa2b267080e28a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref><sp/><ref refid="classhipdnn__frontend_1_1Knob_1a37e3f7d77e48ac0975fa2b267080e28a" kindref="member">validate</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref>&amp;<sp/>setting)</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="135"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="136"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Validate<sp/>against<sp/>constraint<sp/>if<sp/>present</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="137"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(_constraint)</highlight></codeline>
+<codeline lineno="138"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="139"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>_constraint-&gt;validateKnobSetting(setting);</highlight></codeline>
+<codeline lineno="140"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="141"><highlight class="normal"></highlight></codeline>
+<codeline lineno="142"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>,<sp/></highlight><highlight class="stringliteral">&quot;&quot;</highlight><highlight class="normal">};</highlight></codeline>
+<codeline lineno="143"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="144"><highlight class="normal"></highlight></codeline>
+<codeline lineno="149" refid="classhipdnn__frontend_1_1Knob_1a9124bbcb67e0bd7ed12c50ed2097e989" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::string<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a9124bbcb67e0bd7ed12c50ed2097e989" kindref="member">toString</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="150"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="151"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::ostringstream<sp/>oss;</highlight></codeline>
+<codeline lineno="152"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>oss<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;Knob{knobIdStr=\&quot;&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>_knobId<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;\&quot;,<sp/>description=\&quot;&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>_description</highlight></codeline>
+<codeline lineno="153"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;\&quot;,<sp/>defaultValue=&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="154"><highlight class="normal"></highlight></codeline>
+<codeline lineno="155"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>variantToStream(oss,<sp/>_defaultValue);</highlight></codeline>
+<codeline lineno="156"><highlight class="normal"></highlight></codeline>
+<codeline lineno="157"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>oss<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;,<sp/>deprecated=&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>(_deprecated<sp/>?<sp/></highlight><highlight class="stringliteral">&quot;true&quot;</highlight><highlight class="normal"><sp/>:<sp/></highlight><highlight class="stringliteral">&quot;false&quot;</highlight><highlight class="normal">);</highlight></codeline>
+<codeline lineno="158"><highlight class="normal"></highlight></codeline>
+<codeline lineno="159"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(_constraint)</highlight></codeline>
+<codeline lineno="160"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="161"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>oss<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;,<sp/>constraint=&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>_constraint-&gt;toString();</highlight></codeline>
+<codeline lineno="162"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="163"><highlight class="normal"></highlight></codeline>
+<codeline lineno="164"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>oss<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;}&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="165"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>oss.str();</highlight></codeline>
+<codeline lineno="166"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="167"><highlight class="normal"></highlight></codeline>
+<codeline lineno="168"><highlight class="normal"></highlight><highlight class="keyword">private</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="169"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Private<sp/>default<sp/>constructor<sp/>-<sp/>allows<sp/>factory<sp/>function<sp/>to<sp/>create<sp/>empty<sp/>Knob<sp/>then<sp/>populate</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="170"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref>()<sp/>=<sp/></highlight><highlight class="keywordflow">default</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="171"><highlight class="normal"></highlight></codeline>
+<codeline lineno="172"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Private<sp/>constructor<sp/>-<sp/>use<sp/>flatbuffer<sp/>factory<sp/>function<sp/>to<sp/>create<sp/>instances</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="173"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref>(std::string<sp/>knobIdStr,</highlight></codeline>
+<codeline lineno="174"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::string<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a33d5e6503f02f351202f9f30e539af49" kindref="member">description</ref>,</highlight></codeline>
+<codeline lineno="175"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref><sp/><ref refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" kindref="member">defaultValue</ref>,</highlight></codeline>
+<codeline lineno="176"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/>deprecated)</highlight></codeline>
+<codeline lineno="177"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>:<sp/>_knobId(<ref refid="namespacestd" kindref="compound">std</ref>::move(knobIdStr))</highlight></codeline>
+<codeline lineno="178"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>,<sp/>_description(<ref refid="namespacestd" kindref="compound">std</ref>::move(<ref refid="classhipdnn__frontend_1_1Knob_1a33d5e6503f02f351202f9f30e539af49" kindref="member">description</ref>))</highlight></codeline>
+<codeline lineno="179"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>,<sp/>_defaultValue(<ref refid="namespacestd" kindref="compound">std</ref>::move(<ref refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" kindref="member">defaultValue</ref>))</highlight></codeline>
+<codeline lineno="180"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>,<sp/>_deprecated(deprecated)</highlight></codeline>
+<codeline lineno="181"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="182"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="183"><highlight class="normal"></highlight></codeline>
+<codeline lineno="184"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/>variantToStream(std::ostringstream&amp;<sp/>oss,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref>&amp;<sp/>variant)</highlight></codeline>
+<codeline lineno="185"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="186"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::visit(</highlight></codeline>
+<codeline lineno="187"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>[&amp;oss](</highlight><highlight class="keyword">auto</highlight><highlight class="normal">&amp;&amp;<sp/>value)<sp/>{</highlight></codeline>
+<codeline lineno="188"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">constexpr</highlight><highlight class="normal">(std::is_same_v&lt;std::decay_t&lt;</highlight><highlight class="keyword">decltype</highlight><highlight class="normal">(value)&gt;,<sp/>std::string&gt;)</highlight></codeline>
+<codeline lineno="189"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="190"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>oss<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;\&quot;&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>value<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;\&quot;&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="191"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="192"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">else</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="193"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="194"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>oss<sp/>&lt;&lt;<sp/>value;</highlight></codeline>
+<codeline lineno="195"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="196"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>},</highlight></codeline>
+<codeline lineno="197"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>variant);</highlight></codeline>
+<codeline lineno="198"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="199"><highlight class="normal"></highlight></codeline>
+<codeline lineno="200"><highlight class="normal"><sp/><sp/><sp/><sp/>std::string<sp/>_knobId;<sp/></highlight></codeline>
+<codeline lineno="201"><highlight class="normal"><sp/><sp/><sp/><sp/>std::string<sp/>_description;<sp/></highlight></codeline>
+<codeline lineno="202"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref><sp/>_defaultValue;<sp/></highlight></codeline>
+<codeline lineno="203"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/>_deprecated;<sp/></highlight></codeline>
+<codeline lineno="204"><highlight class="normal"></highlight></codeline>
+<codeline lineno="205"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;IConstraint&gt;<sp/>_constraint;<sp/></highlight></codeline>
+<codeline lineno="206"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="207"><highlight class="normal"></highlight></codeline>
+<codeline lineno="208"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Factory<sp/>method<sp/>implementation</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="209" refid="classhipdnn__frontend_1_1Knob_1a45b1ed6885cdf92321a3e45aa3a1e13d" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/>std::pair&lt;Error,<sp/>Knob&gt;<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a45b1ed6885cdf92321a3e45aa3a1e13d" kindref="member">Knob::tryFromFlatbuffer</ref>(<ref refid="structhipdnnBackendFlatbufferData__t" kindref="compound">hipdnnBackendFlatbufferData_t</ref><sp/>fbData)</highlight></codeline>
+<codeline lineno="210"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="211"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fbData.<ref refid="structhipdnnBackendFlatbufferData__t_1a19cd5c816dea79a41ccb6ae96402c45e" kindref="member">ptr</ref><sp/>==<sp/></highlight><highlight class="keyword">nullptr</highlight><highlight class="normal"><sp/>||<sp/>fbData.<ref refid="structhipdnnBackendFlatbufferData__t_1aaa6e335ef2d3ed27ab80b7d3872403ed" kindref="member">size</ref><sp/>==<sp/>0)</highlight></codeline>
+<codeline lineno="212"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="213"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bad8f24f388e990b9ccf8905b7993b99ae" kindref="member">ErrorCode::INVALID_VALUE</ref>,<sp/></highlight><highlight class="stringliteral">&quot;Flatbuffer<sp/>data<sp/>is<sp/>nullptr<sp/>or<sp/>has<sp/>zero<sp/>size&quot;</highlight><highlight class="normal">},<sp/>{}};</highlight></codeline>
+<codeline lineno="214"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="215"><highlight class="normal"></highlight></codeline>
+<codeline lineno="216"><highlight class="normal"><sp/><sp/><sp/><sp/>hipdnn_data_sdk::flatbuffer_utilities::KnobWrapper<sp/>knobWrapper(fbData.<ref refid="structhipdnnBackendFlatbufferData__t_1a19cd5c816dea79a41ccb6ae96402c45e" kindref="member">ptr</ref>,<sp/>fbData.<ref refid="structhipdnnBackendFlatbufferData__t_1aaa6e335ef2d3ed27ab80b7d3872403ed" kindref="member">size</ref>);</highlight></codeline>
+<codeline lineno="217"><highlight class="normal"></highlight></codeline>
+<codeline lineno="218"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(!knobWrapper.isValid())</highlight></codeline>
+<codeline lineno="219"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="220"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bad8f24f388e990b9ccf8905b7993b99ae" kindref="member">ErrorCode::INVALID_VALUE</ref>,<sp/></highlight><highlight class="stringliteral">&quot;Knob<sp/>flatbuffer<sp/>failed<sp/>verification&quot;</highlight><highlight class="normal">},<sp/>{}};</highlight></codeline>
+<codeline lineno="221"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="222"><highlight class="normal"></highlight></codeline>
+<codeline lineno="223"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>fbKnob<sp/>=<sp/>&amp;knobWrapper.getKnob();</highlight></codeline>
+<codeline lineno="224"><highlight class="normal"></highlight></codeline>
+<codeline lineno="225"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Unpack<sp/>to<sp/>native<sp/>KnobT<sp/>-<sp/>all<sp/>conversions<sp/>done<sp/>automatically<sp/>by<sp/>FlatBuffers</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="226"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unique_ptr&lt;hipdnn_data_sdk::data_objects::KnobT&gt;<sp/>knobT(fbKnob-&gt;UnPack());</highlight></codeline>
+<codeline lineno="227"><highlight class="normal"></highlight></codeline>
+<codeline lineno="228"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Get<sp/>knob_id<sp/>for<sp/>error<sp/>messages</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="229"><highlight class="normal"><sp/><sp/><sp/><sp/>std::string<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a9ddf41e1b669b33e105dfd4cee434fce" kindref="member">knobId</ref><sp/>=<sp/>knobT-&gt;knob_id;</highlight></codeline>
+<codeline lineno="230"><highlight class="normal"></highlight></codeline>
+<codeline lineno="231"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Extract<sp/>default<sp/>value<sp/>from<sp/>the<sp/>union</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="232"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref><sp/><ref refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" kindref="member">defaultValue</ref>;</highlight></codeline>
+<codeline lineno="233"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">switch</highlight><highlight class="normal">(knobT-&gt;default_value.type)</highlight></codeline>
+<codeline lineno="234"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="235"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::KnobValue::IntValue:</highlight></codeline>
+<codeline lineno="236"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" kindref="member">defaultValue</ref><sp/>=<sp/>knobT-&gt;default_value.AsIntValue()-&gt;value;</highlight></codeline>
+<codeline lineno="237"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="238"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::KnobValue::FloatValue:</highlight></codeline>
+<codeline lineno="239"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" kindref="member">defaultValue</ref><sp/>=<sp/>knobT-&gt;default_value.AsFloatValue()-&gt;value;</highlight></codeline>
+<codeline lineno="240"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="241"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::KnobValue::StringValue:</highlight></codeline>
+<codeline lineno="242"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" kindref="member">defaultValue</ref><sp/>=<sp/>knobT-&gt;default_value.AsStringValue()-&gt;value;<sp/></highlight><highlight class="comment">//<sp/>Already<sp/>std::string</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="243"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="244"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::KnobValue::NONE:</highlight></codeline>
+<codeline lineno="245"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NONE<sp/>default_value<sp/>is<sp/>invalid<sp/>-<sp/>knobs<sp/>must<sp/>have<sp/>a<sp/>default<sp/>value</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="246"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bad8f24f388e990b9ccf8905b7993b99ae" kindref="member">ErrorCode::INVALID_VALUE</ref>,</highlight></codeline>
+<codeline lineno="247"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;Knob<sp/>&apos;&quot;</highlight><highlight class="normal"><sp/>+<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a9ddf41e1b669b33e105dfd4cee434fce" kindref="member">knobId</ref><sp/>+<sp/></highlight><highlight class="stringliteral">&quot;&apos;<sp/>has<sp/>NONE<sp/>default_value<sp/>-<sp/>knobs<sp/>must<sp/>have<sp/>a<sp/>default<sp/>value&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="248"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{}};</highlight></codeline>
+<codeline lineno="249"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">default</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="250"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bad8f24f388e990b9ccf8905b7993b99ae" kindref="member">ErrorCode::INVALID_VALUE</ref>,<sp/></highlight><highlight class="stringliteral">&quot;Knob<sp/>&apos;&quot;</highlight><highlight class="normal"><sp/>+<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a9ddf41e1b669b33e105dfd4cee434fce" kindref="member">knobId</ref><sp/>+<sp/></highlight><highlight class="stringliteral">&quot;&apos;<sp/>has<sp/>unknown<sp/>default_value<sp/>type&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="251"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{}};</highlight></codeline>
+<codeline lineno="252"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="253"><highlight class="normal"></highlight></codeline>
+<codeline lineno="254"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Create<sp/>the<sp/>knob<sp/>-<sp/>strings<sp/>are<sp/>already<sp/>std::string<sp/>in<sp/>KnobT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="255"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref><sp/>knob(std::move(knobT-&gt;knob_id),</highlight></codeline>
+<codeline lineno="256"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::move(knobT-&gt;description),</highlight></codeline>
+<codeline lineno="257"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::move(<ref refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" kindref="member">defaultValue</ref>),</highlight></codeline>
+<codeline lineno="258"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>knobT-&gt;deprecated);</highlight></codeline>
+<codeline lineno="259"><highlight class="normal"></highlight></codeline>
+<codeline lineno="260"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Handle<sp/>constraints<sp/>using<sp/>the<sp/>native<sp/>union<sp/>types</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="261"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">switch</highlight><highlight class="normal">(knobT-&gt;constraint.type)</highlight></codeline>
+<codeline lineno="262"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="263"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::KnobConstraint::IntConstraint:</highlight></codeline>
+<codeline lineno="264"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="265"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal">*<sp/>c<sp/>=<sp/>knobT-&gt;constraint.AsIntConstraint();</highlight></codeline>
+<codeline lineno="266"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::unordered_set&lt;int64_t&gt;<sp/>validValues(c-&gt;valid_values.begin(),<sp/>c-&gt;valid_values.end());</highlight></codeline>
+<codeline lineno="267"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>knob._constraint<sp/>=<sp/>std::make_unique&lt;IntConstraint&gt;(</highlight></codeline>
+<codeline lineno="268"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>c-&gt;min_value,<sp/>c-&gt;max_value,<sp/>c-&gt;step,<sp/>std::move(validValues));</highlight></codeline>
+<codeline lineno="269"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="270"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="271"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::KnobConstraint::FloatConstraint:</highlight></codeline>
+<codeline lineno="272"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="273"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal">*<sp/>c<sp/>=<sp/>knobT-&gt;constraint.AsFloatConstraint();</highlight></codeline>
+<codeline lineno="274"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>knob._constraint<sp/>=<sp/>std::make_unique&lt;FloatConstraint&gt;(c-&gt;min_value,<sp/>c-&gt;max_value);</highlight></codeline>
+<codeline lineno="275"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="276"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="277"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::KnobConstraint::StringConstraint:</highlight></codeline>
+<codeline lineno="278"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="279"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal">*<sp/>c<sp/>=<sp/>knobT-&gt;constraint.AsStringConstraint();</highlight></codeline>
+<codeline lineno="280"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::unordered_set&lt;std::string&gt;<sp/>validValues(c-&gt;valid_values.begin(),<sp/>c-&gt;valid_values.end());</highlight></codeline>
+<codeline lineno="281"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>knob._constraint</highlight></codeline>
+<codeline lineno="282"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>=<sp/>std::make_unique&lt;StringConstraint&gt;(c-&gt;max_length,<sp/>std::move(validValues));</highlight></codeline>
+<codeline lineno="283"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="284"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="285"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::KnobConstraint::NONE:</highlight></codeline>
+<codeline lineno="286"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>knob._constraint<sp/>=<sp/>std::make_unique&lt;EmptyConstraint&gt;();</highlight></codeline>
+<codeline lineno="287"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="288"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">default</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="289"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bad8f24f388e990b9ccf8905b7993b99ae" kindref="member">ErrorCode::INVALID_VALUE</ref>,<sp/></highlight><highlight class="stringliteral">&quot;Knob<sp/>&apos;&quot;</highlight><highlight class="normal"><sp/>+<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a9ddf41e1b669b33e105dfd4cee434fce" kindref="member">knobId</ref><sp/>+<sp/></highlight><highlight class="stringliteral">&quot;&apos;<sp/>has<sp/>unknown<sp/>constraint<sp/>type&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="290"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{}};</highlight></codeline>
+<codeline lineno="291"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="292"><highlight class="normal"></highlight></codeline>
+<codeline lineno="293"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Validate<sp/>that<sp/>the<sp/>default_value<sp/>satisfies<sp/>the<sp/>constraint</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="294"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(knob._constraint)</highlight></codeline>
+<codeline lineno="295"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="296"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref><sp/>defaultSetting(knob._knobId,<sp/>knob._defaultValue);</highlight></codeline>
+<codeline lineno="297"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>validationError<sp/>=<sp/>knob._constraint-&gt;validateKnobSetting(defaultSetting);</highlight></codeline>
+<codeline lineno="298"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(validationError.code<sp/>!=<sp/><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>)</highlight></codeline>
+<codeline lineno="299"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="300"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bad8f24f388e990b9ccf8905b7993b99ae" kindref="member">ErrorCode::INVALID_VALUE</ref>,</highlight></codeline>
+<codeline lineno="301"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;Knob<sp/>&apos;&quot;</highlight><highlight class="normal"><sp/>+<sp/>knob._knobId<sp/>+<sp/></highlight><highlight class="stringliteral">&quot;&apos;<sp/>has<sp/>default_value<sp/>that<sp/>violates<sp/>its<sp/>constraint:<sp/>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="302"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>+<sp/>validationError.err_msg},</highlight></codeline>
+<codeline lineno="303"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{}};</highlight></codeline>
+<codeline lineno="304"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="305"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="306"><highlight class="normal"></highlight></codeline>
+<codeline lineno="307"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>,<sp/></highlight><highlight class="stringliteral">&quot;&quot;</highlight><highlight class="normal">},<sp/>knob};</highlight></codeline>
+<codeline lineno="308"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="309"><highlight class="normal"></highlight></codeline>
+<codeline lineno="310" refid="namespacehipdnn__frontend_1_1detail" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal">detail</highlight></codeline>
+<codeline lineno="311"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="312"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref><sp/>getKnobsForEngine(std::vector&lt;Knob&gt;&amp;<sp/>knobs,<sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>engineDesc)</highlight></codeline>
+<codeline lineno="313"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="314"><highlight class="normal"><sp/><sp/><sp/><sp/>int64_t<sp/>knobCount<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="315"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="Utilities_8hpp_1a1ca90104fc912edd6a801ea40a9f4333" kindref="member">HIPDNN_RETURN_ON_BACKEND_FAILURE</ref>(</highlight></codeline>
+<codeline lineno="316"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1a1b406b5a5510fc1d73a0b477f8cdc332" kindref="member">hipdnnBackend</ref>()-&gt;backendGetAttribute(engineDesc,</highlight></codeline>
+<codeline lineno="317"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6afc7e72aad4b12649f3aa2aeb18776f2a" kindref="member">HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT</ref>,</highlight></codeline>
+<codeline lineno="318"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeType_8h_1a16cf2465cfc6d4f269b8c658352326b7a44d70eccbb2c46c246dcef363030f8df" kindref="member">HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT</ref>,</highlight></codeline>
+<codeline lineno="319"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>0,</highlight></codeline>
+<codeline lineno="320"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&amp;knobCount,</highlight></codeline>
+<codeline lineno="321"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">nullptr</highlight><highlight class="normal">),</highlight></codeline>
+<codeline lineno="322"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;Failed<sp/>to<sp/>get<sp/>knob<sp/>count<sp/>from<sp/>engine<sp/>descriptor.&quot;</highlight><highlight class="normal">);</highlight></codeline>
+<codeline lineno="323"><highlight class="normal"></highlight></codeline>
+<codeline lineno="324"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(knobCount<sp/>==<sp/>0)</highlight></codeline>
+<codeline lineno="325"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="326"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>knobs.clear();</highlight></codeline>
+<codeline lineno="327"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>,<sp/></highlight><highlight class="stringliteral">&quot;&quot;</highlight><highlight class="normal">};</highlight></codeline>
+<codeline lineno="328"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="329"><highlight class="normal"></highlight></codeline>
+<codeline lineno="330"><highlight class="normal"><sp/><sp/><sp/><sp/>std::vector&lt;hipdnnBackendFlatbufferData_t&gt;<sp/>flatbufferDataArray(</highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="keywordtype">size_t</highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(knobCount));</highlight></codeline>
+<codeline lineno="331"><highlight class="normal"></highlight></codeline>
+<codeline lineno="332"><highlight class="normal"><sp/><sp/><sp/><sp/>int64_t<sp/>actualCount<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="333"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="Utilities_8hpp_1a1ca90104fc912edd6a801ea40a9f4333" kindref="member">HIPDNN_RETURN_ON_BACKEND_FAILURE</ref>(</highlight></codeline>
+<codeline lineno="334"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1a1b406b5a5510fc1d73a0b477f8cdc332" kindref="member">hipdnnBackend</ref>()-&gt;backendGetAttribute(engineDesc,</highlight></codeline>
+<codeline lineno="335"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6afc7e72aad4b12649f3aa2aeb18776f2a" kindref="member">HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT</ref>,</highlight></codeline>
+<codeline lineno="336"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeType_8h_1a16cf2465cfc6d4f269b8c658352326b7a44d70eccbb2c46c246dcef363030f8df" kindref="member">HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT</ref>,</highlight></codeline>
+<codeline lineno="337"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>knobCount,</highlight></codeline>
+<codeline lineno="338"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&amp;actualCount,</highlight></codeline>
+<codeline lineno="339"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>flatbufferDataArray.data()),</highlight></codeline>
+<codeline lineno="340"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;Failed<sp/>to<sp/>get<sp/>knob<sp/>flatbuffer<sp/>data<sp/>from<sp/>engine<sp/>descriptor.&quot;</highlight><highlight class="normal">);</highlight></codeline>
+<codeline lineno="341"><highlight class="normal"></highlight></codeline>
+<codeline lineno="342"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(actualCount<sp/>!=<sp/>knobCount)</highlight></codeline>
+<codeline lineno="343"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="344"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bafdc6240981fc7cdc8b9c9dfd3f497804" kindref="member">ErrorCode::HIPDNN_BACKEND_ERROR</ref>,</highlight></codeline>
+<codeline lineno="345"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;Mismatch<sp/>between<sp/>expected<sp/>and<sp/>actual<sp/>knob<sp/>count.&quot;</highlight><highlight class="normal">};</highlight></codeline>
+<codeline lineno="346"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="347"><highlight class="normal"></highlight></codeline>
+<codeline lineno="348"><highlight class="normal"><sp/><sp/><sp/><sp/>knobs.clear();</highlight></codeline>
+<codeline lineno="349"><highlight class="normal"><sp/><sp/><sp/><sp/>knobs.reserve(</highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="keywordtype">size_t</highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(actualCount));</highlight></codeline>
+<codeline lineno="350"><highlight class="normal"></highlight></codeline>
+<codeline lineno="351"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_set&lt;std::string&gt;<sp/>usedKnobIds;</highlight></codeline>
+<codeline lineno="352"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>skippedCount<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="353"><highlight class="normal"></highlight></codeline>
+<codeline lineno="354"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal">(</highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>i<sp/>=<sp/>0;<sp/>i<sp/>&lt;<sp/>static_cast&lt;size_t&gt;(actualCount);<sp/>++i)</highlight></codeline>
+<codeline lineno="355"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="356"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>[error,<sp/>knob]<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1Knob_1a45b1ed6885cdf92321a3e45aa3a1e13d" kindref="member">Knob::tryFromFlatbuffer</ref>(flatbufferDataArray[i]);</highlight></codeline>
+<codeline lineno="357"><highlight class="normal"></highlight></codeline>
+<codeline lineno="358"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(error.code<sp/>!=<sp/><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>)</highlight></codeline>
+<codeline lineno="359"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="360"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Log<sp/>error<sp/>and<sp/>skip<sp/>this<sp/>knob<sp/>-<sp/>don&apos;t<sp/>fail<sp/>the<sp/>entire<sp/>operation</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="361"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="Logging_8hpp_1ab7c059fc019c0b9b7122f4926177e519" kindref="member">HIPDNN_FE_LOG_ERROR</ref>(</highlight><highlight class="stringliteral">&quot;Skipping<sp/>invalid<sp/>knob<sp/>at<sp/>index<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>i<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;:<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>error.err_msg);</highlight></codeline>
+<codeline lineno="362"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>++skippedCount;</highlight></codeline>
+<codeline lineno="363"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">continue</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="364"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="365"><highlight class="normal"></highlight></codeline>
+<codeline lineno="366"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Check<sp/>for<sp/>duplicate<sp/>knob<sp/>IDs</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="367"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(!usedKnobIds.insert(knob.knobId()).second)</highlight></codeline>
+<codeline lineno="368"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="369"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="Logging_8hpp_1ab7c059fc019c0b9b7122f4926177e519" kindref="member">HIPDNN_FE_LOG_ERROR</ref>(</highlight><highlight class="stringliteral">&quot;Skipping<sp/>knob<sp/>with<sp/>duplicate<sp/>ID:<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>knob.knobId());</highlight></codeline>
+<codeline lineno="370"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>++skippedCount;</highlight></codeline>
+<codeline lineno="371"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">continue</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="372"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="373"><highlight class="normal"></highlight></codeline>
+<codeline lineno="374"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>knobs.emplace_back(std::move(knob));</highlight></codeline>
+<codeline lineno="375"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="376"><highlight class="normal"></highlight></codeline>
+<codeline lineno="377"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>If<sp/>any<sp/>knobs<sp/>were<sp/>skipped,<sp/>include<sp/>that<sp/>information<sp/>in<sp/>the<sp/>return<sp/>message</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="378"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(skippedCount<sp/>&gt;<sp/>0)</highlight></codeline>
+<codeline lineno="379"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="380"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::ostringstream<sp/>oss;</highlight></codeline>
+<codeline lineno="381"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>oss<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;Loaded<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>knobs.size()<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;<sp/>knobs,<sp/>skipped<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>skippedCount</highlight></codeline>
+<codeline lineno="382"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;<sp/>invalid/duplicate<sp/>knobs&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="383"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="Logging_8hpp_1a074924720a6831a6b7dcbb84fed6a7bb" kindref="member">HIPDNN_FE_LOG_WARN</ref>(oss.str());</highlight></codeline>
+<codeline lineno="384"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>,<sp/>oss.str()};</highlight></codeline>
+<codeline lineno="385"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="386"><highlight class="normal"></highlight></codeline>
+<codeline lineno="387"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>{<ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>,<sp/></highlight><highlight class="stringliteral">&quot;&quot;</highlight><highlight class="normal">};</highlight></codeline>
+<codeline lineno="388"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="389"><highlight class="normal"></highlight></codeline>
+<codeline lineno="390"><highlight class="normal">}<sp/></highlight><highlight class="comment">//<sp/>namespace<sp/>detail</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="391"><highlight class="normal"></highlight></codeline>
+<codeline lineno="392"><highlight class="normal">}<sp/></highlight><highlight class="comment">//<sp/>namespace<sp/>hipdnn_frontend</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp"/>
+  </compounddef>
+</doxygen>

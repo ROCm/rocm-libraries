@@ -1,0 +1,89 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__data__sdk_1_1utilities_1_1bfp16" kind="namespace" language="C++">
+    <compoundname>hipdnn_data_sdk::utilities::bfp16</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1_1bfp16_1affd96860a7e41ff0f7393d229743a0fb" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>__HOST_DEVICE__ hip_bfloat16</type>
+        <definition>__HOST_DEVICE__ hip_bfloat16 hipdnn_data_sdk::utilities::bfp16::ushort_as_bfloat16</definition>
+        <argsstring>(const unsigned short int a)</argsstring>
+        <name>ushort_as_bfloat16</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::bfp16::ushort_as_bfloat16</qualifiedname>
+        <param>
+          <type>const unsigned short int</type>
+          <declname>a</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" line="23" column="37" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" bodystart="23" bodyend="28"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1_1bfp16_1a7522a55c11e09cc48c5120fb98df30b9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>__HOST_DEVICE__ hip_bfloat16</type>
+        <definition>__HOST_DEVICE__ hip_bfloat16 hipdnn_data_sdk::utilities::bfp16::habs</definition>
+        <argsstring>(const hip_bfloat16 a)</argsstring>
+        <name>habs</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::bfp16::habs</qualifiedname>
+        <param>
+          <type>const hip_bfloat16</type>
+          <declname>a</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" line="30" column="37" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" bodystart="30" bodyend="35"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1_1bfp16_1a6f671e5da4715d522eade5ee1936566d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>__HOST_DEVICE__ bool</type>
+        <definition>__HOST_DEVICE__ bool hipdnn_data_sdk::utilities::bfp16::hisnan</definition>
+        <argsstring>(const hip_bfloat16 a)</argsstring>
+        <name>hisnan</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::bfp16::hisnan</qualifiedname>
+        <param>
+          <type>const hip_bfloat16</type>
+          <declname>a</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" line="37" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" bodystart="37" bodyend="41"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1_1bfp16_1aea4324ced8b004649fde2f7ac439f744" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>__HOST_DEVICE__ hip_bfloat16</type>
+        <definition>__HOST_DEVICE__ hip_bfloat16 hipdnn_data_sdk::utilities::bfp16::hmax</definition>
+        <argsstring>(const hip_bfloat16 a, const hip_bfloat16 b)</argsstring>
+        <name>hmax</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::bfp16::hmax</qualifiedname>
+        <param>
+          <type>const hip_bfloat16</type>
+          <declname>a</declname>
+        </param>
+        <param>
+          <type>const hip_bfloat16</type>
+          <declname>b</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" line="43" column="37" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" bodystart="43" bodyend="59"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsBfp16.hpp" line="20" column="1"/>
+  </compounddef>
+</doxygen>

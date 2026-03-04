@@ -1,0 +1,14 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_00329dc12b63a149af6fce9d552c8204" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk</compoundname>
+    <innerdir refid="dir_2b0686e0eb4dc80ac5cd90b0523f0738">/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities</innerdir>
+    <innerdir refid="dir_04cf2c9c5917a2c117379fe038ced291">/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging</innerdir>
+    <innerdir refid="dir_ae2d335f51df9e7d6e9288cc7edb3614">/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities</innerdir>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/"/>
+  </compounddef>
+</doxygen>

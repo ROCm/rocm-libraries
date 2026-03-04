@@ -1,0 +1,470 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1INode" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::INode</compoundname>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; BatchnormBackwardNode &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; BatchnormInferenceNode &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; BatchnormInferenceNodeVarianceExt &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; BatchnormNode &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; ConvolutionDgradNode &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; ConvolutionFpropNode &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; ConvolutionWgradNode &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; PointwiseNode &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; DerivedT &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__frontend_1_1graph_1_1Graph" prot="public" virt="non-virtual">hipdnn_frontend::graph::Graph</derivedcompoundref>
+    <includes refid="Node_8hpp" local="no">Node.hpp</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1INode_1aacfcb1f1ec9b376ac7a7afb6b4f7389a" prot="public" static="no" mutable="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref></type>
+        <definition>GraphAttributes hipdnn_frontend::graph::INode::graph_attributes</definition>
+        <argsstring></argsstring>
+        <name>graph_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::graph_attributes</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="20" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="20" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="protected-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1INode_1a0d40adb0a0b71eeae9cd946495b7705e" prot="protected" static="no" mutable="no">
+        <type>std::vector&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1INode" kindref="compound">INode</ref> &gt; &gt;</type>
+        <definition>std::vector&lt;std::shared_ptr&lt;INode&gt; &gt; hipdnn_frontend::graph::INode::_sub_nodes</definition>
+        <argsstring></argsstring>
+        <name>_sub_nodes</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::_sub_nodes</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="96" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="96" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a5487d58d8e51312358e341ff75157f2b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::graph::INode::INode</definition>
+        <argsstring>(GraphAttributes attributes)</argsstring>
+        <name>INode</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::INode</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="21" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="21" bodyend="24"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a504092d3f0e9ffffbd874e562a5251aa" prot="public" static="no" const="no" explicit="no" inline="no" virt="virtual">
+        <type></type>
+        <definition>virtual hipdnn_frontend::graph::INode::~INode</definition>
+        <argsstring>()=default</argsstring>
+        <name>~INode</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::~INode</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="25" column="13"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1aa2b999b5be1babae092b12a616e47142" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>virtual Error hipdnn_frontend::graph::INode::pre_validate_node</definition>
+        <argsstring>() const</argsstring>
+        <name>pre_validate_node</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::pre_validate_node</qualifiedname>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a7e214b8577942f727db19fcedc83da6b">pre_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNode_1af6532e76cb26b57a8e6fa69f678eda42">pre_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNodeVarianceExt_1a94cc235ba4b9fed80bc981ebb79d3288">pre_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormNode_1a8871ea634522f7d6394298d3f652978b">pre_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a1464b8005eef4e7b9891bc7a9f3844a7">pre_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionFpropNode_1a50860166811b26f709b99deb890fe60a">pre_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionWgradNode_1a72c94dad146ab559e9ef63e527b84bad">pre_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1PointwiseNode_1a231ed0c1992003e8ceac7eb7e5f88335">pre_validate_node</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="27" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="27" bodyend="30"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a8b28f89f18758ed3a1dfc5b9b2ad63a0" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>virtual Error hipdnn_frontend::graph::INode::infer_properties_node</definition>
+        <argsstring>()</argsstring>
+        <name>infer_properties_node</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::infer_properties_node</qualifiedname>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1ab8ec3955a7c047194db52d7d0af0d937">infer_properties_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNode_1afb5382a0b27483db6ef0c48e874a396b">infer_properties_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNodeVarianceExt_1a0c3719890f863e440c533e46c0e04ddc">infer_properties_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormNode_1af15daf929ff1e2d64f6d11290410db75">infer_properties_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a8ee2f85ba3a60dc0f79a1e0227a7758c">infer_properties_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionFpropNode_1aaf5cf15618b6870f4a83d6cbea097b27">infer_properties_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionWgradNode_1a7b013c305ac2bb4914fce5481b7f608a">infer_properties_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1PointwiseNode_1a704379b5753422d1e9a2c0f04325320f">infer_properties_node</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="31" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="31" bodyend="34"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1af801cad4058b88879fca83028e296c6b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>virtual Error hipdnn_frontend::graph::INode::post_validate_node</definition>
+        <argsstring>() const</argsstring>
+        <name>post_validate_node</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::post_validate_node</qualifiedname>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47">post_validate_node</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="35" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="35" bodyend="38"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a004660761457ea01996ce149618cee10" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>void</type>
+        <definition>virtual void hipdnn_frontend::graph::INode::gather_hipdnn_tensors</definition>
+        <argsstring>(std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;allTensors) const</argsstring>
+        <name>gather_hipdnn_tensors</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::gather_hipdnn_tensors</qualifiedname>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a4bf24c993bde3abb66cd16a6a199289c">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormNode_1a2aa971bbb1c081fddfa3986e32f1bc34">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplementedby>
+        <param>
+          <type>std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+          <declname>allTensors</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="41" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="41" bodyend="45"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a4561977ed6bd0bf33b9c8840f8cf1164" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::Node &gt;</type>
+        <definition>virtual flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::Node &gt; hipdnn_frontend::graph::INode::pack_node</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder) const</argsstring>
+        <name>pack_node</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::pack_node</qualifiedname>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a6fdc6bef7396a5f634946c16fa23be44">pack_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNode_1aa6ff48e0d440a25963570eae3c949dc7">pack_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNodeVarianceExt_1a081507149392b378a0e895a03895e569">pack_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BatchnormNode_1a41d889a6ba8c0be87dfae227e65c4116">pack_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a911bf5ef4a7a5db16416dd491f4ad093">pack_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionFpropNode_1ae8538bdf24ddfaa07d162cbdd02bde46">pack_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1ConvolutionWgradNode_1a2f3c2cfc960b17044fb8547e6e379a79">pack_node</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1PointwiseNode_1a89b55934ca498b53009fd0c21bdb95ce">pack_node</reimplementedby>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="48" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="48" bodyend="51"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a9b39efdf9b873e1f1664ada8dc311a2b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>std::vector&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>virtual std::vector&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; hipdnn_frontend::graph::INode::getNodeInputTensorAttributes</definition>
+        <argsstring>() const</argsstring>
+        <name>getNodeInputTensorAttributes</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::getNodeInputTensorAttributes</qualifiedname>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66">getNodeInputTensorAttributes</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="53" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="53" bodyend="56"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a5e0ee1763d5213b2a8e0ebf99009c93b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>std::vector&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>virtual std::vector&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; hipdnn_frontend::graph::INode::getNodeOutputTensorAttributes</definition>
+        <argsstring>() const</argsstring>
+        <name>getNodeOutputTensorAttributes</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::getNodeOutputTensorAttributes</qualifiedname>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <reimplementedby refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691">getNodeOutputTensorAttributes</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="58" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="58" bodyend="61"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a88228ffa2f038c274dfcaf8316f55227" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_frontend::graph::INode::visit</definition>
+        <argsstring>(const std::function&lt; void(INode &amp;)&gt; &amp;visitor)</argsstring>
+        <name>visit</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::visit</qualifiedname>
+        <param>
+          <type>const std::function&lt; void(<ref refid="classhipdnn__frontend_1_1graph_1_1INode" kindref="compound">INode</ref> &amp;)&gt; &amp;</type>
+          <declname>visitor</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="63" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="63" bodyend="76"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a84993f3eb21c56cd0f00c35655d828bd" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_frontend::graph::INode::visit</definition>
+        <argsstring>(const std::function&lt; void(const INode &amp;)&gt; &amp;visitor) const</argsstring>
+        <name>visit</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::visit</qualifiedname>
+        <param>
+          <type>const std::function&lt; void(const <ref refid="classhipdnn__frontend_1_1graph_1_1INode" kindref="compound">INode</ref> &amp;)&gt; &amp;</type>
+          <declname>visitor</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="78" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="78" bodyend="93"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="protected-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a20295372f663ad76910d185982baabe3" prot="protected" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::INode::validateSubtree</definition>
+        <argsstring>()</argsstring>
+        <name>validateSubtree</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::validateSubtree</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="98" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="98" bodyend="108"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1INode_1a1f9eb34676b9472a82f5f121c4763492" prot="protected" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_frontend::graph::INode::gatherHipdnnTensorsSubtree</definition>
+        <argsstring>(std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;allTensors) const</argsstring>
+        <name>gatherHipdnnTensorsSubtree</name>
+        <qualifiedname>hipdnn_frontend::graph::INode::gatherHipdnnTensorsSubtree</qualifiedname>
+        <param>
+          <type>std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+          <declname>allTensors</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="110" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="110" bodyend="119"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_frontend::graph::BaseNode&lt; BatchnormBackwardNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_frontend::graph::BaseNode&lt; BatchnormInferenceNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="6">
+        <label>hipdnn_frontend::graph::BaseNode&lt; BatchnormInferenceNodeVarianceExt &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="8">
+        <label>hipdnn_frontend::graph::BaseNode&lt; BatchnormNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="10">
+        <label>hipdnn_frontend::graph::BaseNode&lt; ConvolutionDgradNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="12">
+        <label>hipdnn_frontend::graph::BaseNode&lt; ConvolutionFpropNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="14">
+        <label>hipdnn_frontend::graph::BaseNode&lt; ConvolutionWgradNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="16">
+        <label>hipdnn_frontend::graph::BaseNode&lt; PointwiseNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="18">
+        <label>hipdnn_frontend::graph::BaseNode&lt; DerivedT &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>hipdnn_frontend::graph::BatchnormBackwardNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="5">
+        <label>hipdnn_frontend::graph::BatchnormInferenceNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNode"/>
+        <childnode refid="4" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="7">
+        <label>hipdnn_frontend::graph::BatchnormInferenceNodeVarianceExt</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNodeVarianceExt"/>
+        <childnode refid="6" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="9">
+        <label>hipdnn_frontend::graph::BatchnormNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormNode"/>
+        <childnode refid="8" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="11">
+        <label>hipdnn_frontend::graph::ConvolutionDgradNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode"/>
+        <childnode refid="10" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="13">
+        <label>hipdnn_frontend::graph::ConvolutionFpropNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1ConvolutionFpropNode"/>
+        <childnode refid="12" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="15">
+        <label>hipdnn_frontend::graph::ConvolutionWgradNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1ConvolutionWgradNode"/>
+        <childnode refid="14" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="19">
+        <label>hipdnn_frontend::graph::Graph</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Graph"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::INode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1INode"/>
+      </node>
+      <node id="17">
+        <label>hipdnn_frontend::graph::PointwiseNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1PointwiseNode"/>
+        <childnode refid="16" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="2">
+        <label>hipdnn_frontend::graph::GraphAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::INode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1INode"/>
+        <childnode refid="2" relation="usage">
+          <edgelabel>graph_attributes</edgelabel>
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="17" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="18" bodyend="120"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a0d40adb0a0b71eeae9cd946495b7705e" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::INode</scope><name>_sub_nodes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a004660761457ea01996ce149618cee10" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::INode</scope><name>gather_hipdnn_tensors</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a1f9eb34676b9472a82f5f121c4763492" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::INode</scope><name>gatherHipdnnTensorsSubtree</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a9b39efdf9b873e1f1664ada8dc311a2b" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::INode</scope><name>getNodeInputTensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a5e0ee1763d5213b2a8e0ebf99009c93b" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::INode</scope><name>getNodeOutputTensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1aacfcb1f1ec9b376ac7a7afb6b4f7389a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::INode</scope><name>graph_attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a8b28f89f18758ed3a1dfc5b9b2ad63a0" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::INode</scope><name>infer_properties_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a5487d58d8e51312358e341ff75157f2b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::INode</scope><name>INode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a4561977ed6bd0bf33b9c8840f8cf1164" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::INode</scope><name>pack_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1af801cad4058b88879fca83028e296c6b" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::INode</scope><name>post_validate_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1aa2b999b5be1babae092b12a616e47142" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::INode</scope><name>pre_validate_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a20295372f663ad76910d185982baabe3" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::INode</scope><name>validateSubtree</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a88228ffa2f038c274dfcaf8316f55227" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::INode</scope><name>visit</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a84993f3eb21c56cd0f00c35655d828bd" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::INode</scope><name>visit</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a504092d3f0e9ffffbd874e562a5251aa" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::INode</scope><name>~INode</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

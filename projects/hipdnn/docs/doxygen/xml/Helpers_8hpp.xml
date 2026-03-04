@@ -1,0 +1,1633 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="Helpers_8hpp" kind="file" language="C++">
+    <compoundname>Helpers.hpp</compoundname>
+    <includes local="no">hip/hip_runtime.h</includes>
+    <includes refid="hipdnn__backend_8h" local="no">hipdnn_backend.h</includes>
+    <includes refid="ShapeUtilities_8hpp" local="no">hipdnn_data_sdk/utilities/ShapeUtilities.hpp</includes>
+    <includes refid="Tensor_8hpp" local="no">hipdnn_data_sdk/utilities/Tensor.hpp</includes>
+    <includes refid="hipdnn__frontend_8hpp" local="no">hipdnn_frontend.hpp</includes>
+    <includes local="no">algorithm</includes>
+    <includes local="no">iostream</includes>
+    <includes local="no">memory</includes>
+    <includes local="no">numeric</includes>
+    <includes local="no">random</includes>
+    <includes local="no">vector</includes>
+    <includedby refid="BnBackward_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</includedby>
+    <includedby refid="BnInference_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</includedby>
+    <includedby refid="BnTraining_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</includedby>
+    <includedby refid="FusedBnInfDReluBnBwd_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</includedby>
+    <includedby refid="FusedBnTrainingActiv_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</includedby>
+    <includedby refid="ConvDgrad_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</includedby>
+    <includedby refid="ConvFprop_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</includedby>
+    <includedby refid="ConvWgrad_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</includedby>
+    <includedby refid="FusedConvFpropActiv_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</includedby>
+    <includedby refid="FusedConvFpropBiasActiv_8cpp" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</includedby>
+    <incdepgraph>
+      <node id="6">
+        <label>HipdnnBackendAttributeName.h</label>
+        <link refid="HipdnnBackendAttributeName_8h"/>
+      </node>
+      <node id="7">
+        <label>HipdnnBackendAttributeType.h</label>
+        <link refid="HipdnnBackendAttributeType_8h"/>
+      </node>
+      <node id="8">
+        <label>HipdnnBackendCallbackTypes.h</label>
+        <link refid="HipdnnBackendCallbackTypes_8h"/>
+      </node>
+      <node id="9">
+        <label>HipdnnBackendDescriptorType.h</label>
+        <link refid="HipdnnBackendDescriptorType_8h"/>
+      </node>
+      <node id="69">
+        <label>HipdnnBackendFlatbufferData.h</label>
+        <link refid="HipdnnBackendFlatbufferData_8h"/>
+        <childnode refid="70" relation="include">
+        </childnode>
+        <childnode refid="71" relation="include">
+        </childnode>
+      </node>
+      <node id="10">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="HipdnnBackendHeuristicType_8h"/>
+      </node>
+      <node id="11">
+        <label>HipdnnBackendLimits.h</label>
+        <link refid="HipdnnBackendLimits_8h"/>
+      </node>
+      <node id="12">
+        <label>HipdnnBackendPluginLoadingMode.h</label>
+        <link refid="HipdnnBackendPluginLoadingMode_8h"/>
+      </node>
+      <node id="13">
+        <label>HipdnnBackendPluginUnloadingMode.h</label>
+        <link refid="HipdnnBackendPluginUnloadingMode_8h"/>
+      </node>
+      <node id="14">
+        <label>HipdnnStatus.h</label>
+        <link refid="HipdnnStatus_8h"/>
+      </node>
+      <node id="3">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="18">
+        <label>CallbackSink.hpp</label>
+        <link refid="CallbackSink_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+      </node>
+      <node id="19">
+        <label>CallbackTypes.h</label>
+        <link refid="CallbackTypes_8h"/>
+      </node>
+      <node id="17">
+        <label>hipdnn_data_sdk/logging/Logger.hpp</label>
+        <link refid="Logger_8hpp"/>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="32" relation="include">
+        </childnode>
+        <childnode refid="33" relation="include">
+        </childnode>
+        <childnode refid="34" relation="include">
+        </childnode>
+      </node>
+      <node id="20">
+        <label>LoggingUtils.hpp</label>
+        <link refid="LoggingUtils_8hpp"/>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+      </node>
+      <node id="45">
+        <label>hipdnn_data_sdk/utilities/Allocators.hpp</label>
+        <link refid="Allocators_8hpp"/>
+        <childnode refid="46" relation="include">
+        </childnode>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="47" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="48" relation="include">
+        </childnode>
+        <childnode refid="49" relation="include">
+        </childnode>
+      </node>
+      <node id="106">
+        <label>hipdnn_data_sdk/utilities/FlatbufferUtils.hpp</label>
+        <link refid="FlatbufferUtils_8hpp"/>
+        <childnode refid="76" relation="include">
+        </childnode>
+        <childnode refid="78" relation="include">
+        </childnode>
+        <childnode refid="41" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="44">
+        <label>hipdnn_data_sdk/utilities/MigratableMemory.hpp</label>
+        <link refid="MigratableMemory_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="45" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="41" relation="include">
+        </childnode>
+      </node>
+      <node id="22">
+        <label>hipdnn_data_sdk/utilities/PlatformUtils.hpp</label>
+        <link refid="PlatformUtils_8hpp"/>
+        <childnode refid="23" relation="include">
+        </childnode>
+      </node>
+      <node id="64">
+        <label>hipdnn_data_sdk/utilities/PointwiseValidation.hpp</label>
+        <link refid="PointwiseValidation_8hpp"/>
+        <childnode refid="65" relation="include">
+        </childnode>
+        <childnode refid="62" relation="include">
+        </childnode>
+      </node>
+      <node id="15">
+        <label>hipdnn_data_sdk/utilities/ShapeUtilities.hpp</label>
+        <link refid="ShapeUtilities_8hpp"/>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+        <childnode refid="39" relation="include">
+        </childnode>
+        <childnode refid="40" relation="include">
+        </childnode>
+        <childnode refid="41" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="35">
+        <label>hipdnn_data_sdk/utilities/StringUtil.hpp</label>
+        <link refid="StringUtil_8hpp"/>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="36" relation="include">
+        </childnode>
+        <childnode refid="37" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="42">
+        <label>hipdnn_data_sdk/utilities/Tensor.hpp</label>
+        <link refid="Tensor_8hpp"/>
+        <childnode refid="43" relation="include">
+        </childnode>
+        <childnode refid="44" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="50" relation="include">
+        </childnode>
+        <childnode refid="53" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="39" relation="include">
+        </childnode>
+        <childnode refid="55" relation="include">
+        </childnode>
+        <childnode refid="56" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="50">
+        <label>hipdnn_data_sdk/utilities/UtilsBfp16.hpp</label>
+        <link refid="UtilsBfp16_8hpp"/>
+        <childnode refid="51" relation="include">
+        </childnode>
+        <childnode refid="52" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+      </node>
+      <node id="53">
+        <label>hipdnn_data_sdk/utilities/UtilsFp16.hpp</label>
+        <link refid="UtilsFp16_8hpp"/>
+        <childnode refid="54" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+      </node>
+      <node id="124">
+        <label>hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormAttributes_8hpp"/>
+        <childnode refid="86" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="129">
+        <label>hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormBackwardAttributes_8hpp"/>
+        <childnode refid="113" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="130">
+        <label>hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributes_8hpp"/>
+        <childnode refid="88" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="131">
+        <label>hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributesVarianceExt_8hpp"/>
+        <childnode refid="90" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="125">
+        <label>hipdnn_data_sdk/utilities/json/Common.hpp</label>
+        <link refid="Common_8hpp"/>
+        <childnode refid="126" relation="include">
+        </childnode>
+        <childnode refid="43" relation="include">
+        </childnode>
+        <childnode refid="127" relation="include">
+        </childnode>
+        <childnode refid="128" relation="include">
+        </childnode>
+      </node>
+      <node id="132">
+        <label>hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp</label>
+        <link refid="ConvolutionBwdAttributes_8hpp"/>
+        <childnode refid="92" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="133">
+        <label>hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp</label>
+        <link refid="ConvolutionFwdAttributes_8hpp"/>
+        <childnode refid="60" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="134">
+        <label>hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp</label>
+        <link refid="ConvolutionWrwAttributes_8hpp"/>
+        <childnode refid="95" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="123">
+        <label>hipdnn_data_sdk/utilities/json/Graph.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2Graph_8hpp"/>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="124" relation="include">
+        </childnode>
+        <childnode refid="129" relation="include">
+        </childnode>
+        <childnode refid="130" relation="include">
+        </childnode>
+        <childnode refid="131" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+        <childnode refid="132" relation="include">
+        </childnode>
+        <childnode refid="133" relation="include">
+        </childnode>
+        <childnode refid="134" relation="include">
+        </childnode>
+        <childnode refid="135" relation="include">
+        </childnode>
+        <childnode refid="136" relation="include">
+        </childnode>
+      </node>
+      <node id="135">
+        <label>hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2PointwiseAttributes_8hpp"/>
+        <childnode refid="62" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="136">
+        <label>hipdnn_data_sdk/utilities/json/TensorAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2TensorAttributes_8hpp"/>
+        <childnode refid="78" relation="include">
+        </childnode>
+        <childnode refid="125" relation="include">
+        </childnode>
+      </node>
+      <node id="57">
+        <label>hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="68" relation="include">
+        </childnode>
+        <childnode refid="138" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+      </node>
+      <node id="58">
+        <label>hipdnn_frontend/Error.hpp</label>
+        <link refid="Error_8hpp"/>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+      </node>
+      <node id="68">
+        <label>hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="69" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="61" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="83" relation="include">
+        </childnode>
+        <childnode refid="87" relation="include">
+        </childnode>
+        <childnode refid="89" relation="include">
+        </childnode>
+        <childnode refid="91" relation="include">
+        </childnode>
+        <childnode refid="93" relation="include">
+        </childnode>
+        <childnode refid="94" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+        <childnode refid="96" relation="include">
+        </childnode>
+        <childnode refid="98" relation="include">
+        </childnode>
+        <childnode refid="82" relation="include">
+        </childnode>
+        <childnode refid="99" relation="include">
+        </childnode>
+        <childnode refid="100" relation="include">
+        </childnode>
+        <childnode refid="101" relation="include">
+        </childnode>
+        <childnode refid="102" relation="include">
+        </childnode>
+        <childnode refid="110" relation="include">
+        </childnode>
+        <childnode refid="114" relation="include">
+        </childnode>
+        <childnode refid="115" relation="include">
+        </childnode>
+        <childnode refid="116" relation="include">
+        </childnode>
+        <childnode refid="117" relation="include">
+        </childnode>
+        <childnode refid="118" relation="include">
+        </childnode>
+        <childnode refid="119" relation="include">
+        </childnode>
+        <childnode refid="120" relation="include">
+        </childnode>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="121" relation="include">
+        </childnode>
+        <childnode refid="122" relation="include">
+        </childnode>
+        <childnode refid="123" relation="include">
+        </childnode>
+        <childnode refid="137" relation="include">
+        </childnode>
+      </node>
+      <node id="138">
+        <label>hipdnn_frontend/Handle.hpp</label>
+        <link refid="Handle_8hpp"/>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="82" relation="include">
+        </childnode>
+      </node>
+      <node id="80">
+        <label>hipdnn_frontend/Logging.hpp</label>
+        <link refid="Logging_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="81" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+      </node>
+      <node id="59">
+        <label>Types.hpp</label>
+        <link refid="Types_8hpp"/>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="60" relation="include">
+        </childnode>
+        <childnode refid="43" relation="include">
+        </childnode>
+        <childnode refid="61" relation="include">
+        </childnode>
+        <childnode refid="62" relation="include">
+        </childnode>
+        <childnode refid="63" relation="include">
+        </childnode>
+        <childnode refid="64" relation="include">
+        </childnode>
+        <childnode refid="65" relation="include">
+        </childnode>
+        <childnode refid="51" relation="include">
+        </childnode>
+        <childnode refid="66" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="67" relation="include">
+        </childnode>
+      </node>
+      <node id="72">
+        <label>hipdnn_frontend/Utilities.hpp</label>
+        <link refid="Utilities_8hpp"/>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="42" relation="include">
+        </childnode>
+        <childnode refid="39" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+        <childnode refid="80" relation="include">
+        </childnode>
+        <childnode refid="82" relation="include">
+        </childnode>
+      </node>
+      <node id="84">
+        <label>Attributes.hpp</label>
+        <link refid="Attributes_8hpp"/>
+        <childnode refid="74" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="85" relation="include">
+        </childnode>
+      </node>
+      <node id="83">
+        <label>hipdnn_frontend/attributes/BatchnormAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormAttributes_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="86" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="112">
+        <label>hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormBackwardAttributes_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="113" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="87">
+        <label>hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormInferenceAttributes_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="88" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+      </node>
+      <node id="89">
+        <label>hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormInferenceAttributesVarianceExt_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="90" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+      </node>
+      <node id="91">
+        <label>hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp</label>
+        <link refid="ConvolutionDgradAttributes_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="92" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="93">
+        <label>hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp</label>
+        <link refid="ConvolutionFpropAttributes_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="60" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="94">
+        <label>hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp</label>
+        <link refid="ConvolutionWgradAttributes_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="95" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="74">
+        <label>GraphAttributes.hpp</label>
+        <link refid="GraphAttributes_8hpp"/>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+      </node>
+      <node id="96">
+        <label>hipdnn_frontend/attributes/MatmulAttributes.hpp</label>
+        <link refid="MatmulAttributes_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="97" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="98">
+        <label>hipdnn_frontend/attributes/PointwiseAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2PointwiseAttributes_8hpp"/>
+        <childnode refid="84" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="62" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="79" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+      </node>
+      <node id="73">
+        <label>attributes/TensorAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp"/>
+        <childnode refid="74" relation="include">
+        </childnode>
+        <childnode refid="76" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="78" relation="include">
+        </childnode>
+        <childnode refid="63" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="79" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="49" relation="include">
+        </childnode>
+        <childnode refid="67" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="102">
+        <label>hipdnn_frontend/knob/Knob.hpp</label>
+        <link refid="Knob_8hpp"/>
+        <childnode refid="69" relation="include">
+        </childnode>
+        <childnode refid="103" relation="include">
+        </childnode>
+        <childnode refid="104" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="105" relation="include">
+        </childnode>
+        <childnode refid="107" relation="include">
+        </childnode>
+        <childnode refid="106" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="108" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="79" relation="include">
+        </childnode>
+        <childnode refid="37" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="109" relation="include">
+        </childnode>
+        <childnode refid="67" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="103">
+        <label>hipdnn_frontend/knob/KnobConstraint.hpp</label>
+        <link refid="KnobConstraint_8hpp"/>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="104" relation="include">
+        </childnode>
+      </node>
+      <node id="104">
+        <label>hipdnn_frontend/knob/KnobSetting.hpp</label>
+        <link refid="KnobSetting_8hpp"/>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="105" relation="include">
+        </childnode>
+        <childnode refid="61" relation="include">
+        </childnode>
+        <childnode refid="106" relation="include">
+        </childnode>
+      </node>
+      <node id="110">
+        <label>hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
+        <link refid="BatchnormBackwardNode_8hpp"/>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="112" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+      </node>
+      <node id="114">
+        <label>hipdnn_frontend/node/BatchnormInferenceNode.hpp</label>
+        <link refid="BatchnormInferenceNode_8hpp"/>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="87" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+      </node>
+      <node id="115">
+        <label>hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp</label>
+        <link refid="BatchnormInferenceNodeVarianceExt_8hpp"/>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="89" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+      </node>
+      <node id="116">
+        <label>hipdnn_frontend/node/BatchnormNode.hpp</label>
+        <link refid="BatchnormNode_8hpp"/>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="83" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+      </node>
+      <node id="117">
+        <label>hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
+        <link refid="ConvolutionDgradNode_8hpp"/>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="91" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+        <childnode refid="39" relation="include">
+        </childnode>
+      </node>
+      <node id="118">
+        <label>hipdnn_frontend/node/ConvolutionFpropNode.hpp</label>
+        <link refid="ConvolutionFpropNode_8hpp"/>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="93" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+      </node>
+      <node id="119">
+        <label>hipdnn_frontend/node/ConvolutionWgradNode.hpp</label>
+        <link refid="ConvolutionWgradNode_8hpp"/>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="94" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+        <childnode refid="39" relation="include">
+        </childnode>
+      </node>
+      <node id="111">
+        <label>Node.hpp</label>
+        <link refid="Node_8hpp"/>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+        <childnode refid="73" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="109" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="121">
+        <label>hipdnn_frontend/node/PointwiseNode.hpp</label>
+        <link refid="PointwiseNode_8hpp"/>
+        <childnode refid="111" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="72" relation="include">
+        </childnode>
+        <childnode refid="74" relation="include">
+        </childnode>
+        <childnode refid="98" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="42" relation="include">
+        </childnode>
+        <childnode refid="57" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="39" relation="include">
+        </childnode>
+        <childnode refid="55" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+      </node>
+      <node id="16">
+        <label>algorithm</label>
+      </node>
+      <node id="21">
+        <label>array</label>
+      </node>
+      <node id="65">
+        <label>bitset</label>
+      </node>
+      <node id="108">
+        <label>cstdint</label>
+      </node>
+      <node id="46">
+        <label>cstdlib</label>
+      </node>
+      <node id="36">
+        <label>cstring</label>
+      </node>
+      <node id="126">
+        <label>flatbuffers/flatbuffer_builder.h</label>
+      </node>
+      <node id="76">
+        <label>flatbuffers/flatbuffers.h</label>
+      </node>
+      <node id="24">
+        <label>functional</label>
+      </node>
+      <node id="52">
+        <label>hip/hip_bfloat16.h</label>
+      </node>
+      <node id="54">
+        <label>hip/hip_fp16.h</label>
+      </node>
+      <node id="2">
+        <label>hip/hip_runtime.h</label>
+      </node>
+      <node id="4">
+        <label>hip/hip_runtime_api.h</label>
+      </node>
+      <node id="5">
+        <label>hipdnn_backend_export.h</label>
+      </node>
+      <node id="86">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h</label>
+      </node>
+      <node id="113">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h</label>
+      </node>
+      <node id="88">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h</label>
+      </node>
+      <node id="90">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h</label>
+      </node>
+      <node id="92">
+        <label>hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h</label>
+      </node>
+      <node id="60">
+        <label>hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h</label>
+      </node>
+      <node id="95">
+        <label>hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h</label>
+      </node>
+      <node id="43">
+        <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
+      </node>
+      <node id="105">
+        <label>hipdnn_data_sdk/data_objects/engine_config_generated.h</label>
+      </node>
+      <node id="77">
+        <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
+      </node>
+      <node id="61">
+        <label>hipdnn_data_sdk/data_objects/knob_value_generated.h</label>
+      </node>
+      <node id="97">
+        <label>hipdnn_data_sdk/data_objects/matmul_attributes_generated.h</label>
+      </node>
+      <node id="62">
+        <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
+      </node>
+      <node id="78">
+        <label>hipdnn_data_sdk/data_objects/tensor_attributes_generated.h</label>
+      </node>
+      <node id="107">
+        <label>hipdnn_data_sdk/flatbuffer_utilities/KnobWrapper.hpp</label>
+      </node>
+      <node id="81">
+        <label>hipdnn_data_sdk/logging/LogLevel.hpp</label>
+      </node>
+      <node id="63">
+        <label>hipdnn_data_sdk/types.hpp</label>
+      </node>
+      <node id="137">
+        <label>hipdnn_data_sdk/utilities/EngineNames.hpp</label>
+      </node>
+      <node id="82">
+        <label>hipdnn_frontend/detail/BackendWrapper.hpp</label>
+      </node>
+      <node id="99">
+        <label>hipdnn_frontend/detail/CreateBackendDescriptor.hpp</label>
+      </node>
+      <node id="100">
+        <label>hipdnn_frontend/detail/GraphDetail.hpp</label>
+      </node>
+      <node id="101">
+        <label>hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp</label>
+      </node>
+      <node id="120">
+        <label>hipdnn_frontend/node/MatmulNode.hpp</label>
+      </node>
+      <node id="122">
+        <label>hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp</label>
+      </node>
+      <node id="30">
+        <label>iostream</label>
+      </node>
+      <node id="47">
+        <label>limits</label>
+      </node>
+      <node id="31">
+        <label>memory</label>
+      </node>
+      <node id="25">
+        <label>mutex</label>
+      </node>
+      <node id="48">
+        <label>new</label>
+      </node>
+      <node id="127">
+        <label>nlohmann/detail/macro_scope.hpp</label>
+      </node>
+      <node id="128">
+        <label>nlohmann/json.hpp</label>
+      </node>
+      <node id="39">
+        <label>numeric</label>
+      </node>
+      <node id="79">
+        <label>optional</label>
+      </node>
+      <node id="51">
+        <label>ostream</label>
+      </node>
+      <node id="55">
+        <label>random</label>
+      </node>
+      <node id="40">
+        <label>ranges</label>
+      </node>
+      <node id="66">
+        <label>set</label>
+      </node>
+      <node id="26">
+        <label>spdlog/async.h</label>
+      </node>
+      <node id="27">
+        <label>spdlog/details/null_mutex.h</label>
+      </node>
+      <node id="28">
+        <label>spdlog/details/synchronous_factory.h</label>
+      </node>
+      <node id="29">
+        <label>spdlog/sinks/base_sink.h</label>
+      </node>
+      <node id="32">
+        <label>spdlog/sinks/basic_file_sink.h</label>
+      </node>
+      <node id="33">
+        <label>spdlog/sinks/stdout_color_sinks.h</label>
+      </node>
+      <node id="34">
+        <label>spdlog/spdlog.h</label>
+      </node>
+      <node id="37">
+        <label>sstream</label>
+      </node>
+      <node id="70">
+        <label>stddef.h</label>
+      </node>
+      <node id="41">
+        <label>stdexcept</label>
+      </node>
+      <node id="71">
+        <label>stdint.h</label>
+      </node>
+      <node id="23">
+        <label>string</label>
+      </node>
+      <node id="49">
+        <label>type_traits</label>
+      </node>
+      <node id="56">
+        <label>typeindex</label>
+      </node>
+      <node id="75">
+        <label>unordered_map</label>
+      </node>
+      <node id="109">
+        <label>unordered_set</label>
+      </node>
+      <node id="85">
+        <label>utility</label>
+      </node>
+      <node id="67">
+        <label>variant</label>
+      </node>
+      <node id="38">
+        <label>vector</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <innerclass refid="structConfig" prot="public">Config</innerclass>
+    <innerclass refid="structSampleRunner" prot="public">SampleRunner</innerclass>
+    <sectiondef kind="define">
+      <memberdef kind="define" id="Helpers_8hpp_1aaf41965393ffaedeec1441c5bc1c04e9" prot="public" static="no">
+        <name>HIP_CHECK</name>
+        <param><defname>status</defname></param>
+        <initializer>    do                                                                                         \
+    {                                                                                          \
+        if(status != hipSuccess)                                                               \
+        {                                                                                      \
+            std::cerr &lt;&lt; &quot;HIP Error: &quot; &lt;&lt; hipGetErrorString(status) &lt;&lt; &quot; in file &quot; &lt;&lt; __FILE__ \
+                      &lt;&lt; &quot; at line &quot; &lt;&lt; __LINE__ &lt;&lt; std::endl;                                 \
+            exit(EXIT_FAILURE);                                                                \
+        }                                                                                      \
+    } while(0)</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="20" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="20" bodyend="29"/>
+      </memberdef>
+      <memberdef kind="define" id="Helpers_8hpp_1a96acd1b777e4151da28de265f8d22a61" prot="public" static="no">
+        <name>HIPDNN_CHECK</name>
+        <param><defname>status</defname></param>
+        <initializer>    do                                                                                   \
+    {                                                                                    \
+        if(status != <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345a449c00a84ecf02107b8d51b0dd900083" kindref="member">HIPDNN_STATUS_SUCCESS</ref>)                                              \
+        {                                                                                \
+            std::cerr &lt;&lt; &quot;hipDNN Error: &quot; &lt;&lt; hipdnnGetErrorString(status) &lt;&lt; &quot; in file &quot; \
+                      &lt;&lt; __FILE__ &lt;&lt; &quot; at line &quot; &lt;&lt; __LINE__ &lt;&lt; std::endl;               \
+            exit(EXIT_FAILURE);                                                          \
+        }                                                                                \
+    } while(0)</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="31" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="31" bodyend="40"/>
+      </memberdef>
+      <memberdef kind="define" id="Helpers_8hpp_1a0e796d6d03dad288ff04bef60b661df0" prot="public" static="no">
+        <name>HIPDNN_FE_CHECK</name>
+        <param><defname>statusObj</defname></param>
+        <initializer>    do                                                                                    \
+    {                                                                                     \
+        auto const&amp; status = statusObj;                                                   \
+        if(!status.is_good())                                                             \
+        {                                                                                 \
+            std::cerr &lt;&lt; &quot;hipDNN Frontend Error: &quot; &lt;&lt; status.get_message() &lt;&lt; &quot; in file &quot; \
+                      &lt;&lt; __FILE__ &lt;&lt; &quot; at line &quot; &lt;&lt; __LINE__ &lt;&lt; std::endl;                \
+            exit(EXIT_FAILURE);                                                           \
+        }                                                                                 \
+    } while(0)</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="42" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="42" bodyend="52"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="Helpers_8hpp_1ab6b7453aa4ac068ab1bf344748dce256" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void printSampleHelp</definition>
+        <argsstring>(const std::string &amp;sampleName)</argsstring>
+        <name>printSampleHelp</name>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>sampleName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="54" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="54" bodyend="65"/>
+      </memberdef>
+      <memberdef kind="function" id="Helpers_8hpp_1a1c61b706ce507632548dc21304f92cfd" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structConfig" kindref="compound">Config</ref></type>
+        <definition>Config parseCommandLineArgs</definition>
+        <argsstring>(int argc, char *argv[])</argsstring>
+        <name>parseCommandLineArgs</name>
+        <param>
+          <type>int</type>
+          <declname>argc</declname>
+        </param>
+        <param>
+          <type>char *</type>
+          <declname>argv</declname>
+          <array>[]</array>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="73" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="73" bodyend="107"/>
+      </memberdef>
+      <memberdef kind="function" id="Helpers_8hpp_1a4440f217fd7c193945279f2111de60eb" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename F</type>
+          </param>
+        </templateparamlist>
+        <type>bool</type>
+        <definition>bool run</definition>
+        <argsstring>(F &amp;&amp;f)</argsstring>
+        <name>run</name>
+        <param>
+          <type>F &amp;&amp;</type>
+          <declname>f</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="110" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="110" bodyend="120"/>
+      </memberdef>
+      <memberdef kind="function" id="Helpers_8hpp_1a135c27bcf0909dff03d8a2376662d14a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="namespacehipdnn__frontend_1_1graph_1abf5c442ecbf0096989ffad74dbb1ab60" kindref="member">hipdnn_frontend::graph::Tensor_attributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; hipdnn_frontend::graph::Tensor_attributes &gt; createTensor</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;dims, hipdnn_frontend::DataType_t dataType, const TensorLayout &amp;layout=TensorLayout::NCHW)</argsstring>
+        <name>createTensor</name>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">hipdnn_frontend::DataType_t</ref></type>
+          <declname>dataType</declname>
+        </param>
+        <param>
+          <type>const <ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref> &amp;</type>
+          <declname>layout</declname>
+          <defval>TensorLayout::NCHW</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="123" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="123" bodyend="132"/>
+      </memberdef>
+      <memberdef kind="function" id="Helpers_8hpp_1a36f4cf97a3a0fe83269b44ea7dee1467" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>int64_t getTensorElementCount</definition>
+        <argsstring>(const std::shared_ptr&lt; hipdnn_frontend::graph::Tensor_attributes &gt; &amp;tensor)</argsstring>
+        <name>getTensorElementCount</name>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="namespacehipdnn__frontend_1_1graph_1abf5c442ecbf0096989ffad74dbb1ab60" kindref="member">hipdnn_frontend::graph::Tensor_attributes</ref> &gt; &amp;</type>
+          <declname>tensor</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="135" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="135" bodyend="143"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hip/hip_runtime.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="hipdnn__backend_8h" kindref="compound">hipdnn_backend.h</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="7"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="ShapeUtilities_8hpp" kindref="compound">hipdnn_data_sdk/utilities/ShapeUtilities.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="8"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Tensor_8hpp" kindref="compound">hipdnn_data_sdk/utilities/Tensor.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="9"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="hipdnn__frontend_8hpp" kindref="compound">hipdnn_frontend.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="10"><highlight class="normal"></highlight></codeline>
+<codeline lineno="11"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;algorithm&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;iostream&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;memory&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;numeric&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;random&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;vector&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">hipdnn_data_sdk::utilities::TensorLayout</ref>;</highlight></codeline>
+<codeline lineno="19"><highlight class="normal"></highlight></codeline>
+<codeline lineno="20" refid="Helpers_8hpp_1aaf41965393ffaedeec1441c5bc1c04e9" refkind="member"><highlight class="normal"></highlight><highlight class="preprocessor">#define<sp/>HIP_CHECK(status)<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="21"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>do<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="22"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>{<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="23"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>if(status<sp/>!=<sp/>hipSuccess)<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="24"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="25"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::cerr<sp/>&lt;&lt;<sp/>&quot;HIP<sp/>Error:<sp/>&quot;<sp/>&lt;&lt;<sp/>hipGetErrorString(status)<sp/>&lt;&lt;<sp/>&quot;<sp/>in<sp/>file<sp/>&quot;<sp/>&lt;&lt;<sp/>__FILE__<sp/>\</highlight></codeline>
+<codeline lineno="26"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/>&quot;<sp/>at<sp/>line<sp/>&quot;<sp/>&lt;&lt;<sp/>__LINE__<sp/>&lt;&lt;<sp/>std::endl;<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="27"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>exit(EXIT_FAILURE);<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="28"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="29"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>}<sp/>while(0)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="30"><highlight class="normal"></highlight></codeline>
+<codeline lineno="31" refid="Helpers_8hpp_1a96acd1b777e4151da28de265f8d22a61" refkind="member"><highlight class="normal"></highlight><highlight class="preprocessor">#define<sp/>HIPDNN_CHECK(status)<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="32"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>do<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="33"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>{<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="34"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>if(status<sp/>!=<sp/>HIPDNN_STATUS_SUCCESS)<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="35"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="36"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::cerr<sp/>&lt;&lt;<sp/>&quot;hipDNN<sp/>Error:<sp/>&quot;<sp/>&lt;&lt;<sp/>hipdnnGetErrorString(status)<sp/>&lt;&lt;<sp/>&quot;<sp/>in<sp/>file<sp/>&quot;<sp/>\</highlight></codeline>
+<codeline lineno="37"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/>__FILE__<sp/>&lt;&lt;<sp/>&quot;<sp/>at<sp/>line<sp/>&quot;<sp/>&lt;&lt;<sp/>__LINE__<sp/>&lt;&lt;<sp/>std::endl;<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="38"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>exit(EXIT_FAILURE);<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="39"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="40"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>}<sp/>while(0)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="41"><highlight class="normal"></highlight></codeline>
+<codeline lineno="42" refid="Helpers_8hpp_1a0e796d6d03dad288ff04bef60b661df0" refkind="member"><highlight class="normal"></highlight><highlight class="preprocessor">#define<sp/>HIPDNN_FE_CHECK(statusObj)<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="43"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>do<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="44"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>{<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="45"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>auto<sp/>const&amp;<sp/>status<sp/>=<sp/>statusObj;<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="46"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>if(!status.is_good())<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="47"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="48"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::cerr<sp/>&lt;&lt;<sp/>&quot;hipDNN<sp/>Frontend<sp/>Error:<sp/>&quot;<sp/>&lt;&lt;<sp/>status.get_message()<sp/>&lt;&lt;<sp/>&quot;<sp/>in<sp/>file<sp/>&quot;<sp/>\</highlight></codeline>
+<codeline lineno="49"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/>__FILE__<sp/>&lt;&lt;<sp/>&quot;<sp/>at<sp/>line<sp/>&quot;<sp/>&lt;&lt;<sp/>__LINE__<sp/>&lt;&lt;<sp/>std::endl;<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="50"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>exit(EXIT_FAILURE);<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="51"><highlight class="preprocessor"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>\</highlight></codeline>
+<codeline lineno="52"><highlight class="preprocessor"><sp/><sp/><sp/><sp/>}<sp/>while(0)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="53"><highlight class="normal"></highlight></codeline>
+<codeline lineno="54" refid="Helpers_8hpp_1ab6b7453aa4ac068ab1bf344748dce256" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="Helpers_8hpp_1ab6b7453aa4ac068ab1bf344748dce256" kindref="member">printSampleHelp</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::string&amp;<sp/>sampleName)</highlight></codeline>
+<codeline lineno="55"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="56"><highlight class="normal"><sp/><sp/><sp/><sp/>std::cout<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;Usage:<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>sampleName<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;<sp/>[OPTIONS]\n&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="57"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;Options:\n&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="58"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;<sp/><sp/>--verify-cpu,<sp/>-vc<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>Enable<sp/>CPU<sp/>reference<sp/>validation\n&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="59"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;<sp/><sp/>--batch-stats-only<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>Use<sp/>batch<sp/>statistics<sp/>only<sp/>(no<sp/>running<sp/>stats)<sp/>[BN<sp/>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="60"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;training<sp/>only]\n&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="61"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;<sp/><sp/>--full-training<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>Use<sp/>full<sp/>training<sp/>with<sp/>running<sp/>statistics<sp/>[BN<sp/>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="62"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;training<sp/>only]\n&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="63"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;<sp/><sp/>--help,<sp/>-h<sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>Show<sp/>this<sp/>help<sp/>message\n&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="64"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&lt;&lt;<sp/>std::endl;</highlight></codeline>
+<codeline lineno="65"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="66"><highlight class="normal"></highlight></codeline>
+<codeline lineno="67" refid="structConfig" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal"><ref refid="structConfig" kindref="compound">Config</ref></highlight></codeline>
+<codeline lineno="68"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="69" refid="structConfig_1a54dcaf161499eb405a4b7596ed80207f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="structConfig_1a54dcaf161499eb405a4b7596ed80207f" kindref="member">cpuValidation</ref><sp/>=<sp/></highlight><highlight class="keyword">false</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="70" refid="structConfig_1a498952c29fb4d5b52e29edc5c04eeaa2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="structConfig_1a498952c29fb4d5b52e29edc5c04eeaa2" kindref="member">useRunningStats</ref><sp/>=<sp/></highlight><highlight class="keyword">false</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="71"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="72"><highlight class="normal"></highlight></codeline>
+<codeline lineno="73" refid="Helpers_8hpp_1a1c61b706ce507632548dc21304f92cfd" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/><ref refid="structConfig" kindref="compound">Config</ref><sp/><ref refid="Helpers_8hpp_1a1c61b706ce507632548dc21304f92cfd" kindref="member">parseCommandLineArgs</ref>(</highlight><highlight class="keywordtype">int</highlight><highlight class="normal"><sp/>argc,<sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>argv[])</highlight></codeline>
+<codeline lineno="74"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="75"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>config<sp/>=<sp/><ref refid="structConfig" kindref="compound">Config</ref>{};</highlight></codeline>
+<codeline lineno="76"><highlight class="normal"></highlight></codeline>
+<codeline lineno="77"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal">(</highlight><highlight class="keywordtype">int</highlight><highlight class="normal"><sp/>i<sp/>=<sp/>1;<sp/>i<sp/>&lt;<sp/>argc;<sp/>++i)</highlight></codeline>
+<codeline lineno="78"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="79"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>arg<sp/>=<sp/>std::string(argv[i]);</highlight></codeline>
+<codeline lineno="80"><highlight class="normal"></highlight></codeline>
+<codeline lineno="81"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(arg<sp/>==<sp/></highlight><highlight class="stringliteral">&quot;--verify-cpu&quot;</highlight><highlight class="normal"><sp/>||<sp/>arg<sp/>==<sp/></highlight><highlight class="stringliteral">&quot;-vc&quot;</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="82"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="83"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>config.cpuValidation<sp/>=<sp/></highlight><highlight class="keyword">true</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="84"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="85"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">else</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(arg<sp/>==<sp/></highlight><highlight class="stringliteral">&quot;--batch-stats-only&quot;</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="86"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="87"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>config.useRunningStats<sp/>=<sp/></highlight><highlight class="keyword">false</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="88"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="89"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">else</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(arg<sp/>==<sp/></highlight><highlight class="stringliteral">&quot;--full-training&quot;</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="90"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="91"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>config.useRunningStats<sp/>=<sp/></highlight><highlight class="keyword">true</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="93"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">else</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(arg<sp/>==<sp/></highlight><highlight class="stringliteral">&quot;--help&quot;</highlight><highlight class="normal"><sp/>||<sp/>arg<sp/>==<sp/></highlight><highlight class="stringliteral">&quot;-h&quot;</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="94"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="95"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="Helpers_8hpp_1ab6b7453aa4ac068ab1bf344748dce256" kindref="member">printSampleHelp</ref>(argv[0]);</highlight></codeline>
+<codeline lineno="96"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>exit(EXIT_SUCCESS);</highlight></codeline>
+<codeline lineno="97"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="98"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">else</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="99"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="100"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::cerr<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;Unknown<sp/>argument:<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>arg<sp/>&lt;&lt;<sp/>std::endl;</highlight></codeline>
+<codeline lineno="101"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="Helpers_8hpp_1ab6b7453aa4ac068ab1bf344748dce256" kindref="member">printSampleHelp</ref>(argv[0]);</highlight></codeline>
+<codeline lineno="102"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>exit(EXIT_FAILURE);</highlight></codeline>
+<codeline lineno="103"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="104"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"></highlight></codeline>
+<codeline lineno="106"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>config;</highlight></codeline>
+<codeline lineno="107"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="108"><highlight class="normal"></highlight></codeline>
+<codeline lineno="109"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>F&gt;</highlight></codeline>
+<codeline lineno="110" refid="Helpers_8hpp_1a4440f217fd7c193945279f2111de60eb" refkind="member"><highlight class="normal"></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="Helpers_8hpp_1a4440f217fd7c193945279f2111de60eb" kindref="member">run</ref>(F&amp;&amp;<sp/>f)</highlight></codeline>
+<codeline lineno="111"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="112"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/>allPassed<sp/>=<sp/></highlight><highlight class="keyword">true</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="113"><highlight class="normal"><sp/><sp/><sp/><sp/>allPassed<sp/>&amp;=<sp/>f.template<sp/>operator()&lt;float,<sp/></highlight><highlight class="keywordtype">float</highlight><highlight class="normal">&gt;(<ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1acd72749a19c75f56571a6f7e895d12d2" kindref="member">TensorLayout::NCHW</ref>);</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"><sp/><sp/><sp/><sp/>allPassed<sp/>&amp;=<sp/>f.template<sp/>operator()&lt;half,<sp/></highlight><highlight class="keywordtype">float</highlight><highlight class="normal">&gt;(<ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1acd72749a19c75f56571a6f7e895d12d2" kindref="member">TensorLayout::NCHW</ref>);</highlight></codeline>
+<codeline lineno="115"><highlight class="normal"><sp/><sp/><sp/><sp/>allPassed<sp/>&amp;=<sp/>f.template<sp/>operator()&lt;hip_bfloat16,<sp/></highlight><highlight class="keywordtype">float</highlight><highlight class="normal">&gt;(<ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1acd72749a19c75f56571a6f7e895d12d2" kindref="member">TensorLayout::NCHW</ref>);</highlight></codeline>
+<codeline lineno="116"><highlight class="normal"><sp/><sp/><sp/><sp/>allPassed<sp/>&amp;=<sp/>f.template<sp/>operator()&lt;float,<sp/></highlight><highlight class="keywordtype">float</highlight><highlight class="normal">&gt;(<ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1ab60cb8d8ac75839eae475082732a9cf2" kindref="member">TensorLayout::NHWC</ref>);</highlight></codeline>
+<codeline lineno="117"><highlight class="normal"><sp/><sp/><sp/><sp/>allPassed<sp/>&amp;=<sp/>f.template<sp/>operator()&lt;half,<sp/></highlight><highlight class="keywordtype">float</highlight><highlight class="normal">&gt;(<ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1ab60cb8d8ac75839eae475082732a9cf2" kindref="member">TensorLayout::NHWC</ref>);</highlight></codeline>
+<codeline lineno="118"><highlight class="normal"><sp/><sp/><sp/><sp/>allPassed<sp/>&amp;=<sp/>f.template<sp/>operator()&lt;hip_bfloat16,<sp/></highlight><highlight class="keywordtype">float</highlight><highlight class="normal">&gt;(<ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1ab60cb8d8ac75839eae475082732a9cf2" kindref="member">TensorLayout::NHWC</ref>);</highlight></codeline>
+<codeline lineno="119"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>allPassed;</highlight></codeline>
+<codeline lineno="120"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="121"><highlight class="normal"></highlight></codeline>
+<codeline lineno="122"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;hipdnn_frontend::graph::Tensor_attributes&gt;</highlight></codeline>
+<codeline lineno="123" refid="Helpers_8hpp_1a135c27bcf0909dff03d8a2376662d14a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="Helpers_8hpp_1a135c27bcf0909dff03d8a2376662d14a" kindref="member">createTensor</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/>dims,</highlight></codeline>
+<codeline lineno="124"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">hipdnn_frontend::DataType_t</ref><sp/>dataType,</highlight></codeline>
+<codeline lineno="125"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref>&amp;<sp/>layout<sp/>=<sp/><ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1acd72749a19c75f56571a6f7e895d12d2" kindref="member">TensorLayout::NCHW</ref>)</highlight></codeline>
+<codeline lineno="126"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="127"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>tensor<sp/>=<sp/>std::make_shared&lt;hipdnn_frontend::graph::Tensor_attributes&gt;();</highlight></codeline>
+<codeline lineno="128"><highlight class="normal"><sp/><sp/><sp/><sp/>tensor-&gt;set_dim(dims).set_data_type(dataType);</highlight></codeline>
+<codeline lineno="129"><highlight class="normal"><sp/><sp/><sp/><sp/>tensor-&gt;set_stride(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a892cd5e7bd645014ff042f09ae5c8df3" kindref="member">hipdnn_data_sdk::utilities::generateStrides</ref>(dims,<sp/>layout.strideOrder));</highlight></codeline>
+<codeline lineno="130"><highlight class="normal"></highlight></codeline>
+<codeline lineno="131"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>tensor;</highlight></codeline>
+<codeline lineno="132"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="133"><highlight class="normal"></highlight></codeline>
+<codeline lineno="134"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/>int64_t</highlight></codeline>
+<codeline lineno="135" refid="Helpers_8hpp_1a36f4cf97a3a0fe83269b44ea7dee1467" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="Helpers_8hpp_1a36f4cf97a3a0fe83269b44ea7dee1467" kindref="member">getTensorElementCount</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;hipdnn_frontend::graph::Tensor_attributes&gt;&amp;<sp/>tensor)</highlight></codeline>
+<codeline lineno="136"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="137"><highlight class="normal"><sp/><sp/><sp/><sp/>int64_t<sp/>count<sp/>=<sp/>1;</highlight></codeline>
+<codeline lineno="138"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal">(</highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>dim<sp/>:<sp/>tensor-&gt;get_dim())</highlight></codeline>
+<codeline lineno="139"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="140"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>count<sp/>*=<sp/>dim;</highlight></codeline>
+<codeline lineno="141"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="142"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>count;</highlight></codeline>
+<codeline lineno="143"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="144"><highlight class="normal"></highlight></codeline>
+<codeline lineno="145" refid="structSampleRunner" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal"><ref refid="structSampleRunner" kindref="compound">SampleRunner</ref></highlight></codeline>
+<codeline lineno="146"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="147" refid="structSampleRunner_1a663ea1407384f6b179668655434a5621" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/><ref refid="structSampleRunner_1a663ea1407384f6b179668655434a5621" kindref="member">handle</ref>;</highlight></codeline>
+<codeline lineno="148" refid="structSampleRunner_1a84cf68355b7b749c45b00d52d669a887" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="structConfig" kindref="compound">Config</ref><sp/><ref refid="structSampleRunner_1a84cf68355b7b749c45b00d52d669a887" kindref="member">config</ref>;</highlight></codeline>
+<codeline lineno="149"><highlight class="normal"></highlight></codeline>
+<codeline lineno="150"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>InputType,<sp/></highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>IntermediateType&gt;</highlight></codeline>
+<codeline lineno="151"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="structSampleRunner_1a2b9f0f17432117dc5dc7c9f6f8ebbeb9" kindref="member">operator()</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref>&amp;<sp/>layout);</highlight></codeline>
+<codeline lineno="152"><highlight class="normal">};</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp"/>
+  </compounddef>
+</doxygen>

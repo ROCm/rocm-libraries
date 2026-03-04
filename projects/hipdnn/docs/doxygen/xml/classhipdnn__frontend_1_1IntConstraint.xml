@@ -1,0 +1,295 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1IntConstraint" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::IntConstraint</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1IConstraint" prot="public" virt="non-virtual">hipdnn_frontend::IConstraint</basecompoundref>
+    <includes refid="KnobConstraint_8hpp" local="no">KnobConstraint.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1IntConstraint_1a1870cadbf9cb3f72989ab296ab1cb198" prot="private" static="no" mutable="no">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::IntConstraint::_minValue</definition>
+        <argsstring></argsstring>
+        <name>_minValue</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::_minValue</qualifiedname>
+        <briefdescription>
+<para>Minimum allowed value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="164" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="164" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1IntConstraint_1a720e00793cc580a960f4ce8af401070a" prot="private" static="no" mutable="no">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::IntConstraint::_maxValue</definition>
+        <argsstring></argsstring>
+        <name>_maxValue</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::_maxValue</qualifiedname>
+        <briefdescription>
+<para>Maximum allowed value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="165" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="165" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1IntConstraint_1a4e25ce2389fa588f39e164a9c9543b0c" prot="private" static="no" mutable="no">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::IntConstraint::_step</definition>
+        <argsstring></argsstring>
+        <name>_step</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::_step</qualifiedname>
+        <briefdescription>
+<para>Step increment. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="166" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="166" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1IntConstraint_1a13c4408432ee5ef316eec41200ad7899" prot="private" static="no" mutable="no">
+        <type>std::unordered_set&lt; int64_t &gt;</type>
+        <definition>std::unordered_set&lt;int64_t&gt; hipdnn_frontend::IntConstraint::_validValues</definition>
+        <argsstring></argsstring>
+        <name>_validValues</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::_validValues</qualifiedname>
+        <briefdescription>
+<para>Explicit allowed values. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="167" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="167" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1IntConstraint_1ac931b2f150cfabd215efdc43a39309fc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::IntConstraint::IntConstraint</definition>
+        <argsstring>(int64_t minValue, int64_t maxValue, int64_t step=1, std::unordered_set&lt; int64_t &gt; validValues={})</argsstring>
+        <name>IntConstraint</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::IntConstraint</qualifiedname>
+        <param>
+          <type>int64_t</type>
+          <declname>minValue</declname>
+        </param>
+        <param>
+          <type>int64_t</type>
+          <declname>maxValue</declname>
+        </param>
+        <param>
+          <type>int64_t</type>
+          <declname>step</declname>
+          <defval>1</defval>
+        </param>
+        <param>
+          <type>std::unordered_set&lt; int64_t &gt;</type>
+          <declname>validValues</declname>
+          <defval>{}</defval>
+        </param>
+        <briefdescription>
+<para>Construct an <ref refid="classhipdnn__frontend_1_1IntConstraint" kindref="compound">IntConstraint</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>minValue</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Minimum allowed value </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>maxValue</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Maximum allowed value </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>step</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Step increment (value must be minValue + n*step) </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>validValues</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Explicit set of allowed values (if non-empty, overrides range) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="70" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="70" bodyend="79"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1IntConstraint_1a847b24ab93bafbe7ffcfa08b301fb9e7" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::IntConstraint::validateKnobSetting</definition>
+        <argsstring>(const KnobSetting &amp;setting) const override</argsstring>
+        <name>validateKnobSetting</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::validateKnobSetting</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1IConstraint_1a6ab00265f7278a5fa54bfc2c33bc1e92">validateKnobSetting</reimplements>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> &amp;</type>
+          <declname>setting</declname>
+        </param>
+        <briefdescription>
+<para>Validate a knob setting against this constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>setting</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> to validate </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or describing the validation failure </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="81" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="81" bodyend="122"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1IntConstraint_1a4e11f5d651a522f9f3941d72b3737ad6" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::IntConstraint::toString</definition>
+        <argsstring>() const override</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::toString</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1IConstraint_1ad415b6bb1b75cc43d38a06f18d74db9e">toString</reimplements>
+        <briefdescription>
+<para>Get a string representation of this constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Human-readable string for debugging/logging </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="124" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="124" bodyend="137"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1IntConstraint_1a93ed9a6ce37351b7636dfaad5dc607fc" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::IntConstraint::getMinValue</definition>
+        <argsstring>() const</argsstring>
+        <name>getMinValue</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::getMinValue</qualifiedname>
+        <briefdescription>
+<para>Get the minimum allowed value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="140" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="140" bodyend="143"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1IntConstraint_1a4f15e6a06efac85a89f353a40e6937a3" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::IntConstraint::getMaxValue</definition>
+        <argsstring>() const</argsstring>
+        <name>getMaxValue</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::getMaxValue</qualifiedname>
+        <briefdescription>
+<para>Get the maximum allowed value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="146" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="146" bodyend="149"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1IntConstraint_1a21c330deccf3eb0937142cdd06ba5718" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::IntConstraint::getStep</definition>
+        <argsstring>() const</argsstring>
+        <name>getStep</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::getStep</qualifiedname>
+        <briefdescription>
+<para>Get the step increment. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="152" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="152" bodyend="155"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1IntConstraint_1a257d300fcd8d3a699e7c627ccb9b5037" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::unordered_set&lt; int64_t &gt; &amp;</type>
+        <definition>const std::unordered_set&lt; int64_t &gt; &amp; hipdnn_frontend::IntConstraint::getValidValues</definition>
+        <argsstring>() const</argsstring>
+        <name>getValidValues</name>
+        <qualifiedname>hipdnn_frontend::IntConstraint::getValidValues</qualifiedname>
+        <briefdescription>
+<para>Get the set of explicitly allowed values. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="158" column="30" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="158" bodyend="161"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Constraint for integer-valued knobs. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>Validates that integer knob values are within a specified range and/or match allowed values. Supports min/max bounds, step increments, and explicit allowed value lists. </para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_frontend::IConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IConstraint"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::IntConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IntConstraint"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="2">
+        <label>hipdnn_frontend::IConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IConstraint"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::IntConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IntConstraint"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="60" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="61" bodyend="168"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a720e00793cc580a960f4ce8af401070a" prot="private" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>_maxValue</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a1870cadbf9cb3f72989ab296ab1cb198" prot="private" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>_minValue</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a4e25ce2389fa588f39e164a9c9543b0c" prot="private" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>_step</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a13c4408432ee5ef316eec41200ad7899" prot="private" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>_validValues</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a4f15e6a06efac85a89f353a40e6937a3" prot="public" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>getMaxValue</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a93ed9a6ce37351b7636dfaad5dc607fc" prot="public" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>getMinValue</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a21c330deccf3eb0937142cdd06ba5718" prot="public" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>getStep</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a257d300fcd8d3a699e7c627ccb9b5037" prot="public" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>getValidValues</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1ac931b2f150cfabd215efdc43a39309fc" prot="public" virt="non-virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>IntConstraint</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a4e11f5d651a522f9f3941d72b3737ad6" prot="public" virt="virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>toString</name></member>
+      <member refid="classhipdnn__frontend_1_1IntConstraint_1a847b24ab93bafbe7ffcfa08b301fb9e7" prot="public" virt="virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>validateKnobSetting</name></member>
+      <member refid="classhipdnn__frontend_1_1IConstraint_1aff435d1b005226f942d3943c72fcd95a" prot="public" virt="virtual"><scope>hipdnn_frontend::IntConstraint</scope><name>~IConstraint</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

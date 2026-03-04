@@ -1,0 +1,61 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structhipdnn__frontend_1_1TopologicalSortResult" kind="struct" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::TopologicalSortResult</compoundname>
+    <includes refid="TopologicalSortingUtils_8hpp" local="no">TopologicalSortingUtils.hpp</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="structhipdnn__frontend_1_1TopologicalSortResult_1a33750e03b85b1261ce03bda1123cba82" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; size_t &gt;</type>
+        <definition>std::vector&lt;size_t&gt; hipdnn_frontend::TopologicalSortResult::order</definition>
+        <argsstring></argsstring>
+        <name>order</name>
+        <qualifiedname>hipdnn_frontend::TopologicalSortResult::order</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="22" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="22" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structhipdnn__frontend_1_1TopologicalSortResult_1a097931eaf99c41bd47d9a59897af22df" prot="public" static="no" mutable="no">
+        <type>int</type>
+        <definition>int hipdnn_frontend::TopologicalSortResult::componentCount</definition>
+        <argsstring></argsstring>
+        <name>componentCount</name>
+        <qualifiedname>hipdnn_frontend::TopologicalSortResult::componentCount</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="23" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="23" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structhipdnn__frontend_1_1TopologicalSortResult_1ab7d7c0a0e16c954e44cff79b73c9726e" prot="public" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::TopologicalSortResult::hasCycle</definition>
+        <argsstring></argsstring>
+        <name>hasCycle</name>
+        <qualifiedname>hipdnn_frontend::TopologicalSortResult::hasCycle</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="24" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="24" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="20" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="21" bodyend="25"/>
+    <listofallmembers>
+      <member refid="structhipdnn__frontend_1_1TopologicalSortResult_1a097931eaf99c41bd47d9a59897af22df" prot="public" virt="non-virtual"><scope>hipdnn_frontend::TopologicalSortResult</scope><name>componentCount</name></member>
+      <member refid="structhipdnn__frontend_1_1TopologicalSortResult_1ab7d7c0a0e16c954e44cff79b73c9726e" prot="public" virt="non-virtual"><scope>hipdnn_frontend::TopologicalSortResult</scope><name>hasCycle</name></member>
+      <member refid="structhipdnn__frontend_1_1TopologicalSortResult_1a33750e03b85b1261ce03bda1123cba82" prot="public" virt="non-virtual"><scope>hipdnn_frontend::TopologicalSortResult</scope><name>order</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

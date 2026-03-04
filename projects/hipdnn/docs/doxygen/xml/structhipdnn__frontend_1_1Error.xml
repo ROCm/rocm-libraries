@@ -1,0 +1,272 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structhipdnn__frontend_1_1Error" kind="struct" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::Error</compoundname>
+    <includes refid="Error_8hpp" local="no">Error.hpp</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="structhipdnn__frontend_1_1Error_1a963cdaf81a05845c99a9fc4141b9cb12" prot="public" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" kindref="member">ErrorCode</ref></type>
+        <definition>ErrorCode hipdnn_frontend::Error::code</definition>
+        <argsstring></argsstring>
+        <name>code</name>
+        <qualifiedname>hipdnn_frontend::Error::code</qualifiedname>
+        <briefdescription>
+<para>The error code. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="83" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="83" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structhipdnn__frontend_1_1Error_1aa9cae139966979bdea4af530cb22bb3c" prot="public" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::Error::err_msg</definition>
+        <argsstring></argsstring>
+        <name>err_msg</name>
+        <qualifiedname>hipdnn_frontend::Error::err_msg</qualifiedname>
+        <briefdescription>
+<para>Detailed error message // NOLINT(readability-identifier-naming) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="84" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="84" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1aac1811595f212e3a8f230480da402a66" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::Error::Error</definition>
+        <argsstring>()</argsstring>
+        <name>Error</name>
+        <qualifiedname>hipdnn_frontend::Error::Error</qualifiedname>
+        <briefdescription>
+<para>Default constructor, creates a success result. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="89" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="89" bodyend="92"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1a0e8004cd161862d3e49d590e6166cc7a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::Error::Error</definition>
+        <argsstring>(ErrorCode errorCode, std::string message)</argsstring>
+        <name>Error</name>
+        <qualifiedname>hipdnn_frontend::Error::Error</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" kindref="member">ErrorCode</ref></type>
+          <declname>errorCode</declname>
+        </param>
+        <param>
+          <type>std::string</type>
+          <declname>message</declname>
+        </param>
+        <briefdescription>
+<para>Construct an <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> with a specific code and message. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>errorCode</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The error code </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>message</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Descriptive message about the error </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="99" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="99" bodyend="103"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1a28303d6c5a62e2a7cc602ee5dc984f72" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::Error::get_message</definition>
+        <argsstring>() const</argsstring>
+        <name>get_message</name>
+        <qualifiedname>hipdnn_frontend::Error::get_message</qualifiedname>
+        <briefdescription>
+<para>Get the error message. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The error message string </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="109" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="109" bodyend="112"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1ae2c84b3d8fae0b75aa1e212604bb011e" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" kindref="member">ErrorCode</ref></type>
+        <definition>ErrorCode hipdnn_frontend::Error::get_code</definition>
+        <argsstring>() const</argsstring>
+        <name>get_code</name>
+        <qualifiedname>hipdnn_frontend::Error::get_code</qualifiedname>
+        <briefdescription>
+<para>Get the error code. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The ErrorCode value </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="118" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="118" bodyend="121"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1a175ea7c1f41a56058c14b65ec7fc4116" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::Error::is_good</definition>
+        <argsstring>() const</argsstring>
+        <name>is_good</name>
+        <qualifiedname>hipdnn_frontend::Error::is_good</qualifiedname>
+        <briefdescription>
+<para>Check if the operation succeeded. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>true if code == <ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>, false otherwise </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="127" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="127" bodyend="130"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1a3c4ee3ef2c8855e64737fd2e92d35eea" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::Error::is_bad</definition>
+        <argsstring>() const</argsstring>
+        <name>is_bad</name>
+        <qualifiedname>hipdnn_frontend::Error::is_bad</qualifiedname>
+        <briefdescription>
+<para>Check if the operation failed. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>true if code != <ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40bae0aa021e21dddbd6d8cecec71e9cf564" kindref="member">ErrorCode::OK</ref>, false otherwise </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="136" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="136" bodyend="139"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1a385c89ad00b1a973dcd97719e2e37d3e" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::Error::operator==</definition>
+        <argsstring>(ErrorCode otherCode) const</argsstring>
+        <name>operator==</name>
+        <qualifiedname>hipdnn_frontend::Error::operator==</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" kindref="member">ErrorCode</ref></type>
+          <declname>otherCode</declname>
+        </param>
+        <briefdescription>
+<para>Compare error code with an ErrorCode value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="142" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="142" bodyend="145"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1a2226085dd8d1146236fb614f63e2c698" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::Error::operator!=</definition>
+        <argsstring>(ErrorCode otherCode) const</argsstring>
+        <name>operator!=</name>
+        <qualifiedname>hipdnn_frontend::Error::operator!=</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a95ef10ef8cf510bd0c6b494bba45d40b" kindref="member">ErrorCode</ref></type>
+          <declname>otherCode</declname>
+        </param>
+        <briefdescription>
+<para>Compare error code with an ErrorCode value (inequality) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="147" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="147" bodyend="150"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1a366272f26300132a21f9ae2e50fc0f3b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::Error::operator==</definition>
+        <argsstring>(const Error &amp;other) const</argsstring>
+        <name>operator==</name>
+        <qualifiedname>hipdnn_frontend::Error::operator==</qualifiedname>
+        <param>
+          <type>const <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> &amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+<para>Compare two <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> objects by their error codes. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="152" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="152" bodyend="155"/>
+      </memberdef>
+      <memberdef kind="function" id="structhipdnn__frontend_1_1Error_1a0a50fe122d92e1d8396566f96d3dd875" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::Error::operator!=</definition>
+        <argsstring>(const Error &amp;other) const</argsstring>
+        <name>operator!=</name>
+        <qualifiedname>hipdnn_frontend::Error::operator!=</qualifiedname>
+        <param>
+          <type>const <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> &amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+<para>Compare two <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> objects by their error codes (inequality) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="157" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="157" bodyend="160"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Represents an error with a code and descriptive message. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>The <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> struct is the primary mechanism for reporting errors in hipDNN Frontend operations. It combines an ErrorCode with a human-readable message describing what went wrong.</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="normal"><ref refid="structhipdnn__frontend_1_1Error_1aac1811595f212e3a8f230480da402a66" kindref="member">Error</ref><sp/>result<sp/>=<sp/>graph.build(handle);</highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(result.is_bad())</highlight></codeline>
+<codeline><highlight class="normal">{</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>std::cerr<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;Build<sp/>failed:<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>result.get_message()<sp/>&lt;&lt;<sp/>std::endl;</highlight></codeline>
+<codeline><highlight class="normal">}</highlight></codeline>
+</programlisting> </para>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" line="81" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp" bodystart="82" bodyend="161"/>
+    <listofallmembers>
+      <member refid="structhipdnn__frontend_1_1Error_1a963cdaf81a05845c99a9fc4141b9cb12" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>code</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1aa9cae139966979bdea4af530cb22bb3c" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>err_msg</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1aac1811595f212e3a8f230480da402a66" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>Error</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1a0e8004cd161862d3e49d590e6166cc7a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>Error</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1ae2c84b3d8fae0b75aa1e212604bb011e" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>get_code</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1a28303d6c5a62e2a7cc602ee5dc984f72" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>get_message</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1a3c4ee3ef2c8855e64737fd2e92d35eea" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>is_bad</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1a175ea7c1f41a56058c14b65ec7fc4116" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>is_good</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1a2226085dd8d1146236fb614f63e2c698" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>operator!=</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1a0a50fe122d92e1d8396566f96d3dd875" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>operator!=</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1a385c89ad00b1a973dcd97719e2e37d3e" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>operator==</name></member>
+      <member refid="structhipdnn__frontend_1_1Error_1a366272f26300132a21f9ae2e50fc0f3b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Error</scope><name>operator==</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

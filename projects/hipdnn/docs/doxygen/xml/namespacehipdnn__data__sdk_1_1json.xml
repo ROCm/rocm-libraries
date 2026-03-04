@@ -1,0 +1,331 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__data__sdk_1_1json" kind="namespace" language="C++">
+    <compoundname>hipdnn_data_sdk::json</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a951e221c9c1bd6c25e05fde4298a1f47" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::BatchnormAttributes &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::BatchnormAttributes &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::BatchnormAttributes &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp" line="37" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp" bodystart="37" bodyend="61"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a9a29b61bbbe30a1f3087509f0318cf1a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::BatchnormBackwardAttributes &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::BatchnormBackwardAttributes &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::BatchnormBackwardAttributes &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp" line="32" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp" bodystart="32" bodyend="52"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1ae8589b89e4e7faf5531db58abce09053" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::BatchnormInferenceAttributes &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::BatchnormInferenceAttributes &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::BatchnormInferenceAttributes &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp" line="28" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp" bodystart="28" bodyend="40"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a381ce0767cdce135c5b7199295a6042f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::BatchnormInferenceAttributesVarianceExt &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::BatchnormInferenceAttributesVarianceExt &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::BatchnormInferenceAttributesVarianceExt &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp" line="29" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp" bodystart="29" bodyend="41"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a3b3a7928e01f15c50a10c54211b33f97" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>class T</type>
+          </param>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to</name>
+        <qualifiedname>hipdnn_data_sdk::json::to</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" line="105" column="13" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" declline="105" declcolumn="13"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1ab627fd953aac0b2affc4a686696e70fd" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>class T</type>
+          </param>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::toVector</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>toVector</name>
+        <qualifiedname>hipdnn_data_sdk::json::toVector</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" line="108" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" bodystart="108" bodyend="121"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a43550114f62c71b64e78cb76a71dbc39" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::ConvolutionBwdAttributes &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::ConvolutionBwdAttributes &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::ConvolutionBwdAttributes &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp" line="32" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp" bodystart="32" bodyend="54"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a32e3f02f0b94b6dffd30a17cfc1a361c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::ConvolutionFwdAttributes &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::ConvolutionFwdAttributes &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::ConvolutionFwdAttributes &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp" line="32" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp" bodystart="32" bodyend="54"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a7a2a05f987d6f55776f1b01392d72095" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::ConvolutionWrwAttributes &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::ConvolutionWrwAttributes &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::ConvolutionWrwAttributes &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp" line="32" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp" bodystart="32" bodyend="54"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a0c66750f564cdd528bd2efbee209585b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::Node &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::Node &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::Node &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp" line="93" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp" bodystart="93" bodyend="128"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a965b8caf41f783df214ec488be5e7fc6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::Graph &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::Graph &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::Graph &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp" line="131" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp" bodystart="131" bodyend="146"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1a15381c0f0f7341d77b17f0c0128104b8" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::PointwiseAttributes &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::PointwiseAttributes &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::PointwiseAttributes &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp" line="83" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp" bodystart="83" bodyend="104"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1json_1ad2b0309c800592bd903cebc691c127dc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+        </templateparamlist>
+        <type>auto</type>
+        <definition>auto hipdnn_data_sdk::json::to&lt; data_objects::TensorAttributes &gt;</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder, const nlohmann::json &amp;entry)</argsstring>
+        <name>to&lt; data_objects::TensorAttributes &gt;</name>
+        <qualifiedname>hipdnn_data_sdk::json::to&lt; data_objects::TensorAttributes &gt;</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>entry</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/TensorAttributes.hpp" line="58" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/TensorAttributes.hpp" bodystart="58" bodyend="138"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp" line="34" column="1"/>
+  </compounddef>
+</doxygen>

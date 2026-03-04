@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_e150018ec2dc0b06885a1a3be39fac5e" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node</compoundname>
+    <innerfile refid="BatchnormBackwardNode_8hpp">BatchnormBackwardNode.hpp</innerfile>
+    <innerfile refid="BatchnormInferenceNode_8hpp">BatchnormInferenceNode.hpp</innerfile>
+    <innerfile refid="BatchnormInferenceNodeVarianceExt_8hpp">BatchnormInferenceNodeVarianceExt.hpp</innerfile>
+    <innerfile refid="BatchnormNode_8hpp">BatchnormNode.hpp</innerfile>
+    <innerfile refid="ConvolutionDgradNode_8hpp">ConvolutionDgradNode.hpp</innerfile>
+    <innerfile refid="ConvolutionFpropNode_8hpp">ConvolutionFpropNode.hpp</innerfile>
+    <innerfile refid="ConvolutionWgradNode_8hpp">ConvolutionWgradNode.hpp</innerfile>
+    <innerfile refid="Node_8hpp">Node.hpp</innerfile>
+    <innerfile refid="PointwiseNode_8hpp">PointwiseNode.hpp</innerfile>
+    <innerfile refid="TopologicalSortingUtils_8hpp">TopologicalSortingUtils.hpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/"/>
+  </compounddef>
+</doxygen>

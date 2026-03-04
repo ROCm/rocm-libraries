@@ -1,0 +1,209 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__plugin__sdk_1_1NodeWrapper" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_plugin_sdk::NodeWrapper</compoundname>
+    <basecompoundref refid="classhipdnn__plugin__sdk_1_1INodeWrapper" prot="public" virt="non-virtual">hipdnn_plugin_sdk::INodeWrapper</basecompoundref>
+    <includes refid="NodeWrapper_8hpp" local="no">NodeWrapper.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1a876861d16f44ca112d15399639d05e61" prot="private" static="no" mutable="no">
+        <type>const hipdnn_data_sdk::data_objects::Node *</type>
+        <definition>const hipdnn_data_sdk::data_objects::Node* hipdnn_plugin_sdk::NodeWrapper::_shallowNode</definition>
+        <argsstring></argsstring>
+        <name>_shallowNode</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::_shallowNode</qualifiedname>
+        <initializer>= nullptr</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="117" column="47" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="117" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1aae58e6a75794705d08d4dde5391d6ad5" prot="public" static="no" const="no" explicit="yes" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_plugin_sdk::NodeWrapper::NodeWrapper</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::Node *node)</argsstring>
+        <name>NodeWrapper</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::NodeWrapper</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::Node *</type>
+          <declname>node</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="48" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="48" bodyend="52"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1a30d3db6fd920af73db7c881b99affa59" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_plugin_sdk::NodeWrapper::isValid</definition>
+        <argsstring>() const override</argsstring>
+        <name>isValid</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::isValid</qualifiedname>
+        <reimplements refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1af1be34ef09ef64bc9ecbfc7008eb8230">isValid</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="54" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="54" bodyend="57"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1ab8e0933b1a7697f0c647f3a9594a5807" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>const hipdnn_data_sdk::data_objects::Node &amp;</type>
+        <definition>const hipdnn_data_sdk::data_objects::Node &amp; hipdnn_plugin_sdk::NodeWrapper::node</definition>
+        <argsstring>() const override</argsstring>
+        <name>node</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::node</qualifiedname>
+        <reimplements refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1aa53e64286a8e96b7f6df31cb33dcda4b">node</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="59" column="47" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="59" bodyend="62"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1ad63a2d157e661cde3acd60956a59518b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>const void *</type>
+        <definition>const void * hipdnn_plugin_sdk::NodeWrapper::attributes</definition>
+        <argsstring>() const override</argsstring>
+        <name>attributes</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::attributes</qualifiedname>
+        <reimplements refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1a2f069700b1bbf8cd932aa8671f9568ff">attributes</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="64" column="16" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="64" bodyend="67"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1ad28c5f2ca0f5324171e9c3751423f0a2" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>hipdnn_data_sdk::data_objects::NodeAttributes</type>
+        <definition>hipdnn_data_sdk::data_objects::NodeAttributes hipdnn_plugin_sdk::NodeWrapper::attributesType</definition>
+        <argsstring>() const override</argsstring>
+        <name>attributesType</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::attributesType</qualifiedname>
+        <reimplements refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1a279f91d842940e4b0853d9c38c91d8d1">attributesType</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="69" column="51" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="69" bodyend="72"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1a94dbdabbed521c7de2c25971477b973f" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>const std::type_info &amp;</type>
+        <definition>const std::type_info &amp; hipdnn_plugin_sdk::NodeWrapper::attributesClassType</definition>
+        <argsstring>() const override</argsstring>
+        <name>attributesClassType</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::attributesClassType</qualifiedname>
+        <reimplements refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1a284deda425802a6744ee216ed136fcd7">attributesClassType</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="74" column="26" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="74" bodyend="95"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1a13d72631875d8f7dae4cae55426e22ba" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_plugin_sdk::NodeWrapper::name</definition>
+        <argsstring>() const override</argsstring>
+        <name>name</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::name</qualifiedname>
+        <reimplements refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1ac3059f33cda86f2424535e8225d095aa">name</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="97" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="97" bodyend="101"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1a1818fb226d26ead090468c4fb73f34fe" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>hipdnn_data_sdk::data_objects::DataType</type>
+        <definition>hipdnn_data_sdk::data_objects::DataType hipdnn_plugin_sdk::NodeWrapper::computeDataType</definition>
+        <argsstring>() const override</argsstring>
+        <name>computeDataType</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::computeDataType</qualifiedname>
+        <reimplements refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1a15a72af55a4729f2bc3c2e961652c1a8">computeDataType</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="103" column="45" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="103" bodyend="106"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1NodeWrapper_1a7ab3b87128e8786be0ce2c1248f85bde" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_plugin_sdk::NodeWrapper::throwIfNotValid</definition>
+        <argsstring>() const</argsstring>
+        <name>throwIfNotValid</name>
+        <qualifiedname>hipdnn_plugin_sdk::NodeWrapper::throwIfNotValid</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="109" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="109" bodyend="115"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_plugin_sdk::INodeWrapper</label>
+        <link refid="classhipdnn__plugin__sdk_1_1INodeWrapper"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_plugin_sdk::NodeWrapper</label>
+        <link refid="classhipdnn__plugin__sdk_1_1NodeWrapper"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="2">
+        <label>hipdnn_plugin_sdk::INodeWrapper</label>
+        <link refid="classhipdnn__plugin__sdk_1_1INodeWrapper"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_plugin_sdk::NodeWrapper</label>
+        <link refid="classhipdnn__plugin__sdk_1_1NodeWrapper"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" line="45" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/NodeWrapper.hpp" bodystart="46" bodyend="118"/>
+    <listofallmembers>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1a876861d16f44ca112d15399639d05e61" prot="private" virt="non-virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>_shallowNode</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1ad63a2d157e661cde3acd60956a59518b" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>attributes</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1a95a28355d35d96b81ccbf52d49c84cb6" prot="public" virt="non-virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>attributesAs</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1a94dbdabbed521c7de2c25971477b973f" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>attributesClassType</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1ad28c5f2ca0f5324171e9c3751423f0a2" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>attributesType</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1a1818fb226d26ead090468c4fb73f34fe" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>computeDataType</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1a30d3db6fd920af73db7c881b99affa59" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>isValid</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1a13d72631875d8f7dae4cae55426e22ba" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>name</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1ab8e0933b1a7697f0c647f3a9594a5807" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>node</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1aae58e6a75794705d08d4dde5391d6ad5" prot="public" virt="non-virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>NodeWrapper</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1NodeWrapper_1a7ab3b87128e8786be0ce2c1248f85bde" prot="private" virt="non-virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>throwIfNotValid</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1INodeWrapper_1ad67d28f2b5c128f6489adf3adc96c84d" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::NodeWrapper</scope><name>~INodeWrapper</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

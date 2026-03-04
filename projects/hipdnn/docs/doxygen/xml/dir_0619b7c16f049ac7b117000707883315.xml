@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_0619b7c16f049ac7b117000707883315" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk</compoundname>
+    <innerdir refid="dir_f32de92cf61ea7ad677c3ffe83b3490c">/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include</innerdir>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/"/>
+  </compounddef>
+</doxygen>

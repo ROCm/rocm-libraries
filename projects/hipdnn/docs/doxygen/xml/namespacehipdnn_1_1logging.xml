@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn_1_1logging" kind="namespace" language="C++">
+    <compoundname>hipdnn::logging</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn_1_1logging_1a49b1df5ebdd5974013ed786119bfd043" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn::logging::initializeCallbackLogging</definition>
+        <argsstring>(const std::string &amp;componentName, hipdnnCallback_t callbackFunction)</argsstring>
+        <name>initializeCallbackLogging</name>
+        <qualifiedname>hipdnn::logging::initializeCallbackLogging</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>componentName</declname>
+        </param>
+        <param>
+          <type><ref refid="HipdnnBackendCallbackTypes_8h_1a89c1a24875bd3c5cf12c73dd64689906" kindref="member">hipdnnCallback_t</ref></type>
+          <declname>callbackFunction</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp" line="46" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp" bodystart="46" bodyend="73"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp" line="44" column="1"/>
+  </compounddef>
+</doxygen>

@@ -1,0 +1,231 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::ScopedResource</compoundname>
+    <includes refid="ScopedResource_8hpp" local="no">ScopedResource.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>typename T</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1aaee53362e1de5be72afa668036adff36" prot="private" static="no" mutable="no">
+        <type>T</type>
+        <definition>T hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::_resource</definition>
+        <argsstring></argsstring>
+        <name>_resource</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::_resource</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="80" column="7" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="80" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a8f2a99cbb5d8ddd2837fac03ac43cfbe" prot="private" static="no" mutable="no">
+        <type>std::function&lt; void(T)&gt;</type>
+        <definition>std::function&lt;void(T)&gt; hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::_destructor</definition>
+        <argsstring></argsstring>
+        <name>_destructor</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::_destructor</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="81" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="81" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a8f3b80a8272778c343615e0445f98b30" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::_empty</definition>
+        <argsstring></argsstring>
+        <name>_empty</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::_empty</qualifiedname>
+        <initializer>= true</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="82" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="82" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1aa3862a8491b46f2ac6dae844ff8cf359" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::ScopedResource</definition>
+        <argsstring>()=default</argsstring>
+        <name>ScopedResource</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::ScopedResource</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="18" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a3446ac5e3353192154c90e2020f527fd" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename Callable</type>
+          </param>
+        </templateparamlist>
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::ScopedResource</definition>
+        <argsstring>(T resource, Callable &amp;&amp;destructor)</argsstring>
+        <name>ScopedResource</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::ScopedResource</qualifiedname>
+        <param>
+          <type>T</type>
+          <declname>resource</declname>
+        </param>
+        <param>
+          <type>Callable &amp;&amp;</type>
+          <declname>destructor</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="22" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="22" bodyend="27"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a0d6b3eace99796b41f6201e5e8ffe8ca" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::~ScopedResource</definition>
+        <argsstring>()</argsstring>
+        <name>~ScopedResource</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::~ScopedResource</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="29" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="29" bodyend="35"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1ab65312bd7e76df4b7542d1350c19e64f" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::ScopedResource</definition>
+        <argsstring>(const ScopedResource &amp;)=delete</argsstring>
+        <name>ScopedResource</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::ScopedResource</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource" kindref="compound">ScopedResource</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="38" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1adeff696dacd4ed38e53048c7e41e0717" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource" kindref="compound">ScopedResource</ref> &amp;</type>
+        <definition>ScopedResource &amp; hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::operator=</definition>
+        <argsstring>(const ScopedResource &amp;)=delete</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::operator=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource" kindref="compound">ScopedResource</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="39" column="20"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a040b37317ef91b7319df218c67747f5b" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::ScopedResource</definition>
+        <argsstring>(ScopedResource &amp;&amp;other) noexcept</argsstring>
+        <name>ScopedResource</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::ScopedResource</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource" kindref="compound">ScopedResource</ref> &amp;&amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="41" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="41" bodyend="47"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a977cad5c52a58b08d315b8b021426382" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource" kindref="compound">ScopedResource</ref> &amp;</type>
+        <definition>ScopedResource &amp; hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::operator=</definition>
+        <argsstring>(ScopedResource &amp;&amp;other) noexcept</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::operator=</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource" kindref="compound">ScopedResource</ref> &amp;&amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="49" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="49" bodyend="67"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a485a20764301cb66abd9c6e4db05d68d" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::isEmpty</definition>
+        <argsstring>() const</argsstring>
+        <name>isEmpty</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::isEmpty</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="69" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="69" bodyend="72"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1ab32f20be9af1b238cb37580e0775810d" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>T</type>
+        <definition>T hipdnn_data_sdk::utilities::ScopedResource&lt; T &gt;::get</definition>
+        <argsstring>() const</argsstring>
+        <name>get</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ScopedResource::get</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="74" column="7" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="74" bodyend="77"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" line="15" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ScopedResource.hpp" bodystart="16" bodyend="83"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a8f2a99cbb5d8ddd2837fac03ac43cfbe" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>_destructor</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a8f3b80a8272778c343615e0445f98b30" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>_empty</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1aaee53362e1de5be72afa668036adff36" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>_resource</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1ab32f20be9af1b238cb37580e0775810d" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>get</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a485a20764301cb66abd9c6e4db05d68d" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>isEmpty</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1adeff696dacd4ed38e53048c7e41e0717" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>operator=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a977cad5c52a58b08d315b8b021426382" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>operator=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1aa3862a8491b46f2ac6dae844ff8cf359" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>ScopedResource</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a3446ac5e3353192154c90e2020f527fd" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>ScopedResource</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1ab65312bd7e76df4b7542d1350c19e64f" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>ScopedResource</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a040b37317ef91b7319df218c67747f5b" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>ScopedResource</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource_1a0d6b3eace99796b41f6201e5e8ffe8ca" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ScopedResource</scope><name>~ScopedResource</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

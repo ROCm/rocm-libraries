@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_509f467ab47beb9555d92c28b0e570cb" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes</compoundname>
+    <innerfile refid="Attributes_8hpp">Attributes.hpp</innerfile>
+    <innerfile refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormAttributes_8hpp">BatchnormAttributes.hpp</innerfile>
+    <innerfile refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormBackwardAttributes_8hpp">BatchnormBackwardAttributes.hpp</innerfile>
+    <innerfile refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormInferenceAttributes_8hpp">BatchnormInferenceAttributes.hpp</innerfile>
+    <innerfile refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormInferenceAttributesVarianceExt_8hpp">BatchnormInferenceAttributesVarianceExt.hpp</innerfile>
+    <innerfile refid="ConvolutionDgradAttributes_8hpp">ConvolutionDgradAttributes.hpp</innerfile>
+    <innerfile refid="ConvolutionFpropAttributes_8hpp">ConvolutionFpropAttributes.hpp</innerfile>
+    <innerfile refid="ConvolutionWgradAttributes_8hpp">ConvolutionWgradAttributes.hpp</innerfile>
+    <innerfile refid="GraphAttributes_8hpp">GraphAttributes.hpp</innerfile>
+    <innerfile refid="MatmulAttributes_8hpp">MatmulAttributes.hpp</innerfile>
+    <innerfile refid="frontend_2include_2hipdnn__frontend_2attributes_2PointwiseAttributes_8hpp">PointwiseAttributes.hpp</innerfile>
+    <innerfile refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp">TensorAttributes.hpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/"/>
+  </compounddef>
+</doxygen>

@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__frontend_1_1detail" kind="namespace" language="C++">
+    <compoundname>hipdnn_frontend::detail</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__frontend_1_1detail_1a08809217d0f0d1f25f861ed06e155dbf" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::detail::getKnobsForEngine</definition>
+        <argsstring>(std::vector&lt; Knob &gt; &amp;knobs, hipdnnBackendDescriptor_t engineDesc)</argsstring>
+        <name>getKnobsForEngine</name>
+        <qualifiedname>hipdnn_frontend::detail::getKnobsForEngine</qualifiedname>
+        <param>
+          <type>std::vector&lt; <ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref> &gt; &amp;</type>
+          <declname>knobs</declname>
+        </param>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>engineDesc</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="312" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="312" bodyend="388"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="310" column="1"/>
+  </compounddef>
+</doxygen>

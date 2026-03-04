@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_04cf2c9c5917a2c117379fe038ced291" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging</compoundname>
+    <innerfile refid="CallbackSink_8hpp">CallbackSink.hpp</innerfile>
+    <innerfile refid="CallbackTypes_8h">CallbackTypes.h</innerfile>
+    <innerfile refid="ComponentFormatter_8hpp">ComponentFormatter.hpp</innerfile>
+    <innerfile refid="Logger_8hpp">Logger.hpp</innerfile>
+    <innerfile refid="LoggingUtils_8hpp">LoggingUtils.hpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/"/>
+  </compounddef>
+</doxygen>

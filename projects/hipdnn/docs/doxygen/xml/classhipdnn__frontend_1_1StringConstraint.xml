@@ -1,0 +1,206 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1StringConstraint" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::StringConstraint</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1IConstraint" prot="public" virt="non-virtual">hipdnn_frontend::IConstraint</basecompoundref>
+    <includes refid="KnobConstraint_8hpp" local="no">KnobConstraint.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1StringConstraint_1aa7c45c89e172ded25ba1f3a083f24371" prot="private" static="no" mutable="no">
+        <type>int32_t</type>
+        <definition>int32_t hipdnn_frontend::StringConstraint::_maxLength</definition>
+        <argsstring></argsstring>
+        <name>_maxLength</name>
+        <qualifiedname>hipdnn_frontend::StringConstraint::_maxLength</qualifiedname>
+        <briefdescription>
+<para>Maximum string length. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="320" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="320" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1StringConstraint_1a0b3717bc3fca096da8f145a8ef039b9c" prot="private" static="no" mutable="no">
+        <type>std::unordered_set&lt; std::string &gt;</type>
+        <definition>std::unordered_set&lt;std::string&gt; hipdnn_frontend::StringConstraint::_validValues</definition>
+        <argsstring></argsstring>
+        <name>_validValues</name>
+        <qualifiedname>hipdnn_frontend::StringConstraint::_validValues</qualifiedname>
+        <briefdescription>
+<para>Explicit allowed values. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="321" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="321" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1StringConstraint_1ad75350ca842345d45384fd463b6e4964" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::StringConstraint::StringConstraint</definition>
+        <argsstring>(int32_t maxLength, std::unordered_set&lt; std::string &gt; validValues={})</argsstring>
+        <name>StringConstraint</name>
+        <qualifiedname>hipdnn_frontend::StringConstraint::StringConstraint</qualifiedname>
+        <param>
+          <type>int32_t</type>
+          <declname>maxLength</declname>
+        </param>
+        <param>
+          <type>std::unordered_set&lt; std::string &gt;</type>
+          <declname>validValues</declname>
+          <defval>{}</defval>
+        </param>
+        <briefdescription>
+<para>Construct a <ref refid="classhipdnn__frontend_1_1StringConstraint" kindref="compound">StringConstraint</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>maxLength</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Maximum allowed string length </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>validValues</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Explicit set of allowed strings (if non-empty, overrides length check) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="249" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="249" bodyend="253"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1StringConstraint_1a76d5ecbf0af5ea82d44bb21796d0e275" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::StringConstraint::validateKnobSetting</definition>
+        <argsstring>(const KnobSetting &amp;setting) const override</argsstring>
+        <name>validateKnobSetting</name>
+        <qualifiedname>hipdnn_frontend::StringConstraint::validateKnobSetting</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1IConstraint_1a6ab00265f7278a5fa54bfc2c33bc1e92">validateKnobSetting</reimplements>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> &amp;</type>
+          <declname>setting</declname>
+        </param>
+        <briefdescription>
+<para>Validate a knob setting against this constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>setting</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> to validate </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or describing the validation failure </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="255" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="255" bodyend="289"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1StringConstraint_1a9e0cfa8514f2a45889b13b4830a60758" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::StringConstraint::toString</definition>
+        <argsstring>() const override</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_frontend::StringConstraint::toString</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1IConstraint_1ad415b6bb1b75cc43d38a06f18d74db9e">toString</reimplements>
+        <briefdescription>
+<para>Get a string representation of this constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Human-readable string for debugging/logging </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="291" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="291" bodyend="305"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1StringConstraint_1a0d0bebf519b2aa799f7ed49ccc632acd" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>int32_t</type>
+        <definition>int32_t hipdnn_frontend::StringConstraint::getMaxLength</definition>
+        <argsstring>() const</argsstring>
+        <name>getMaxLength</name>
+        <qualifiedname>hipdnn_frontend::StringConstraint::getMaxLength</qualifiedname>
+        <briefdescription>
+<para>Get the maximum allowed string length. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="308" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="308" bodyend="311"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1StringConstraint_1ab2bd93790bb73c2b55be39236102ad3f" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::unordered_set&lt; std::string &gt; &amp;</type>
+        <definition>const std::unordered_set&lt; std::string &gt; &amp; hipdnn_frontend::StringConstraint::getValidValues</definition>
+        <argsstring>() const</argsstring>
+        <name>getValidValues</name>
+        <qualifiedname>hipdnn_frontend::StringConstraint::getValidValues</qualifiedname>
+        <briefdescription>
+<para>Get the set of explicitly allowed strings. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="314" column="30" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="314" bodyend="317"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Constraint for string-valued knobs. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>Validates that string knob values have an acceptable length and/or match allowed values. </para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_frontend::IConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IConstraint"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::StringConstraint</label>
+        <link refid="classhipdnn__frontend_1_1StringConstraint"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="2">
+        <label>hipdnn_frontend::IConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IConstraint"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::StringConstraint</label>
+        <link refid="classhipdnn__frontend_1_1StringConstraint"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="241" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="242" bodyend="322"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1StringConstraint_1aa7c45c89e172ded25ba1f3a083f24371" prot="private" virt="non-virtual"><scope>hipdnn_frontend::StringConstraint</scope><name>_maxLength</name></member>
+      <member refid="classhipdnn__frontend_1_1StringConstraint_1a0b3717bc3fca096da8f145a8ef039b9c" prot="private" virt="non-virtual"><scope>hipdnn_frontend::StringConstraint</scope><name>_validValues</name></member>
+      <member refid="classhipdnn__frontend_1_1StringConstraint_1a0d0bebf519b2aa799f7ed49ccc632acd" prot="public" virt="non-virtual"><scope>hipdnn_frontend::StringConstraint</scope><name>getMaxLength</name></member>
+      <member refid="classhipdnn__frontend_1_1StringConstraint_1ab2bd93790bb73c2b55be39236102ad3f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::StringConstraint</scope><name>getValidValues</name></member>
+      <member refid="classhipdnn__frontend_1_1StringConstraint_1ad75350ca842345d45384fd463b6e4964" prot="public" virt="non-virtual"><scope>hipdnn_frontend::StringConstraint</scope><name>StringConstraint</name></member>
+      <member refid="classhipdnn__frontend_1_1StringConstraint_1a9e0cfa8514f2a45889b13b4830a60758" prot="public" virt="virtual"><scope>hipdnn_frontend::StringConstraint</scope><name>toString</name></member>
+      <member refid="classhipdnn__frontend_1_1StringConstraint_1a76d5ecbf0af5ea82d44bb21796d0e275" prot="public" virt="virtual"><scope>hipdnn_frontend::StringConstraint</scope><name>validateKnobSetting</name></member>
+      <member refid="classhipdnn__frontend_1_1IConstraint_1aff435d1b005226f942d3943c72fcd95a" prot="public" virt="virtual"><scope>hipdnn_frontend::StringConstraint</scope><name>~IConstraint</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

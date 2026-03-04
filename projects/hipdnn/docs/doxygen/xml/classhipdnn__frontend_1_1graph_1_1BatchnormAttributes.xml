@@ -1,0 +1,1077 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::BatchnormAttributes</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1graph_1_1Attributes" prot="public" virt="non-virtual">hipdnn_frontend::graph::Attributes&lt; BatchnormAttributes &gt;</basecompoundref>
+    <includes refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormAttributes_8hpp" local="no">BatchnormAttributes.hpp</includes>
+    <sectiondef kind="public-type">
+      <memberdef kind="enum" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>InputNames</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::InputNames</qualifiedname>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4a02129bb861061d1a052c592e2dc6b383" prot="public">
+          <name>X</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4a127ea1d20becc4dba06d9d152db0c2e5" prot="public">
+          <name>SCALE</name>
+          <initializer>= 1</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4ab8d9b53a9ce0cd78a9c3813faa792bbf" prot="public">
+          <name>BIAS</name>
+          <initializer>= 2</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4aaa0819783a92834ea633b17a15f66e72" prot="public">
+          <name>PREV_RUNNING_MEAN</name>
+          <initializer>= 3</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4a49b14822b59afb4bd4fa8646a656fa2c" prot="public">
+          <name>PREV_RUNNING_VARIANCE</name>
+          <initializer>= 4</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4aaa0bb0672ef352b41a6a0d1aff53fb40" prot="public">
+          <name>MOMENTUM</name>
+          <initializer>= 5</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4a48d3e3d06977ae5b32d170485108630a" prot="public">
+          <name>EPSILON</name>
+          <initializer>= 6</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="66" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="67" bodyend="75"/>
+      </memberdef>
+      <memberdef kind="enum" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>OutputNames</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::OutputNames</qualifiedname>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13a57cec4137b614c87cb4e24a3d003a3e0" prot="public">
+          <name>Y</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13a4ea6d1161ea24d7599365f574aff6610" prot="public">
+          <name>MEAN</name>
+          <initializer>= 1</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13ab09dfe157fdc6e0e0d26e317f0fec2af" prot="public">
+          <name>INV_VARIANCE</name>
+          <initializer>= 2</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13a400d64bd925b3810bca2ec89c19ffb65" prot="public">
+          <name>NEXT_RUNNING_MEAN</name>
+          <initializer>= 3</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13a343d7120004d183c66a48cfd1c4eb105" prot="public">
+          <name>NEXT_RUNNING_VARIANCE</name>
+          <initializer>= 4</initializer>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="78" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="79" bodyend="85"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aab7daeebb2e14dda31b83e8bb65aa200" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4" kindref="member">InputNames</ref></type>
+        <definition>typedef InputNames hipdnn_frontend::graph::BatchnormAttributes::input_names</definition>
+        <argsstring></argsstring>
+        <name>input_names</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::input_names</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="76" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="76" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad949db226f0f84c4628dd1083c4d477b" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13" kindref="member">OutputNames</ref></type>
+        <definition>typedef OutputNames hipdnn_frontend::graph::BatchnormAttributes::output_names</definition>
+        <argsstring></argsstring>
+        <name>output_names</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::output_names</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="86" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="86" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a8df887b22eae5f92b42a5f560be9d2c7" prot="public" static="no" mutable="no">
+        <type>std::unordered_map&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4" kindref="member">InputNames</ref>, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>std::unordered_map&lt;InputNames, std::shared_ptr&lt;TensorAttributes&gt; &gt; hipdnn_frontend::graph::BatchnormAttributes::inputs</definition>
+        <argsstring></argsstring>
+        <name>inputs</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::inputs</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="88" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="88" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ac0312cbc5bab7ffe4f2dfc2ddea72b89" prot="public" static="no" mutable="no">
+        <type>std::unordered_map&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13" kindref="member">OutputNames</ref>, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>std::unordered_map&lt;OutputNames, std::shared_ptr&lt;TensorAttributes&gt; &gt; hipdnn_frontend::graph::BatchnormAttributes::outputs</definition>
+        <argsstring></argsstring>
+        <name>outputs</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::outputs</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="89" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="89" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aae9b996629d4d44800ab5e8f3cf7b09e" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>std::vector&lt;std::shared_ptr&lt;TensorAttributes&gt; &gt; hipdnn_frontend::graph::BatchnormAttributes::peer_stats</definition>
+        <argsstring></argsstring>
+        <name>peer_stats</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::peer_stats</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="91" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="91" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a9efc1a79244e779ab97a76e7e0c2837c" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_x</definition>
+        <argsstring>() const</argsstring>
+        <name>get_x</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_x</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="94" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="94" bodyend="97"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a0d4a7e18713c86a48cc6bbe4cf0dc4db" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_scale</definition>
+        <argsstring>() const</argsstring>
+        <name>get_scale</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_scale</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="99" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="99" bodyend="102"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ace0f60502c40624130089413ac2b66dc" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_bias</definition>
+        <argsstring>() const</argsstring>
+        <name>get_bias</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_bias</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="104" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="104" bodyend="107"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a15beeba8a20a5d46538f222a6315fc14" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_epsilon</definition>
+        <argsstring>() const</argsstring>
+        <name>get_epsilon</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_epsilon</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="109" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="109" bodyend="112"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a0bdc879d5cc3370638b756e931fbcde5" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::vector&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+        <definition>const std::vector&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp; hipdnn_frontend::graph::BatchnormAttributes::get_peer_stats</definition>
+        <argsstring>() const</argsstring>
+        <name>get_peer_stats</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_peer_stats</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="114" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="114" bodyend="117"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a93a0a7bb47e82d7c7a217d8b8a1927a8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_prev_running_mean</definition>
+        <argsstring>() const</argsstring>
+        <name>get_prev_running_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_prev_running_mean</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="119" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="119" bodyend="122"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a35a4853daae96a1f4f369cea8c2226d9" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_prev_running_variance</definition>
+        <argsstring>() const</argsstring>
+        <name>get_prev_running_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_prev_running_variance</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="124" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="124" bodyend="127"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aa5826826fbd253f7e47a755abefc9cb8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_momentum</definition>
+        <argsstring>() const</argsstring>
+        <name>get_momentum</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_momentum</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="129" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="129" bodyend="132"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a549aa72dfb1c28855d7d1e890cf58d77" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_y</definition>
+        <argsstring>() const</argsstring>
+        <name>get_y</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_y</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="134" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="134" bodyend="137"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a1dcac0a03f3d8a90d53b302177ee3975" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_mean</definition>
+        <argsstring>() const</argsstring>
+        <name>get_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_mean</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="139" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="139" bodyend="142"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aae809b6c76b311c7d3bc66511c845958" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_inv_variance</definition>
+        <argsstring>() const</argsstring>
+        <name>get_inv_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_inv_variance</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="144" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="144" bodyend="147"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a8053ea5531489c166dfb2597a1e27f8f" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_next_running_mean</definition>
+        <argsstring>() const</argsstring>
+        <name>get_next_running_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_next_running_mean</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="149" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="149" bodyend="152"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a4defa50d124d88237c3348576ef1b878" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::get_next_running_variance</definition>
+        <argsstring>() const</argsstring>
+        <name>get_next_running_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::get_next_running_variance</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="154" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="154" bodyend="157"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a2e9ee559b4adb0d654e112ce21ef562e" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_x</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_x</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_x</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="159" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="159" bodyend="162"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a22d2ccb14366d7443d13144abc3299bc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_x</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_x</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_x</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="164" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="164" bodyend="167"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad6cb94c8f0fc1b799ab9e8f7547722da" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_scale</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_scale</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_scale</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="169" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="169" bodyend="172"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a1bfb8aee9f92ceb54382b8139ece3b86" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_scale</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_scale</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_scale</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="174" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="174" bodyend="177"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a54d5c3c9b7c2591d6de4c0e4191f7889" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_bias</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_bias</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_bias</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="179" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="179" bodyend="182"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a56f2572e392c64dccb3caa72a472cd44" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_bias</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_bias</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_bias</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="184" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="184" bodyend="187"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a366a04f1fc9695dc055c8eefa2d36467" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_epsilon</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_epsilon</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_epsilon</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="189" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="189" bodyend="192"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1acb7d044be2ef669c8ec2c491bfef76aa" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_epsilon</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_epsilon</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_epsilon</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="194" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="194" bodyend="197"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a8d7b23c885bb81ad96463efda83b24de" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_peer_stats</definition>
+        <argsstring>(const std::vector&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;value)</argsstring>
+        <name>set_peer_stats</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_peer_stats</qualifiedname>
+        <param>
+          <type>const std::vector&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="200" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="200" bodyend="204"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ac0b40fc3627ddaf5c132a106df70cd6c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_peer_stats</definition>
+        <argsstring>(std::vector&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;&amp;value)</argsstring>
+        <name>set_peer_stats</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_peer_stats</qualifiedname>
+        <param>
+          <type>std::vector&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="206" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="206" bodyend="210"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ae51d9d47baa1b311c3d1de443f4f16e3" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_prev_running_mean</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_prev_running_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_prev_running_mean</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="212" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="212" bodyend="215"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1abc5ad629f102cbe404008614fec916ad" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_prev_running_mean</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_prev_running_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_prev_running_mean</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="217" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="217" bodyend="220"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a1f154b578c2bbc483ef38c9e15653ce9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_prev_running_variance</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_prev_running_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_prev_running_variance</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="222" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="222" bodyend="225"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a5b0b6f6a26bd01d572db9f59ab80bab4" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_prev_running_variance</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_prev_running_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_prev_running_variance</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="227" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="227" bodyend="230"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a5ce814fbbbf4a42d6127b92599012f3f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_momentum</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_momentum</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_momentum</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="232" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="232" bodyend="235"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a02b57526b2df8dadf060f62ce83804c9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_momentum</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_momentum</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_momentum</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="237" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="237" bodyend="240"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a564239295880361947e9d8072a304db4" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_y</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_y</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_y</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="242" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="242" bodyend="245"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a84d61499c1fce5e949c5510c58fc4e2a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_y</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_y</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_y</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="247" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="247" bodyend="250"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a495a42a10d50c632445962cca1733c90" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_mean</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_mean</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="252" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="252" bodyend="255"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1adacfecae7d9ef0c2d934abae99d59e4b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_mean</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_mean</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="257" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="257" bodyend="260"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aa01bd3ccb46ed193ffc15e6c41c350d7" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_inv_variance</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_inv_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_inv_variance</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="262" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="262" bodyend="265"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1afbf34dc6e7cab20c095fcd18f2cfd17b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_inv_variance</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_inv_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_inv_variance</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="267" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="267" bodyend="270"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ae0a2c6f84d315db3796f8574bb40848b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_next_running_mean</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_next_running_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_next_running_mean</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="272" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="272" bodyend="275"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ae011aae2a79ce8d2a9816fd84a3e2956" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_next_running_mean</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_next_running_mean</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_next_running_mean</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="277" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="277" bodyend="280"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1afa9e9a32847bda9df35f5246954e1665" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_next_running_variance</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>set_next_running_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_next_running_variance</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="282" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="282" bodyend="285"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a84b7431271067a16c75842670cd9bbf6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_next_running_variance</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>set_next_running_variance</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_next_running_variance</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="287" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="287" bodyend="290"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a548b08d937eea6c02779ac88ecd5e605" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_previous_running_stats</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;mean, const std::shared_ptr&lt; TensorAttributes &gt; &amp;variance, const std::shared_ptr&lt; TensorAttributes &gt; &amp;momentum)</argsstring>
+        <name>set_previous_running_stats</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_previous_running_stats</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>mean</declname>
+        </param>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>variance</declname>
+        </param>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>momentum</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="293" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="293" bodyend="300"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a5fb5d26060c8d78dbf0e069b43fa9da9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> &amp;</type>
+        <definition>BatchnormAttributes &amp; hipdnn_frontend::graph::BatchnormAttributes::set_previous_running_stats</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;mean, std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;variance, std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;momentum)</argsstring>
+        <name>set_previous_running_stats</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::set_previous_running_stats</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>mean</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>variance</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>momentum</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="302" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="302" bodyend="309"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a6a484d27f3227d642d26a3cb32390952" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::BatchnormAttributes &gt;</type>
+        <definition>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::BatchnormAttributes &gt; hipdnn_frontend::graph::BatchnormAttributes::pack_attributes</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder) const</argsstring>
+        <name>pack_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::pack_attributes</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="312" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="312" bodyend="351"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-static-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1afb6df17c41bf14bd5a0d4067654b1073" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref></type>
+        <definition>static BatchnormAttributes hipdnn_frontend::graph::BatchnormAttributes::fromFlatBuffer</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::BatchnormAttributes *fb, const std::unordered_map&lt; int64_t, std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;tensorMap)</argsstring>
+        <name>fromFlatBuffer</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormAttributes::fromFlatBuffer</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::BatchnormAttributes *</type>
+          <declname>fb</declname>
+        </param>
+        <param>
+          <type>const std::unordered_map&lt; int64_t, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+          <declname>tensorMap</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="353" column="32" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="353" bodyend="409"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Configuration attributes for batch normalization forward training. </para>
+    </briefdescription>
+    <detaileddescription>
+<para><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref> configures a batch normalization operation for training. This operation normalizes the input tensor across the batch dimension and computes running statistics for inference.</para>
+<para><bold>Required inputs:</bold><itemizedlist>
+<listitem><para>X: Input tensor to normalize (NCHW format)</para>
+</listitem><listitem><para>Scale: Per-channel scale (gamma) tensor</para>
+</listitem><listitem><para>Bias: Per-channel bias (beta) tensor</para>
+</listitem></itemizedlist>
+</para>
+<para><bold>Optional inputs (for running statistics):</bold><itemizedlist>
+<listitem><para>prev_running_mean: Previous running mean (for exponential moving average)</para>
+</listitem><listitem><para>prev_running_variance: Previous running variance</para>
+</listitem><listitem><para>momentum: Momentum for running statistics update</para>
+</listitem></itemizedlist>
+</para>
+<para><bold>Outputs:</bold><itemizedlist>
+<listitem><para>Y: Normalized output tensor</para>
+</listitem><listitem><para>Mean: Computed batch mean</para>
+</listitem><listitem><para>Inv_variance: Computed inverse variance (1/sqrt(var + epsilon))</para>
+</listitem><listitem><para>next_running_mean: Updated running mean (optional)</para>
+</listitem><listitem><para>next_running_variance: Updated running variance (optional)</para>
+</listitem></itemizedlist>
+</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="normal">BatchnormAttributes<sp/>attr;</highlight></codeline>
+<codeline><highlight class="normal">attr.set_x(inputTensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>.set_scale(scaleTensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>.set_bias(biasTensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>.set_epsilon(epsilonTensor);</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>[y,<sp/>mean,<sp/>invVar,<sp/>nextMean,<sp/>nextVar]<sp/>=<sp/>graph.batchnorm(x,<sp/>scale,<sp/>bias,<sp/>attr);</highlight></codeline>
+</programlisting></para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceAttributes" kindref="compound">BatchnormInferenceAttributes</ref> for inference-only batch normalization </para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref> for backward pass </para>
+</simplesect>
+</para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_frontend::graph::Attributes&lt; BatchnormAttributes &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Attributes"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::BatchnormAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="2">
+        <label>hipdnn_frontend::graph::Attributes&lt; BatchnormAttributes &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Attributes"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::BatchnormAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="63" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="64" bodyend="410"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a1f611be5dadd5ac864d57e70426bc657" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7e777086ef899eb3e8111f8d37a769e5" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>fill_from_context</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1afb6df17c41bf14bd5a0d4067654b1073" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>fromFlatBuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ace0f60502c40624130089413ac2b66dc" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_bias</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a72744d6c95d6b80eb370354717065da2" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a15beeba8a20a5d46538f222a6315fc14" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_epsilon</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aae809b6c76b311c7d3bc66511c845958" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_inv_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a1dcac0a03f3d8a90d53b302177ee3975" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aa5826826fbd253f7e47a755abefc9cb8" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_momentum</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a2a9ace69e5f920fb4daf7af96bffefc1" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a8053ea5531489c166dfb2597a1e27f8f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_next_running_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a4defa50d124d88237c3348576ef1b878" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_next_running_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a0bdc879d5cc3370638b756e931fbcde5" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_peer_stats</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a93a0a7bb47e82d7c7a217d8b8a1927a8" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_prev_running_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a35a4853daae96a1f4f369cea8c2226d9" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_prev_running_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a0d4a7e18713c86a48cc6bbe4cf0dc4db" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_scale</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a9efc1a79244e779ab97a76e7e0c2837c" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_x</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a549aa72dfb1c28855d7d1e890cf58d77" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>get_y</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>getInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>getOutput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aab7daeebb2e14dda31b83e8bb65aa200" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>input_names</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1af2c7f7fb92cd4a311d2706dd16d3aac4" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>InputNames</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a8df887b22eae5f92b42a5f560be9d2c7" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>inputs</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a35a15e675ee8564745405e8c791303d8" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad949db226f0f84c4628dd1083c4d477b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>output_names</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad06f63c2ee5abb5e95ba610927ac2b13" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>OutputNames</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ac0312cbc5bab7ffe4f2dfc2ddea72b89" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>outputs</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a6a484d27f3227d642d26a3cb32390952" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>pack_attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aae9b996629d4d44800ab5e8f3cf7b09e" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>peer_stats</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a54d5c3c9b7c2591d6de4c0e4191f7889" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_bias</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a56f2572e392c64dccb3caa72a472cd44" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_bias</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ac066abf7d7a6b2a45cebfe233fb15213" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a366a04f1fc9695dc055c8eefa2d36467" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_epsilon</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1acb7d044be2ef669c8ec2c491bfef76aa" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_epsilon</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1aa01bd3ccb46ed193ffc15e6c41c350d7" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_inv_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1afbf34dc6e7cab20c095fcd18f2cfd17b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_inv_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a495a42a10d50c632445962cca1733c90" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1adacfecae7d9ef0c2d934abae99d59e4b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a5ce814fbbbf4a42d6127b92599012f3f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_momentum</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a02b57526b2df8dadf060f62ce83804c9" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_momentum</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a3a6b6b3fa84673526d14abb73441a477" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ae0a2c6f84d315db3796f8574bb40848b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_next_running_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ae011aae2a79ce8d2a9816fd84a3e2956" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_next_running_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1afa9e9a32847bda9df35f5246954e1665" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_next_running_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a84b7431271067a16c75842670cd9bbf6" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_next_running_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a8d7b23c885bb81ad96463efda83b24de" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_peer_stats</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ac0b40fc3627ddaf5c132a106df70cd6c" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_peer_stats</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ae51d9d47baa1b311c3d1de443f4f16e3" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_prev_running_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1abc5ad629f102cbe404008614fec916ad" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_prev_running_mean</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a1f154b578c2bbc483ef38c9e15653ce9" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_prev_running_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a5b0b6f6a26bd01d572db9f59ab80bab4" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_prev_running_variance</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a548b08d937eea6c02779ac88ecd5e605" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_previous_running_stats</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a5fb5d26060c8d78dbf0e069b43fa9da9" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_previous_running_stats</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1ad6cb94c8f0fc1b799ab9e8f7547722da" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_scale</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a1bfb8aee9f92ceb54382b8139ece3b86" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_scale</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a2e9ee559b4adb0d654e112ce21ef562e" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_x</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a22d2ccb14366d7443d13144abc3299bc" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_x</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a564239295880361947e9d8072a304db4" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_y</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes_1a84d61499c1fce5e949c5510c58fc4e2a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>set_y</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>setInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a70ec6d24e78284d214aa983fd02bfbbb" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>setInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>setOutput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a5f49c2c19da1ca5f648ae0e4d8e89b55" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormAttributes</scope><name>setOutput</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

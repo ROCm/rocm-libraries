@@ -1,0 +1,579 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormBackwardAttributes_8hpp" kind="file" language="C++">
+    <compoundname>BatchnormBackwardAttributes.hpp</compoundname>
+    <includes refid="Attributes_8hpp" local="yes">Attributes.hpp</includes>
+    <includes refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" local="yes">TensorAttributes.hpp</includes>
+    <includes local="no">hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h</includes>
+    <includes local="no">memory</includes>
+    <includes local="no">unordered_map</includes>
+    <includes local="no">vector</includes>
+    <includedby refid="BatchnormBackwardNode_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp</includedby>
+    <incdepgraph>
+      <node id="5">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="HipdnnBackendHeuristicType_8h"/>
+      </node>
+      <node id="11">
+        <label>hipdnn_data_sdk/utilities/PointwiseValidation.hpp</label>
+        <link refid="PointwiseValidation_8hpp"/>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+      </node>
+      <node id="23">
+        <label>hipdnn_frontend/Error.hpp</label>
+        <link refid="Error_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_frontend/Types.hpp</label>
+        <link refid="Types_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>Attributes.hpp</label>
+        <link refid="Attributes_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormBackwardAttributes_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>GraphAttributes.hpp</label>
+        <link refid="GraphAttributes_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="19">
+        <label>TensorAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+      </node>
+      <node id="12">
+        <label>bitset</label>
+      </node>
+      <node id="20">
+        <label>flatbuffers/flatbuffers.h</label>
+      </node>
+      <node id="28">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h</label>
+      </node>
+      <node id="6">
+        <label>hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h</label>
+      </node>
+      <node id="7">
+        <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
+      </node>
+      <node id="21">
+        <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
+      </node>
+      <node id="8">
+        <label>hipdnn_data_sdk/data_objects/knob_value_generated.h</label>
+      </node>
+      <node id="9">
+        <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
+      </node>
+      <node id="22">
+        <label>hipdnn_data_sdk/data_objects/tensor_attributes_generated.h</label>
+      </node>
+      <node id="10">
+        <label>hipdnn_data_sdk/types.hpp</label>
+      </node>
+      <node id="17">
+        <label>memory</label>
+      </node>
+      <node id="24">
+        <label>optional</label>
+      </node>
+      <node id="13">
+        <label>ostream</label>
+      </node>
+      <node id="14">
+        <label>set</label>
+      </node>
+      <node id="15">
+        <label>string</label>
+      </node>
+      <node id="25">
+        <label>type_traits</label>
+      </node>
+      <node id="18">
+        <label>unordered_map</label>
+      </node>
+      <node id="27">
+        <label>utility</label>
+      </node>
+      <node id="16">
+        <label>variant</label>
+      </node>
+      <node id="26">
+        <label>vector</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormBackwardAttributes_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
+        <link refid="BatchnormBackwardNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="15">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" prot="public">hipdnn_frontend::graph::BatchnormBackwardAttributes</innerclass>
+    <innernamespace refid="namespacehipdnn__frontend">hipdnn_frontend</innernamespace>
+    <innernamespace refid="namespacehipdnn__frontend_1_1graph">hipdnn_frontend::graph</innernamespace>
+    <briefdescription>
+<para>Attributes for batch normalization backward pass operation. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the BatchnormBackwardAttributes class used to configure the backward pass (gradient computation) of batch normalization. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="Attributes_8hpp" kindref="compound">Attributes.hpp</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" kindref="compound">TensorAttributes.hpp</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;memory&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;unordered_map&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="19"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;vector&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="20"><highlight class="normal"></highlight></codeline>
+<codeline lineno="21"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__frontend_1_1graph" kindref="compound">hipdnn_frontend::graph</ref></highlight></codeline>
+<codeline lineno="22"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="23"><highlight class="normal"></highlight></codeline>
+<codeline lineno="54" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">class<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref><sp/>:<sp/></highlight><highlight class="keyword">public</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes" kindref="compound">Attributes</ref>&lt;BatchnormBackwardAttributes&gt;</highlight></codeline>
+<codeline lineno="55"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="56"><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="57" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">enum<sp/>class</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68b" kindref="member">InputNames</ref></highlight></codeline>
+<codeline lineno="58"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="59"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba8e33631037901075c85616c9b60441e4" kindref="member">DY</ref><sp/>=<sp/>0,</highlight></codeline>
+<codeline lineno="60"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba02129bb861061d1a052c592e2dc6b383" kindref="member">X</ref><sp/>=<sp/>1,</highlight></codeline>
+<codeline lineno="61"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba127ea1d20becc4dba06d9d152db0c2e5" kindref="member">SCALE</ref><sp/>=<sp/>2,</highlight></codeline>
+<codeline lineno="62"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba4ea6d1161ea24d7599365f574aff6610" kindref="member">MEAN</ref><sp/>=<sp/>3,</highlight></codeline>
+<codeline lineno="63"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68bab09dfe157fdc6e0e0d26e317f0fec2af" kindref="member">INV_VARIANCE</ref><sp/>=<sp/>4</highlight></codeline>
+<codeline lineno="64"><highlight class="normal"><sp/><sp/><sp/><sp/>};</highlight></codeline>
+<codeline lineno="65" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab847e191607b3f4df6c8f08e90f80da0" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68b" kindref="member">InputNames</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab847e191607b3f4df6c8f08e90f80da0" kindref="member">input_names</ref>;<sp/></highlight><highlight class="comment">//<sp/>NOLINT(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="66"><highlight class="normal"></highlight></codeline>
+<codeline lineno="67" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">enum<sp/>class</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52" kindref="member">OutputNames</ref></highlight></codeline>
+<codeline lineno="68"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="69"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52a72a530b2433264cef373d8fcca5662c1" kindref="member">DX</ref><sp/>=<sp/>0,</highlight></codeline>
+<codeline lineno="70"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52ac0af610c11d162cb9c588b594075186c" kindref="member">DSCALE</ref><sp/>=<sp/>1,</highlight></codeline>
+<codeline lineno="71"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52a93ea92a5ee8d2db2043817516cbc6f05" kindref="member">DBIAS</ref><sp/>=<sp/>2</highlight></codeline>
+<codeline lineno="72"><highlight class="normal"><sp/><sp/><sp/><sp/>};</highlight></codeline>
+<codeline lineno="73" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a4a3650e1bd04998121268beba219abdc" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52" kindref="member">OutputNames</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a4a3650e1bd04998121268beba219abdc" kindref="member">output_names</ref>;<sp/></highlight><highlight class="comment">//<sp/>NOLINT(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="74"><highlight class="normal"></highlight></codeline>
+<codeline lineno="75" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ae9cd7a497c31f0b1e361f79d49efb8e6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;InputNames,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ae9cd7a497c31f0b1e361f79d49efb8e6" kindref="member">inputs</ref>;</highlight></codeline>
+<codeline lineno="76" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a716a32f8f06747db148c0266b1240b41" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;OutputNames,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a716a32f8f06747db148c0266b1240b41" kindref="member">outputs</ref>;</highlight></codeline>
+<codeline lineno="77"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="78" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1abf9465692593648761d222819a01274b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::vector&lt;std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1abf9465692593648761d222819a01274b" kindref="member">peer_stats</ref>;</highlight></codeline>
+<codeline lineno="79"><highlight class="normal"></highlight></codeline>
+<codeline lineno="80"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="81" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad16e5672754b053f1e3a21b3272d4b6e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad16e5672754b053f1e3a21b3272d4b6e" kindref="member">get_dy</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="82"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="83"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba8e33631037901075c85616c9b60441e4" kindref="member">InputNames::DY</ref>);</highlight></codeline>
+<codeline lineno="84"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="85"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="86" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1adf2b3e9fcef4ebd83f45ba3c7ba92efa" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1adf2b3e9fcef4ebd83f45ba3c7ba92efa" kindref="member">get_x</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="87"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="88"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba02129bb861061d1a052c592e2dc6b383" kindref="member">InputNames::X</ref>);</highlight></codeline>
+<codeline lineno="89"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="90"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="91" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ac3008fd9fb6ac6e246b0e141d04e28fc" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ac3008fd9fb6ac6e246b0e141d04e28fc" kindref="member">get_scale</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="92"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="93"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba127ea1d20becc4dba06d9d152db0c2e5" kindref="member">InputNames::SCALE</ref>);</highlight></codeline>
+<codeline lineno="94"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="95"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="96" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ac62eade20978320f440007f9e8b82a3f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ac62eade20978320f440007f9e8b82a3f" kindref="member">get_mean</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="97"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="98"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba4ea6d1161ea24d7599365f574aff6610" kindref="member">InputNames::MEAN</ref>);</highlight></codeline>
+<codeline lineno="99"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="100"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="101" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad14cfafcf65feb66baf673b4fb060788" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad14cfafcf65feb66baf673b4fb060788" kindref="member">get_inv_variance</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="102"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="103"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68bab09dfe157fdc6e0e0d26e317f0fec2af" kindref="member">InputNames::INV_VARIANCE</ref>);</highlight></codeline>
+<codeline lineno="104"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="106" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a1782ac942c5864e36fe594d93874401c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a1782ac942c5864e36fe594d93874401c" kindref="member">get_dx</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="107"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="108"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" kindref="member">getOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52a72a530b2433264cef373d8fcca5662c1" kindref="member">OutputNames::DX</ref>);</highlight></codeline>
+<codeline lineno="109"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="110"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="111" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a9b324896b41f645b3a4dba28477c50c9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a9b324896b41f645b3a4dba28477c50c9" kindref="member">get_dscale</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="112"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="113"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" kindref="member">getOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52ac0af610c11d162cb9c588b594075186c" kindref="member">OutputNames::DSCALE</ref>);</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="115"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="116" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aaa6cb2c996891302dd1f6265633ab9ec" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aaa6cb2c996891302dd1f6265633ab9ec" kindref="member">get_dbias</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="117"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="118"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" kindref="member">getOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52a93ea92a5ee8d2db2043817516cbc6f05" kindref="member">OutputNames::DBIAS</ref>);</highlight></codeline>
+<codeline lineno="119"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="120"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="121" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab6e7ffc7291f2b48c78d4a485a141dd9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;std::shared_ptr&lt;TensorAttributes&gt;&gt;&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab6e7ffc7291f2b48c78d4a485a141dd9" kindref="member">get_peer_stats</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="122"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="123"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1abf9465692593648761d222819a01274b" kindref="member">peer_stats</ref>;</highlight></codeline>
+<codeline lineno="124"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="125"><highlight class="normal"></highlight></codeline>
+<codeline lineno="126"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="127" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab70a0c78e02690005cd58ec3b24ac905" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab70a0c78e02690005cd58ec3b24ac905" kindref="member">set_dy</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="128"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="129"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba8e33631037901075c85616c9b60441e4" kindref="member">InputNames::DY</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="130"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="131"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="132" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ac36db71b8150d33620329f3044fbbd01" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ac36db71b8150d33620329f3044fbbd01" kindref="member">set_dy</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="133"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="134"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba8e33631037901075c85616c9b60441e4" kindref="member">InputNames::DY</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="135"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="136"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="137" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab7a5dcfaaa7c7109537443b94e34000e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab7a5dcfaaa7c7109537443b94e34000e" kindref="member">set_x</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="138"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="139"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba02129bb861061d1a052c592e2dc6b383" kindref="member">InputNames::X</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="140"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="141"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="142" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad0ec81d81c7ce89a6667eea52b423bdb" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad0ec81d81c7ce89a6667eea52b423bdb" kindref="member">set_x</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="143"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="144"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba02129bb861061d1a052c592e2dc6b383" kindref="member">InputNames::X</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="145"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="146"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="147" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a6df45e0cb07086e88aa5dcc919edfc4c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a6df45e0cb07086e88aa5dcc919edfc4c" kindref="member">set_scale</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="148"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="149"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba127ea1d20becc4dba06d9d152db0c2e5" kindref="member">InputNames::SCALE</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="150"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="151"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="152" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad7cecc5d45b95e3892849ef1e3fc42b2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad7cecc5d45b95e3892849ef1e3fc42b2" kindref="member">set_scale</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="153"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="154"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba127ea1d20becc4dba06d9d152db0c2e5" kindref="member">InputNames::SCALE</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="155"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="156"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="157" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a8b2259cbeaea7a5a098e991bdd2f48ef" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a8b2259cbeaea7a5a098e991bdd2f48ef" kindref="member">set_mean</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="158"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="159"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba4ea6d1161ea24d7599365f574aff6610" kindref="member">InputNames::MEAN</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="160"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="161"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="162" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a3d420b429115047bc3a3903539611914" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a3d420b429115047bc3a3903539611914" kindref="member">set_mean</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="163"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="164"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68ba4ea6d1161ea24d7599365f574aff6610" kindref="member">InputNames::MEAN</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="165"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="166"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="167" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a031d6c00be638e105f7f387421cf7757" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a031d6c00be638e105f7f387421cf7757" kindref="member">set_inv_variance</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="168"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="169"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68bab09dfe157fdc6e0e0d26e317f0fec2af" kindref="member">InputNames::INV_VARIANCE</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="170"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="171"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="172" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1adf862fe7c327072b314f3e5ff00c0b31" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1adf862fe7c327072b314f3e5ff00c0b31" kindref="member">set_inv_variance</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="173"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="174"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a5ff25bf156a7d5e5198b21a7ef19c68bab09dfe157fdc6e0e0d26e317f0fec2af" kindref="member">InputNames::INV_VARIANCE</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="175"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="176"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="177" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a56f9afda52056bb983e10002566db0f5" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a56f9afda52056bb983e10002566db0f5" kindref="member">set_dx</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="178"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="179"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52a72a530b2433264cef373d8fcca5662c1" kindref="member">OutputNames::DX</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="180"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="181"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="182" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1afd8b5c982332afd214fa0bf9471f5bc1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1afd8b5c982332afd214fa0bf9471f5bc1" kindref="member">set_dx</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="183"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="184"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52a72a530b2433264cef373d8fcca5662c1" kindref="member">OutputNames::DX</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="185"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="186"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="187" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a4da7e4d0a8f86de814361229513efbd7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a4da7e4d0a8f86de814361229513efbd7" kindref="member">set_dscale</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="188"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="189"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52ac0af610c11d162cb9c588b594075186c" kindref="member">OutputNames::DSCALE</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="190"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="191"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="192" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1acb0d22e5405dc3157ce37d68a0da229e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1acb0d22e5405dc3157ce37d68a0da229e" kindref="member">set_dscale</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="193"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="194"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52ac0af610c11d162cb9c588b594075186c" kindref="member">OutputNames::DSCALE</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="195"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="196"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="197" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a19e8ee131c02ccf30d8a71dd84689d74" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a19e8ee131c02ccf30d8a71dd84689d74" kindref="member">set_dbias</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="198"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="199"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52a93ea92a5ee8d2db2043817516cbc6f05" kindref="member">OutputNames::DBIAS</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="200"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="201"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="202" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a04cb21c80104c221bce7762bb6c28e87" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a04cb21c80104c221bce7762bb6c28e87" kindref="member">set_dbias</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="203"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="204"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad58272c66bd79ef19311ea5260cc0f52a93ea92a5ee8d2db2043817516cbc6f05" kindref="member">OutputNames::DBIAS</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="205"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="206"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;</highlight></codeline>
+<codeline lineno="207" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aedbb287516a8f39d25fd250941192798" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aedbb287516a8f39d25fd250941192798" kindref="member">set_peer_stats</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;std::shared_ptr&lt;TensorAttributes&gt;&gt;&amp;<sp/>value)<sp/></highlight><highlight class="comment">//<sp/>NOLINT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="208"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="209"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1abf9465692593648761d222819a01274b" kindref="member">peer_stats</ref><sp/>=<sp/>value;</highlight></codeline>
+<codeline lineno="210"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="211"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="212"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;</highlight></codeline>
+<codeline lineno="213" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a6f7da05b47ff277d28e5991a3e06a7c3" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a6f7da05b47ff277d28e5991a3e06a7c3" kindref="member">set_peer_stats</ref>(std::vector&lt;std::shared_ptr&lt;TensorAttributes&gt;&gt;&amp;&amp;<sp/>value)<sp/></highlight><highlight class="comment">//<sp/>NOLINT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="214"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="215"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1abf9465692593648761d222819a01274b" kindref="member">peer_stats</ref><sp/>=<sp/>std::move(value);</highlight></codeline>
+<codeline lineno="216"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="217"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="218"><highlight class="normal"></highlight></codeline>
+<codeline lineno="219"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;</highlight></codeline>
+<codeline lineno="220" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aaa6ceca9f21300be7fcf808f08f0c957" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aaa6ceca9f21300be7fcf808f08f0c957" kindref="member">set_saved_mean_and_inv_variance</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>mean,<sp/></highlight><highlight class="comment">//<sp/>NOLINT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="221"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>invVariance)</highlight></codeline>
+<codeline lineno="222"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="223"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a8b2259cbeaea7a5a098e991bdd2f48ef" kindref="member">set_mean</ref>(mean).<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a031d6c00be638e105f7f387421cf7757" kindref="member">set_inv_variance</ref>(invVariance);</highlight></codeline>
+<codeline lineno="224"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="225"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref>&amp;</highlight></codeline>
+<codeline lineno="226" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1accb029a1fcafc2cf60dd3e55725f7fa4" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1accb029a1fcafc2cf60dd3e55725f7fa4" kindref="member">set_saved_mean_and_inv_variance</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>mean,<sp/></highlight><highlight class="comment">//<sp/>NOLINT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="227"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>invVariance)</highlight></codeline>
+<codeline lineno="228"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="229"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a8b2259cbeaea7a5a098e991bdd2f48ef" kindref="member">set_mean</ref>(std::move(mean)).<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a031d6c00be638e105f7f387421cf7757" kindref="member">set_inv_variance</ref>(std::move(invVariance));</highlight></codeline>
+<codeline lineno="230"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="231"><highlight class="normal"></highlight></codeline>
+<codeline lineno="232"><highlight class="normal"><sp/><sp/><sp/><sp/>flatbuffers::Offset&lt;hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes&gt;</highlight></codeline>
+<codeline lineno="233" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aeeb3993e46d4e1dc82a60f30b8994b22" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aeeb3993e46d4e1dc82a60f30b8994b22" kindref="member">pack_attributes</ref>(flatbuffers::FlatBufferBuilder&amp;<sp/>builder)<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="comment">//<sp/>NOLINT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="234"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="235"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>peerStatsVector<sp/>=<sp/>std::vector&lt;int64_t&gt;{};</highlight></codeline>
+<codeline lineno="236"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal">(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal">&amp;<sp/>peerStat<sp/>:<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1abf9465692593648761d222819a01274b" kindref="member">peer_stats</ref>)</highlight></codeline>
+<codeline lineno="237"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="238"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(peerStat)</highlight></codeline>
+<codeline lineno="239"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="240"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>peerStatsVector.emplace_back(peerStat-&gt;get_uid());</highlight></codeline>
+<codeline lineno="241"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="242"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="243"><highlight class="normal"></highlight></codeline>
+<codeline lineno="244"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>mean<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ac62eade20978320f440007f9e8b82a3f" kindref="member">get_mean</ref>();</highlight></codeline>
+<codeline lineno="245"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>invVariance<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad14cfafcf65feb66baf673b4fb060788" kindref="member">get_inv_variance</ref>();</highlight></codeline>
+<codeline lineno="246"><highlight class="normal"></highlight></codeline>
+<codeline lineno="247"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::CreateBatchnormBackwardAttributesDirect(</highlight></codeline>
+<codeline lineno="248"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>builder,</highlight></codeline>
+<codeline lineno="249"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ad16e5672754b053f1e3a21b3272d4b6e" kindref="member">get_dy</ref>()-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="250"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1adf2b3e9fcef4ebd83f45ba3c7ba92efa" kindref="member">get_x</ref>()-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="251"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>mean<sp/>?<sp/>flatbuffers::Optional&lt;int64_t&gt;(mean-&gt;get_uid())<sp/>:<sp/>flatbuffers::nullopt,</highlight></codeline>
+<codeline lineno="252"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>invVariance<sp/>?<sp/>flatbuffers::Optional&lt;int64_t&gt;(invVariance-&gt;get_uid())</highlight></codeline>
+<codeline lineno="253"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>:<sp/>flatbuffers::nullopt,</highlight></codeline>
+<codeline lineno="254"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ac3008fd9fb6ac6e246b0e141d04e28fc" kindref="member">get_scale</ref>()-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="255"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&amp;peerStatsVector,</highlight></codeline>
+<codeline lineno="256"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a1782ac942c5864e36fe594d93874401c" kindref="member">get_dx</ref>()-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="257"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a9b324896b41f645b3a4dba28477c50c9" kindref="member">get_dscale</ref>()-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="258"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aaa6cb2c996891302dd1f6265633ab9ec" kindref="member">get_dbias</ref>()-&gt;get_uid());</highlight></codeline>
+<codeline lineno="259"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="260"><highlight class="normal"></highlight></codeline>
+<codeline lineno="261" refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aef6dbf4fa1ce86e23257333343565026" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aef6dbf4fa1ce86e23257333343565026" kindref="member">fromFlatBuffer</ref>(</highlight></codeline>
+<codeline lineno="262"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::BatchnormBackwardAttributes*<sp/>fb,</highlight></codeline>
+<codeline lineno="263"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::unordered_map&lt;int64_t,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;&amp;<sp/>tensorMap)</highlight></codeline>
+<codeline lineno="264"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="265"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref><sp/>attr;</highlight></codeline>
+<codeline lineno="266"><highlight class="normal"></highlight></codeline>
+<codeline lineno="267"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab70a0c78e02690005cd58ec3b24ac905" kindref="member">set_dy</ref>(tensorMap.at(fb-&gt;dy_tensor_uid()));</highlight></codeline>
+<codeline lineno="268"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1ab7a5dcfaaa7c7109537443b94e34000e" kindref="member">set_x</ref>(tensorMap.at(fb-&gt;x_tensor_uid()));</highlight></codeline>
+<codeline lineno="269"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a6df45e0cb07086e88aa5dcc919edfc4c" kindref="member">set_scale</ref>(tensorMap.at(fb-&gt;scale_tensor_uid()));</highlight></codeline>
+<codeline lineno="270"><highlight class="normal"></highlight></codeline>
+<codeline lineno="271"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;mean_tensor_uid().has_value())</highlight></codeline>
+<codeline lineno="272"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="273"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a8b2259cbeaea7a5a098e991bdd2f48ef" kindref="member">set_mean</ref>(tensorMap.at(fb-&gt;mean_tensor_uid().value()));</highlight></codeline>
+<codeline lineno="274"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="275"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;inv_variance_tensor_uid().has_value())</highlight></codeline>
+<codeline lineno="276"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="277"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a031d6c00be638e105f7f387421cf7757" kindref="member">set_inv_variance</ref>(tensorMap.at(fb-&gt;inv_variance_tensor_uid().value()));</highlight></codeline>
+<codeline lineno="278"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="279"><highlight class="normal"></highlight></codeline>
+<codeline lineno="280"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::vector&lt;std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/>peerStats;</highlight></codeline>
+<codeline lineno="281"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;peer_stats_tensor_uid()<sp/>!=<sp/></highlight><highlight class="keyword">nullptr</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="282"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="283"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal">(</highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>uid<sp/>:<sp/>*fb-&gt;peer_stats_tensor_uid())</highlight></codeline>
+<codeline lineno="284"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="285"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>peerStats.push_back(tensorMap.at(uid));</highlight></codeline>
+<codeline lineno="286"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="287"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="288"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1aedbb287516a8f39d25fd250941192798" kindref="member">set_peer_stats</ref>(peerStats);</highlight></codeline>
+<codeline lineno="289"><highlight class="normal"></highlight></codeline>
+<codeline lineno="290"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a56f9afda52056bb983e10002566db0f5" kindref="member">set_dx</ref>(tensorMap.at(fb-&gt;dx_tensor_uid()));</highlight></codeline>
+<codeline lineno="291"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a4da7e4d0a8f86de814361229513efbd7" kindref="member">set_dscale</ref>(tensorMap.at(fb-&gt;dscale_tensor_uid()));</highlight></codeline>
+<codeline lineno="292"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes_1a19e8ee131c02ccf30d8a71dd84689d74" kindref="member">set_dbias</ref>(tensorMap.at(fb-&gt;dbias_tensor_uid()));</highlight></codeline>
+<codeline lineno="293"><highlight class="normal"></highlight></codeline>
+<codeline lineno="294"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>attr;</highlight></codeline>
+<codeline lineno="295"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="296"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="297" refid="namespacehipdnn__frontend_1_1graph_1a30060ab01d8ebf146db7e195e912a01f" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref><sp/><ref refid="namespacehipdnn__frontend_1_1graph_1a30060ab01d8ebf146db7e195e912a01f" kindref="member">Batchnorm_backward_attributes</ref>;</highlight></codeline>
+<codeline lineno="298"><highlight class="normal">}<sp/></highlight><highlight class="comment">//<sp/>namespace<sp/>hipdnn_frontend::graph</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp"/>
+  </compounddef>
+</doxygen>

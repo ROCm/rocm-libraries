@@ -1,0 +1,124 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kind="struct" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::TensorLayout</compoundname>
+    <includes refid="Tensor_8hpp" local="no">Tensor.hpp</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1a1935ebb675b22ec7310b7defb1a0cc09" prot="public" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string hipdnn_data_sdk::utilities::TensorLayout::name</definition>
+        <argsstring></argsstring>
+        <name>name</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorLayout::name</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="22" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="22" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1afa02c23064c384d844d437c97e49ebc8" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_data_sdk::utilities::TensorLayout::strideOrder</definition>
+        <argsstring></argsstring>
+        <name>strideOrder</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorLayout::strideOrder</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="23" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="23" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-static-attrib">
+      <memberdef kind="variable" id="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1acd72749a19c75f56571a6f7e895d12d2" prot="public" static="yes" mutable="no">
+        <type>const <ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref></type>
+        <definition>const TensorLayout hipdnn_data_sdk::utilities::TensorLayout::NCHW</definition>
+        <argsstring></argsstring>
+        <name>NCHW</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorLayout::NCHW</qualifiedname>
+        <initializer>{&quot;NCHW&quot;, {3, 2, 1, 0}}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="25" column="31" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="25" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1ab60cb8d8ac75839eae475082732a9cf2" prot="public" static="yes" mutable="no">
+        <type>const <ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref></type>
+        <definition>const TensorLayout hipdnn_data_sdk::utilities::TensorLayout::NHWC</definition>
+        <argsstring></argsstring>
+        <name>NHWC</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorLayout::NHWC</qualifiedname>
+        <initializer>{&quot;NHWC&quot;, <ref refid="namespacehipdnn__data__sdk_1_1utilities_1a06d3f3fee70885d377eafd0ead07df6e" kindref="member">strideOrderNhwc</ref>(4)}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="26" column="31" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="26" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1a64c1ceeb1990694c5b614446fc0e5448" prot="public" static="yes" mutable="no">
+        <type>const <ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref></type>
+        <definition>const TensorLayout hipdnn_data_sdk::utilities::TensorLayout::NCDHW</definition>
+        <argsstring></argsstring>
+        <name>NCDHW</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorLayout::NCDHW</qualifiedname>
+        <initializer>{&quot;NCDHW&quot;, {4, 3, 2, 1, 0}}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="27" column="31" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="27" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1ae8207ea7a0e1f66c6085f7ba8bbabc5f" prot="public" static="yes" mutable="no">
+        <type>const <ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref></type>
+        <definition>const TensorLayout hipdnn_data_sdk::utilities::TensorLayout::NDHWC</definition>
+        <argsstring></argsstring>
+        <name>NDHWC</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorLayout::NDHWC</qualifiedname>
+        <initializer>{&quot;NDHWC&quot;, <ref refid="namespacehipdnn__data__sdk_1_1utilities_1a06d3f3fee70885d377eafd0ead07df6e" kindref="member">strideOrderNhwc</ref>(5)}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="28" column="31" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="28" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <collaborationgraph>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::TensorLayout</label>
+        <link refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout"/>
+        <childnode refid="1" relation="usage">
+          <edgelabel>NCDHW</edgelabel>
+          <edgelabel>NCHW</edgelabel>
+          <edgelabel>NDHWC</edgelabel>
+          <edgelabel>NHWC</edgelabel>
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="20" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="21" bodyend="29"/>
+    <listofallmembers>
+      <member refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1a1935ebb675b22ec7310b7defb1a0cc09" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorLayout</scope><name>name</name></member>
+      <member refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1a64c1ceeb1990694c5b614446fc0e5448" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorLayout</scope><name>NCDHW</name></member>
+      <member refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1acd72749a19c75f56571a6f7e895d12d2" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorLayout</scope><name>NCHW</name></member>
+      <member refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1ae8207ea7a0e1f66c6085f7ba8bbabc5f" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorLayout</scope><name>NDHWC</name></member>
+      <member refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1ab60cb8d8ac75839eae475082732a9cf2" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorLayout</scope><name>NHWC</name></member>
+      <member refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout_1afa02c23064c384d844d437c97e49ebc8" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorLayout</scope><name>strideOrder</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

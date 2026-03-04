@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="Visitor_8hpp" kind="file" language="C++">
+    <compoundname>Visitor.hpp</compoundname>
+    <innerclass refid="structhipdnn__data__sdk_1_1utilities_1_1Visitor" prot="public">hipdnn_data_sdk::utilities::Visitor</innerclass>
+    <innernamespace refid="namespacehipdnn__data__sdk">hipdnn_data_sdk</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1utilities">hipdnn_data_sdk::utilities</innernamespace>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1utilities" kindref="compound">hipdnn_data_sdk::utilities</ref></highlight></codeline>
+<codeline lineno="7"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="8"><highlight class="normal"></highlight></codeline>
+<codeline lineno="9"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Struct<sp/>is<sp/>initialized<sp/>with<sp/>a<sp/>list<sp/>of<sp/>functors</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="10"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Typically<sp/>passed<sp/>to<sp/>std:visit<sp/>to<sp/>provide<sp/>the<sp/>overloads<sp/>for<sp/>different</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="11"><highlight class="normal"></highlight><highlight class="comment">//<sp/>variant<sp/>values</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">class</highlight><highlight class="normal">...<sp/>Ts&gt;</highlight></codeline>
+<codeline lineno="13" refid="structhipdnn__data__sdk_1_1utilities_1_1Visitor" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal"><ref refid="structhipdnn__data__sdk_1_1utilities_1_1Visitor" kindref="compound">Visitor</ref><sp/>:<sp/>Ts...</highlight></codeline>
+<codeline lineno="14"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="15"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal">Ts::operator()...;</highlight></codeline>
+<codeline lineno="16"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">class</highlight><highlight class="normal">...<sp/>Ts&gt;</highlight></codeline>
+<codeline lineno="19" refid="namespacehipdnn__data__sdk_1_1utilities_1a209855546929155d5fea3c6338a28ba7" refkind="member"><highlight class="normal"><ref refid="structhipdnn__data__sdk_1_1utilities_1_1Visitor" kindref="compound">Visitor</ref>(Ts...)<sp/>-&gt;<sp/><ref refid="structhipdnn__data__sdk_1_1utilities_1_1Visitor" kindref="compound">Visitor</ref>&lt;Ts...&gt;;</highlight></codeline>
+<codeline lineno="20"><highlight class="normal">}</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Visitor.hpp"/>
+  </compounddef>
+</doxygen>

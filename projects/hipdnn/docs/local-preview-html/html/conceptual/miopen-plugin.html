@@ -1,0 +1,904 @@
+
+<!DOCTYPE html>
+
+<html data-content_root="../" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="width=device-width, initial-scale=1" name="viewport"/>
+<meta content="The MIOpen Provider plugin serves as the kernel provider. It employs a modular C++ architecture, largely decoupled from the API layer." name="description"/>
+<meta content="hipDNN, ROCm, API," name="keywords"/>
+<title>MIOpen Provider plugin — hipDNN 1.0.0 documentation</title>
+<script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+<!-- Loaded before other Sphinx assets -->
+<link href="../_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet"/>
+<link href="../_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet"/>
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet"/>
+<link href="../_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet"/>
+<link as="font" crossorigin="" href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" rel="preload" type="font/woff2"/>
+<link as="font" crossorigin="" href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" rel="preload" type="font/woff2"/>
+<link as="font" crossorigin="" href="../_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" rel="preload" type="font/woff2"/>
+<link href="../_static/pygments.css?v=8f2a1f02" rel="stylesheet" type="text/css"/>
+<link href="../_static/styles/sphinx-book-theme.css?v=eba8b062" rel="stylesheet" type="text/css"/>
+<link href="../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css?v=6644e6bb" rel="stylesheet" type="text/css"/>
+<link href="../_static/copybutton.css?v=76b2166b" rel="stylesheet" type="text/css"/>
+<link href="../_static/custom.css?v=643846e8" rel="stylesheet" type="text/css"/>
+<link href="../_static/rocm_header.css?v=9557e3d1" rel="stylesheet" type="text/css"/>
+<link href="../_static/rocm_footer.css?v=7095035a" rel="stylesheet" type="text/css"/>
+<link href="../_static/fonts.css?v=fcff5274" rel="stylesheet" type="text/css"/>
+<link href="../_static/sphinx-design.min.css?v=95c83b7e" rel="stylesheet" type="text/css"/>
+<!-- Pre-loaded scripts that we'll load fully later -->
+<link as="script" href="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" rel="preload"/>
+<link as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" rel="preload"/>
+<script src="../_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/documentation_options.js?v=f9c1cefe"></script>
+<script src="../_static/doctools.js?v=9bcbadda"></script>
+<script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+<script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+<script src="../_static/copybutton.js?v=91c4cb68"></script>
+<script async="async" src="../_static/code_word_breaks.js?v=327952c4"></script>
+<script async="async" src="../_static/renameVersionLinks.js?v=929fe5e4"></script>
+<script async="async" src="../_static/rdcMisc.js?v=01f88d96"></script>
+<script async="async" src="../_static/theme_mode_captions.js?v=15f4ec5d"></script>
+<script defer="defer" src="../_static/search.js?v=90a4452c"></script>
+<script src="../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+<script src="../_static/design-tabs.js?v=f930bc37"></script>
+<script>DOCUMENTATION_OPTIONS.pagename = 'conceptual/miopen-plugin';</script>
+<script async="async" src="https://download.amd.com/js/analytics/analyticsinit.js"></script>
+<link href="https://www.amd.com/content/dam/code/images/favicon/favicon.ico" rel="icon"/>
+<link href="../genindex.html" rel="index" title="Index"/>
+<link href="../search.html" rel="search" title="Search"/>
+<link href="hipblaslt.html" rel="next" title="hipBLASLt Provider plugin"/>
+<link href="plugins.html" rel="prev" title="hipDNN plugin-specific operation support"/>
+<meta content="vo35SZt_GASsTHAEmdww7AYKPCvZyzLvOXBl8guBME4" name="google-site-verification"/>
+</head>
+<body data-bs-root-margin="0px 0px -60%" data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-default-mode="" data-offset="180">
+<div class="skip-link d-print-none" id="pst-skip-link"><a href="#main-content">Skip to main content</a></div>
+<div id="pst-scroll-pixel-helper"></div>
+<button class="btn rounded-pill" id="pst-back-to-top" type="button">
+<i class="fa-solid fa-arrow-up"></i>Back to top</button>
+<input class="sidebar-toggle" id="pst-primary-sidebar-checkbox" type="checkbox"/>
+<label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+<input class="sidebar-toggle" id="pst-secondary-sidebar-checkbox" type="checkbox"/>
+<label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+<div class="search-button__wrapper">
+<div class="search-button__overlay"></div>
+<div class="search-button__search-container">
+<form action="../search.html" class="bd-search d-flex align-items-center" method="get">
+<i class="fa-solid fa-magnifying-glass"></i>
+<input aria-label="Search..." autocapitalize="off" autocomplete="off" autocorrect="off" class="form-control" id="search-input" name="q" placeholder="Search..." spellcheck="false" type="search"/>
+<span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+</div>
+<div class="pst-async-banner-revealer d-none">
+<aside aria-label="Version warning" class="d-none d-print-none" id="bd-header-version-warning"></aside>
+</div>
+<header class="common-header">
+<nav class="navbar navbar-expand-xl">
+<div class="container-fluid main-nav rocm-header">
+<button aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation" class="navbar-toggler collapsed" data-bs-target="#navbarSupportedContent" data-bs-toggle="collapse" data-tracking-information="mainMenuToggle" id="nav-icon" type="button">
+<span></span>
+<span></span>
+<span></span>
+</button>
+<div class="header-logo">
+<a class="navbar-brand" href="https://www.amd.com/">
+<img alt="AMD Logo" class="d-inline-block align-text-top hover-opacity" src="../_static/images/amd-header-logo.svg" title="AMD Logo" width="90"/>
+</a>
+<div class="vr vr mx-40 my-25"></div>
+<a class="klavika-font hover-opacity" href="#">hipDNN 1.0.0</a>
+</div>
+<div class="icon-nav text-center d-flex ms-auto">
+</div>
+</div>
+</nav>
+<nav class="navbar navbar-expand-xl second-level-nav">
+<div class="container-fluid main-nav">
+<div class="navbar-nav-container collapse navbar-collapse" id="navbarSupportedContent">
+<ul class="navbar-nav nav-mega me-auto mb-2 mb-lg-0 col-xl-10">
+<li class="nav-item">
+<a aria-expanded="false" class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn" id="navgithub" role="button" target="_blank">
+                                GitHub
+                            </a>
+</li>
+<li class="nav-item">
+<a aria-expanded="false" class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries/discussions" id="navcommunity" role="button" target="_blank">
+                                Community
+                            </a>
+</li>
+<li class="nav-item">
+<a aria-expanded="false" class="nav-link top-level header-menu-links" href="https://rocm.blogs.amd.com/" id="navblogs" role="button" target="_blank">
+                                Blogs
+                            </a>
+</li>
+<li class="nav-item">
+<a aria-expanded="false" class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/rocm-hub.html" id="navrocm-developer-hub" role="button" target="_blank">
+                                ROCm Developer Hub
+                            </a>
+</li>
+<li class="nav-item">
+<a aria-expanded="false" class="nav-link top-level header-menu-links" href="https://instinct.docs.amd.com/" id="navinstinct™-docs" role="button" target="_blank">
+                                Instinct™ Docs
+                            </a>
+</li>
+<li class="nav-item">
+<a aria-expanded="false" class="nav-link top-level header-menu-links" href="https://www.amd.com/en/developer/resources/infinity-hub.html" id="navinfinity-hub" role="button" target="_blank">
+                                Infinity Hub
+                            </a>
+</li>
+<li class="nav-item">
+<a aria-expanded="false" class="nav-link top-level header-menu-links" href="https://github.com/ROCm/rocm-libraries/issues/new/choose" id="navsupport" role="button" target="_blank">
+                                Support
+                            </a>
+</li>
+</ul>
+</div>
+</div>
+</nav>
+</header>
+<div class="bd-container">
+<div class="bd-container__inner bd-page-width">
+<div class="bd-sidebar-primary bd-sidebar">
+<div class="sidebar-header-items sidebar-primary__section">
+</div>
+<div class="sidebar-primary-items__start sidebar-primary__section">
+<div class="sidebar-primary-item">
+<a class="navbar-brand logo" href="../index.html">
+<p class="title logo__title">hipDNN 1.0.0 documentation</p>
+</a></div>
+<div class="sidebar-primary-item">
+<script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+<div class="sidebar-primary-item"><nav aria-label="Main" class="bd-links bd-docs-nav">
+<div class="bd-toc-item navbar-nav active">
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../what-is-hipdnn.html">What is hipDNN?</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Install</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../install/users.html">For users</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../install/quickstart.html">hipDNN quick start</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../install/plugin-developers.html">For plugin developers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../install/hipdnn-prerequisites.html">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install/hipdnn-install.html">hipDNN installation (Linux)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../install/hipdnn-install-windows.html">hipDNN installation (Windows)</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Conceptual</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="architecture.html">High-level architecture</a></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="plugins.html">Plugin-specific operation support</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">MIOpen Provider plugin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hipblaslt.html">hipBLASLt Provider plugin</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="knobs.html">Engine configuration knobs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="backend-architecture.html">Backend architecture</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">How to</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="../reference/how-to-users.html">For users</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../how-to/build-execute-hipdnn.html">Build and execute operation graphs</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../reference/how-to-plugin.html">For plugin developers</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../how-to/migrate-cudnn.html">Migrate a cuDNN project to hipDNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../how-to/get-set-engine-knob.html">Get/set engine knob configurations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../how-to/extend-hipdnn.html">Extend hipDNN functionality</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../how-to/develop-plugins.html">Develop plugins for hipDNN</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../reference/environment-variables.html">Environment variables</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/naming-guidelines.html">Coding style and naming guidelines</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../reference/glossary.html">Glossary</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">About</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../license.html">License</a></li>
+</ul>
+</div>
+</nav></div>
+</div>
+<div class="sidebar-primary-items__end sidebar-primary__section">
+</div>
+<div id="rtd-footer-container"></div>
+</div>
+<main class="bd-main" id="main-content" role="main">
+<div class="sbt-scroll-pixel-helper"></div>
+<div class="bd-content">
+<div class="bd-article-container">
+<div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+<div class="header-article-items__start">
+<div class="header-article-item"><label class="sidebar-toggle primary-toggle btn btn-sm" data-bs-placement="bottom" data-bs-toggle="tooltip" for="__primary" title="Toggle primary sidebar">
+<span class="fa-solid fa-angle-right"></span>
+</label></div>
+<div class="header-article-item">
+<nav aria-label="Breadcrumb" class="d-print-none">
+<ul class="bd-breadcrumbs">
+<li class="breadcrumb-item breadcrumb-home">
+<a aria-label="Home" class="nav-link" href="../index.html">
+<i class="fa-solid fa-home"></i>
+</a>
+</li>
+<li class="breadcrumb-item"><a class="nav-link" href="plugins.html">hipDNN plugin-specific operation support</a></li>
+<li aria-current="page" class="breadcrumb-item active">MIOpen...</li>
+</ul>
+</nav>
+</div>
+</div>
+<div class="header-article-items__end">
+<div class="header-article-item">
+<div class="article-header-buttons">
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" data-bs-placement="bottom" data-bs-toggle="tooltip" title="Toggle secondary sidebar">
+<span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+</div>
+</div>
+</div>
+<div class="onlyprint" id="jb-print-docs-body">
+<h1>MIOpen Provider plugin</h1>
+<!-- Table of contents -->
+<div id="print-main-content">
+<div id="jb-print-toc">
+<div>
+<h2> Contents </h2>
+</div>
+<nav aria-label="Page">
+<ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#operation-support">Operation support</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#detailed-requirements">Detailed requirements</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#convolution-forward-bias-activation">Convolution Forward + (Bias) + Activation</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#convolution-forward-node">Convolution forward node</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#bias-node-optional">Bias node (optional)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#activation-node">Activation node</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#operation-notes">Operation notes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#knobs">Knobs</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#knob-benchmarking">Knob benchmarking</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#caching">Caching</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#code-sample">Code sample</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workspace-size-limit">Workspace size limit</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Code sample</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#usage-examples">Usage examples</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#query-available-knobs">Query available knobs</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#combined-knob-settings">Combined knob settings</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#best-practices">Best practices</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#for-development">For development</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#for-production">For production</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#for-memory-constrained-environments">For memory-constrained environments</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#error-handling">Error handling</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div id="searchbox"></div>
+<article class="bd-article">
+<section id="miopen-provider-plugin">
+<span id="miopen"></span><h1>MIOpen Provider plugin<a class="headerlink" href="#miopen-provider-plugin" title="Link to this heading">#</a></h1><div class="sd-container-fluid sd-sphinx-override sd-p-0 sd-mt-2 sd-mb-4 sd-p-2 sd-rounded-1 docutils" id="rocm-docs-core-article-info">
+<div class="sd-row sd-row-cols-2 sd-gx-2 sd-gy-1 docutils">
+<div class="sd-col sd-d-flex-row sd-align-minor-center docutils">
+<div class="sd-container-fluid sd-sphinx-override docutils">
+<div class="sd-row sd-row-cols-2 sd-row-cols-xs-2 sd-row-cols-sm-3 sd-row-cols-md-3 sd-row-cols-lg-3 sd-gx-3 sd-gy-1 docutils">
+<div class="sd-col sd-col-auto sd-d-flex-row sd-align-minor-center docutils">
+<p class="sd-p-0 sd-m-0" style="color:gray;">
+<span class="sd-pr-2 article-info-date-svg">
+<svg aria-hidden="true" class="sd-octicon sd-octicon-calendar" height="16.0px" version="1.1" viewbox="0 0 16 16" width="16.0px">
+<path d="M4.75 0a.75.75 0 01.75.75V2h5V.75a.75.75 0 011.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0113.25 16H2.75A1.75 1.75 0 011 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 014.75 0zm0 3.5h8.5a.25.25 0 01.25.25V6h-11V3.75a.25.25 0 01.25-.25h2zm-2.25 4v6.75c0 .138.112.25.25.25h10.5a.25.25 0 00.25-.25V7.5h-11z" fill-rule="evenodd"></path>
+</svg>
+</span>
+</p>
+</div>
+<div class="sd-col sd-col-auto sd-d-flex-row sd-align-minor-center docutils">
+<p class="sd-p-0 sd-m-0" style="color:gray;">
+<span class="sd-pr-2 article-info-read-time-svg">
+<svg aria-hidden="true" class="sd-octicon sd-octicon-clock" height="16.0px" version="1.1" viewbox="0 0 16 16" width="16.0px">
+<path d="M1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zM8 0a8 8 0 100 16A8 8 0 008 0zm.5 4.75a.75.75 0 00-1.5 0v3.5a.75.75 0 00.471.696l2.5 1a.75.75 0 00.557-1.392L8.5 7.742V4.75z" fill-rule="evenodd"></path>
+</svg>
+</span>
+                            10 min read time
+                        </p>
+</div>
+<div class="sd-col sd-col-auto sd-d-flex-row sd-align-minor-center docutils" style="color:gray;">
+                        Applies to Linux
+                    </div>
+<div class="sd-col sd-col-auto sd-d-flex-row sd-align-minor-center docutils">
+<p class="sd-p-0 sd-m-0" style="color:gray;"></p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<p>The MIOpen Provider plugin serves as the kernel provider. It employs a modular C++ architecture, largely decoupled from the API layer.</p>
+<p>The plugin consists of these components:</p>
+<ul class="simple">
+<li><p>Dependency injection container (<code class="docutils literal notranslate"><span class="pre">MiopenContainer</span></code>): This is the root object that manages the lifecycle and dependencies of all other components. It initializes the <code class="docutils literal notranslate"><span class="pre">EngineManager</span></code> and ensures that all necessary services are correctly injected.</p></li>
+<li><p>Engine manager (<code class="docutils literal notranslate"><span class="pre">EngineManager</span></code>): The central registry for execution engines. It orchestrates the selection of the appropriate engine for a given operation graph by querying its registered engines.</p></li>
+<li><p>Plan builders (<code class="docutils literal notranslate"><span class="pre">IPlanBuilder</span></code>): Each engine is associated with a set of plan builders. These components are responsible for:</p>
+<ul>
+<li><p>Applicability: Inspecting an operation graph to determine if the engine can execute it.</p></li>
+<li><p>Resource estimation: Calculating the required workspace size.</p></li>
+<li><p>Plan construction: Creating an executable IPlan object if the graph is supported.</p></li>
+</ul>
+</li>
+<li><p>Plans (IPlan): An IPlan represents a strategy for executing a specific operation graph. It encapsulates all the necessary logic and state to run the routine, abstracting the details from the higher-level engine management.</p></li>
+<li><p>C-API Interface: A thin translation layer that exposes these internal C++ components to the backend via the required engine plugin C-API.</p></li>
+</ul>
+<section id="operation-support">
+<span id="id1"></span><h2>Operation support<a class="headerlink" href="#operation-support" title="Link to this heading">#</a></h2>
+<p>These are the supported datatypes:</p>
+<ul class="simple">
+<li><p><strong>FP16</strong>: Half-precision floating point (16-bit)</p></li>
+<li><p><strong>BFP16</strong>: Brain floating point (16-bit)</p></li>
+<li><p><strong>FP32</strong>: Single-precision floating point (32-bit)</p></li>
+</ul>
+<p>These are the supported layouts:</p>
+<ul class="simple">
+<li><p><strong>NCHW</strong>: Batch, Channels, Height, Width (2D, channel-first)</p></li>
+<li><p><strong>NHWC</strong>: Batch, Height, Width, Channels (2D, channel-last)</p></li>
+<li><p><strong>NCDHW</strong>: Batch, Channels, Depth, Height, Width (3D, channel-first)</p></li>
+<li><p><strong>NDHWC</strong>: Batch, Depth, Height, Width, Channels (3D, channel-last)</p></li>
+</ul>
+<p>This table lists all operations supported in hipDNN:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 21.4%"/>
+<col style="width: 21.4%"/>
+<col style="width: 21.4%"/>
+<col style="width: 35.7%"/>
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Operation</p></th>
+<th class="head"><p>Datatypes</p></th>
+<th class="head"><p>Layouts</p></th>
+<th class="head"><p>Notes</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Batchnorm Inference with Variance</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Spatial mode only¹</p></td>
+</tr>
+<tr class="row-odd"><td><p>Batchnorm Inference + DRelu + Backward</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Fused graph³</p></td>
+</tr>
+<tr class="row-even"><td><p>Batchnorm Training</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Spatial mode only¹, No running stats⁴</p></td>
+</tr>
+<tr class="row-odd"><td><p>Batchnorm Training + Activation</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Fused graph³ ⁴</p></td>
+</tr>
+<tr class="row-even"><td><p>Batchnorm Backward</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Spatial mode only¹</p></td>
+</tr>
+<tr class="row-odd"><td><p>Convolution Dgrad</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Cross-correlation only²</p></td>
+</tr>
+<tr class="row-even"><td><p>Convolution Forward</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Cross-correlation only²</p></td>
+</tr>
+<tr class="row-odd"><td><p>Convolution Forward + (Bias) + Activation⁵</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Fused graph²³</p></td>
+</tr>
+<tr class="row-even"><td><p>Convolution Wgrad</p></td>
+<td><p>FP16, BFP16, FP32</p></td>
+<td><p>NCHW, NHWC, NCDHW, NDHWC</p></td>
+<td><p>Cross-correlation only²</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p>For annotations ¹ through ⁴, refer to <a class="reference internal" href="#operations"><span class="std std-ref">Operation notes</span></a>.</p></li>
+<li><p>For annotation ⁵, see <a class="reference internal" href="#detailed"><span class="std std-ref">Detailed requirements</span></a> for more information.</p></li>
+</ul>
+</div>
+</section>
+<section id="detailed-requirements">
+<span id="detailed"></span><h2>Detailed requirements<a class="headerlink" href="#detailed-requirements" title="Link to this heading">#</a></h2>
+<section id="convolution-forward-bias-activation">
+<h3>Convolution Forward + (Bias) + Activation<a class="headerlink" href="#convolution-forward-bias-activation" title="Link to this heading">#</a></h3>
+<section id="convolution-forward-node">
+<h4>Convolution forward node<a class="headerlink" href="#convolution-forward-node" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p>Compute data type: FP32</p></li>
+<li><dl class="simple">
+<dt>Y tensor</dt><dd><ul>
+<li><p>Virtual</p></li>
+<li><p>Data type: FP32 or the input data type (the latter only if bias is used)</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="bias-node-optional">
+<h4>Bias node (optional)<a class="headerlink" href="#bias-node-optional" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p>Compute data type: input data type</p></li>
+<li><dl class="simple">
+<dt>Output tensor</dt><dd><ul>
+<li><p>Virtual</p></li>
+<li><p>Data type: FP32 or the input data type</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+<section id="activation-node">
+<h4>Activation node<a class="headerlink" href="#activation-node" title="Link to this heading">#</a></h4>
+<ul class="simple">
+<li><p>Compute data type: FP32</p></li>
+<li><p>Activation mode: RELU_FORWARD</p></li>
+<li><dl class="simple">
+<dt>Supports</dt><dd><ul>
+<li><p>no clipping</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">relu_lower_clip</span></code> set</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">relu_lower_clip</span></code> and <code class="docutils literal notranslate"><span class="pre">relu_upper_clip</span></code> set</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</section>
+</section>
+</section>
+<section id="operation-notes">
+<span id="operations"></span><h2>Operation notes<a class="headerlink" href="#operation-notes" title="Link to this heading">#</a></h2>
+<ul class="simple">
+<li><p>¹ <strong>Batchnorm Operations</strong>: Only spatial batchnorm mode is supported. Spatial mode computes statistics over the batch (N) and spatial dimensions (H, W, or D, H, W) for each channel.</p></li>
+<li><p>² <strong>Convolution Operations</strong>: Only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.</p></li>
+<li><p>³ <strong>Fused Operations</strong>: Fused graph patterns combine multiple operations.</p>
+<ul>
+<li><p><strong>Batchnorm Inference + DReLU + Backward</strong>: Combines batchnorm inference, activation backward (DReLU), and batchnorm backward.</p></li>
+<li><p><strong>Batchnorm Training + Activation</strong>: Combines batchnorm training with forward activation.</p></li>
+<li><p><strong>Convolution Forward + (Bias) + Activation</strong>: Combines convolution forward, optional bias addition, and forward activation.</p></li>
+</ul>
+</li>
+<li><p>⁴ <strong>Batchnorm Training Running Statistics</strong>: Batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.</p></li>
+<li><p><strong>Activation Functions</strong>: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips).</p></li>
+<li><p><strong>Sparse Support</strong>: All operations only work with dense tensors.</p></li>
+</ul>
+</section>
+<section id="knobs">
+<h2>Knobs<a class="headerlink" href="#knobs" title="Link to this heading">#</a></h2>
+<p>The MIOpen Provider plugin supports <a class="reference internal" href="knobs.html#knobs"><span class="std std-ref">hipDNN engine configuration knobs</span></a> that control kernel selection, performance tuning, and memory usage. These knobs allow you to optimize MIOpen’s behavior for your specific workload and hardware configuration.</p>
+<p>The MIOpen Provider plugin supports two types of knobs:</p>
+<ul class="simple">
+<li><p><strong>Global Knobs</strong>: Standard knobs available for all engines (namespace: <code class="docutils literal notranslate"><span class="pre">global.*</span></code>)</p></li>
+<li><p><strong>Custom Knobs</strong>: Operation-specific knobs provided dynamically based on the graph (no custom knobs currently)</p></li>
+</ul>
+<p>This table lists all configuration knobs supported by the MIOpen Provider plugin:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 15.0%"/>
+<col style="width: 15.0%"/>
+<col style="width: 15.0%"/>
+<col style="width: 15.0%"/>
+<col style="width: 15.0%"/>
+<col style="width: 25.0%"/>
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Knob</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Scope</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Valid Range</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">global.benchmarking</span></code></p></td>
+<td><p>Integer (int64)</p></td>
+<td><p>All Operations</p></td>
+<td><p>0 (disabled)</p></td>
+<td><p>0-1</p></td>
+<td><p>Enable benchmarking mode for kernel selection</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">global.workspace_size_limit</span></code></p></td>
+<td><p>Integer (int64)</p></td>
+<td><p>Convolution operations only</p></td>
+<td><p>Maximum</p></td>
+<td><p>Dynamic (solver-dependent)</p></td>
+<td><p>Maximum workspace memory in bytes</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">global.workspace_size_limit</span></code> knob is <em>only available</em> for convolution operations (Forward, Backward Data, Backward Weights). It’s not supported for batchnorm or other operations.</p>
+</div>
+<section id="knob-benchmarking">
+<h3>Knob benchmarking<a class="headerlink" href="#knob-benchmarking" title="Link to this heading">#</a></h3>
+<p>The MIOpen Provider plugin uses the <code class="docutils literal notranslate"><span class="pre">global.benchmarking</span></code> knob to control whether MIOpen performs kernel benchmarking to find the optimal solver for a given operation. It’s an Integer (int64) type Knob, and it has these values:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">0</span></code> (Benchmarking disabled (default)): MIOpen uses heuristics to select a kernel. The first execution is relatively fast, but it may not use the optimal kernel for your specific configuration.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">1</span></code> (Benchmarking enabled): MIOpen benchmarks multiple solver candidates. The first execution is slower, but subsequent executions use the cached optimal solver which provides the best performance for production workloads. It has minimal overhead and typically results in 10-50% performance improvement over the default heuristic selection.</p></li>
+</ul>
+<section id="caching">
+<h4>Caching<a class="headerlink" href="#caching" title="Link to this heading">#</a></h4>
+<p>Benchmark results are cached in MIOpen’s performance database. The default location is <code class="docutils literal notranslate"><span class="pre">~/.config/miopen/</span></code> on Linux.
+Cache persists across application runs. It’s specific to the GPU model, operation parameters, tensor dimensions, and data types.</p>
+</section>
+<section id="code-sample">
+<h4>Code sample<a class="headerlink" href="#code-sample" title="Link to this heading">#</a></h4>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Enable benchmarking</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">KnobSetting</span><span class="o">&gt;</span><span class="w"> </span><span class="n">settings</span><span class="p">;</span>
+<span class="n">settings</span><span class="p">.</span><span class="n">emplace_back</span><span class="p">(</span><span class="s">"global.benchmarking"</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">create_execution_plan_ext</span><span class="p">(</span><span class="n">engineId</span><span class="p">,</span><span class="w"> </span><span class="n">settings</span><span class="p">);</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="workspace-size-limit">
+<h3>Workspace size limit<a class="headerlink" href="#workspace-size-limit" title="Link to this heading">#</a></h3>
+<p>The MIOpen Provider plugin uses the <code class="docutils literal notranslate"><span class="pre">global.workspace_size_limit</span></code> knob (Integer (int64)) to limit the maximum workspace memory that MIOpen solvers can use for convolution operations (Forward, Backward Data, Backward Weights).</p>
+<p>The valid range for the knob is dynamic, i.e., determined at runtime based on the available MIOpen solvers with this workflow:</p>
+<ol class="arabic simple">
+<li><p>MIOpen queries all available solvers for the specific operation and tensor configuration.</p></li>
+<li><p>Each solver reports its workspace memory requirement.</p></li>
+<li><p>The minimum workspace is the smallest requirement across all solvers.</p></li>
+<li><p>The maximum workspace is the largest requirement across all solvers.</p></li>
+<li><p>Default is set to the maximum for optimal performance.</p></li>
+</ol>
+<p>The range is operation-specific and depends on the:</p>
+<ul class="simple">
+<li><p>Convolution type</p></li>
+<li><p>Tensor dimensions and data types</p></li>
+<li><p>Available MIOpen solvers for the configuration</p></li>
+<li><p>GPU memory constraints</p></li>
+</ul>
+<p>Here’s an example range for a specific convultion forward operation:</p>
+<ul class="simple">
+<li><p><strong>Minimum</strong>: 512 KB (lightweight kernel with minimal workspace)</p></li>
+<li><p><strong>Maximum</strong>: 128 MB (high-performance kernel with large workspace)</p></li>
+<li><p><strong>Default</strong>: 128 MB (use maximum for best performance)</p></li>
+</ul>
+<p>Setting <code class="docutils literal notranslate"><span class="pre">global.workspace_size_limit</span></code> to a value lower than the maximum range:</p>
+<ul class="simple">
+<li><p>Constrains solver selection to only those requiring less than the specified workspace.</p></li>
+<li><p>May reduce performance if optimal solvers require more workspace.</p></li>
+<li><p>Is useful for memory-constrained systems where total GPU memory is limited.</p></li>
+</ul>
+<p>Setting <code class="docutils literal notranslate"><span class="pre">global.workspace_size_limit</span></code> to the maximum range (or not setting it):</p>
+<ul class="simple">
+<li><p>Allows all solvers to be considered.</p></li>
+<li><p>Provides the best performance.</p></li>
+<li><p>Uses more GPU memory.</p></li>
+</ul>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">global.workspace_size_limit</span></code> knob is dynamically provided <em>only</em> when applicable. It won’t appear in the knobs list for non-convolution operations (e.g., batchnorm, pointwise).</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Setting a workspace limit below the minimum required by all solvers will result in an error when creating the execution plan.</p>
+</div>
+<section id="id2">
+<h4>Code sample<a class="headerlink" href="#id2" title="Link to this heading">#</a></h4>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Query knobs to find valid range</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Knob</span><span class="o">&gt;</span><span class="w"> </span><span class="n">knobs</span><span class="p">;</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">get_knobs_for_engine</span><span class="p">(</span><span class="n">engineId</span><span class="p">,</span><span class="w"> </span><span class="n">knobs</span><span class="p">);</span>
+
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">knob</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">knobs</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">knob</span><span class="p">.</span><span class="n">knobId</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">"global.workspace_size_limit"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Check constraints to see valid range</span>
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">constraint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">knob</span><span class="p">.</span><span class="n">constraint</span><span class="p">();</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"Workspace range: "</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">constraint</span><span class="o">-&gt;</span><span class="n">toString</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Limit workspace to 32 MB</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">KnobSetting</span><span class="o">&gt;</span><span class="w"> </span><span class="n">settings</span><span class="p">;</span>
+<span class="n">settings</span><span class="p">.</span><span class="n">emplace_back</span><span class="p">(</span><span class="s">"global.workspace_size_limit"</span><span class="p">,</span><span class="w"> </span><span class="mf">32L</span><span class="n">L</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1024</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1024</span><span class="p">);</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">create_execution_plan_ext</span><span class="p">(</span><span class="n">engineId</span><span class="p">,</span><span class="w"> </span><span class="n">settings</span><span class="p">);</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="usage-examples">
+<h3>Usage examples<a class="headerlink" href="#usage-examples" title="Link to this heading">#</a></h3>
+<section id="query-available-knobs">
+<h4>Query available knobs<a class="headerlink" href="#query-available-knobs" title="Link to this heading">#</a></h4>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;hipdnn_frontend.hpp&gt;</span>
+
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">hipdnn_frontend</span><span class="p">;</span>
+
+<span class="c1">// After building the graph</span>
+<span class="n">Graph</span><span class="w"> </span><span class="n">graph</span><span class="p">;</span>
+<span class="c1">// ... setup and build graph ...</span>
+
+<span class="c1">// Query knobs for MIOpen engine</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Knob</span><span class="o">&gt;</span><span class="w"> </span><span class="n">knobs</span><span class="p">;</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">graph</span><span class="p">.</span><span class="n">get_knobs_for_engine</span><span class="p">(</span><span class="n">MIOPEN_ENGINE_ID</span><span class="p">,</span><span class="w"> </span><span class="n">knobs</span><span class="p">);</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="p">.</span><span class="n">is_good</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"Available knobs for MIOpen engine:</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">knob</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">knobs</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"  "</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">knob</span><span class="p">.</span><span class="n">knobId</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">": "</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">knob</span><span class="p">.</span><span class="n">description</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"  Default: "</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">defaultVal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">knob</span><span class="p">.</span><span class="n">defaultValue</span><span class="p">();</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">holds_alternative</span><span class="o">&lt;</span><span class="kt">int64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">defaultVal</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">get</span><span class="o">&lt;</span><span class="kt">int64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">defaultVal</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">*</span><span class="w"> </span><span class="n">constraint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">knob</span><span class="p">.</span><span class="n">constraint</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"  Constraint: "</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">constraint</span><span class="o">-&gt;</span><span class="n">toString</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="combined-knob-settings">
+<h4>Combined knob settings<a class="headerlink" href="#combined-knob-settings" title="Link to this heading">#</a></h4>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;hipdnn_frontend.hpp&gt;</span>
+
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">hipdnn_frontend</span><span class="p">;</span>
+
+<span class="n">Graph</span><span class="w"> </span><span class="n">graph</span><span class="p">;</span>
+<span class="c1">// ... setup convolution graph ...</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">build_operation_graph</span><span class="p">(</span><span class="n">handle</span><span class="p">);</span>
+
+<span class="c1">// Enable benchmarking and set workspace limit</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">KnobSetting</span><span class="o">&gt;</span><span class="w"> </span><span class="n">settings</span><span class="p">;</span>
+<span class="n">settings</span><span class="p">.</span><span class="n">emplace_back</span><span class="p">(</span><span class="s">"global.benchmarking"</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="n">settings</span><span class="p">.</span><span class="n">emplace_back</span><span class="p">(</span><span class="s">"global.workspace_size_limit"</span><span class="p">,</span><span class="w"> </span><span class="mf">128L</span><span class="n">L</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1024</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1024</span><span class="p">);</span>
+
+<span class="k">auto</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">graph</span><span class="p">.</span><span class="n">create_execution_plan_ext</span><span class="p">(</span><span class="n">MIOPEN_ENGINE_ID</span><span class="p">,</span><span class="w"> </span><span class="n">settings</span><span class="p">);</span>
+
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">error</span><span class="p">.</span><span class="n">is_good</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"Execution plan created with custom knob settings</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+<section id="best-practices">
+<h2>Best practices<a class="headerlink" href="#best-practices" title="Link to this heading">#</a></h2>
+<section id="for-development">
+<h3>For development<a class="headerlink" href="#for-development" title="Link to this heading">#</a></h3>
+<ul class="simple">
+<li><p><strong>Start with defaults</strong>: Use default knob values during initial development.</p></li>
+<li><p><strong>Profile first</strong>: Measure baseline performance before tuning knobs.</p></li>
+<li><p><strong>Query knobs</strong>: Always check available knobs and their constraints using <code class="docutils literal notranslate"><span class="pre">get_knobs_for_engine()</span></code>.</p></li>
+<li><p><strong>Test incremental changes</strong>: Modify one knob at a time to understand impact.</p></li>
+</ul>
+</section>
+<section id="for-production">
+<h3>For production<a class="headerlink" href="#for-production" title="Link to this heading">#</a></h3>
+<ul>
+<li><p><strong>Enable benchmarking during warm-up</strong>:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Warm-up phase</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">KnobSetting</span><span class="o">&gt;</span><span class="w"> </span><span class="n">warmupSettings</span><span class="p">;</span>
+<span class="n">warmupSettings</span><span class="p">.</span><span class="n">emplace_back</span><span class="p">(</span><span class="s">"global.benchmarking"</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">create_execution_plan_ext</span><span class="p">(</span><span class="n">engineId</span><span class="p">,</span><span class="w"> </span><span class="n">warmupSettings</span><span class="p">);</span>
+
+<span class="c1">// Execute a few times to populate cache</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">5</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">graph</span><span class="p">.</span><span class="n">execute</span><span class="p">(</span><span class="n">handle</span><span class="p">,</span><span class="w"> </span><span class="n">variantPack</span><span class="p">,</span><span class="w"> </span><span class="n">workspace</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Use cached results in production</strong>: After warm-up, benchmarking can be disabled as results are cached.</p></li>
+<li><p><strong>Document knob settings</strong>: Keep a record of knob configurations used in production for reproducibility.</p></li>
+</ul>
+</section>
+<section id="for-memory-constrained-environments">
+<h3>For memory-constrained environments<a class="headerlink" href="#for-memory-constrained-environments" title="Link to this heading">#</a></h3>
+<ul>
+<li><p><strong>Query workspace ranges</strong>:</p>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Find minimum and maximum workspace for the operation</span>
+<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Knob</span><span class="o">&gt;</span><span class="w"> </span><span class="n">knobs</span><span class="p">;</span>
+<span class="n">graph</span><span class="p">.</span><span class="n">get_knobs_for_engine</span><span class="p">(</span><span class="n">engineId</span><span class="p">,</span><span class="w"> </span><span class="n">knobs</span><span class="p">);</span>
+
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">knob</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">knobs</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">knob</span><span class="p">.</span><span class="n">knobId</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s">"global.workspace_size_limit"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// Log constraint to understand valid range</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</li>
+<li><p><strong>Set conservative limits</strong>: Start with a lower workspace limit and increase if performance is insufficient.</p></li>
+<li><p><strong>Balance batch size and workspace</strong>: Reducing workspace allows larger batch sizes, which may offset performance loss.</p></li>
+</ul>
+</section>
+<section id="error-handling">
+<h3>Error handling<a class="headerlink" href="#error-handling" title="Link to this heading">#</a></h3>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">auto</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">graph</span><span class="p">.</span><span class="n">create_execution_plan_ext</span><span class="p">(</span><span class="n">engineId</span><span class="p">,</span><span class="w"> </span><span class="n">settings</span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">error</span><span class="p">.</span><span class="n">is_good</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cerr</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"Failed to create execution plan: "</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">error</span><span class="p">.</span><span class="n">get_message</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Common errors:</span>
+<span class="w">    </span><span class="c1">// - Workspace limit below minimum</span>
+<span class="w">    </span><span class="c1">// - Invalid knob ID</span>
+<span class="w">    </span><span class="c1">// - Value outside valid range</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+</article>
+<footer class="prev-next-footer d-print-none">
+<div class="prev-next-area">
+<a class="left-prev" href="plugins.html" title="previous page">
+<i class="fa-solid fa-angle-left"></i>
+<div class="prev-next-info">
+<p class="prev-next-subtitle">previous</p>
+<p class="prev-next-title">hipDNN plugin-specific operation support</p>
+</div>
+</a>
+<a class="right-next" href="hipblaslt.html" title="next page">
+<div class="prev-next-info">
+<p class="prev-next-subtitle">next</p>
+<p class="prev-next-title">hipBLASLt Provider plugin</p>
+</div>
+<i class="fa-solid fa-angle-right"></i>
+</a>
+</div>
+</footer>
+</div>
+<div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+<div class="sidebar-secondary-item">
+<div class="page-toc tocsection onthispage">
+<i class="fa-solid fa-list"></i> Contents
+  </div>
+<nav class="bd-toc-nav page-toc">
+<ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#operation-support">Operation support</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#detailed-requirements">Detailed requirements</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#convolution-forward-bias-activation">Convolution Forward + (Bias) + Activation</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#convolution-forward-node">Convolution forward node</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#bias-node-optional">Bias node (optional)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#activation-node">Activation node</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#operation-notes">Operation notes</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#knobs">Knobs</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#knob-benchmarking">Knob benchmarking</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#caching">Caching</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#code-sample">Code sample</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#workspace-size-limit">Workspace size limit</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Code sample</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#usage-examples">Usage examples</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#query-available-knobs">Query available knobs</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#combined-knob-settings">Combined knob settings</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#best-practices">Best practices</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#for-development">For development</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#for-production">For production</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#for-memory-constrained-environments">For memory-constrained environments</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#error-handling">Error handling</a></li>
+</ul>
+</li>
+</ul>
+</nav></div>
+</div></div>
+</div>
+<footer class="bd-footer-content">
+<p>
+</p>
+</footer>
+</main>
+</div>
+</div>
+<!-- Scripts loaded after <body> so the DOM is not blocked -->
+<script src="../_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+<footer class="rocm-footer">
+<div class="container-lg">
+<section class="bottom-menu menu py-45">
+<div class="row d-flex align-items-center">
+<div class="col-12 text-center">
+<ul>
+<li><a href="https://www.amd.com/en/corporate/copyright" target="_blank">Terms and Conditions</a></li>
+<li><a href="https://www.amd.com/en/corporate/privacy" target="_blank">Privacy</a></li>
+<li><a href="https://www.amd.com/en/corporate/trademarks" target="_blank">Trademarks</a></li>
+<li><a href="https://www.amd.com/content/dam/amd/en/documents/corporate/cr/supply-chain-transparency.pdf" target="_blank">Supply Chain Transparency</a></li>
+<li><a href="https://www.amd.com/en/corporate/competition" target="_blank">Fair and Open Competition</a></li>
+<li><a href="https://www.amd.com/system/files/documents/amd-uk-tax-strategy.pdf" target="_blank">UK Tax Strategy</a></li>
+<li><a href="https://www.amd.com/en/corporate/cookies" target="_blank">Cookie Policy</a></li>
+<!-- OneTrust Cookies Settings button start -->
+<li><a class="ot-sdk-show-settings" href="#cookie-settings" id="ot-sdk-btn">Cookie Settings</a></li>
+<!-- OneTrust Cookies Settings button end -->
+</ul>
+</div>
+</div>
+<div class="row d-flex align-items-center">
+<div class="col-12 text-center">
+<div>
+<span class="copyright">© 2025 Advanced Micro Devices, Inc</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+</footer>
+<!-- <div id="rdc-watermark-container">
+    <img id="rdc-watermark" src="../_static/images/alpha-watermark.svg" alt="DRAFT watermark"/>
+</div> -->
+</body>
+</html>

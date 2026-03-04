@@ -1,0 +1,67 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespaceflatbuffers" kind="namespace" language="C++">
+    <compoundname>flatbuffers</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespaceflatbuffers_1adbbac92a4b5ef8708d41f04fb3485500" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>class T</type>
+          </param>
+        </templateparamlist>
+        <type>void</type>
+        <definition>void flatbuffers::to_json</definition>
+        <argsstring>(nlohmann::json &amp;vectorList, const Vector&lt; T &gt; *vec)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>flatbuffers::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>vectorList</declname>
+        </param>
+        <param>
+          <type>const Vector&lt; T &gt; *</type>
+          <declname>vec</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" line="38" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" bodystart="38" bodyend="50"/>
+      </memberdef>
+      <memberdef kind="function" id="namespaceflatbuffers_1af6023ffc917086c2a53137932d2671df" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>class T</type>
+          </param>
+        </templateparamlist>
+        <type>void</type>
+        <definition>void flatbuffers::to_json</definition>
+        <argsstring>(nlohmann::json &amp;vectorList, const Vector&lt; Offset&lt; T &gt; &gt; *vec)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>flatbuffers::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>vectorList</declname>
+        </param>
+        <param>
+          <type>const Vector&lt; Offset&lt; T &gt; &gt; *</type>
+          <declname>vec</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" line="54" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" bodystart="54" bodyend="65"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" line="34" column="1"/>
+  </compounddef>
+</doxygen>

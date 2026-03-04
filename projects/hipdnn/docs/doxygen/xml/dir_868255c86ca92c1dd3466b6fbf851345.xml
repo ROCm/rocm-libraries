@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_868255c86ca92c1dd3466b6fbf851345" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend</compoundname>
+    <innerdir refid="dir_509f467ab47beb9555d92c28b0e570cb">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes</innerdir>
+    <innerdir refid="dir_f2d90541e8ac34d50fb3fe986e997046">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend</innerdir>
+    <innerdir refid="dir_4f96cbf74334c95ca4185f25bf5ca526">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob</innerdir>
+    <innerdir refid="dir_e150018ec2dc0b06885a1a3be39fac5e">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node</innerdir>
+    <innerfile refid="Error_8hpp">Error.hpp</innerfile>
+    <innerfile refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp">Graph.hpp</innerfile>
+    <innerfile refid="Handle_8hpp">Handle.hpp</innerfile>
+    <innerfile refid="Logging_8hpp">Logging.hpp</innerfile>
+    <innerfile refid="Types_8hpp">Types.hpp</innerfile>
+    <innerfile refid="Utilities_8hpp">Utilities.hpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/"/>
+  </compounddef>
+</doxygen>

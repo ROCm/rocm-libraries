@@ -1,0 +1,241 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::TensorViewIterator</compoundname>
+    <includes refid="TensorView_8hpp" local="no">TensorView.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>typename T</type>
+      </param>
+      <param>
+        <type>bool</type>
+        <declname>IsConst</declname>
+        <defname>IsConst</defname>
+        <defval>false</defval>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="public-type">
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1ac02a02913ed41d2ba694b8006fa02c2a" prot="public" static="no">
+        <type>std::forward_iterator_tag</type>
+        <definition>using hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::iterator_category =  std::forward_iterator_tag</definition>
+        <argsstring></argsstring>
+        <name>iterator_category</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::iterator_category</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="15" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="15" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a42366d39eab4613b2629b48c54439e96" prot="public" static="no">
+        <type>T</type>
+        <definition>using hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::value_type =  T</definition>
+        <argsstring></argsstring>
+        <name>value_type</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::value_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="16" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="16" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a5984b347bb333c4bf692ec35bc6d2c9f" prot="public" static="no">
+        <type>std::ptrdiff_t</type>
+        <definition>using hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::difference_type =  std::ptrdiff_t</definition>
+        <argsstring></argsstring>
+        <name>difference_type</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::difference_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="17" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="17" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acf2c4192cf16a2a1ee4a1d9e82d8a3a6" prot="public" static="no">
+        <type>std::conditional_t&lt; IsConst, const T &amp;, T &amp; &gt;</type>
+        <definition>using hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::reference =  std::conditional_t&lt;IsConst, const T&amp;, T&amp;&gt;</definition>
+        <argsstring></argsstring>
+        <name>reference</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::reference</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="18" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="18" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a91cab99deb804c13d4f13118490506a4" prot="public" static="no">
+        <type>std::conditional_t&lt; IsConst, const T *, T * &gt;</type>
+        <definition>using hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::pointer =  std::conditional_t&lt;IsConst, const T*, T*&gt;</definition>
+        <argsstring></argsstring>
+        <name>pointer</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::pointer</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="19" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="19" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a8cafe31fa8db2f5159eff736eb1decd9" prot="private" static="no" mutable="no">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" kindref="compound">ITensorIterator</ref>&lt; IsConst &gt;</type>
+        <definition>ITensorIterator&lt;IsConst&gt; hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::_iter</definition>
+        <argsstring></argsstring>
+        <name>_iter</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::_iter</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="62" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="62" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a6d211bff7f33742649a3db6fae2b62c8" prot="public" static="no" const="no" explicit="yes" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::TensorViewIterator</definition>
+        <argsstring>(ITensorIterator&lt; IsConst &gt; iter)</argsstring>
+        <name>TensorViewIterator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::TensorViewIterator</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" kindref="compound">ITensorIterator</ref>&lt; IsConst &gt;</type>
+          <declname>iter</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="22" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="22" bodyend="25"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a5332a2181cbbc5174e400bbd288f9926" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acf2c4192cf16a2a1ee4a1d9e82d8a3a6" kindref="member">reference</ref></type>
+        <definition>reference hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::operator*</definition>
+        <argsstring>()</argsstring>
+        <name>operator*</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::operator*</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="27" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="27" bodyend="30"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a4abe0f16a81cde7e015f8a0e58d460d3" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a91cab99deb804c13d4f13118490506a4" kindref="member">pointer</ref></type>
+        <definition>pointer hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::operator-&gt;</definition>
+        <argsstring>()</argsstring>
+        <name>operator-&gt;</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::operator-&gt;</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="32" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="32" bodyend="36"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acc5b548b247f522e3acd486f92ce2b95" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref> &amp;</type>
+        <definition>TensorViewIterator &amp; hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::operator++</definition>
+        <argsstring>()</argsstring>
+        <name>operator++</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::operator++</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="38" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="38" bodyend="42"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a80b4d1bf9cdaa26a8f08b9b167aaac20" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref></type>
+        <definition>TensorViewIterator hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::operator++</definition>
+        <argsstring>(int)</argsstring>
+        <name>operator++</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::operator++</qualifiedname>
+        <param>
+          <type>int</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="44" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="44" bodyend="49"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a8de5d80cb79a25068a18c79f08651bdc" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::operator==</definition>
+        <argsstring>(const TensorViewIterator &amp;other) const</argsstring>
+        <name>operator==</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::operator==</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref> &amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="51" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="51" bodyend="54"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1ad7a04aecc925ecc95871ff171940ec9a" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::TensorViewIterator&lt; T, IsConst &gt;::operator!=</definition>
+        <argsstring>(const TensorViewIterator &amp;other) const</argsstring>
+        <name>operator!=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::TensorViewIterator::operator!=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref> &amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="56" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="56" bodyend="59"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="12" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="13" bodyend="63"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a8cafe31fa8db2f5159eff736eb1decd9" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>_iter</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a5984b347bb333c4bf692ec35bc6d2c9f" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>difference_type</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1ac02a02913ed41d2ba694b8006fa02c2a" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>iterator_category</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1ad7a04aecc925ecc95871ff171940ec9a" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>operator!=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a5332a2181cbbc5174e400bbd288f9926" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>operator*</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acc5b548b247f522e3acd486f92ce2b95" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>operator++</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a80b4d1bf9cdaa26a8f08b9b167aaac20" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>operator++</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a4abe0f16a81cde7e015f8a0e58d460d3" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>operator-&gt;</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a8de5d80cb79a25068a18c79f08651bdc" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>operator==</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a91cab99deb804c13d4f13118490506a4" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>pointer</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acf2c4192cf16a2a1ee4a1d9e82d8a3a6" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>reference</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a6d211bff7f33742649a3db6fae2b62c8" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>TensorViewIterator</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a42366d39eab4613b2629b48c54439e96" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::TensorViewIterator</scope><name>value_type</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

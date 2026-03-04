@@ -1,0 +1,423 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="TensorView_8hpp" kind="file" language="C++">
+    <compoundname>TensorView.hpp</compoundname>
+    <includes refid="Tensor_8hpp" local="no">hipdnn_data_sdk/utilities/Tensor.hpp</includes>
+    <incdepgraph>
+      <node id="7">
+        <label>CallbackSink.hpp</label>
+        <link refid="CallbackSink_8hpp"/>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+      <node id="8">
+        <label>CallbackTypes.h</label>
+        <link refid="CallbackTypes_8h"/>
+      </node>
+      <node id="6">
+        <label>hipdnn_data_sdk/logging/Logger.hpp</label>
+        <link refid="Logger_8hpp"/>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+      </node>
+      <node id="9">
+        <label>LoggingUtils.hpp</label>
+        <link refid="LoggingUtils_8hpp"/>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+      <node id="25">
+        <label>hipdnn_data_sdk/utilities/Allocators.hpp</label>
+        <link refid="Allocators_8hpp"/>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_data_sdk/utilities/MigratableMemory.hpp</label>
+        <link refid="MigratableMemory_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="12">
+        <label>hipdnn_data_sdk/utilities/PlatformUtils.hpp</label>
+        <link refid="PlatformUtils_8hpp"/>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+      <node id="31">
+        <label>hipdnn_data_sdk/utilities/ShapeUtilities.hpp</label>
+        <link refid="ShapeUtilities_8hpp"/>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="32" relation="include">
+        </childnode>
+        <childnode refid="36" relation="include">
+        </childnode>
+        <childnode refid="37" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+      </node>
+      <node id="32">
+        <label>hipdnn_data_sdk/utilities/StringUtil.hpp</label>
+        <link refid="StringUtil_8hpp"/>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="33" relation="include">
+        </childnode>
+        <childnode refid="34" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk/utilities/Tensor.hpp</label>
+        <link refid="Tensor_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+        <childnode refid="41" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="36" relation="include">
+        </childnode>
+        <childnode refid="43" relation="include">
+        </childnode>
+        <childnode refid="44" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp</label>
+        <link refid="TensorView_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="38">
+        <label>hipdnn_data_sdk/utilities/UtilsBfp16.hpp</label>
+        <link refid="UtilsBfp16_8hpp"/>
+        <childnode refid="39" relation="include">
+        </childnode>
+        <childnode refid="40" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+      <node id="41">
+        <label>hipdnn_data_sdk/utilities/UtilsFp16.hpp</label>
+        <link refid="UtilsFp16_8hpp"/>
+        <childnode refid="42" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+      <node id="10">
+        <label>algorithm</label>
+      </node>
+      <node id="11">
+        <label>array</label>
+      </node>
+      <node id="26">
+        <label>cstdlib</label>
+      </node>
+      <node id="33">
+        <label>cstring</label>
+      </node>
+      <node id="14">
+        <label>functional</label>
+      </node>
+      <node id="40">
+        <label>hip/hip_bfloat16.h</label>
+      </node>
+      <node id="42">
+        <label>hip/hip_fp16.h</label>
+      </node>
+      <node id="5">
+        <label>hip/hip_runtime.h</label>
+      </node>
+      <node id="3">
+        <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
+      </node>
+      <node id="20">
+        <label>iostream</label>
+      </node>
+      <node id="27">
+        <label>limits</label>
+      </node>
+      <node id="21">
+        <label>memory</label>
+      </node>
+      <node id="15">
+        <label>mutex</label>
+      </node>
+      <node id="28">
+        <label>new</label>
+      </node>
+      <node id="36">
+        <label>numeric</label>
+      </node>
+      <node id="39">
+        <label>ostream</label>
+      </node>
+      <node id="43">
+        <label>random</label>
+      </node>
+      <node id="37">
+        <label>ranges</label>
+      </node>
+      <node id="16">
+        <label>spdlog/async.h</label>
+      </node>
+      <node id="17">
+        <label>spdlog/details/null_mutex.h</label>
+      </node>
+      <node id="18">
+        <label>spdlog/details/synchronous_factory.h</label>
+      </node>
+      <node id="19">
+        <label>spdlog/sinks/base_sink.h</label>
+      </node>
+      <node id="22">
+        <label>spdlog/sinks/basic_file_sink.h</label>
+      </node>
+      <node id="23">
+        <label>spdlog/sinks/stdout_color_sinks.h</label>
+      </node>
+      <node id="24">
+        <label>spdlog/spdlog.h</label>
+      </node>
+      <node id="34">
+        <label>sstream</label>
+      </node>
+      <node id="30">
+        <label>stdexcept</label>
+      </node>
+      <node id="13">
+        <label>string</label>
+      </node>
+      <node id="29">
+        <label>type_traits</label>
+      </node>
+      <node id="44">
+        <label>typeindex</label>
+      </node>
+      <node id="35">
+        <label>vector</label>
+      </node>
+    </incdepgraph>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" prot="public">hipdnn_data_sdk::utilities::TensorViewIterator</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView" prot="public">hipdnn_data_sdk::utilities::TensorView</innerclass>
+    <innernamespace refid="namespacehipdnn__data__sdk">hipdnn_data_sdk</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1utilities">hipdnn_data_sdk::utilities</innernamespace>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Tensor_8hpp" kindref="compound">hipdnn_data_sdk/utilities/Tensor.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="7"><highlight class="normal"></highlight></codeline>
+<codeline lineno="8"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1utilities" kindref="compound">hipdnn_data_sdk::utilities</ref></highlight></codeline>
+<codeline lineno="9"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="10"><highlight class="normal"></highlight></codeline>
+<codeline lineno="11"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>T,<sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/>IsConst<sp/>=<sp/>false&gt;</highlight></codeline>
+<codeline lineno="12" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">class<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref></highlight></codeline>
+<codeline lineno="13"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="15" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1ac02a02913ed41d2ba694b8006fa02c2a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1ac02a02913ed41d2ba694b8006fa02c2a" kindref="member">iterator_category</ref><sp/>=<sp/>std::forward_iterator_tag;</highlight></codeline>
+<codeline lineno="16" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a42366d39eab4613b2629b48c54439e96" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a42366d39eab4613b2629b48c54439e96" kindref="member">value_type</ref><sp/>=<sp/>T;</highlight></codeline>
+<codeline lineno="17" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a5984b347bb333c4bf692ec35bc6d2c9f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a5984b347bb333c4bf692ec35bc6d2c9f" kindref="member">difference_type</ref><sp/>=<sp/>std::ptrdiff_t;</highlight></codeline>
+<codeline lineno="18" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acf2c4192cf16a2a1ee4a1d9e82d8a3a6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acf2c4192cf16a2a1ee4a1d9e82d8a3a6" kindref="member">reference</ref><sp/>=<sp/>std::conditional_t&lt;IsConst,<sp/>const<sp/>T&amp;,<sp/>T&amp;&gt;;</highlight></codeline>
+<codeline lineno="19" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a91cab99deb804c13d4f13118490506a4" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a91cab99deb804c13d4f13118490506a4" kindref="member">pointer</ref><sp/>=<sp/>std::conditional_t&lt;IsConst,<sp/>const<sp/>T*,<sp/>T*&gt;;</highlight></codeline>
+<codeline lineno="20"><highlight class="normal"></highlight></codeline>
+<codeline lineno="21"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Constructor</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="22" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a6d211bff7f33742649a3db6fae2b62c8" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">explicit</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a6d211bff7f33742649a3db6fae2b62c8" kindref="member">TensorViewIterator</ref>(<ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" kindref="compound">ITensorIterator&lt;IsConst&gt;</ref><sp/>iter)</highlight></codeline>
+<codeline lineno="23"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>:<sp/>_iter(<ref refid="namespacestd" kindref="compound">std</ref>::move(iter))</highlight></codeline>
+<codeline lineno="24"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="25"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="26"><highlight class="normal"></highlight></codeline>
+<codeline lineno="27" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a5332a2181cbbc5174e400bbd288f9926" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acf2c4192cf16a2a1ee4a1d9e82d8a3a6" kindref="member">reference</ref><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a5332a2181cbbc5174e400bbd288f9926" kindref="member">operator*</ref>()</highlight></codeline>
+<codeline lineno="28"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="29"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a91cab99deb804c13d4f13118490506a4" kindref="member">pointer</ref></highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(*_iter);</highlight></codeline>
+<codeline lineno="30"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="31"><highlight class="normal"></highlight></codeline>
+<codeline lineno="32" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a4abe0f16a81cde7e015f8a0e58d460d3" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a91cab99deb804c13d4f13118490506a4" kindref="member">pointer</ref><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a4abe0f16a81cde7e015f8a0e58d460d3" kindref="member">operator-&gt;</ref>()</highlight></codeline>
+<codeline lineno="33"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="34"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal">*<sp/>ptr<sp/>=<sp/>*_iter;</highlight></codeline>
+<codeline lineno="35"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a91cab99deb804c13d4f13118490506a4" kindref="member">pointer</ref></highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(ptr);</highlight></codeline>
+<codeline lineno="36"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="37"><highlight class="normal"></highlight></codeline>
+<codeline lineno="38" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acc5b548b247f522e3acd486f92ce2b95" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref>&amp;<sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1acc5b548b247f522e3acd486f92ce2b95" kindref="member">operator++</ref>()</highlight></codeline>
+<codeline lineno="39"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="40"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>++_iter;</highlight></codeline>
+<codeline lineno="41"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="42"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="43"><highlight class="normal"></highlight></codeline>
+<codeline lineno="44" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a80b4d1bf9cdaa26a8f08b9b167aaac20" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a80b4d1bf9cdaa26a8f08b9b167aaac20" kindref="member">operator++</ref>(</highlight><highlight class="keywordtype">int</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="45"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="46"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref><sp/>temp<sp/>=<sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="47"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>++_iter;</highlight></codeline>
+<codeline lineno="48"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>temp;</highlight></codeline>
+<codeline lineno="49"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="50"><highlight class="normal"></highlight></codeline>
+<codeline lineno="51" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a8de5d80cb79a25068a18c79f08651bdc" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1a8de5d80cb79a25068a18c79f08651bdc" kindref="member">operator==</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref>&amp;<sp/>other)</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="52"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="53"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>_iter<sp/>==<sp/>other._iter;</highlight></codeline>
+<codeline lineno="54"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="55"><highlight class="normal"></highlight></codeline>
+<codeline lineno="56" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1ad7a04aecc925ecc95871ff171940ec9a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator_1ad7a04aecc925ecc95871ff171940ec9a" kindref="member">operator!=</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator</ref>&amp;<sp/>other)</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="57"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="58"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>_iter<sp/>!=<sp/>other._iter;</highlight></codeline>
+<codeline lineno="59"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="60"><highlight class="normal"></highlight></codeline>
+<codeline lineno="61"><highlight class="normal"></highlight><highlight class="keyword">private</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="62"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" kindref="compound">ITensorIterator&lt;IsConst&gt;</ref><sp/>_iter;</highlight></codeline>
+<codeline lineno="63"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="64"><highlight class="normal"></highlight></codeline>
+<codeline lineno="65"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>T,<sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/>IsConst<sp/>=<sp/>false&gt;</highlight></codeline>
+<codeline lineno="66" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">class<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView" kindref="compound">TensorView</ref></highlight></codeline>
+<codeline lineno="67"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="68"><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="69" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1af1b87ce7a3ff0019f2a06f733d1ec7ec" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">iterator</ref><sp/>=<sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator&lt;T, IsConst&gt;</ref>;</highlight></codeline>
+<codeline lineno="70" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a19f8cf470d54548fcb51de246fe09e0b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">const_iterator</ref><sp/>=<sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">TensorViewIterator&lt;T, true&gt;</ref>;</highlight></codeline>
+<codeline lineno="71" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1ad0d74018c8534bf809978640fbbc554b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1ad0d74018c8534bf809978640fbbc554b" kindref="member">tensor_reference</ref><sp/>=<sp/>std::conditional_t&lt;IsConst,<sp/>const<sp/>ITensor&amp;,<sp/>ITensor&amp;&gt;;</highlight></codeline>
+<codeline lineno="72" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a5cb7e040ffe83ed4ad76e8f6b8b6e45d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a5cb7e040ffe83ed4ad76e8f6b8b6e45d" kindref="member">value_reference</ref><sp/>=<sp/>std::conditional_t&lt;IsConst,<sp/>const<sp/>T&amp;,<sp/>T&amp;&gt;;</highlight></codeline>
+<codeline lineno="73"><highlight class="normal"></highlight></codeline>
+<codeline lineno="74" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a5557e7f687190b3168a573a7b3f2eb7a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">explicit</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a5557e7f687190b3168a573a7b3f2eb7a" kindref="member">TensorView</ref>(<ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1ad0d74018c8534bf809978640fbbc554b" kindref="member">tensor_reference</ref><sp/>tensor)</highlight></codeline>
+<codeline lineno="75"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>:<sp/>_tensor(tensor)</highlight></codeline>
+<codeline lineno="76"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="77"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="78"><highlight class="normal"></highlight></codeline>
+<codeline lineno="79" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1ad3e6ee9986198b36218663fa4fa037ad" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">iterator</ref><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1ad3e6ee9986198b36218663fa4fa037ad" kindref="member">begin</ref>()</highlight></codeline>
+<codeline lineno="80"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">constexpr</highlight><highlight class="normal">(IsConst)</highlight></codeline>
+<codeline lineno="82"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="83"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1af1b87ce7a3ff0019f2a06f733d1ec7ec" kindref="member">iterator</ref>(_tensor.cbegin());</highlight></codeline>
+<codeline lineno="84"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="85"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">else</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="86"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="87"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1af1b87ce7a3ff0019f2a06f733d1ec7ec" kindref="member">iterator</ref>(_tensor.begin());</highlight></codeline>
+<codeline lineno="88"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="89"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="90"><highlight class="normal"></highlight></codeline>
+<codeline lineno="91" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a1928e19da0073c24756ec1caf31cec78" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">iterator</ref><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a1928e19da0073c24756ec1caf31cec78" kindref="member">end</ref>()</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="93"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">constexpr</highlight><highlight class="normal">(IsConst)</highlight></codeline>
+<codeline lineno="94"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="95"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1af1b87ce7a3ff0019f2a06f733d1ec7ec" kindref="member">iterator</ref>(_tensor.cend());</highlight></codeline>
+<codeline lineno="96"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="97"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">else</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="98"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="99"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1af1b87ce7a3ff0019f2a06f733d1ec7ec" kindref="member">iterator</ref>(_tensor.end());</highlight></codeline>
+<codeline lineno="100"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="101"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="102"><highlight class="normal"></highlight></codeline>
+<codeline lineno="103" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a87a9bd3965e198778975d63c2adc1ba1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">const_iterator</ref><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a87a9bd3965e198778975d63c2adc1ba1" kindref="member">cbegin</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="104"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a19f8cf470d54548fcb51de246fe09e0b" kindref="member">const_iterator</ref>(_tensor.cbegin());</highlight></codeline>
+<codeline lineno="106"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="107"><highlight class="normal"></highlight></codeline>
+<codeline lineno="108" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a8629b2ab22e59608b3aea0a33b8cf9e1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" kindref="compound">const_iterator</ref><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a8629b2ab22e59608b3aea0a33b8cf9e1" kindref="member">cend</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="109"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="110"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a19f8cf470d54548fcb51de246fe09e0b" kindref="member">const_iterator</ref>(_tensor.cend());</highlight></codeline>
+<codeline lineno="111"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="112"><highlight class="normal"></highlight></codeline>
+<codeline lineno="113" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a8aafd89f5b092f7a5952ebdf70a22951" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a5cb7e040ffe83ed4ad76e8f6b8b6e45d" kindref="member">value_reference</ref><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a8aafd89f5b092f7a5952ebdf70a22951" kindref="member">getHostValue</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/>indices)</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="115"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="normal">T*</highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(_tensor.hostDataOffsetFromIndex(_tensor.getIndex(indices)));</highlight></codeline>
+<codeline lineno="116"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="117"><highlight class="normal"></highlight></codeline>
+<codeline lineno="118" refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a650329097232a61afb9dba214534f37a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>T&amp;<sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1a650329097232a61afb9dba214534f37a" kindref="member">getHostValue</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/>indices)</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="119"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="120"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="keyword">const<sp/></highlight><highlight class="normal">T*</highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(_tensor.hostDataOffsetFromIndex(_tensor.getIndex(indices)));</highlight></codeline>
+<codeline lineno="121"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="122"><highlight class="normal"></highlight></codeline>
+<codeline lineno="123"><highlight class="normal"></highlight><highlight class="keyword">private</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="124"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView_1ad0d74018c8534bf809978640fbbc554b" kindref="member">tensor_reference</ref><sp/>_tensor;</highlight></codeline>
+<codeline lineno="125"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="126"><highlight class="normal"></highlight></codeline>
+<codeline lineno="127"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>T&gt;</highlight></codeline>
+<codeline lineno="128" refid="namespacehipdnn__data__sdk_1_1utilities_1a92dd70cddf14073d9e143baeba2434ef" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView" kindref="compound">ConstTensorView</ref><sp/>=<sp/><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView" kindref="compound">TensorView&lt;T, true&gt;</ref>;</highlight></codeline>
+<codeline lineno="129"><highlight class="normal"></highlight></codeline>
+<codeline lineno="130"><highlight class="normal">}</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp"/>
+  </compounddef>
+</doxygen>

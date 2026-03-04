@@ -1,0 +1,88 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structSampleRunner" kind="struct" language="C++" prot="public">
+    <compoundname>SampleRunner</compoundname>
+    <includes refid="Helpers_8hpp" local="no">Helpers.hpp</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="structSampleRunner_1a663ea1407384f6b179668655434a5621" prot="public" static="no" mutable="no">
+        <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+        <definition>hipdnnHandle_t SampleRunner::handle</definition>
+        <argsstring></argsstring>
+        <name>handle</name>
+        <qualifiedname>SampleRunner::handle</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="147" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="147" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structSampleRunner_1a84cf68355b7b749c45b00d52d669a887" prot="public" static="no" mutable="no">
+        <type><ref refid="structConfig" kindref="compound">Config</ref></type>
+        <definition>Config SampleRunner::config</definition>
+        <argsstring></argsstring>
+        <name>config</name>
+        <qualifiedname>SampleRunner::config</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="148" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="148" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="structSampleRunner_1a2b9f0f17432117dc5dc7c9f6f8ebbeb9" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename InputType</type>
+          </param>
+          <param>
+            <type>typename IntermediateType</type>
+          </param>
+        </templateparamlist>
+        <type>bool</type>
+        <definition>bool SampleRunner::operator()</definition>
+        <argsstring>(const TensorLayout &amp;layout)</argsstring>
+        <name>operator()</name>
+        <qualifiedname>SampleRunner::operator()</qualifiedname>
+        <param>
+          <type>const <ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref> &amp;</type>
+          <declname>layout</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="151" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp" bodystart="20" bodyend="151"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <collaborationgraph>
+      <node id="2">
+        <label>Config</label>
+        <link refid="structConfig"/>
+      </node>
+      <node id="1">
+        <label>SampleRunner</label>
+        <link refid="structSampleRunner"/>
+        <childnode refid="2" relation="usage">
+          <edgelabel>config</edgelabel>
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" line="145" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp" bodystart="146" bodyend="152"/>
+    <listofallmembers>
+      <member refid="structSampleRunner_1a84cf68355b7b749c45b00d52d669a887" prot="public" virt="non-virtual"><scope>SampleRunner</scope><name>config</name></member>
+      <member refid="structSampleRunner_1a663ea1407384f6b179668655434a5621" prot="public" virt="non-virtual"><scope>SampleRunner</scope><name>handle</name></member>
+      <member refid="structSampleRunner_1a2b9f0f17432117dc5dc7c9f6f8ebbeb9" prot="public" virt="non-virtual"><scope>SampleRunner</scope><name>operator()</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

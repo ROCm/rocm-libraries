@@ -1,0 +1,292 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="FlatbufferTypeHelpers_8hpp" kind="file" language="C++">
+    <compoundname>FlatbufferTypeHelpers.hpp</compoundname>
+    <includes local="no">ostream</includes>
+    <includes local="no">hipdnn_data_sdk/data_objects/graph_generated.h</includes>
+    <includes refid="Logger_8hpp" local="no">hipdnn_data_sdk/logging/Logger.hpp</includes>
+    <incdepgraph>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp</label>
+        <link refid="FlatbufferTypeHelpers_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="5">
+        <label>CallbackSink.hpp</label>
+        <link refid="CallbackSink_8hpp"/>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+      </node>
+      <node id="6">
+        <label>CallbackTypes.h</label>
+        <link refid="CallbackTypes_8h"/>
+      </node>
+      <node id="4">
+        <label>hipdnn_data_sdk/logging/Logger.hpp</label>
+        <link refid="Logger_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+      </node>
+      <node id="7">
+        <label>LoggingUtils.hpp</label>
+        <link refid="LoggingUtils_8hpp"/>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+      </node>
+      <node id="10">
+        <label>hipdnn_data_sdk/utilities/PlatformUtils.hpp</label>
+        <link refid="PlatformUtils_8hpp"/>
+        <childnode refid="11" relation="include">
+        </childnode>
+      </node>
+      <node id="8">
+        <label>algorithm</label>
+      </node>
+      <node id="9">
+        <label>array</label>
+      </node>
+      <node id="12">
+        <label>functional</label>
+      </node>
+      <node id="3">
+        <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
+      </node>
+      <node id="18">
+        <label>iostream</label>
+      </node>
+      <node id="19">
+        <label>memory</label>
+      </node>
+      <node id="13">
+        <label>mutex</label>
+      </node>
+      <node id="2">
+        <label>ostream</label>
+      </node>
+      <node id="14">
+        <label>spdlog/async.h</label>
+      </node>
+      <node id="15">
+        <label>spdlog/details/null_mutex.h</label>
+      </node>
+      <node id="16">
+        <label>spdlog/details/synchronous_factory.h</label>
+      </node>
+      <node id="17">
+        <label>spdlog/sinks/base_sink.h</label>
+      </node>
+      <node id="20">
+        <label>spdlog/sinks/basic_file_sink.h</label>
+      </node>
+      <node id="21">
+        <label>spdlog/sinks/stdout_color_sinks.h</label>
+      </node>
+      <node id="22">
+        <label>spdlog/spdlog.h</label>
+      </node>
+      <node id="11">
+        <label>string</label>
+      </node>
+    </incdepgraph>
+    <innerclass refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1NodeAttributes_01_4" prot="public">fmt::formatter&lt; hipdnn_data_sdk::data_objects::NodeAttributes &gt;</innerclass>
+    <innerclass refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1DataType_01_4" prot="public">fmt::formatter&lt; hipdnn_data_sdk::data_objects::DataType &gt;</innerclass>
+    <innerclass refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1PointwiseMode_01_4" prot="public">fmt::formatter&lt; hipdnn_data_sdk::data_objects::PointwiseMode &gt;</innerclass>
+    <innernamespace refid="namespacehipdnn__data__sdk">hipdnn_data_sdk</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1data__objects">hipdnn_data_sdk::data_objects</innernamespace>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="FlatbufferTypeHelpers_8hpp_1ad3c0a5e4add6d48aec1b17ff982ebf65" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, hipdnn_data_sdk::data_objects::NodeAttributes attributes)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>hipdnn_data_sdk::data_objects::NodeAttributes</type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" line="31" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" bodystart="31" bodyend="35"/>
+      </memberdef>
+      <memberdef kind="function" id="FlatbufferTypeHelpers_8hpp_1ac3fb1ffe366a46058c85d40455d25c9a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, hipdnn_data_sdk::data_objects::DataType dataType)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>hipdnn_data_sdk::data_objects::DataType</type>
+          <declname>dataType</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" line="37" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" bodystart="37" bodyend="40"/>
+      </memberdef>
+      <memberdef kind="function" id="FlatbufferTypeHelpers_8hpp_1a5d1c2f856da6048fc047237e67e9567b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, hipdnn_data_sdk::data_objects::PointwiseMode pointwiseMode)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>hipdnn_data_sdk::data_objects::PointwiseMode</type>
+          <declname>pointwiseMode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" line="42" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" bodystart="42" bodyend="46"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;ostream&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="7"><highlight class="normal"></highlight></codeline>
+<codeline lineno="8"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/data_objects/graph_generated.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="9"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Logger_8hpp" kindref="compound">hipdnn_data_sdk/logging/Logger.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="10"><highlight class="normal"></highlight></codeline>
+<codeline lineno="11" refid="namespacehipdnn__data__sdk" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1data__objects" kindref="compound">hipdnn_data_sdk::data_objects</ref></highlight></codeline>
+<codeline lineno="12"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight></codeline>
+<codeline lineno="14" refid="namespacehipdnn__data__sdk_1_1data__objects_1a08d7da297e5a5c734185817c677b5f63" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="namespacehipdnn__data__sdk_1_1data__objects_1a08d7da297e5a5c734185817c677b5f63" kindref="member">toString</ref>(NodeAttributes<sp/>attributes)</highlight></codeline>
+<codeline lineno="15"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="16"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>EnumNameNodeAttributes(attributes);</highlight></codeline>
+<codeline lineno="17"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight></codeline>
+<codeline lineno="19" refid="namespacehipdnn__data__sdk_1_1data__objects_1a53e71fb23644d03107575d37d6b11d67" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="namespacehipdnn__data__sdk_1_1data__objects_1a08d7da297e5a5c734185817c677b5f63" kindref="member">toString</ref>(DataType<sp/>dataType)</highlight></codeline>
+<codeline lineno="20"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="21"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>EnumNameDataType(dataType);</highlight></codeline>
+<codeline lineno="22"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="23"><highlight class="normal"></highlight></codeline>
+<codeline lineno="24" refid="namespacehipdnn__data__sdk_1_1data__objects_1a1350eea6843d5e17341d757fba999468" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="namespacehipdnn__data__sdk_1_1data__objects_1a08d7da297e5a5c734185817c677b5f63" kindref="member">toString</ref>(PointwiseMode<sp/>pointwiseMode)</highlight></codeline>
+<codeline lineno="25"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="26"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>EnumNamePointwiseMode(pointwiseMode);</highlight></codeline>
+<codeline lineno="27"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="28"><highlight class="normal"></highlight></codeline>
+<codeline lineno="29"><highlight class="normal">}<sp/></highlight><highlight class="comment">//<sp/>namespace<sp/>hipdnn_data_sdk::data_objects</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="30"><highlight class="normal"></highlight></codeline>
+<codeline lineno="31" refid="FlatbufferTypeHelpers_8hpp_1ad3c0a5e4add6d48aec1b17ff982ebf65" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/>std::ostream&amp;<sp/><ref refid="FlatbufferTypeHelpers_8hpp_1ad3c0a5e4add6d48aec1b17ff982ebf65" kindref="member">operator&lt;&lt;</ref>(std::ostream&amp;<sp/>os,</highlight></codeline>
+<codeline lineno="32"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>hipdnn_data_sdk::data_objects::NodeAttributes<sp/>attributes)</highlight></codeline>
+<codeline lineno="33"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="34"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>os<sp/>&lt;&lt;<sp/>hipdnn_data_sdk::data_objects::EnumNameNodeAttributes(attributes);</highlight></codeline>
+<codeline lineno="35"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="36"><highlight class="normal"></highlight></codeline>
+<codeline lineno="37" refid="FlatbufferTypeHelpers_8hpp_1ac3fb1ffe366a46058c85d40455d25c9a" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/>std::ostream&amp;<sp/><ref refid="FlatbufferTypeHelpers_8hpp_1ad3c0a5e4add6d48aec1b17ff982ebf65" kindref="member">operator&lt;&lt;</ref>(std::ostream&amp;<sp/>os,<sp/>hipdnn_data_sdk::data_objects::DataType<sp/>dataType)</highlight></codeline>
+<codeline lineno="38"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="39"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>os<sp/>&lt;&lt;<sp/>hipdnn_data_sdk::data_objects::EnumNameDataType(dataType);</highlight></codeline>
+<codeline lineno="40"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="41"><highlight class="normal"></highlight></codeline>
+<codeline lineno="42" refid="FlatbufferTypeHelpers_8hpp_1a5d1c2f856da6048fc047237e67e9567b" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/>std::ostream&amp;<sp/><ref refid="FlatbufferTypeHelpers_8hpp_1ad3c0a5e4add6d48aec1b17ff982ebf65" kindref="member">operator&lt;&lt;</ref>(std::ostream&amp;<sp/>os,</highlight></codeline>
+<codeline lineno="43"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>hipdnn_data_sdk::data_objects::PointwiseMode<sp/>pointwiseMode)</highlight></codeline>
+<codeline lineno="44"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="45"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>os<sp/>&lt;&lt;<sp/>hipdnn_data_sdk::data_objects::EnumNamePointwiseMode(pointwiseMode);</highlight></codeline>
+<codeline lineno="46"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="47"><highlight class="normal"></highlight></codeline>
+<codeline lineno="48"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;&gt;</highlight></codeline>
+<codeline lineno="49" refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1NodeAttributes_01_4" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal">fmt::formatter&lt;<ref refid="namespacehipdnn__data__sdk" kindref="compound">hipdnn_data_sdk</ref>::data_objects::NodeAttributes&gt;<sp/>:<sp/>fmt::formatter&lt;const<sp/>char*&gt;</highlight></codeline>
+<codeline lineno="50"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="51"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>FormatContext&gt;</highlight></codeline>
+<codeline lineno="52" refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1NodeAttributes_01_4_1ac12bc0b11ae4d2677c3abd2697ebc6c7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/><ref refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1NodeAttributes_01_4_1ac12bc0b11ae4d2677c3abd2697ebc6c7" kindref="member">format</ref>(hipdnn_data_sdk::data_objects::NodeAttributes<sp/>attributes,<sp/>FormatContext&amp;<sp/>ctx)</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="53"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="54"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>fmt::formatter&lt;const<sp/>char*&gt;::format(</highlight></codeline>
+<codeline lineno="55"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>hipdnn_data_sdk::data_objects::EnumNameNodeAttributes(attributes),<sp/>ctx);</highlight></codeline>
+<codeline lineno="56"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="57"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="58"><highlight class="normal"></highlight></codeline>
+<codeline lineno="59"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;&gt;</highlight></codeline>
+<codeline lineno="60" refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1DataType_01_4" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal">fmt::formatter&lt;<ref refid="namespacehipdnn__data__sdk" kindref="compound">hipdnn_data_sdk</ref>::data_objects::DataType&gt;<sp/>:<sp/>fmt::formatter&lt;const<sp/>char*&gt;</highlight></codeline>
+<codeline lineno="61"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="62"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>FormatContext&gt;</highlight></codeline>
+<codeline lineno="63" refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1DataType_01_4_1a4ed91b3384db0c6ed65e0f85d43c0243" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/><ref refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1DataType_01_4_1a4ed91b3384db0c6ed65e0f85d43c0243" kindref="member">format</ref>(hipdnn_data_sdk::data_objects::DataType<sp/>dataType,<sp/>FormatContext&amp;<sp/>ctx)</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="64"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="65"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>fmt::formatter&lt;const<sp/>char*&gt;::format(</highlight></codeline>
+<codeline lineno="66"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>hipdnn_data_sdk::data_objects::EnumNameDataType(dataType),<sp/>ctx);</highlight></codeline>
+<codeline lineno="67"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="68"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="69"><highlight class="normal"></highlight></codeline>
+<codeline lineno="70"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;&gt;</highlight></codeline>
+<codeline lineno="71" refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1PointwiseMode_01_4" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal">fmt::formatter&lt;<ref refid="namespacehipdnn__data__sdk" kindref="compound">hipdnn_data_sdk</ref>::data_objects::PointwiseMode&gt;<sp/>:<sp/>fmt::formatter&lt;const<sp/>char*&gt;</highlight></codeline>
+<codeline lineno="72"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="73"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>FormatContext&gt;</highlight></codeline>
+<codeline lineno="74" refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1PointwiseMode_01_4_1a0f993faef56b9062d847488ef3ddf6ee" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/><ref refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1PointwiseMode_01_4_1a0f993faef56b9062d847488ef3ddf6ee" kindref="member">format</ref>(hipdnn_data_sdk::data_objects::PointwiseMode<sp/>pointwiseMode,</highlight></codeline>
+<codeline lineno="75"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>FormatContext&amp;<sp/>ctx)</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="76"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="77"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>fmt::formatter&lt;const<sp/>char*&gt;::format(</highlight></codeline>
+<codeline lineno="78"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>hipdnn_data_sdk::data_objects::EnumNamePointwiseMode(pointwiseMode),<sp/>ctx);</highlight></codeline>
+<codeline lineno="79"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="80"><highlight class="normal">};</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp"/>
+  </compounddef>
+</doxygen>

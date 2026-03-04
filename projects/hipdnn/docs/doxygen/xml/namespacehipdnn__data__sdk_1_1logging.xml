@@ -1,0 +1,166 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__data__sdk_1_1logging" kind="namespace" language="C++">
+    <compoundname>hipdnn_data_sdk::logging</compoundname>
+    <innerclass refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink" prot="public">hipdnn_data_sdk::logging::CallbackSink</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter" prot="public">hipdnn_data_sdk::logging::ComponentFormatter</innerclass>
+    <sectiondef kind="typedef">
+      <memberdef kind="typedef" id="namespacehipdnn__data__sdk_1_1logging_1a6e7b01cf74a7fd9708fc1fbc760320cb" prot="public" static="no">
+        <type><ref refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink" kindref="compound">CallbackSink</ref>&lt; std::mutex &gt;</type>
+        <definition>using hipdnn_data_sdk::logging::CallbackSinkMt = typedef CallbackSink&lt;std::mutex&gt;</definition>
+        <argsstring></argsstring>
+        <name>CallbackSinkMt</name>
+        <qualifiedname>hipdnn_data_sdk::logging::CallbackSinkMt</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="78" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="78" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="var">
+      <memberdef kind="variable" id="namespacehipdnn__data__sdk_1_1logging_1ac5e95f0d8c43a310d2a6bffd68cd69b2" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>constexpr std::array&lt; const char *, 5 &gt;</type>
+        <definition>constexpr std::array&lt;const char*, 5&gt; hipdnn_data_sdk::logging::VALID_LOG_LEVELS</definition>
+        <argsstring></argsstring>
+        <name>VALID_LOG_LEVELS</name>
+        <qualifiedname>hipdnn_data_sdk::logging::VALID_LOG_LEVELS</qualifiedname>
+        <initializer>= {&quot;off&quot;, &quot;info&quot;, &quot;warn&quot;, &quot;error&quot;, &quot;fatal&quot;}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/LoggingUtils.hpp" line="14" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/LoggingUtils.hpp" bodystart="15" bodyend="15"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1logging_1afaf2ab8016df2e9af14e13e33f6a0aa2" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="HipdnnBackendCallbackTypes_8h_1aa3f15482bbaf7bcbc31a7b5737e6ff07" kindref="member">hipdnnSeverity_t</ref></type>
+        <definition>hipdnnSeverity_t hipdnn_data_sdk::logging::spdlogToHipdnnSeverity</definition>
+        <argsstring>(spdlog::level::level_enum level)</argsstring>
+        <name>spdlogToHipdnnSeverity</name>
+        <qualifiedname>hipdnn_data_sdk::logging::spdlogToHipdnnSeverity</qualifiedname>
+        <param>
+          <type>spdlog::level::level_enum</type>
+          <declname>level</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="19" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="19" bodyend="34"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1logging_1a74ec1dd1ddc932722898892b0b6a9f38" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; spdlog::logger &gt;</type>
+        <definition>std::shared_ptr&lt; spdlog::logger &gt; hipdnn_data_sdk::logging::createAsyncCallbackLoggerMt</definition>
+        <argsstring>(hipdnnCallback_t callback, const std::string &amp;source)</argsstring>
+        <name>createAsyncCallbackLoggerMt</name>
+        <qualifiedname>hipdnn_data_sdk::logging::createAsyncCallbackLoggerMt</qualifiedname>
+        <param>
+          <type><ref refid="HipdnnBackendCallbackTypes_8h_1a89c1a24875bd3c5cf12c73dd64689906" kindref="member">hipdnnCallback_t</ref></type>
+          <declname>callback</declname>
+        </param>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>source</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="80" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="80" bodyend="89"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1logging_1aa2f856321be8829a310599effa45995f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename Factory</type>
+            <defval>spdlog::synchronous_factory</defval>
+          </param>
+        </templateparamlist>
+        <type>std::shared_ptr&lt; spdlog::logger &gt;</type>
+        <definition>std::shared_ptr&lt; spdlog::logger &gt; hipdnn_data_sdk::logging::createCallbackLoggerMt</definition>
+        <argsstring>(hipdnnCallback_t callback, const std::string &amp;source)</argsstring>
+        <name>createCallbackLoggerMt</name>
+        <qualifiedname>hipdnn_data_sdk::logging::createCallbackLoggerMt</qualifiedname>
+        <param>
+          <type><ref refid="HipdnnBackendCallbackTypes_8h_1a89c1a24875bd3c5cf12c73dd64689906" kindref="member">hipdnnCallback_t</ref></type>
+          <declname>callback</declname>
+        </param>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>source</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="92" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="92" bodyend="99"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1logging_1a6dd22ab88fcfd7143d6493e82630cadc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::logging::isValidLogLevel</definition>
+        <argsstring>(const std::string &amp;level)</argsstring>
+        <name>isValidLogLevel</name>
+        <qualifiedname>hipdnn_data_sdk::logging::isValidLogLevel</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>level</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/LoggingUtils.hpp" line="17" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/LoggingUtils.hpp" bodystart="17" bodyend="21"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1logging_1af55511e4c7f6d167c03e47fda7b8f11b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::logging::isLoggingEnabled</definition>
+        <argsstring>()</argsstring>
+        <name>isLoggingEnabled</name>
+        <qualifiedname>hipdnn_data_sdk::logging::isLoggingEnabled</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/LoggingUtils.hpp" line="23" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/LoggingUtils.hpp" bodystart="23" bodyend="27"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1logging_1a83bc2123b2f4c9ac47258f63f8e0ccad" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_data_sdk::logging::generatePatternString</definition>
+        <argsstring>(const std::string &amp;componentName)</argsstring>
+        <name>generatePatternString</name>
+        <qualifiedname>hipdnn_data_sdk::logging::generatePatternString</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>componentName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/LoggingUtils.hpp" line="29" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/LoggingUtils.hpp" bodystart="29" bodyend="32"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="16" column="1"/>
+  </compounddef>
+</doxygen>

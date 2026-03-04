@@ -1,0 +1,110 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1EmptyConstraint" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::EmptyConstraint</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1IConstraint" prot="public" virt="non-virtual">hipdnn_frontend::IConstraint</basecompoundref>
+    <includes refid="KnobConstraint_8hpp" local="no">KnobConstraint.hpp</includes>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1EmptyConstraint_1ae28ef05aacda9d368bf9f9540cdb9622" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::EmptyConstraint::EmptyConstraint</definition>
+        <argsstring>()=default</argsstring>
+        <name>EmptyConstraint</name>
+        <qualifiedname>hipdnn_frontend::EmptyConstraint::EmptyConstraint</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="328" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1EmptyConstraint_1a7af515eddde8fcc33dc9795e6fea1273" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::EmptyConstraint::validateKnobSetting</definition>
+        <argsstring>(const KnobSetting &amp;) const override</argsstring>
+        <name>validateKnobSetting</name>
+        <qualifiedname>hipdnn_frontend::EmptyConstraint::validateKnobSetting</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1IConstraint_1a6ab00265f7278a5fa54bfc2c33bc1e92">validateKnobSetting</reimplements>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> &amp;</type>
+          <declname>setting</declname>
+        </param>
+        <briefdescription>
+<para>Validate a knob setting against this constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>setting</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> to validate </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or describing the validation failure </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="330" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="330" bodyend="334"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1EmptyConstraint_1ace691c128915c07a0f1cf095bb7de9ea" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::EmptyConstraint::toString</definition>
+        <argsstring>() const override</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_frontend::EmptyConstraint::toString</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1IConstraint_1ad415b6bb1b75cc43d38a06f18d74db9e">toString</reimplements>
+        <briefdescription>
+<para>Get a string representation of this constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Human-readable string for debugging/logging </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="336" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="336" bodyend="339"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>hipdnn_frontend::EmptyConstraint</label>
+        <link refid="classhipdnn__frontend_1_1EmptyConstraint"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend::IConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IConstraint"/>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>hipdnn_frontend::EmptyConstraint</label>
+        <link refid="classhipdnn__frontend_1_1EmptyConstraint"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend::IConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IConstraint"/>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="325" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="326" bodyend="340"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1EmptyConstraint_1ae28ef05aacda9d368bf9f9540cdb9622" prot="public" virt="non-virtual"><scope>hipdnn_frontend::EmptyConstraint</scope><name>EmptyConstraint</name></member>
+      <member refid="classhipdnn__frontend_1_1EmptyConstraint_1ace691c128915c07a0f1cf095bb7de9ea" prot="public" virt="virtual"><scope>hipdnn_frontend::EmptyConstraint</scope><name>toString</name></member>
+      <member refid="classhipdnn__frontend_1_1EmptyConstraint_1a7af515eddde8fcc33dc9795e6fea1273" prot="public" virt="virtual"><scope>hipdnn_frontend::EmptyConstraint</scope><name>validateKnobSetting</name></member>
+      <member refid="classhipdnn__frontend_1_1IConstraint_1aff435d1b005226f942d3943c72fcd95a" prot="public" virt="virtual"><scope>hipdnn_frontend::EmptyConstraint</scope><name>~IConstraint</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

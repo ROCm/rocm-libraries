@@ -1,0 +1,378 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1Knob" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::Knob</compoundname>
+    <includes refid="Knob_8hpp" local="no">Knob.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1Knob_1af1038301646e5dff6ff6c1e31afeaed2" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::Knob::_knobId</definition>
+        <argsstring></argsstring>
+        <name>_knobId</name>
+        <qualifiedname>hipdnn_frontend::Knob::_knobId</qualifiedname>
+        <briefdescription>
+<para>Unique knob identifier. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="200" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="200" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1Knob_1a499d8051aa240474ae403c7eefce9919" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::Knob::_description</definition>
+        <argsstring></argsstring>
+        <name>_description</name>
+        <qualifiedname>hipdnn_frontend::Knob::_description</qualifiedname>
+        <briefdescription>
+<para>Human-readable description. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="201" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="201" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1Knob_1a3c4b684f7bbcda08db5fd0837dab2b61" prot="private" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref></type>
+        <definition>KnobValueVariant hipdnn_frontend::Knob::_defaultValue</definition>
+        <argsstring></argsstring>
+        <name>_defaultValue</name>
+        <qualifiedname>hipdnn_frontend::Knob::_defaultValue</qualifiedname>
+        <briefdescription>
+<para>Default value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="202" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="202" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1Knob_1a0f000f4738080e3cfecf2ef016ec440c" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::Knob::_deprecated</definition>
+        <argsstring></argsstring>
+        <name>_deprecated</name>
+        <qualifiedname>hipdnn_frontend::Knob::_deprecated</qualifiedname>
+        <briefdescription>
+<para>Whether this knob is deprecated. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="203" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="203" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1Knob_1a5af3d570e12b7e1cc713c21cef8b38ce" prot="private" static="no" mutable="no">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1IConstraint" kindref="compound">IConstraint</ref> &gt;</type>
+        <definition>std::shared_ptr&lt;IConstraint&gt; hipdnn_frontend::Knob::_constraint</definition>
+        <argsstring></argsstring>
+        <name>_constraint</name>
+        <qualifiedname>hipdnn_frontend::Knob::_constraint</qualifiedname>
+        <briefdescription>
+<para>Optional constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="205" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="205" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-static-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a45b1ed6885cdf92321a3e45aa3a1e13d" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::pair&lt; <ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref>, <ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref> &gt;</type>
+        <definition>std::pair&lt; Error, Knob &gt; hipdnn_frontend::Knob::tryFromFlatbuffer</definition>
+        <argsstring>(hipdnnBackendFlatbufferData_t fbData)</argsstring>
+        <name>tryFromFlatbuffer</name>
+        <qualifiedname>hipdnn_frontend::Knob::tryFromFlatbuffer</qualifiedname>
+        <param>
+          <type><ref refid="structhipdnnBackendFlatbufferData__t" kindref="compound">hipdnnBackendFlatbufferData_t</ref></type>
+          <declname>fbData</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="73" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="209" bodyend="308"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a9ddf41e1b669b33e105dfd4cee434fce" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::string &amp;</type>
+        <definition>const std::string &amp; hipdnn_frontend::Knob::knobId</definition>
+        <argsstring>() const</argsstring>
+        <name>knobId</name>
+        <qualifiedname>hipdnn_frontend::Knob::knobId</qualifiedname>
+        <briefdescription>
+<para>Get the knob identifier. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The unique identifier string for this knob </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="79" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="79" bodyend="82"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a33d5e6503f02f351202f9f30e539af49" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::string &amp;</type>
+        <definition>const std::string &amp; hipdnn_frontend::Knob::description</definition>
+        <argsstring>() const</argsstring>
+        <name>description</name>
+        <qualifiedname>hipdnn_frontend::Knob::description</qualifiedname>
+        <briefdescription>
+<para>Get the knob description. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Human-readable description of what this knob controls </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="88" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="88" bodyend="91"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a28f86a190846f1d4c05736e63e605229" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::Knob::isDeprecated</definition>
+        <argsstring>() const</argsstring>
+        <name>isDeprecated</name>
+        <qualifiedname>hipdnn_frontend::Knob::isDeprecated</qualifiedname>
+        <briefdescription>
+<para>Check if this knob is deprecated. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>true if the knob is deprecated and should not be used </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="97" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="97" bodyend="100"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a2ab63871ee4cb2f7ec9b3f019f2481ce" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a51f1ca4447672651e407eb755c22fc6c" kindref="member">KnobValueType</ref></type>
+        <definition>KnobValueType hipdnn_frontend::Knob::valueType</definition>
+        <argsstring>() const</argsstring>
+        <name>valueType</name>
+        <qualifiedname>hipdnn_frontend::Knob::valueType</qualifiedname>
+        <briefdescription>
+<para>Get the value type of this knob. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The KnobValueType (INT64, FLOAT64, or STRING) </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="106" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="106" bodyend="109"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref> &amp;</type>
+        <definition>const KnobValueVariant &amp; hipdnn_frontend::Knob::defaultValue</definition>
+        <argsstring>() const</argsstring>
+        <name>defaultValue</name>
+        <qualifiedname>hipdnn_frontend::Knob::defaultValue</qualifiedname>
+        <briefdescription>
+<para>Get the default value for this knob. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The default value as a variant </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="115" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="115" bodyend="118"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a18d3d4ffc94f5f58739a88bf1d5683bc" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="classhipdnn__frontend_1_1IConstraint" kindref="compound">IConstraint</ref> *</type>
+        <definition>const IConstraint * hipdnn_frontend::Knob::constraint</definition>
+        <argsstring>() const</argsstring>
+        <name>constraint</name>
+        <qualifiedname>hipdnn_frontend::Knob::constraint</qualifiedname>
+        <briefdescription>
+<para>Get the constraint for this knob. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Pointer to the constraint, or nullptr if no constraint </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="124" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="124" bodyend="127"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a37e3f7d77e48ac0975fa2b267080e28a" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::Knob::validate</definition>
+        <argsstring>(const KnobSetting &amp;setting) const</argsstring>
+        <name>validate</name>
+        <qualifiedname>hipdnn_frontend::Knob::validate</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> &amp;</type>
+          <declname>setting</declname>
+        </param>
+        <briefdescription>
+<para>Validate a knob setting against this knob&apos;s constraints. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>setting</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> to validate </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or describing the validation failure </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="134" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="134" bodyend="143"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a9124bbcb67e0bd7ed12c50ed2097e989" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::Knob::toString</definition>
+        <argsstring>() const</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_frontend::Knob::toString</qualifiedname>
+        <briefdescription>
+<para>Get a string representation of this knob. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Human-readable string for debugging/logging </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="149" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="149" bodyend="166"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1ac1c34ab71a2fbd31415b5da38827bcd9" prot="private" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::Knob::Knob</definition>
+        <argsstring>()=default</argsstring>
+        <name>Knob</name>
+        <qualifiedname>hipdnn_frontend::Knob::Knob</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="170" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1aa63b858a48945cba6c571aea6263b0dc" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::Knob::Knob</definition>
+        <argsstring>(std::string knobIdStr, std::string description, KnobValueVariant defaultValue, bool deprecated)</argsstring>
+        <name>Knob</name>
+        <qualifiedname>hipdnn_frontend::Knob::Knob</qualifiedname>
+        <param>
+          <type>std::string</type>
+          <declname>knobIdStr</declname>
+        </param>
+        <param>
+          <type>std::string</type>
+          <declname>description</declname>
+        </param>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref></type>
+          <declname>defaultValue</declname>
+        </param>
+        <param>
+          <type>bool</type>
+          <declname>deprecated</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="173" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="173" bodyend="182"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-static-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1Knob_1a97691fc692247a0b7ab3794cc565c153" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>static void hipdnn_frontend::Knob::variantToStream</definition>
+        <argsstring>(std::ostringstream &amp;oss, const KnobValueVariant &amp;variant)</argsstring>
+        <name>variantToStream</name>
+        <qualifiedname>hipdnn_frontend::Knob::variantToStream</qualifiedname>
+        <param>
+          <type>std::ostringstream &amp;</type>
+          <declname>oss</declname>
+        </param>
+        <param>
+          <type>const <ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref> &amp;</type>
+          <declname>variant</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="184" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="184" bodyend="198"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Describes a tunable configuration parameter for an execution engine. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>Knobs are engine-specific configuration options that can be adjusted to tune performance. Each knob has:<itemizedlist>
+<listitem><para>An identifier (knobId)</para>
+</listitem><listitem><para>A description of what it controls</para>
+</listitem><listitem><para>A default value</para>
+</listitem><listitem><para>Optional constraints (valid ranges, allowed values)</para>
+</listitem></itemizedlist>
+</para>
+<para>Knobs are retrieved from engine descriptors and can be used to create custom execution plans.</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="comment">//<sp/>Get<sp/>available<sp/>knobs<sp/>for<sp/>an<sp/>engine</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>engines<sp/>=<sp/>graph.get_available_engines(handle);</highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>knobs<sp/>=<sp/>engines[0].getKnobs();</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keywordflow">for</highlight><highlight class="normal">(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal">&amp;<sp/>knob<sp/>:<sp/>knobs)</highlight></codeline>
+<codeline><highlight class="normal">{</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>std::cout<sp/>&lt;&lt;<sp/>knob.knobId()<sp/>&lt;&lt;<sp/></highlight><highlight class="stringliteral">&quot;:<sp/>&quot;</highlight><highlight class="normal"><sp/>&lt;&lt;<sp/>knob.description()<sp/>&lt;&lt;<sp/>std::endl;</highlight></codeline>
+<codeline><highlight class="normal">}</highlight></codeline>
+</programlisting></para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref>, <ref refid="classhipdnn__frontend_1_1IConstraint" kindref="compound">IConstraint</ref>, Graph::get_available_engines() </para>
+</simplesect>
+</para>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" line="68" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp" bodystart="69" bodyend="206"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1Knob_1a5af3d570e12b7e1cc713c21cef8b38ce" prot="private" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>_constraint</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a3c4b684f7bbcda08db5fd0837dab2b61" prot="private" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>_defaultValue</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a0f000f4738080e3cfecf2ef016ec440c" prot="private" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>_deprecated</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a499d8051aa240474ae403c7eefce9919" prot="private" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>_description</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1af1038301646e5dff6ff6c1e31afeaed2" prot="private" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>_knobId</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a18d3d4ffc94f5f58739a88bf1d5683bc" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>constraint</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1af2c372bebd456e02ec5edb2bf7782408" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>defaultValue</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a33d5e6503f02f351202f9f30e539af49" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>description</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a28f86a190846f1d4c05736e63e605229" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>isDeprecated</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1ac1c34ab71a2fbd31415b5da38827bcd9" prot="private" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>Knob</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1aa63b858a48945cba6c571aea6263b0dc" prot="private" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>Knob</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a9ddf41e1b669b33e105dfd4cee434fce" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>knobId</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a9124bbcb67e0bd7ed12c50ed2097e989" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>toString</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a45b1ed6885cdf92321a3e45aa3a1e13d" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>tryFromFlatbuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a37e3f7d77e48ac0975fa2b267080e28a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>validate</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a2ab63871ee4cb2f7ec9b3f019f2481ce" prot="public" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>valueType</name></member>
+      <member refid="classhipdnn__frontend_1_1Knob_1a97691fc692247a0b7ab3794cc565c153" prot="private" virt="non-virtual"><scope>hipdnn_frontend::Knob</scope><name>variantToStream</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

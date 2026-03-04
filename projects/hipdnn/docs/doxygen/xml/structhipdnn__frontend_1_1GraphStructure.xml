@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structhipdnn__frontend_1_1GraphStructure" kind="struct" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::GraphStructure</compoundname>
+    <includes refid="TopologicalSortingUtils_8hpp" local="no">TopologicalSortingUtils.hpp</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="structhipdnn__frontend_1_1GraphStructure_1a6a80a54579e701ae81e441ec45c00ef9" prot="public" static="no" mutable="no">
+        <type>std::vector&lt; std::vector&lt; size_t &gt; &gt;</type>
+        <definition>std::vector&lt;std::vector&lt;size_t&gt; &gt; hipdnn_frontend::GraphStructure::adjacencyList</definition>
+        <argsstring></argsstring>
+        <name>adjacencyList</name>
+        <qualifiedname>hipdnn_frontend::GraphStructure::adjacencyList</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="17" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="17" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" line="15" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp" bodystart="16" bodyend="18"/>
+    <listofallmembers>
+      <member refid="structhipdnn__frontend_1_1GraphStructure_1a6a80a54579e701ae81e441ec45c00ef9" prot="public" virt="non-virtual"><scope>hipdnn_frontend::GraphStructure</scope><name>adjacencyList</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

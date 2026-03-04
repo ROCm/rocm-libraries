@@ -1,0 +1,92 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__plugin__sdk_1_1IEngineConfig" kind="class" language="C++" prot="public" abstract="yes">
+    <compoundname>hipdnn_plugin_sdk::IEngineConfig</compoundname>
+    <derivedcompoundref refid="classhipdnn__plugin__sdk_1_1EngineConfigWrapper" prot="public" virt="non-virtual">hipdnn_plugin_sdk::EngineConfigWrapper</derivedcompoundref>
+    <includes refid="EngineConfigWrapper_8hpp" local="no">EngineConfigWrapper.hpp</includes>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IEngineConfig_1a78d47c8f14cc2e7b1b2a517cff9a56b4" prot="public" static="no" const="no" explicit="no" inline="no" virt="virtual">
+        <type></type>
+        <definition>virtual hipdnn_plugin_sdk::IEngineConfig::~IEngineConfig</definition>
+        <argsstring>()=default</argsstring>
+        <name>~IEngineConfig</name>
+        <qualifiedname>hipdnn_plugin_sdk::IEngineConfig::~IEngineConfig</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp" line="17" column="13"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IEngineConfig_1aa501b52ff288dcedab8a61b71e1446f5" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const hipdnn_data_sdk::data_objects::EngineConfig &amp;</type>
+        <definition>virtual const hipdnn_data_sdk::data_objects::EngineConfig &amp; hipdnn_plugin_sdk::IEngineConfig::getEngineConfig</definition>
+        <argsstring>() const =0</argsstring>
+        <name>getEngineConfig</name>
+        <qualifiedname>hipdnn_plugin_sdk::IEngineConfig::getEngineConfig</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1EngineConfigWrapper_1a7b45c48647abee3456d155b5ea9a2626">getEngineConfig</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp" line="19" column="63"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IEngineConfig_1aa969b580953dd842b971779a919ab08d" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>bool</type>
+        <definition>virtual bool hipdnn_plugin_sdk::IEngineConfig::isValid</definition>
+        <argsstring>() const =0</argsstring>
+        <name>isValid</name>
+        <qualifiedname>hipdnn_plugin_sdk::IEngineConfig::isValid</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1EngineConfigWrapper_1aa37d429853d3783cb278505bc9adc2b9">isValid</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp" line="20" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IEngineConfig_1a4f1c4e84286f63a7f87fdb882d02fa23" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>int64_t</type>
+        <definition>virtual int64_t hipdnn_plugin_sdk::IEngineConfig::engineId</definition>
+        <argsstring>() const =0</argsstring>
+        <name>engineId</name>
+        <qualifiedname>hipdnn_plugin_sdk::IEngineConfig::engineId</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1EngineConfigWrapper_1a7de10027eb87fe467d34cfc3e9db8f74">engineId</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp" line="21" column="21"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_plugin_sdk::EngineConfigWrapper</label>
+        <link refid="classhipdnn__plugin__sdk_1_1EngineConfigWrapper"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>hipdnn_plugin_sdk::IEngineConfig</label>
+        <link refid="classhipdnn__plugin__sdk_1_1IEngineConfig"/>
+      </node>
+    </inheritancegraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp" line="14" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp" bodystart="15" bodyend="22"/>
+    <listofallmembers>
+      <member refid="classhipdnn__plugin__sdk_1_1IEngineConfig_1a4f1c4e84286f63a7f87fdb882d02fa23" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IEngineConfig</scope><name>engineId</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IEngineConfig_1aa501b52ff288dcedab8a61b71e1446f5" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IEngineConfig</scope><name>getEngineConfig</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IEngineConfig_1aa969b580953dd842b971779a919ab08d" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IEngineConfig</scope><name>isValid</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IEngineConfig_1a78d47c8f14cc2e7b1b2a517cff9a56b4" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::IEngineConfig</scope><name>~IEngineConfig</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

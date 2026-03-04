@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__plugin__sdk" kind="namespace" language="C++">
+    <compoundname>hipdnn_plugin_sdk</compoundname>
+    <innerclass refid="classhipdnn__plugin__sdk_1_1EngineConfigWrapper" prot="public">hipdnn_plugin_sdk::EngineConfigWrapper</innerclass>
+    <innerclass refid="classhipdnn__plugin__sdk_1_1EngineDetailsWrapper" prot="public">hipdnn_plugin_sdk::EngineDetailsWrapper</innerclass>
+    <innerclass refid="classhipdnn__plugin__sdk_1_1GraphWrapper" prot="public">hipdnn_plugin_sdk::GraphWrapper</innerclass>
+    <innerclass refid="classhipdnn__plugin__sdk_1_1IEngineConfig" prot="public">hipdnn_plugin_sdk::IEngineConfig</innerclass>
+    <innerclass refid="classhipdnn__plugin__sdk_1_1IEngineDetails" prot="public">hipdnn_plugin_sdk::IEngineDetails</innerclass>
+    <innerclass refid="classhipdnn__plugin__sdk_1_1IGraph" prot="public">hipdnn_plugin_sdk::IGraph</innerclass>
+    <innerclass refid="classhipdnn__plugin__sdk_1_1INodeWrapper" prot="public">hipdnn_plugin_sdk::INodeWrapper</innerclass>
+    <innerclass refid="classhipdnn__plugin__sdk_1_1NodeWrapper" prot="public">hipdnn_plugin_sdk::NodeWrapper</innerclass>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp" line="11" column="1"/>
+  </compounddef>
+</doxygen>

@@ -1,0 +1,260 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="BackendLoggingHelpers_8hpp" kind="file" language="C++">
+    <compoundname>BackendLoggingHelpers.hpp</compoundname>
+    <includes local="no">ostream</includes>
+    <includes refid="HipdnnStatus_8h" local="no">HipdnnStatus.h</includes>
+    <includes refid="Logger_8hpp" local="no">hipdnn_data_sdk/logging/Logger.hpp</includes>
+    <includedby refid="ScopedHipdnnBackendDescriptor_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</includedby>
+    <incdepgraph>
+      <node id="3">
+        <label>HipdnnStatus.h</label>
+        <link refid="HipdnnStatus_8h"/>
+      </node>
+      <node id="5">
+        <label>CallbackSink.hpp</label>
+        <link refid="CallbackSink_8hpp"/>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+      </node>
+      <node id="6">
+        <label>CallbackTypes.h</label>
+        <link refid="CallbackTypes_8h"/>
+      </node>
+      <node id="4">
+        <label>hipdnn_data_sdk/logging/Logger.hpp</label>
+        <link refid="Logger_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+      </node>
+      <node id="7">
+        <label>LoggingUtils.hpp</label>
+        <link refid="LoggingUtils_8hpp"/>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+      </node>
+      <node id="10">
+        <label>hipdnn_data_sdk/utilities/PlatformUtils.hpp</label>
+        <link refid="PlatformUtils_8hpp"/>
+        <childnode refid="11" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendLoggingHelpers.hpp</label>
+        <link refid="BackendLoggingHelpers_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="8">
+        <label>algorithm</label>
+      </node>
+      <node id="9">
+        <label>array</label>
+      </node>
+      <node id="12">
+        <label>functional</label>
+      </node>
+      <node id="18">
+        <label>iostream</label>
+      </node>
+      <node id="19">
+        <label>memory</label>
+      </node>
+      <node id="13">
+        <label>mutex</label>
+      </node>
+      <node id="2">
+        <label>ostream</label>
+      </node>
+      <node id="14">
+        <label>spdlog/async.h</label>
+      </node>
+      <node id="15">
+        <label>spdlog/details/null_mutex.h</label>
+      </node>
+      <node id="16">
+        <label>spdlog/details/synchronous_factory.h</label>
+      </node>
+      <node id="17">
+        <label>spdlog/sinks/base_sink.h</label>
+      </node>
+      <node id="20">
+        <label>spdlog/sinks/basic_file_sink.h</label>
+      </node>
+      <node id="21">
+        <label>spdlog/sinks/stdout_color_sinks.h</label>
+      </node>
+      <node id="22">
+        <label>spdlog/spdlog.h</label>
+      </node>
+      <node id="11">
+        <label>string</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendLoggingHelpers.hpp</label>
+        <link refid="BackendLoggingHelpers_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
+        <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+    </invincdepgraph>
+    <innerclass refid="structfmt_1_1formatter_3_01hipdnnStatus__t_01_4" prot="public">fmt::formatter&lt; hipdnnStatus_t &gt;</innerclass>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="BackendLoggingHelpers_8hpp_1ad2810b5108655d387fb57c851d15d6e9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const char *</type>
+        <definition>const char * toString</definition>
+        <argsstring>(hipdnnStatus_t status)</argsstring>
+        <name>toString</name>
+        <param>
+          <type><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+          <declname>status</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendLoggingHelpers.hpp" line="11" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendLoggingHelpers.hpp" bodystart="11" bodyend="48"/>
+      </memberdef>
+      <memberdef kind="function" id="BackendLoggingHelpers_8hpp_1a6f1f87051e99d0f65337da793b28002c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, hipdnnStatus_t status)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+          <declname>status</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendLoggingHelpers.hpp" line="50" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendLoggingHelpers.hpp" bodystart="50" bodyend="53"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;ostream&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="7"><highlight class="normal"></highlight></codeline>
+<codeline lineno="8"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="HipdnnStatus_8h" kindref="compound">HipdnnStatus.h</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="9"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Logger_8hpp" kindref="compound">hipdnn_data_sdk/logging/Logger.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="10"><highlight class="normal"></highlight></codeline>
+<codeline lineno="11" refid="BackendLoggingHelpers_8hpp_1ad2810b5108655d387fb57c851d15d6e9" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="BackendLoggingHelpers_8hpp_1ad2810b5108655d387fb57c851d15d6e9" kindref="member">toString</ref>(<ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/>status)</highlight></codeline>
+<codeline lineno="12"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="13"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">switch</highlight><highlight class="normal">(status)</highlight></codeline>
+<codeline lineno="14"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="15"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345a449c00a84ecf02107b8d51b0dd900083" kindref="member">HIPDNN_STATUS_SUCCESS</ref>:</highlight></codeline>
+<codeline lineno="16"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_SUCCESS&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="17"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345ac79179c447b6cf5d27efc72112bf2b9d" kindref="member">HIPDNN_STATUS_NOT_INITIALIZED</ref>:</highlight></codeline>
+<codeline lineno="18"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_NOT_INITIALIZED&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="19"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345abc473a49f066f64c278395463783e304" kindref="member">HIPDNN_STATUS_BAD_PARAM</ref>:</highlight></codeline>
+<codeline lineno="20"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_BAD_PARAM&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="21"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345af1ef126938fb707ecddff124d0d4d19f" kindref="member">HIPDNN_STATUS_BAD_PARAM_NULL_POINTER</ref>:</highlight></codeline>
+<codeline lineno="22"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_BAD_PARAM_NULL_POINTER&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="23"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345a18989e8a1b3bb7421116a17b951a17f7" kindref="member">HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED</ref>:</highlight></codeline>
+<codeline lineno="24"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="25"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345af68566952e945a9ce967eb3775f24911" kindref="member">HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND</ref>:</highlight></codeline>
+<codeline lineno="26"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_BAD_PARAM_OUT_OF_BOUND&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="27"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345a5999ea909a2cee39b26c37b33925ee54" kindref="member">HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT</ref>:</highlight></codeline>
+<codeline lineno="28"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="29"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345ac91fe6ef298ec36f99ddf3d5d8643dd9" kindref="member">HIPDNN_STATUS_BAD_PARAM_STREAM_MISMATCH</ref>:</highlight></codeline>
+<codeline lineno="30"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_BAD_PARAM_STREAM_MISMATCH&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="31"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345a8355638de42d1e86e6b65fa60d7b2d59" kindref="member">HIPDNN_STATUS_NOT_SUPPORTED</ref>:</highlight></codeline>
+<codeline lineno="32"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_NOT_SUPPORTED&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="33"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345a6261b1363916d60a131f8ff7ad58985b" kindref="member">HIPDNN_STATUS_INTERNAL_ERROR</ref>:</highlight></codeline>
+<codeline lineno="34"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_INTERNAL_ERROR&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="35"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345a65aa1ae9d53b914c623725179dfa962a" kindref="member">HIPDNN_STATUS_ALLOC_FAILED</ref>:</highlight></codeline>
+<codeline lineno="36"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_ALLOC_FAILED&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="37"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345abf684759b27d2da15899b45b27caf1e7" kindref="member">HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED</ref>:</highlight></codeline>
+<codeline lineno="38"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="39"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345a0f83bb5f28443736387d6ec08996d909" kindref="member">HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED</ref>:</highlight></codeline>
+<codeline lineno="40"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="41"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345ae0d8a48a5378878dc7f27847422168fd" kindref="member">HIPDNN_STATUS_EXECUTION_FAILED</ref>:</highlight></codeline>
+<codeline lineno="42"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_EXECUTION_FAILED&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="43"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345ae99f6e004b5ff402170ed11bb6e17125" kindref="member">HIPDNN_STATUS_PLUGIN_ERROR</ref>:</highlight></codeline>
+<codeline lineno="44"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_PLUGIN_ERROR&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="45"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">default</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="46"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="stringliteral">&quot;HIPDNN_STATUS_UNKNOWN&quot;</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="47"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="48"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="49"><highlight class="normal"></highlight></codeline>
+<codeline lineno="50" refid="BackendLoggingHelpers_8hpp_1a6f1f87051e99d0f65337da793b28002c" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/>std::ostream&amp;<sp/><ref refid="BackendLoggingHelpers_8hpp_1a6f1f87051e99d0f65337da793b28002c" kindref="member">operator&lt;&lt;</ref>(std::ostream&amp;<sp/>os,<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/>status)</highlight></codeline>
+<codeline lineno="51"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="52"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>os<sp/>&lt;&lt;<sp/><ref refid="BackendLoggingHelpers_8hpp_1ad2810b5108655d387fb57c851d15d6e9" kindref="member">toString</ref>(status);</highlight></codeline>
+<codeline lineno="53"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="54"><highlight class="normal"></highlight></codeline>
+<codeline lineno="55"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;&gt;</highlight></codeline>
+<codeline lineno="56" refid="structfmt_1_1formatter_3_01hipdnnStatus__t_01_4" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal">fmt::formatter&lt;<ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref>&gt;<sp/>:<sp/>fmt::formatter&lt;const<sp/>char*&gt;</highlight></codeline>
+<codeline lineno="57"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="58"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;</highlight><highlight class="keyword">typename</highlight><highlight class="normal"><sp/>FormatContext&gt;</highlight></codeline>
+<codeline lineno="59" refid="structfmt_1_1formatter_3_01hipdnnStatus__t_01_4_1ad65dab1dc34b80d19d783ffb80dd04cd" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/><ref refid="structfmt_1_1formatter_3_01hipdnnStatus__t_01_4_1ad65dab1dc34b80d19d783ffb80dd04cd" kindref="member">format</ref>(<ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/>status,<sp/>FormatContext&amp;<sp/>ctx)</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="60"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="61"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>fmt::formatter&lt;const<sp/>char*&gt;::format(<ref refid="BackendLoggingHelpers_8hpp_1ad2810b5108655d387fb57c851d15d6e9" kindref="member">toString</ref>(status),<sp/>ctx);</highlight></codeline>
+<codeline lineno="62"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="63"><highlight class="normal">};</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendLoggingHelpers.hpp"/>
+  </compounddef>
+</doxygen>

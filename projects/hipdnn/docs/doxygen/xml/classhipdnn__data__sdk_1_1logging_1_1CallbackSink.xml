@@ -1,0 +1,131 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1logging_1_1CallbackSink" kind="class" language="C++" prot="public" final="yes">
+    <compoundname>hipdnn_data_sdk::logging::CallbackSink</compoundname>
+    <basecompoundref prot="public" virt="non-virtual">spdlog::sinks::base_sink&lt; Mutex &gt;</basecompoundref>
+    <includes refid="CallbackSink_8hpp" local="no">CallbackSink.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>typename Mutex</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1a6db7fd9d59a8b552c48de9db49727ed9" prot="private" static="no" mutable="no">
+        <type><ref refid="HipdnnBackendCallbackTypes_8h_1a89c1a24875bd3c5cf12c73dd64689906" kindref="member">hipdnnCallback_t</ref></type>
+        <definition>hipdnnCallback_t hipdnn_data_sdk::logging::CallbackSink&lt; Mutex &gt;::_callbackFn</definition>
+        <argsstring></argsstring>
+        <name>_callbackFn</name>
+        <qualifiedname>hipdnn_data_sdk::logging::CallbackSink::_callbackFn</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="74" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="74" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1acb9386a82abbec32608e51fa0e0ef2da" prot="public" static="no" const="no" explicit="yes" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::logging::CallbackSink&lt; Mutex &gt;::CallbackSink</definition>
+        <argsstring>(hipdnnCallback_t callback)</argsstring>
+        <name>CallbackSink</name>
+        <qualifiedname>hipdnn_data_sdk::logging::CallbackSink::CallbackSink</qualifiedname>
+        <param>
+          <type><ref refid="HipdnnBackendCallbackTypes_8h_1a89c1a24875bd3c5cf12c73dd64689906" kindref="member">hipdnnCallback_t</ref></type>
+          <declname>callback</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="43" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="43" bodyend="46"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1a0bfd0a4e4442e0c7ab132d280cdf07d9" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::logging::CallbackSink&lt; Mutex &gt;::~CallbackSink</definition>
+        <argsstring>() override=default</argsstring>
+        <name>~CallbackSink</name>
+        <qualifiedname>hipdnn_data_sdk::logging::CallbackSink::~CallbackSink</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="47" column="5"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="protected-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1a9dd98e54cf8065280eff40752c8a3577" prot="protected" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::logging::CallbackSink&lt; Mutex &gt;::sink_it_</definition>
+        <argsstring>(const spdlog::details::log_msg &amp;msg) override</argsstring>
+        <name>sink_it_</name>
+        <qualifiedname>hipdnn_data_sdk::logging::CallbackSink::sink_it_</qualifiedname>
+        <param>
+          <type>const spdlog::details::log_msg &amp;</type>
+          <declname>msg</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="50" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="50" bodyend="69"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1a0526b371774db27f6e70e039e88f1cd2" prot="protected" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::logging::CallbackSink&lt; Mutex &gt;::flush_</definition>
+        <argsstring>() override</argsstring>
+        <name>flush_</name>
+        <qualifiedname>hipdnn_data_sdk::logging::CallbackSink::flush_</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="71" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="71" bodyend="71"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>hipdnn_data_sdk::logging::CallbackSink&lt; Mutex &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>spdlog::sinks::base_sink&lt; Mutex &gt;</label>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>hipdnn_data_sdk::logging::CallbackSink&lt; Mutex &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>spdlog::sinks::base_sink&lt; Mutex &gt;</label>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" line="40" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/CallbackSink.hpp" bodystart="41" bodyend="75"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1a6db7fd9d59a8b552c48de9db49727ed9" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::logging::CallbackSink</scope><name>_callbackFn</name></member>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1acb9386a82abbec32608e51fa0e0ef2da" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::logging::CallbackSink</scope><name>CallbackSink</name></member>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1a0526b371774db27f6e70e039e88f1cd2" prot="protected" virt="non-virtual"><scope>hipdnn_data_sdk::logging::CallbackSink</scope><name>flush_</name></member>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1a9dd98e54cf8065280eff40752c8a3577" prot="protected" virt="non-virtual"><scope>hipdnn_data_sdk::logging::CallbackSink</scope><name>sink_it_</name></member>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1CallbackSink_1a0bfd0a4e4442e0c7ab132d280cdf07d9" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::logging::CallbackSink</scope><name>~CallbackSink</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

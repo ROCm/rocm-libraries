@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_435ffe7929ec179b13c905aff5a6e2bf" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm</compoundname>
+    <innerfile refid="BnBackward_8cpp">BnBackward.cpp</innerfile>
+    <innerfile refid="BnInference_8cpp">BnInference.cpp</innerfile>
+    <innerfile refid="BnTraining_8cpp">BnTraining.cpp</innerfile>
+    <innerfile refid="FusedBnInfDReluBnBwd_8cpp">FusedBnInfDReluBnBwd.cpp</innerfile>
+    <innerfile refid="FusedBnTrainingActiv_8cpp">FusedBnTrainingActiv.cpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/"/>
+  </compounddef>
+</doxygen>

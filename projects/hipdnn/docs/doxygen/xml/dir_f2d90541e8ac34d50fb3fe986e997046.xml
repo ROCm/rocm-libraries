@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_f2d90541e8ac34d50fb3fe986e997046" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend</compoundname>
+    <innerfile refid="BackendLoggingHelpers_8hpp">BackendLoggingHelpers.hpp</innerfile>
+    <innerfile refid="BackendWrapper_8hpp">BackendWrapper.hpp</innerfile>
+    <innerfile refid="HipdnnBackendInterface_8hpp">HipdnnBackendInterface.hpp</innerfile>
+    <innerfile refid="ScopedHipdnnBackendDescriptor_8hpp">ScopedHipdnnBackendDescriptor.hpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/"/>
+  </compounddef>
+</doxygen>

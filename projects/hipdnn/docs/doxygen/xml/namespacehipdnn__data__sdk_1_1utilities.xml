@@ -1,0 +1,1166 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__data__sdk_1_1utilities" kind="namespace" language="C++">
+    <compoundname>hipdnn_data_sdk::utilities</compoundname>
+    <innerclass refid="structhipdnn__data__sdk_1_1utilities_1_1AllOfTypes" prot="public">hipdnn_data_sdk::utilities::AllOfTypes</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" prot="public">hipdnn_data_sdk::utilities::DeviceAllocator</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" prot="public">hipdnn_data_sdk::utilities::HostAllocator</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator" prot="public">hipdnn_data_sdk::utilities::IDeviceAllocator</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator" prot="public">hipdnn_data_sdk::utilities::IHostAllocator</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory" prot="public">hipdnn_data_sdk::utilities::IMigratableMemory</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor" prot="public">hipdnn_data_sdk::utilities::ITensor</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" prot="public">hipdnn_data_sdk::utilities::ITensorIterator</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory" prot="public">hipdnn_data_sdk::utilities::MigratableMemory</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase" prot="public">hipdnn_data_sdk::utilities::MigratableMemoryBase</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator" prot="public">hipdnn_data_sdk::utilities::PinnedHostAllocator</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1ScopedResource" prot="public">hipdnn_data_sdk::utilities::ScopedResource</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowHostOnlyMigratableMemory" prot="public">hipdnn_data_sdk::utilities::ShallowHostOnlyMigratableMemory</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor" prot="public">hipdnn_data_sdk::utilities::ShallowTensor</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor" prot="public">hipdnn_data_sdk::utilities::Tensor</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase" prot="public">hipdnn_data_sdk::utilities::TensorBase</innerclass>
+    <innerclass refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" prot="public">hipdnn_data_sdk::utilities::TensorLayout</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView" prot="public">hipdnn_data_sdk::utilities::TensorView</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1TensorViewIterator" prot="public">hipdnn_data_sdk::utilities::TensorViewIterator</innerclass>
+    <innerclass refid="structhipdnn__data__sdk_1_1utilities_1_1Visitor" prot="public">hipdnn_data_sdk::utilities::Visitor</innerclass>
+    <innerclass refid="classhipdnn__data__sdk_1_1utilities_1_1Workspace" prot="public">hipdnn_data_sdk::utilities::Workspace</innerclass>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1utilities_1_1bfp16">hipdnn_data_sdk::utilities::bfp16</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1utilities_1_1detail">hipdnn_data_sdk::utilities::detail</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1utilities_1_1fp16">hipdnn_data_sdk::utilities::fp16</innernamespace>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="namespacehipdnn__data__sdk_1_1utilities_1af07a17b909f8d706953cd3255f1431bf" prot="public" static="no" strong="yes">
+        <type></type>
+        <name>MemoryLocation</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MemoryLocation</qualifiedname>
+        <enumvalue id="namespacehipdnn__data__sdk_1_1utilities_1af07a17b909f8d706953cd3255f1431bfab9361011891280a44d85b967739cc6a5" prot="public">
+          <name>HOST</name>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__data__sdk_1_1utilities_1af07a17b909f8d706953cd3255f1431bfae10b6ab6a278644ce40631f62f360b6d" prot="public">
+          <name>DEVICE</name>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__data__sdk_1_1utilities_1af07a17b909f8d706953cd3255f1431bfa6328e5e3186c227a021ef2ff77e40197" prot="public">
+          <name>BOTH</name>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="namespacehipdnn__data__sdk_1_1utilities_1af07a17b909f8d706953cd3255f1431bfab50339a10e1de285ac99d4c3990b8693" prot="public">
+          <name>NONE</name>
+          <briefdescription>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="15" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="16" bodyend="21"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="typedef">
+      <memberdef kind="typedef" id="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" prot="public" static="no">
+        <type>std::bitset&lt; <ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" kindref="member">POINTWISE_MODE_COUNT</ref> &gt;</type>
+        <definition>using hipdnn_data_sdk::utilities::PointwiseModeBitset = typedef std::bitset&lt;POINTWISE_MODE_COUNT&gt;</definition>
+        <argsstring></argsstring>
+        <name>PointwiseModeBitset</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::PointwiseModeBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="16" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="16" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__data__sdk_1_1utilities_1ae1f042b0adb72de5ff4a7071a10c3684" prot="public" static="no">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor" kindref="compound">Tensor</ref>&lt; T, <ref refid="classhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator" kindref="compound">PinnedHostAllocator</ref>&lt; T &gt; &gt;</type>
+        <definition>using hipdnn_data_sdk::utilities::PinnedTensor = typedef Tensor&lt;T, PinnedHostAllocator&lt;T&gt; &gt;</definition>
+        <argsstring></argsstring>
+        <name>PinnedTensor</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::PinnedTensor</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="568" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="568" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__data__sdk_1_1utilities_1a92dd70cddf14073d9e143baeba2434ef" prot="public" static="no">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorView" kindref="compound">TensorView</ref>&lt; T, true &gt;</type>
+        <definition>using hipdnn_data_sdk::utilities::ConstTensorView = typedef TensorView&lt;T, true&gt;</definition>
+        <argsstring></argsstring>
+        <name>ConstTensorView</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ConstTensorView</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" line="128" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/TensorView.hpp" bodystart="128" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="var">
+      <memberdef kind="variable" id="namespacehipdnn__data__sdk_1_1utilities_1a80e3d150358dd224e5d149fa8f18b25c" prot="public" static="no" constexpr="yes" mutable="no">
+        <type>constexpr double</type>
+        <definition>constexpr double hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON</definition>
+        <argsstring></argsstring>
+        <name>BATCHNORM_DEFAULT_EPSILON</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON</qualifiedname>
+        <initializer>= 1e-5</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Constants.hpp" line="8" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Constants.hpp" bodystart="8" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" prot="public" static="yes" constexpr="yes" mutable="no">
+        <type>constexpr size_t</type>
+        <definition>constexpr size_t hipdnn_data_sdk::utilities::POINTWISE_MODE_COUNT</definition>
+        <argsstring></argsstring>
+        <name>POINTWISE_MODE_COUNT</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::POINTWISE_MODE_COUNT</qualifiedname>
+        <initializer>= static_cast&lt;size_t&gt;(data_objects::PointwiseMode::MAX) + 1</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="13" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="14" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a88163e9cf6b02fd010d840d2dc352f2b" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+          <param>
+            <type>typename U</type>
+          </param>
+        </templateparamlist>
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::operator==</definition>
+        <argsstring>(const HostAllocator&lt; T &gt; &amp;lhs, const HostAllocator&lt; U &gt; &amp;rhs) noexcept</argsstring>
+        <name>operator==</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::operator==</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">HostAllocator</ref>&lt; T &gt; &amp;</type>
+          <declname>lhs</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">HostAllocator</ref>&lt; U &gt; &amp;</type>
+          <declname>rhs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="149" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="149" bodyend="153"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1aa87b1790b985c0a23cb35344b0c17e98" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+          <param>
+            <type>typename U</type>
+          </param>
+        </templateparamlist>
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::operator!=</definition>
+        <argsstring>(const HostAllocator&lt; T &gt; &amp;lhs, const HostAllocator&lt; U &gt; &amp;rhs) noexcept</argsstring>
+        <name>operator!=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::operator!=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">HostAllocator</ref>&lt; T &gt; &amp;</type>
+          <declname>lhs</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">HostAllocator</ref>&lt; U &gt; &amp;</type>
+          <declname>rhs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="156" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="156" bodyend="160"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1ac00f1d9d816ee367acc3e5df7f8fd819" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+          <param>
+            <type>typename U</type>
+          </param>
+        </templateparamlist>
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::operator==</definition>
+        <argsstring>(const PinnedHostAllocator&lt; T &gt; &amp;lhs, const PinnedHostAllocator&lt; U &gt; &amp;rhs) noexcept</argsstring>
+        <name>operator==</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::operator==</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator" kindref="compound">PinnedHostAllocator</ref>&lt; T &gt; &amp;</type>
+          <declname>lhs</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator" kindref="compound">PinnedHostAllocator</ref>&lt; U &gt; &amp;</type>
+          <declname>rhs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="214" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="214" bodyend="218"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a85043ae06cb9675440c9150c06c4ab3c" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+          <param>
+            <type>typename U</type>
+          </param>
+        </templateparamlist>
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::operator!=</definition>
+        <argsstring>(const PinnedHostAllocator&lt; T &gt; &amp;lhs, const PinnedHostAllocator&lt; U &gt; &amp;rhs) noexcept</argsstring>
+        <name>operator!=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::operator!=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator" kindref="compound">PinnedHostAllocator</ref>&lt; T &gt; &amp;</type>
+          <declname>lhs</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator" kindref="compound">PinnedHostAllocator</ref>&lt; U &gt; &amp;</type>
+          <declname>rhs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="221" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="221" bodyend="225"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a6c23d22114e91c24ef4dd1bbb10a572b" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+          <param>
+            <type>typename U</type>
+          </param>
+        </templateparamlist>
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::operator==</definition>
+        <argsstring>(const DeviceAllocator&lt; T &gt; &amp;lhs, const DeviceAllocator&lt; U &gt; &amp;rhs) noexcept</argsstring>
+        <name>operator==</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::operator==</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" kindref="compound">DeviceAllocator</ref>&lt; T &gt; &amp;</type>
+          <declname>lhs</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" kindref="compound">DeviceAllocator</ref>&lt; U &gt; &amp;</type>
+          <declname>rhs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="283" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="283" bodyend="287"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a50d1d67b01a9312cd09e9d796f08e15f" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+          <param>
+            <type>typename U</type>
+          </param>
+        </templateparamlist>
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::operator!=</definition>
+        <argsstring>(const DeviceAllocator&lt; T &gt; &amp;lhs, const DeviceAllocator&lt; U &gt; &amp;rhs) noexcept</argsstring>
+        <name>operator!=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::operator!=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" kindref="compound">DeviceAllocator</ref>&lt; T &gt; &amp;</type>
+          <declname>lhs</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" kindref="compound">DeviceAllocator</ref>&lt; U &gt; &amp;</type>
+          <declname>rhs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="290" column="6" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="290" bodyend="294"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a931a2e9288975e3aba9e69ce7e121904" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type>std::vector&lt; T &gt;</type>
+        <definition>std::vector&lt; T &gt; hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector</definition>
+        <argsstring>(const flatbuffers::Vector&lt; T &gt; *in)</argsstring>
+        <name>convertFlatBufferVectorToStdVector</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::convertFlatBufferVectorToStdVector</qualifiedname>
+        <param>
+          <type>const flatbuffers::Vector&lt; T &gt; *</type>
+          <declname>in</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" line="16" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" bodystart="16" bodyend="30"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1ab1c7c13a65f28662922c0f92b7a521be" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename TargetType</type>
+          </param>
+        </templateparamlist>
+        <type>TargetType</type>
+        <definition>TargetType hipdnn_data_sdk::utilities::extractValueFromTensorValue</definition>
+        <argsstring>(const data_objects::TensorAttributesT &amp;tensorAttr, const char *paramName)</argsstring>
+        <name>extractValueFromTensorValue</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::extractValueFromTensorValue</qualifiedname>
+        <param>
+          <type>const data_objects::TensorAttributesT &amp;</type>
+          <declname>tensorAttr</declname>
+        </param>
+        <param>
+          <type>const char *</type>
+          <declname>paramName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" line="33" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" bodystart="33" bodyend="92"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1afe5c6d90da37f73389a794788df7a81d" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename TargetType</type>
+          </param>
+        </templateparamlist>
+        <type>TargetType</type>
+        <definition>TargetType hipdnn_data_sdk::utilities::extractValueFromTensorValue</definition>
+        <argsstring>(const data_objects::TensorAttributes *tensorAttr, const char *paramName)</argsstring>
+        <name>extractValueFromTensorValue</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::extractValueFromTensorValue</qualifiedname>
+        <param>
+          <type>const data_objects::TensorAttributes *</type>
+          <declname>tensorAttr</declname>
+        </param>
+        <param>
+          <type>const char *</type>
+          <declname>paramName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" line="95" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" bodystart="95" bodyend="107"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a8f20c4a80409380d1c4767e31d7c4323" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>double</type>
+        <definition>double hipdnn_data_sdk::utilities::extractDoubleFromTensorValue</definition>
+        <argsstring>(const data_objects::TensorAttributesT &amp;tensorAttr, const char *paramName)</argsstring>
+        <name>extractDoubleFromTensorValue</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::extractDoubleFromTensorValue</qualifiedname>
+        <param>
+          <type>const data_objects::TensorAttributesT &amp;</type>
+          <declname>tensorAttr</declname>
+        </param>
+        <param>
+          <type>const char *</type>
+          <declname>paramName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" line="109" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" bodystart="109" bodyend="113"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1aae60bb8e02487b6ff9542e188ff0e6fc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>double</type>
+        <definition>double hipdnn_data_sdk::utilities::extractDoubleFromTensorValue</definition>
+        <argsstring>(const data_objects::TensorAttributes *tensorAttr, const char *paramName)</argsstring>
+        <name>extractDoubleFromTensorValue</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::extractDoubleFromTensorValue</qualifiedname>
+        <param>
+          <type>const data_objects::TensorAttributes *</type>
+          <declname>tensorAttr</declname>
+        </param>
+        <param>
+          <type>const char *</type>
+          <declname>paramName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" line="115" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/FlatbufferUtils.hpp" bodystart="115" bodyend="119"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1abed029f0824c3cd92cf0164a70ccc50e" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_data_sdk::utilities::getLibraryName</definition>
+        <argsstring>(const char *libraryBaseName)</argsstring>
+        <name>getLibraryName</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::getLibraryName</qualifiedname>
+        <param>
+          <type>const char *</type>
+          <declname>libraryBaseName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PlatformUtils.hpp" line="25" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PlatformUtils.hpp" bodystart="25" bodyend="28"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a426aaa9ae1cf109f9deef5cd0055513c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_data_sdk::utilities::getExecutableName</definition>
+        <argsstring>(const char *executableBaseName)</argsstring>
+        <name>getExecutableName</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::getExecutableName</qualifiedname>
+        <param>
+          <type>const char *</type>
+          <declname>executableBaseName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PlatformUtils.hpp" line="30" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PlatformUtils.hpp" bodystart="30" bodyend="33"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" prot="public" static="no" constexpr="yes" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type>constexpr size_t</type>
+        <definition>constexpr size_t hipdnn_data_sdk::utilities::toBitPosition</definition>
+        <argsstring>(data_objects::PointwiseMode mode)</argsstring>
+        <name>toBitPosition</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::toBitPosition</qualifiedname>
+        <param>
+          <type>data_objects::PointwiseMode</type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="18" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="18" bodyend="21"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a21d79975938289a6c020af6938b17273" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref> &amp;</type>
+        <definition>const PointwiseModeBitset &amp; hipdnn_data_sdk::utilities::getImplementedUnaryModesBitset</definition>
+        <argsstring>()</argsstring>
+        <name>getImplementedUnaryModesBitset</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::getImplementedUnaryModesBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="24" column="34" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="24" bodyend="37"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a4e09934e49976a0981c4ad96a963e183" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref> &amp;</type>
+        <definition>const PointwiseModeBitset &amp; hipdnn_data_sdk::utilities::getImplementedBinaryModesBitset</definition>
+        <argsstring>()</argsstring>
+        <name>getImplementedBinaryModesBitset</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::getImplementedBinaryModesBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="40" column="34" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="40" bodyend="54"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1add506dfed78cde1f6bd30f2a4148f933" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref> &amp;</type>
+        <definition>const PointwiseModeBitset &amp; hipdnn_data_sdk::utilities::getUnaryModesBitset</definition>
+        <argsstring>()</argsstring>
+        <name>getUnaryModesBitset</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::getUnaryModesBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="57" column="34" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="57" bodyend="87"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a51e0c9be722e03d6e397e6242116c1bf" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref> &amp;</type>
+        <definition>const PointwiseModeBitset &amp; hipdnn_data_sdk::utilities::getBinaryModesBitset</definition>
+        <argsstring>()</argsstring>
+        <name>getBinaryModesBitset</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::getBinaryModesBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="90" column="34" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="90" bodyend="120"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1afaaf27c04cce74eccc6db2171480571e" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref> &amp;</type>
+        <definition>const PointwiseModeBitset &amp; hipdnn_data_sdk::utilities::getTernaryModesBitset</definition>
+        <argsstring>()</argsstring>
+        <name>getTernaryModesBitset</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::getTernaryModesBitset</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="123" column="34" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="123" bodyend="131"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a57197d1bc33f48c7ff3e349c5d599591" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::isUnaryPointwiseMode</definition>
+        <argsstring>(data_objects::PointwiseMode mode)</argsstring>
+        <name>isUnaryPointwiseMode</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::isUnaryPointwiseMode</qualifiedname>
+        <param>
+          <type>data_objects::PointwiseMode</type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="133" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="133" bodyend="137"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a3312d12f0aeaaef3d924fb10d238edcc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::isBinaryPointwiseMode</definition>
+        <argsstring>(data_objects::PointwiseMode mode)</argsstring>
+        <name>isBinaryPointwiseMode</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::isBinaryPointwiseMode</qualifiedname>
+        <param>
+          <type>data_objects::PointwiseMode</type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="139" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="139" bodyend="143"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a0cd1a0e7dc1d5ed4caae58990fd0e8b5" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::isTernaryPointwiseMode</definition>
+        <argsstring>(data_objects::PointwiseMode mode)</argsstring>
+        <name>isTernaryPointwiseMode</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::isTernaryPointwiseMode</qualifiedname>
+        <param>
+          <type>data_objects::PointwiseMode</type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="145" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="145" bodyend="149"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a94809294e2630d21572c5ccb9e5b7355" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::isImplementedUnaryPointwiseMode</definition>
+        <argsstring>(data_objects::PointwiseMode mode)</argsstring>
+        <name>isImplementedUnaryPointwiseMode</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::isImplementedUnaryPointwiseMode</qualifiedname>
+        <param>
+          <type>data_objects::PointwiseMode</type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="152" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="152" bodyend="156"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a2ada1683f5e1b7927931be15abecf9a0" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::isImplementedBinaryPointwiseMode</definition>
+        <argsstring>(data_objects::PointwiseMode mode)</argsstring>
+        <name>isImplementedBinaryPointwiseMode</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::isImplementedBinaryPointwiseMode</qualifiedname>
+        <param>
+          <type>data_objects::PointwiseMode</type>
+          <declname>mode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="158" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="158" bodyend="162"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1ac441371ee5b50a3ea2b9b7f933cf4521" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::isImplementedTernaryPointwiseMode</definition>
+        <argsstring>(data_objects::PointwiseMode)</argsstring>
+        <name>isImplementedTernaryPointwiseMode</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::isImplementedTernaryPointwiseMode</qualifiedname>
+        <param>
+          <type>data_objects::PointwiseMode</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" line="164" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp" bodystart="164" bodyend="168"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a0fd394e2e1a674e139aabc5b34ac00b0" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;inputDims, const std::vector&lt; int64_t &gt; &amp;outputDims)</argsstring>
+        <name>areDimensionsBroadcastCompatible</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::areDimensionsBroadcastCompatible</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>inputDims</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>outputDims</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="21" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="21" bodyend="48"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a892cd5e7bd645014ff042f09ae5c8df3" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt; int64_t &gt; hipdnn_data_sdk::utilities::generateStrides</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;dim, const std::vector&lt; int64_t &gt; &amp;strideOrder)</argsstring>
+        <name>generateStrides</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::generateStrides</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dim</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>strideOrder</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="53" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="53" bodyend="80"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1ab13113f8775ee2e07819d1f86258ad71" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt; int64_t &gt; hipdnn_data_sdk::utilities::generateStrides</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;dims)</argsstring>
+        <name>generateStrides</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::generateStrides</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="84" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="84" bodyend="98"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a06d3f3fee70885d377eafd0ead07df6e" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt; int64_t &gt; hipdnn_data_sdk::utilities::strideOrderNhwc</definition>
+        <argsstring>(size_t numDims)</argsstring>
+        <name>strideOrderNhwc</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::strideOrderNhwc</qualifiedname>
+        <param>
+          <type>size_t</type>
+          <declname>numDims</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="102" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="102" bodyend="120"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1af7c8b4d8936e773fc2fa548391e19d5a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt; int64_t &gt; hipdnn_data_sdk::utilities::extractStrideOrder</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;strides)</argsstring>
+        <name>extractStrideOrder</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::extractStrideOrder</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>strides</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="129" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="129" bodyend="190"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a33d94683ffa4508bc929f0c7b89e501d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::isTensorPacked</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;dims, const std::vector&lt; int64_t &gt; &amp;strides)</argsstring>
+        <name>isTensorPacked</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::isTensorPacked</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>strides</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="195" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="195" bodyend="226"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a4f9b35ded2b431296d3d78b2a0505d74" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt; int64_t &gt; hipdnn_data_sdk::utilities::getDerivedShape</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;shape)</argsstring>
+        <name>getDerivedShape</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::getDerivedShape</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>shape</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="230" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="230" bodyend="242"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a9a19f222af0f977ad890b89e41bc7b57" prot="public" static="yes" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename F</type>
+          </param>
+        </templateparamlist>
+        <type>void</type>
+        <definition>static void hipdnn_data_sdk::utilities::iterateAlongDimensions</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;dims, F &amp;&amp;func)</argsstring>
+        <name>iterateAlongDimensions</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::iterateAlongDimensions</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <param>
+          <type>F &amp;&amp;</type>
+          <declname>func</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="247" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="247" bodyend="291"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a5051adcf4f5170bed934ad52fe309076" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>static std::vector&lt; int64_t &gt; hipdnn_data_sdk::utilities::buildTensorIndices</definition>
+        <argsstring>(int64_t batchIdx, int64_t channelIdx, const std::vector&lt; int64_t &gt; &amp;spatialIndices, size_t spatialOffset=0)</argsstring>
+        <name>buildTensorIndices</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::buildTensorIndices</qualifiedname>
+        <param>
+          <type>int64_t</type>
+          <declname>batchIdx</declname>
+        </param>
+        <param>
+          <type>int64_t</type>
+          <declname>channelIdx</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>spatialIndices</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>spatialOffset</declname>
+          <defval>0</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="295" column="27" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="295" bodyend="305"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a15ae6bd7f2dc2337d03b098570bf2e83" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::isLayoutAgnostic</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;dims)</argsstring>
+        <name>isLayoutAgnostic</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::isLayoutAgnostic</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="313" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="313" bodyend="324"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1aed1c43a7c7f60ed9ae653fa46f8cafa6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_data_sdk::utilities::calculateGroupCount</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;inputDims, const std::vector&lt; int64_t &gt; &amp;weightDims)</argsstring>
+        <name>calculateGroupCount</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::calculateGroupCount</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>inputDims</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>weightDims</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" line="328" column="16" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShapeUtilities.hpp" bodystart="328" bodyend="366"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a1b8f7fc80862953fc0f850675a099995" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>class S</type>
+          </param>
+          <param>
+            <type>class T</type>
+          </param>
+        </templateparamlist>
+        <type>S</type>
+        <definition>S hipdnn_data_sdk::utilities::staticCast</definition>
+        <argsstring>(T value)</argsstring>
+        <name>staticCast</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::staticCast</qualifiedname>
+        <param>
+          <type>T</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StaticCast.hpp" line="92" column="3" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StaticCast.hpp" bodystart="92" bodyend="95"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a367c0b94a9a76540d88bc5768aa1e7cd" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator</definition>
+        <argsstring>(char *destination, const char *source, size_t maxSize)</argsstring>
+        <name>copyMaxSizeWithNullTerminator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator</qualifiedname>
+        <param>
+          <type>char *</type>
+          <declname>destination</declname>
+        </param>
+        <param>
+          <type>const char *</type>
+          <declname>source</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>maxSize</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" line="15" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" bodystart="15" bodyend="28"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1ad9ccfbc303469f2b066afb3c0a5f4b1b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_data_sdk::utilities::toLower</definition>
+        <argsstring>(const std::string &amp;str)</argsstring>
+        <name>toLower</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::toLower</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>str</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" line="30" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" bodystart="30" bodyend="35"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1af6254b6c782be2a23f7a21fbb6a4c044" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_data_sdk::utilities::removeNewlines</definition>
+        <argsstring>(const std::string &amp;str)</argsstring>
+        <name>removeNewlines</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::removeNewlines</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>str</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" line="37" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" bodystart="37" bodyend="43"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1af2aec0ee7c68529712b05e90bdd4299d" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type>std::enable_if_t&lt; std::is_arithmetic_v&lt; T &gt;, std::string &gt;</type>
+        <definition>std::enable_if_t&lt; std::is_arithmetic_v&lt; T &gt;, std::string &gt; hipdnn_data_sdk::utilities::vecToString</definition>
+        <argsstring>(const std::vector&lt; T &gt; &amp;vec)</argsstring>
+        <name>vecToString</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::vecToString</qualifiedname>
+        <param>
+          <type>const std::vector&lt; T &gt; &amp;</type>
+          <declname>vec</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" line="48" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" bodystart="48" bodyend="60"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a13915cba4076751c4efb2bf4c2e3cf8b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::vecToStream</definition>
+        <argsstring>(std::ostream &amp;os, const std::vector&lt; T &gt; &amp;vec)</argsstring>
+        <name>vecToStream</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::vecToStream</qualifiedname>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; T &gt; &amp;</type>
+          <declname>vec</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" line="64" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" bodystart="64" bodyend="77"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a3c1ba01e828d3acfa32a4165a6d89aad" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type>std::enable_if_t&lt;!std::is_arithmetic_v&lt; T &gt;, std::string &gt;</type>
+        <definition>std::enable_if_t&lt;!std::is_arithmetic_v&lt; T &gt;, std::string &gt; hipdnn_data_sdk::utilities::vecToString</definition>
+        <argsstring>(const std::vector&lt; T &gt; &amp;vec)</argsstring>
+        <name>vecToString</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::vecToString</qualifiedname>
+        <param>
+          <type>const std::vector&lt; T &gt; &amp;</type>
+          <declname>vec</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" line="81" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/StringUtil.hpp" bodystart="81" bodyend="86"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1ac943830f5b6312c47de09de609521581" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::ostream &amp;</type>
+        <definition>std::ostream &amp; hipdnn_data_sdk::utilities::operator&lt;&lt;</definition>
+        <argsstring>(std::ostream &amp;os, const TensorLayout &amp;layout)</argsstring>
+        <name>operator&lt;&lt;</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::operator&lt;&lt;</qualifiedname>
+        <param>
+          <type>std::ostream &amp;</type>
+          <declname>os</declname>
+        </param>
+        <param>
+          <type>const <ref refid="structhipdnn__data__sdk_1_1utilities_1_1TensorLayout" kindref="compound">TensorLayout</ref> &amp;</type>
+          <declname>layout</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="36" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="36" bodyend="39"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1ae59f93129bb74aaabdd6518efba4f64b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::unique_ptr&lt; <ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor" kindref="compound">utilities::ITensor</ref> &gt;</type>
+        <definition>std::unique_ptr&lt; utilities::ITensor &gt; hipdnn_data_sdk::utilities::createTensor</definition>
+        <argsstring>(data_objects::DataType dataType, const std::vector&lt; int64_t &gt; &amp;dims, const std::vector&lt; int64_t &gt; &amp;strides)</argsstring>
+        <name>createTensor</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::createTensor</qualifiedname>
+        <param>
+          <type>data_objects::DataType</type>
+          <declname>dataType</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>strides</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="570" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="570" bodyend="593"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1a209855546929155d5fea3c6338a28ba7" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>class...</type>
+            <declname>Ts</declname>
+            <defname>Ts</defname>
+          </param>
+        </templateparamlist>
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::Visitor</definition>
+        <argsstring>(Ts...) -&gt; Visitor&lt; Ts... &gt;</argsstring>
+        <name>Visitor</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::Visitor</qualifiedname>
+        <param>
+          <type>Ts...</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Visitor.hpp" line="19" column="1" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Visitor.hpp" declline="19" declcolumn="1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="13" column="1"/>
+  </compounddef>
+</doxygen>

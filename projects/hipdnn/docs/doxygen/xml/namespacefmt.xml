@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacefmt" kind="namespace" language="C++">
+    <compoundname>fmt</compoundname>
+    <innerclass refid="structfmt_1_1formatter_3_01half_01_4" prot="public">fmt::formatter&lt; half &gt;</innerclass>
+    <innerclass refid="structfmt_1_1formatter_3_01hip__bfloat16_01_4" prot="public">fmt::formatter&lt; hip_bfloat16 &gt;</innerclass>
+    <innerclass refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1DataType_01_4" prot="public">fmt::formatter&lt; hipdnn_data_sdk::data_objects::DataType &gt;</innerclass>
+    <innerclass refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1NodeAttributes_01_4" prot="public">fmt::formatter&lt; hipdnn_data_sdk::data_objects::NodeAttributes &gt;</innerclass>
+    <innerclass refid="structfmt_1_1formatter_3_01hipdnn__data__sdk_1_1data__objects_1_1PointwiseMode_01_4" prot="public">fmt::formatter&lt; hipdnn_data_sdk::data_objects::PointwiseMode &gt;</innerclass>
+    <innerclass refid="structfmt_1_1formatter_3_01hipdnnStatus__t_01_4" prot="public">fmt::formatter&lt; hipdnnStatus_t &gt;</innerclass>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="[generated]" line="1" column="1"/>
+  </compounddef>
+</doxygen>

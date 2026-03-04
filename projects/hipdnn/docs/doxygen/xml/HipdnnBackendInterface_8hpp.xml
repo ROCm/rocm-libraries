@@ -1,0 +1,197 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="HipdnnBackendInterface_8hpp" kind="file" language="C++">
+    <compoundname>HipdnnBackendInterface.hpp</compoundname>
+    <includes local="no">cstdint</includes>
+    <includes local="no">mutex</includes>
+    <includes refid="hipdnn__backend_8h" local="no">hipdnn_backend.h</includes>
+    <includedby refid="BackendWrapper_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendWrapper.hpp</includedby>
+    <incdepgraph>
+      <node id="7">
+        <label>HipdnnBackendAttributeName.h</label>
+        <link refid="HipdnnBackendAttributeName_8h"/>
+      </node>
+      <node id="8">
+        <label>HipdnnBackendAttributeType.h</label>
+        <link refid="HipdnnBackendAttributeType_8h"/>
+      </node>
+      <node id="9">
+        <label>HipdnnBackendCallbackTypes.h</label>
+        <link refid="HipdnnBackendCallbackTypes_8h"/>
+      </node>
+      <node id="10">
+        <label>HipdnnBackendDescriptorType.h</label>
+        <link refid="HipdnnBackendDescriptorType_8h"/>
+      </node>
+      <node id="11">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="HipdnnBackendHeuristicType_8h"/>
+      </node>
+      <node id="12">
+        <label>HipdnnBackendLimits.h</label>
+        <link refid="HipdnnBackendLimits_8h"/>
+      </node>
+      <node id="13">
+        <label>HipdnnBackendPluginLoadingMode.h</label>
+        <link refid="HipdnnBackendPluginLoadingMode_8h"/>
+      </node>
+      <node id="14">
+        <label>HipdnnBackendPluginUnloadingMode.h</label>
+        <link refid="HipdnnBackendPluginUnloadingMode_8h"/>
+      </node>
+      <node id="15">
+        <label>HipdnnStatus.h</label>
+        <link refid="HipdnnStatus_8h"/>
+      </node>
+      <node id="4">
+        <label>hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/HipdnnBackendInterface.hpp</label>
+        <link refid="HipdnnBackendInterface_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>cstdint</label>
+      </node>
+      <node id="5">
+        <label>hip/hip_runtime_api.h</label>
+      </node>
+      <node id="6">
+        <label>hipdnn_backend_export.h</label>
+      </node>
+      <node id="3">
+        <label>mutex</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendWrapper.hpp</label>
+        <link refid="BackendWrapper_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/HipdnnBackendInterface.hpp</label>
+        <link refid="HipdnnBackendInterface_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
+        <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+    </invincdepgraph>
+    <innerclass refid="classhipdnn__frontend_1_1IHipdnnBackend" prot="public">hipdnn_frontend::IHipdnnBackend</innerclass>
+    <innernamespace refid="namespacehipdnn__frontend">hipdnn_frontend</innernamespace>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;cstdint&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="7"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;mutex&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="8"><highlight class="normal"></highlight></codeline>
+<codeline lineno="9"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="hipdnn__backend_8h" kindref="compound">hipdnn_backend.h</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="10"><highlight class="normal"></highlight></codeline>
+<codeline lineno="11"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__frontend" kindref="compound">hipdnn_frontend</ref></highlight></codeline>
+<codeline lineno="12"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight></codeline>
+<codeline lineno="14" refid="classhipdnn__frontend_1_1IHipdnnBackend" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">class<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__frontend_1_1IHipdnnBackend" kindref="compound">IHipdnnBackend</ref></highlight></codeline>
+<codeline lineno="15"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="17" refid="classhipdnn__frontend_1_1IHipdnnBackend_1acf68b371c21b1e63e4fc12d0b3a36465" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1acf68b371c21b1e63e4fc12d0b3a36465" kindref="member">~IHipdnnBackend</ref>()<sp/>=<sp/></highlight><highlight class="keywordflow">default</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight></codeline>
+<codeline lineno="19" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">create</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref>*<sp/>handle)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="20" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a7ce2f448c9656b8d39cacfa302cea019" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a7ce2f448c9656b8d39cacfa302cea019" kindref="member">destroy</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="21" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a0e00ea95ea54f55efa776a9492c36ad5" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a0e00ea95ea54f55efa776a9492c36ad5" kindref="member">setStream</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">hipStream_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">streamId</ref>)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="22" refid="classhipdnn__frontend_1_1IHipdnnBackend_1afdd8414fc6a2601a009f52de16a4a9f8" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1afdd8414fc6a2601a009f52de16a4a9f8" kindref="member">getStream</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">hipStream_t</ref>*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">streamId</ref>)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="23" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a4940f44b4463f289bb6170700b8454ec" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a4940f44b4463f289bb6170700b8454ec" kindref="member">backendCreateDescriptor</ref>(<ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">descriptorType</ref>,</highlight></codeline>
+<codeline lineno="24"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">descriptor</ref>)</highlight></codeline>
+<codeline lineno="25"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="26" refid="classhipdnn__frontend_1_1IHipdnnBackend_1ada419966d927bae6431f705f30be6a41" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1ada419966d927bae6431f705f30be6a41" kindref="member">backendDestroyDescriptor</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">descriptor</ref>)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="27" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a055a473a60929e379668eda6c17467e1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a055a473a60929e379668eda6c17467e1" kindref="member">backendExecute</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="28"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">executionPlan</ref>,</highlight></codeline>
+<codeline lineno="29"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">variantPack</ref>)</highlight></codeline>
+<codeline lineno="30"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="31" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a9dfe666865bc944f5126c193a783c49c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a9dfe666865bc944f5126c193a783c49c" kindref="member">backendFinalize</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">descriptor</ref>)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="32" refid="classhipdnn__frontend_1_1IHipdnnBackend_1af5a54cc19903082b5c4070e60a2551a6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1af5a54cc19903082b5c4070e60a2551a6" kindref="member">backendGetAttribute</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">descriptor</ref>,</highlight></codeline>
+<codeline lineno="33"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">attributeName</ref>,</highlight></codeline>
+<codeline lineno="34"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeType_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">attributeType</ref>,</highlight></codeline>
+<codeline lineno="35"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">int64_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">requestedElementCount</ref>,</highlight></codeline>
+<codeline lineno="36"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">int64_t</ref>*<sp/>elementCount,</highlight></codeline>
+<codeline lineno="37"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal">*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">arrayOfElements</ref>)</highlight></codeline>
+<codeline lineno="38"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="39" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a8c62ed1ed8e1ac091e1fbd479046e0d5" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a8c62ed1ed8e1ac091e1fbd479046e0d5" kindref="member">backendSetAttribute</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">descriptor</ref>,</highlight></codeline>
+<codeline lineno="40"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">attributeName</ref>,</highlight></codeline>
+<codeline lineno="41"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeType_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">attributeType</ref>,</highlight></codeline>
+<codeline lineno="42"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">int64_t</ref><sp/>elementCount,</highlight></codeline>
+<codeline lineno="43"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal">*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">arrayOfElements</ref>)</highlight></codeline>
+<codeline lineno="44"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="45" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a48f62e147079523e01a46b562e5eee20" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a48f62e147079523e01a46b562e5eee20" kindref="member">getErrorString</ref>(<ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">status</ref>)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="46" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a1f5a23b3b0691f508ce10f0dbca3858d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a1f5a23b3b0691f508ce10f0dbca3858d" kindref="member">getLastErrorString</ref>(</highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">message</ref>,<sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">maxSize</ref>)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="47" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a3c4bc5267734cf245b56c87035f110cb" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a3c4bc5267734cf245b56c87035f110cb" kindref="member">backendCreateAndDeserializeGraphExt</ref>(</highlight></codeline>
+<codeline lineno="48"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">descriptor</ref>,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">uint8_t</ref>*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">serializedGraph</ref>,<sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">graphByteSize</ref>)</highlight></codeline>
+<codeline lineno="49"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="50" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a061cbeb5aacfe5850b77244605d6b27a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a061cbeb5aacfe5850b77244605d6b27a" kindref="member">loggingCallbackExt</ref>(<ref refid="HipdnnBackendCallbackTypes_8h_1aa3f15482bbaf7bcbc31a7b5737e6ff07" kindref="member">hipdnnSeverity_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">severity</ref>,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">msg</ref>)<sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="51"><highlight class="normal"></highlight></codeline>
+<codeline lineno="52" refid="classhipdnn__frontend_1_1IHipdnnBackend_1aa13b2fa7be5aa2dfd92c98b8ebad1c28" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">virtual</highlight><highlight class="normal"><sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1aa13b2fa7be5aa2dfd92c98b8ebad1c28" kindref="member">setEnginePluginPathsExt</ref>(</highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">numPaths</ref>,</highlight></codeline>
+<codeline lineno="53"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal">*<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">pluginPaths</ref>,</highlight></codeline>
+<codeline lineno="54"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendPluginLoadingMode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref><sp/>mode)</highlight></codeline>
+<codeline lineno="55"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>=<sp/>0;</highlight></codeline>
+<codeline lineno="56"><highlight class="normal"></highlight></codeline>
+<codeline lineno="57" refid="classhipdnn__frontend_1_1IHipdnnBackend_1ab0bb1316ff36c2c5d2682e75a674fbce" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;IHipdnnBackend&gt;<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1ab0bb1316ff36c2c5d2682e75a674fbce" kindref="member">backendInstance</ref>;</highlight></codeline>
+<codeline lineno="58" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a7c321e72fc0d23f61e5e5ce2ae2185b8" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;IHipdnnBackend&gt;<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a7c321e72fc0d23f61e5e5ce2ae2185b8" kindref="member">getInstance</ref>()</highlight></codeline>
+<codeline lineno="59"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="60"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1ab0bb1316ff36c2c5d2682e75a674fbce" kindref="member">backendInstance</ref>;</highlight></codeline>
+<codeline lineno="61"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="62"><highlight class="normal"></highlight></codeline>
+<codeline lineno="63" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a0b0778204f628364837dee7ca2b8c117" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a0b0778204f628364837dee7ca2b8c117" kindref="member">setInstance</ref>(std::shared_ptr&lt;IHipdnnBackend&gt;<sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">instance</ref>)</highlight></codeline>
+<codeline lineno="64"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="65"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1ab0bb1316ff36c2c5d2682e75a674fbce" kindref="member">backendInstance</ref><sp/>=<sp/>std::move(<ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a98c0833e2dcf55f6a036eb28e0d280e2" kindref="member">instance</ref>);</highlight></codeline>
+<codeline lineno="66"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="67"><highlight class="normal"></highlight></codeline>
+<codeline lineno="68" refid="classhipdnn__frontend_1_1IHipdnnBackend_1a95aec19aa143ebdce9dbf0f24d9a3f66" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1a95aec19aa143ebdce9dbf0f24d9a3f66" kindref="member">resetInstance</ref>()</highlight></codeline>
+<codeline lineno="69"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="70"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1IHipdnnBackend_1ab0bb1316ff36c2c5d2682e75a674fbce" kindref="member">backendInstance</ref>.reset();</highlight></codeline>
+<codeline lineno="71"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="72"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="73"><highlight class="normal"></highlight></codeline>
+<codeline lineno="74"><highlight class="normal">}</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/HipdnnBackendInterface.hpp"/>
+  </compounddef>
+</doxygen>

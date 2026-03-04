@@ -1,0 +1,850 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::TensorAttributes</compoundname>
+    <includes refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" local="no">TensorAttributes.hpp</includes>
+    <sectiondef kind="public-type">
+      <memberdef kind="typedef" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a848f028998786d93869f67fe4e11e5b3" prot="public" static="no">
+        <type>std::variant&lt; std::monostate, double, float, half, bfloat16, uint8_t, int32_t &gt;</type>
+        <definition>using hipdnn_frontend::graph::TensorAttributes::ValueVariant =  std::variant&lt;std::monostate, double, float, half, bfloat16, uint8_t, int32_t&gt;</definition>
+        <argsstring></argsstring>
+        <name>ValueVariant</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::ValueVariant</qualifiedname>
+        <briefdescription>
+<para>Variant type for storing pass-by-value scalar values. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="63" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="64" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a350b7197a184c3704bc5b9ddb89bfc0e" prot="private" static="no" mutable="no">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::graph::TensorAttributes::_uid</definition>
+        <argsstring></argsstring>
+        <name>_uid</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::_uid</qualifiedname>
+        <initializer>= 0</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="497" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="497" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aeda6386db3df209d4442b6cedf5a70f0" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::graph::TensorAttributes::_uidSet</definition>
+        <argsstring></argsstring>
+        <name>_uidSet</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::_uidSet</qualifiedname>
+        <initializer>= false</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="498" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="498" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ae53be3e6efa0c9eda9e6da61babf2649" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::graph::TensorAttributes::_name</definition>
+        <argsstring></argsstring>
+        <name>_name</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::_name</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="499" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="499" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1afe9595c636a0fedd10b8cb3c2debb7f3" prot="private" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::TensorAttributes::_dataType</definition>
+        <argsstring></argsstring>
+        <name>_dataType</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::_dataType</qualifiedname>
+        <initializer>= <ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca1c250a21210b7b88a14db9a0cbe71162" kindref="member">DataType::NOT_SET</ref></initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="500" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="500" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aa178db0c7a381f9debdb09a77ec45f6f" prot="private" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_frontend::graph::TensorAttributes::_stride</definition>
+        <argsstring></argsstring>
+        <name>_stride</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::_stride</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="501" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="501" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a1593207a1fbedafbe12c985e952e2451" prot="private" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_frontend::graph::TensorAttributes::_dim</definition>
+        <argsstring></argsstring>
+        <name>_dim</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::_dim</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="502" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="502" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a6d9b7c1a03a0014d4c31dee1e71bda8e" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::graph::TensorAttributes::_isVirtual</definition>
+        <argsstring></argsstring>
+        <name>_isVirtual</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::_isVirtual</qualifiedname>
+        <initializer>= false</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="503" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="503" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1af02d5d247a9415d0307ccaf236164234" prot="private" static="no" mutable="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a848f028998786d93869f67fe4e11e5b3" kindref="member">ValueVariant</ref></type>
+        <definition>ValueVariant hipdnn_frontend::graph::TensorAttributes::_value</definition>
+        <argsstring></argsstring>
+        <name>_value</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::_value</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="504" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="504" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a58a800f11bdd70f2bc7cc477512dbd2d" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::graph::TensorAttributes::TensorAttributes</definition>
+        <argsstring>()=default</argsstring>
+        <name>TensorAttributes</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::TensorAttributes</qualifiedname>
+        <briefdescription>
+<para>Default constructor. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="67" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a31856632263fad849709dd8bec827b53" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type></type>
+        <definition>hipdnn_frontend::graph::TensorAttributes::TensorAttributes</definition>
+        <argsstring>(T const &amp;scalar)</argsstring>
+        <name>TensorAttributes</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::TensorAttributes</qualifiedname>
+        <param>
+          <type>T const &amp;</type>
+          <declname>scalar</declname>
+        </param>
+        <briefdescription>
+<para>Construct a pass-by-value tensor from a scalar. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>T</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>scalar</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The scalar value to store in the tensor </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="75" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="75" bodyend="78"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a0b352d965cebc0925e3296b0b6e2f79b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::graph::TensorAttributes::get_pass_by_value</definition>
+        <argsstring>() const</argsstring>
+        <name>get_pass_by_value</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_pass_by_value</qualifiedname>
+        <briefdescription>
+<para>Check if this tensor is a pass-by-value tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>true if the tensor contains an embedded scalar value </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="84" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="84" bodyend="87"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a8b7565420e54afb809c38b9acfb0265e" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type>std::optional&lt; T &gt;</type>
+        <definition>std::optional&lt; T &gt; hipdnn_frontend::graph::TensorAttributes::get_pass_by_value</definition>
+        <argsstring>() const</argsstring>
+        <name>get_pass_by_value</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_pass_by_value</qualifiedname>
+        <briefdescription>
+<para>Get the pass-by-value scalar of a specific type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>T</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The expected scalar type </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>The scalar value if it matches type T, std::nullopt otherwise </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="95" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="95" bodyend="102"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ae6fd97d97878c50b018f25d1fea8d510" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::set_value</definition>
+        <argsstring>(T v)</argsstring>
+        <name>set_value</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::set_value</qualifiedname>
+        <param>
+          <type>T</type>
+          <declname>v</declname>
+        </param>
+        <briefdescription>
+<para>Set a pass-by-value scalar in this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>T</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>v</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The scalar value </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="111" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="111" bodyend="125"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a3c113a5dacb15c409a6d6b1649093206" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::clear_value</definition>
+        <argsstring>()</argsstring>
+        <name>clear_value</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::clear_value</qualifiedname>
+        <briefdescription>
+<para>Clear the pass-by-value scalar. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="131" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="131" bodyend="135"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a68347a7dc7d223111b226efb6f57fab0" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::graph::TensorAttributes::get_uid</definition>
+        <argsstring>() const</argsstring>
+        <name>get_uid</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_uid</qualifiedname>
+        <briefdescription>
+<para>Get the unique identifier of this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The tensor UID </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="141" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="141" bodyend="144"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1af5c4788b9b8b5a100d2d1bbb457f9f88" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::string &amp;</type>
+        <definition>const std::string &amp; hipdnn_frontend::graph::TensorAttributes::get_name</definition>
+        <argsstring>() const</argsstring>
+        <name>get_name</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_name</qualifiedname>
+        <briefdescription>
+<para>Get the name of this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The tensor name </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="150" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="150" bodyend="153"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a3c84be5f328ba359ecec6f7aa0792c49" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::TensorAttributes::get_data_type</definition>
+        <argsstring>() const</argsstring>
+        <name>get_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_data_type</qualifiedname>
+        <briefdescription>
+<para>Get the data type of this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The DataType enum value </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="159" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="159" bodyend="162"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a39d8e3b7ff383c9a27e6fbd01446b313" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>const std::vector&lt; int64_t &gt; &amp; hipdnn_frontend::graph::TensorAttributes::get_stride</definition>
+        <argsstring>() const</argsstring>
+        <name>get_stride</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_stride</qualifiedname>
+        <briefdescription>
+<para>Get the strides of this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Vector of strides for each dimension </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="168" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="168" bodyend="171"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1acfbd124e3be0c9bd523772ece948c965" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>const std::vector&lt; int64_t &gt; &amp; hipdnn_frontend::graph::TensorAttributes::get_dim</definition>
+        <argsstring>() const</argsstring>
+        <name>get_dim</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_dim</qualifiedname>
+        <briefdescription>
+<para>Get the dimensions of this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Vector of dimension sizes </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="177" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="177" bodyend="180"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ab8ca85932866bfb72ab25e7d2e7b046b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_frontend::graph::TensorAttributes::get_volume</definition>
+        <argsstring>() const</argsstring>
+        <name>get_volume</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_volume</qualifiedname>
+        <briefdescription>
+<para>Get the total number of elements in this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Product of all dimension sizes </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="186" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="186" bodyend="194"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1af04a0380fd07ed72fac658d4b34ccb25" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::graph::TensorAttributes::get_is_virtual</definition>
+        <argsstring>() const</argsstring>
+        <name>get_is_virtual</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::get_is_virtual</qualifiedname>
+        <briefdescription>
+<para>Check if this tensor is virtual (intermediate result) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>true if virtual, false if physical (requires memory allocation) </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="200" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="200" bodyend="203"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a902fcb4a89ab6aaa2898fa4f06bcb13e" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::graph::TensorAttributes::has_uid</definition>
+        <argsstring>() const</argsstring>
+        <name>has_uid</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::has_uid</qualifiedname>
+        <briefdescription>
+<para>Check if this tensor has a UID assigned. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>true if a UID has been set </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="209" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="209" bodyend="212"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ad90cc1292ef321b0807cca4245b47754" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::set_uid</definition>
+        <argsstring>(int64_t uid)</argsstring>
+        <name>set_uid</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::set_uid</qualifiedname>
+        <param>
+          <type>int64_t</type>
+          <declname>uid</declname>
+        </param>
+        <briefdescription>
+<para>Set the unique identifier for this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>uid</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The unique identifier (used for memory mapping during execution) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="219" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="219" bodyend="224"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a85739ed1d80dc56e6c69132f9fe2f287" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::set_name</definition>
+        <argsstring>(const std::string &amp;name)</argsstring>
+        <name>set_name</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::set_name</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>name</declname>
+        </param>
+        <briefdescription>
+<para>Set a human-readable name for this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>name</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The tensor name (for debugging and logging) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="231" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="231" bodyend="235"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aba4af4b22eb5f013ef6c932c825515ac" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::set_data_type</definition>
+        <argsstring>(DataType dataType)</argsstring>
+        <name>set_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::set_data_type</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>dataType</declname>
+        </param>
+        <briefdescription>
+<para>Set the data type of this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>dataType</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The DataType enum value </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="242" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="242" bodyend="246"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a12dbb34f9b7d257cdee9f4e929490105" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::set_stride</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;stride)</argsstring>
+        <name>set_stride</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::set_stride</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>stride</declname>
+        </param>
+        <briefdescription>
+<para>Set the strides for this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>stride</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Vector of strides for each dimension </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining</para>
+</simplesect>
+<simplesect kind="note"><para>Strides must have the same size as dimensions </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="256" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="256" bodyend="260"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aea7e069fa52bc29177547b9008c7f904" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::set_dim</definition>
+        <argsstring>(const std::vector&lt; int64_t &gt; &amp;dim)</argsstring>
+        <name>set_dim</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::set_dim</qualifiedname>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dim</declname>
+        </param>
+        <briefdescription>
+<para>Set the dimensions for this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>dim</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Vector of dimension sizes </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="268" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="268" bodyend="272"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a99b631bf1effdd8e183673d7e229a348" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::set_is_virtual</definition>
+        <argsstring>(bool isVirtual)</argsstring>
+        <name>set_is_virtual</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::set_is_virtual</qualifiedname>
+        <param>
+          <type>bool</type>
+          <declname>isVirtual</declname>
+        </param>
+        <briefdescription>
+<para>Set whether this tensor is virtual. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>isVirtual</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>true for virtual tensors (intermediates), false for physical </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="279" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="279" bodyend="283"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ada0c7b3f669f04dff0a1b241eace70cb" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::set_output</definition>
+        <argsstring>(bool output)</argsstring>
+        <name>set_output</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::set_output</qualifiedname>
+        <param>
+          <type>bool</type>
+          <declname>output</declname>
+        </param>
+        <briefdescription>
+<para>Convenience method to mark tensor as output (non-virtual) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>output</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>true to mark as output, false to mark as virtual </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="290" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="290" bodyend="293"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a8e05631f83ef4ea841e63ee151328d7f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::clear_uid</definition>
+        <argsstring>()</argsstring>
+        <name>clear_uid</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::clear_uid</qualifiedname>
+        <briefdescription>
+<para>Clear the UID from this tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="299" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="299" bodyend="304"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1af318e9a5127e7fea00bbc46aee50754f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+        <definition>TensorAttributes &amp; hipdnn_frontend::graph::TensorAttributes::fill_from_context</definition>
+        <argsstring>(const GraphAttributes &amp;graphAttributes)</argsstring>
+        <name>fill_from_context</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::fill_from_context</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+          <declname>graphAttributes</declname>
+        </param>
+        <briefdescription>
+<para>Fill unset attributes from graph context. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>graphAttributes</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The graph attributes to inherit from </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining</para>
+</simplesect>
+If data type is not set, it will be inferred from the graph&apos;s io_data_type (for physical tensors) or intermediate_data_type (for virtual tensors). </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="315" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="315" bodyend="330"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a1021a7c387a1a72745df7d7295157be1" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::TensorAttributes::validate</definition>
+        <argsstring>() const</argsstring>
+        <name>validate</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::validate</qualifiedname>
+        <briefdescription>
+<para>Validate tensor attributes. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or describing what is invalid</para>
+</simplesect>
+Checks that:<itemizedlist>
+<listitem><para>Data type is set</para>
+</listitem><listitem><para>Virtual tensors are not pass-by-value</para>
+</listitem><listitem><para>Dimensions and strides have matching sizes</para>
+</listitem><listitem><para>Dimensions are non-empty and positive </para>
+</listitem></itemizedlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="342" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="342" bodyend="368"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ac4226903f746b658efced52b7c4d6b9b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::TensorAttributes &gt;</type>
+        <definition>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::TensorAttributes &gt; hipdnn_frontend::graph::TensorAttributes::pack_attributes</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder) const</argsstring>
+        <name>pack_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::pack_attributes</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="371" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="371" bodyend="430"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-static-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a96e9ef392d53cdd3e5995a762cac8e0b" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>static std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::TensorAttributes::fromFlatBuffer</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::TensorAttributes *fb)</argsstring>
+        <name>fromFlatBuffer</name>
+        <qualifiedname>hipdnn_frontend::graph::TensorAttributes::fromFlatBuffer</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::TensorAttributes *</type>
+          <declname>fb</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="433" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="433" bodyend="494"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Describes the properties and configuration of a tensor. </para>
+    </briefdescription>
+    <detaileddescription>
+<para><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> is used to define tensors that participate in hipDNN operations. Each tensor has dimensions, strides, a data type, and optionally a unique identifier for mapping to device memory during execution.</para>
+<para>Tensors can be:<itemizedlist>
+<listitem><para><bold>Physical tensors</bold>: Have a UID and map to actual device memory</para>
+</listitem><listitem><para><bold>Virtual tensors</bold>: Intermediate results that don&apos;t require explicit memory allocation</para>
+</listitem><listitem><para><bold>Pass-by-value tensors</bold>: Scalar values embedded directly in the tensor</para>
+</listitem></itemizedlist>
+</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="comment">//<sp/>Create<sp/>a<sp/>4D<sp/>tensor<sp/>(NCHW<sp/>format)</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>x<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a43a2785c764c003010b456b59bffac8f" kindref="member">Graph::tensor</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a58a800f11bdd70f2bc7cc477512dbd2d" kindref="member">TensorAttributes</ref>()</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.<ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aea7e069fa52bc29177547b9008c7f904" kindref="member">set_dim</ref>({1,<sp/>64,<sp/>28,<sp/>28})</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.<ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a12dbb34f9b7d257cdee9f4e929490105" kindref="member">set_stride</ref>({50176,<sp/>784,<sp/>28,<sp/>1})</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.<ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aba4af4b22eb5f013ef6c932c825515ac" kindref="member">set_data_type</ref>(<ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca87e955627b59c274ec4cbdd3a130f9bb" kindref="member">DataType::HALF</ref>)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.<ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ad90cc1292ef321b0807cca4245b47754" kindref="member">set_uid</ref>(0)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.<ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a85739ed1d80dc56e6c69132f9fe2f287" kindref="member">set_name</ref>(</highlight><highlight class="stringliteral">&quot;input_x&quot;</highlight><highlight class="normal">));</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="comment">//<sp/>Create<sp/>a<sp/>scalar<sp/>tensor</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a58a800f11bdd70f2bc7cc477512dbd2d" kindref="member">TensorAttributes</ref><sp/>scalar(2.0f);<sp/><sp/></highlight><highlight class="comment">//<sp/>Pass-by-value<sp/>float</highlight></codeline>
+</programlisting> </para>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="59" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="60" bodyend="505"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1afe9595c636a0fedd10b8cb3c2debb7f3" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>_dataType</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a1593207a1fbedafbe12c985e952e2451" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>_dim</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a6d9b7c1a03a0014d4c31dee1e71bda8e" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>_isVirtual</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ae53be3e6efa0c9eda9e6da61babf2649" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aa178db0c7a381f9debdb09a77ec45f6f" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>_stride</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a350b7197a184c3704bc5b9ddb89bfc0e" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>_uid</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aeda6386db3df209d4442b6cedf5a70f0" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>_uidSet</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1af02d5d247a9415d0307ccaf236164234" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>_value</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a8e05631f83ef4ea841e63ee151328d7f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>clear_uid</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a3c113a5dacb15c409a6d6b1649093206" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>clear_value</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1af318e9a5127e7fea00bbc46aee50754f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>fill_from_context</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a96e9ef392d53cdd3e5995a762cac8e0b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>fromFlatBuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a3c84be5f328ba359ecec6f7aa0792c49" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1acfbd124e3be0c9bd523772ece948c965" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_dim</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1af04a0380fd07ed72fac658d4b34ccb25" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_is_virtual</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1af5c4788b9b8b5a100d2d1bbb457f9f88" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a0b352d965cebc0925e3296b0b6e2f79b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_pass_by_value</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a8b7565420e54afb809c38b9acfb0265e" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_pass_by_value</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a39d8e3b7ff383c9a27e6fbd01446b313" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_stride</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a68347a7dc7d223111b226efb6f57fab0" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_uid</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ab8ca85932866bfb72ab25e7d2e7b046b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>get_volume</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a902fcb4a89ab6aaa2898fa4f06bcb13e" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>has_uid</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ac4226903f746b658efced52b7c4d6b9b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>pack_attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aba4af4b22eb5f013ef6c932c825515ac" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>set_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1aea7e069fa52bc29177547b9008c7f904" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>set_dim</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a99b631bf1effdd8e183673d7e229a348" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>set_is_virtual</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a85739ed1d80dc56e6c69132f9fe2f287" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>set_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ada0c7b3f669f04dff0a1b241eace70cb" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>set_output</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a12dbb34f9b7d257cdee9f4e929490105" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>set_stride</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ad90cc1292ef321b0807cca4245b47754" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>set_uid</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1ae6fd97d97878c50b018f25d1fea8d510" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>set_value</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a58a800f11bdd70f2bc7cc477512dbd2d" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>TensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a31856632263fad849709dd8bec827b53" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>TensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a1021a7c387a1a72745df7d7295157be1" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>validate</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes_1a848f028998786d93869f67fe4e11e5b3" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::TensorAttributes</scope><name>ValueVariant</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

@@ -1,0 +1,416 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="MatmulAttributes_8hpp" kind="file" language="C++">
+    <compoundname>MatmulAttributes.hpp</compoundname>
+    <includes refid="Attributes_8hpp" local="yes">Attributes.hpp</includes>
+    <includes refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" local="yes">TensorAttributes.hpp</includes>
+    <includes local="no">hipdnn_data_sdk/data_objects/matmul_attributes_generated.h</includes>
+    <includes local="no">memory</includes>
+    <includes local="no">unordered_map</includes>
+    <includes local="no">vector</includes>
+    <includedby refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</includedby>
+    <incdepgraph>
+      <node id="5">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="HipdnnBackendHeuristicType_8h"/>
+      </node>
+      <node id="11">
+        <label>hipdnn_data_sdk/utilities/PointwiseValidation.hpp</label>
+        <link refid="PointwiseValidation_8hpp"/>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+      </node>
+      <node id="23">
+        <label>hipdnn_frontend/Error.hpp</label>
+        <link refid="Error_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_frontend/Types.hpp</label>
+        <link refid="Types_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>Attributes.hpp</label>
+        <link refid="Attributes_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>GraphAttributes.hpp</label>
+        <link refid="GraphAttributes_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/MatmulAttributes.hpp</label>
+        <link refid="MatmulAttributes_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+      </node>
+      <node id="19">
+        <label>TensorAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+      </node>
+      <node id="12">
+        <label>bitset</label>
+      </node>
+      <node id="20">
+        <label>flatbuffers/flatbuffers.h</label>
+      </node>
+      <node id="6">
+        <label>hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h</label>
+      </node>
+      <node id="7">
+        <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
+      </node>
+      <node id="21">
+        <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
+      </node>
+      <node id="8">
+        <label>hipdnn_data_sdk/data_objects/knob_value_generated.h</label>
+      </node>
+      <node id="28">
+        <label>hipdnn_data_sdk/data_objects/matmul_attributes_generated.h</label>
+      </node>
+      <node id="9">
+        <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
+      </node>
+      <node id="22">
+        <label>hipdnn_data_sdk/data_objects/tensor_attributes_generated.h</label>
+      </node>
+      <node id="10">
+        <label>hipdnn_data_sdk/types.hpp</label>
+      </node>
+      <node id="17">
+        <label>memory</label>
+      </node>
+      <node id="24">
+        <label>optional</label>
+      </node>
+      <node id="13">
+        <label>ostream</label>
+      </node>
+      <node id="14">
+        <label>set</label>
+      </node>
+      <node id="15">
+        <label>string</label>
+      </node>
+      <node id="25">
+        <label>type_traits</label>
+      </node>
+      <node id="18">
+        <label>unordered_map</label>
+      </node>
+      <node id="27">
+        <label>utility</label>
+      </node>
+      <node id="16">
+        <label>variant</label>
+      </node>
+      <node id="26">
+        <label>vector</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/MatmulAttributes.hpp</label>
+        <link refid="MatmulAttributes_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" prot="public">hipdnn_frontend::graph::MatmulAttributes</innerclass>
+    <innernamespace refid="namespacehipdnn__frontend">hipdnn_frontend</innernamespace>
+    <innernamespace refid="namespacehipdnn__frontend_1_1graph">hipdnn_frontend::graph</innernamespace>
+    <briefdescription>
+<para>Attributes for matrix multiplication operations. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the MatmulAttributes class for configuring matrix multiplication (matmul) operations in hipDNN computational graphs. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="Attributes_8hpp" kindref="compound">Attributes.hpp</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" kindref="compound">TensorAttributes.hpp</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/data_objects/matmul_attributes_generated.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;memory&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;unordered_map&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="19"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;vector&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="20"><highlight class="normal"></highlight></codeline>
+<codeline lineno="21"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__frontend_1_1graph" kindref="compound">hipdnn_frontend::graph</ref></highlight></codeline>
+<codeline lineno="22"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="23"><highlight class="normal"></highlight></codeline>
+<codeline lineno="39" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">class<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref><sp/>:<sp/></highlight><highlight class="keyword">public</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes" kindref="compound">Attributes</ref>&lt;MatmulAttributes&gt;</highlight></codeline>
+<codeline lineno="40"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="41"><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="43" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">enum<sp/>class</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1" kindref="member">InputNames</ref></highlight></codeline>
+<codeline lineno="44"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="45"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1a7fc56270e7a70fa81a5935b72eacbe29" kindref="member">A</ref><sp/>=<sp/>0,<sp/></highlight></codeline>
+<codeline lineno="46"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1a9d5ed678fe57bcca610140957afab571" kindref="member">B</ref><sp/>=<sp/>1<sp/></highlight></codeline>
+<codeline lineno="47"><highlight class="normal"><sp/><sp/><sp/><sp/>};</highlight></codeline>
+<codeline lineno="48" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a5bcc97371628acaf36258b3c0e03b1a2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1" kindref="member">InputNames</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a5bcc97371628acaf36258b3c0e03b1a2" kindref="member">input_names</ref>;<sp/></highlight></codeline>
+<codeline lineno="49"><highlight class="normal"></highlight></codeline>
+<codeline lineno="51" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab07f597c39879418c536550efe18f14d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">enum<sp/>class</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab07f597c39879418c536550efe18f14d" kindref="member">OutputNames</ref></highlight></codeline>
+<codeline lineno="52"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="53"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab07f597c39879418c536550efe18f14da0d61f8370cad1d412f80b84d143e1257" kindref="member">C</ref><sp/>=<sp/>0<sp/></highlight></codeline>
+<codeline lineno="54"><highlight class="normal"><sp/><sp/><sp/><sp/>};</highlight></codeline>
+<codeline lineno="55" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a4cec665b8a540201f176e661edbe3126" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab07f597c39879418c536550efe18f14d" kindref="member">OutputNames</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a4cec665b8a540201f176e661edbe3126" kindref="member">output_names</ref>;<sp/></highlight></codeline>
+<codeline lineno="56"><highlight class="normal"></highlight></codeline>
+<codeline lineno="57" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ad903a7ecd793d0b47e4be9dd773ff6a5" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;InputNames,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ad903a7ecd793d0b47e4be9dd773ff6a5" kindref="member">inputs</ref>;<sp/></highlight></codeline>
+<codeline lineno="58" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a0d15c1292203f3c4938728368641576d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;OutputNames,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a0d15c1292203f3c4938728368641576d" kindref="member">outputs</ref>;<sp/></highlight></codeline>
+<codeline lineno="59"><highlight class="normal"></highlight></codeline>
+<codeline lineno="61"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="62" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ae0190359150fbb077db75c606ffde7b5" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ae0190359150fbb077db75c606ffde7b5" kindref="member">get_a</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="63"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="64"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1a7fc56270e7a70fa81a5935b72eacbe29" kindref="member">InputNames::A</ref>);</highlight></codeline>
+<codeline lineno="65"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="67"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="68" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a5a0851e6eaf4e51f5d8e3784eaa82d8f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a5a0851e6eaf4e51f5d8e3784eaa82d8f" kindref="member">get_b</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="69"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="70"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1a9d5ed678fe57bcca610140957afab571" kindref="member">InputNames::B</ref>);</highlight></codeline>
+<codeline lineno="71"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="73"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="74" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a8f7f178e92d24086abd4050aa3512f28" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a8f7f178e92d24086abd4050aa3512f28" kindref="member">get_c</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="75"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="76"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" kindref="member">getOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab07f597c39879418c536550efe18f14da0d61f8370cad1d412f80b84d143e1257" kindref="member">OutputNames::C</ref>);</highlight></codeline>
+<codeline lineno="77"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="78"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="79" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af4dfa415830e1850196ce636dd8ea598" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af4dfa415830e1850196ce636dd8ea598" kindref="member">set_a</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="80"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1a7fc56270e7a70fa81a5935b72eacbe29" kindref="member">InputNames::A</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="82"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="83"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="84" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a20e9cb662bdbf56f00deb85579d6fae9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a20e9cb662bdbf56f00deb85579d6fae9" kindref="member">set_a</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="85"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="86"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1a7fc56270e7a70fa81a5935b72eacbe29" kindref="member">InputNames::A</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="87"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="88"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="89" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab7908bb757062c25419ab7850d3aaaad" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab7908bb757062c25419ab7850d3aaaad" kindref="member">set_b</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="90"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="91"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1a9d5ed678fe57bcca610140957afab571" kindref="member">InputNames::B</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="93"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="94" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a591e500fce0572c6ccbf59540dabc8a6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a591e500fce0572c6ccbf59540dabc8a6" kindref="member">set_b</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="95"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="96"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af05924c5b98782975c27f9f9e81b18f1a9d5ed678fe57bcca610140957afab571" kindref="member">InputNames::B</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="97"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="98"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="99" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a84cfcd80269eb021912fb58975acbcdf" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a84cfcd80269eb021912fb58975acbcdf" kindref="member">set_c</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="100"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="101"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab07f597c39879418c536550efe18f14da0d61f8370cad1d412f80b84d143e1257" kindref="member">OutputNames::C</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="102"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="103"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="104" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a1bb1683e4a0cee82a66ba39b5100b64b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a1bb1683e4a0cee82a66ba39b5100b64b" kindref="member">set_c</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="106"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab07f597c39879418c536550efe18f14da0d61f8370cad1d412f80b84d143e1257" kindref="member">OutputNames::C</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="107"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="108"><highlight class="normal"></highlight></codeline>
+<codeline lineno="109"><highlight class="normal"><sp/><sp/><sp/><sp/>flatbuffers::Offset&lt;hipdnn_data_sdk::data_objects::MatmulAttributes&gt;</highlight></codeline>
+<codeline lineno="110" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1aebd7ea9bb77508746644f0c32e64e99c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1aebd7ea9bb77508746644f0c32e64e99c" kindref="member">pack_attributes</ref>(flatbuffers::FlatBufferBuilder&amp;<sp/>builder)<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="comment">//<sp/>NOLINT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="111"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="112"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::CreateMatmulAttributes(</highlight></codeline>
+<codeline lineno="113"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>builder,<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ae0190359150fbb077db75c606ffde7b5" kindref="member">get_a</ref>()-&gt;get_uid(),<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a5a0851e6eaf4e51f5d8e3784eaa82d8f" kindref="member">get_b</ref>()-&gt;get_uid(),<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a8f7f178e92d24086abd4050aa3512f28" kindref="member">get_c</ref>()-&gt;get_uid());</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="115"><highlight class="normal"></highlight></codeline>
+<codeline lineno="116" refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a1eaf66d5fe2fddcf7272ec29a0f66ef8" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a1eaf66d5fe2fddcf7272ec29a0f66ef8" kindref="member">fromFlatBuffer</ref>(</highlight></codeline>
+<codeline lineno="117"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::MatmulAttributes*<sp/>fb,</highlight></codeline>
+<codeline lineno="118"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::unordered_map&lt;int64_t,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;&amp;<sp/>tensorMap)</highlight></codeline>
+<codeline lineno="119"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="120"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref><sp/>attr;</highlight></codeline>
+<codeline lineno="121"><highlight class="normal"></highlight></codeline>
+<codeline lineno="122"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1af4dfa415830e1850196ce636dd8ea598" kindref="member">set_a</ref>(tensorMap.at(fb-&gt;a_tensor_uid()));</highlight></codeline>
+<codeline lineno="123"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1ab7908bb757062c25419ab7850d3aaaad" kindref="member">set_b</ref>(tensorMap.at(fb-&gt;b_tensor_uid()));</highlight></codeline>
+<codeline lineno="124"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes_1a84cfcd80269eb021912fb58975acbcdf" kindref="member">set_c</ref>(tensorMap.at(fb-&gt;c_tensor_uid()));</highlight></codeline>
+<codeline lineno="125"><highlight class="normal"></highlight></codeline>
+<codeline lineno="126"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>attr;</highlight></codeline>
+<codeline lineno="127"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="128"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="129"><highlight class="normal"></highlight></codeline>
+<codeline lineno="130" refid="namespacehipdnn__frontend_1_1graph_1aec1593a6e859c22a759bb6e739207c26" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref><sp/><ref refid="namespacehipdnn__frontend_1_1graph_1aec1593a6e859c22a759bb6e739207c26" kindref="member">Matmul_attributes</ref>;<sp/></highlight></codeline>
+<codeline lineno="131"><highlight class="normal">}<sp/></highlight><highlight class="comment">//<sp/>namespace<sp/>hipdnn_frontend::graph</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/MatmulAttributes.hpp"/>
+  </compounddef>
+</doxygen>

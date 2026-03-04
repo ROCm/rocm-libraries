@@ -25,9 +25,9 @@
     <value><![CDATA[an]]></value>
     <value><![CDATA[the]]></value>
   </option>
-  <option  id='ALWAYS_DETAILED_SEC' default='no' type='bool'><value>YES</value></option>
+  <option  id='ALWAYS_DETAILED_SEC' default='yes' type='bool'><value>NO</value></option>
   <option  id='INLINE_INHERITED_MEMB' default='yes' type='bool'><value>NO</value></option>
-  <option  id='FULL_PATH_NAMES' default='no' type='bool'><value>NO</value></option>
+  <option  id='FULL_PATH_NAMES' default='yes' type='bool'><value>YES</value></option>
   <option  id='STRIP_FROM_PATH' default='yes' type='stringlist'>
   </option>
   <option  id='STRIP_FROM_INC_PATH' default='yes' type='stringlist'>
@@ -43,13 +43,12 @@
   <option  id='TAB_SIZE' default='yes' type='int'><value>4</value></option>
   <option  id='ALIASES' default='yes' type='stringlist'>
   </option>
-  <option  id='OPTIMIZE_OUTPUT_FOR_C' default='no' type='bool'><value>YES</value></option>
+  <option  id='OPTIMIZE_OUTPUT_FOR_C' default='yes' type='bool'><value>NO</value></option>
   <option  id='OPTIMIZE_OUTPUT_JAVA' default='yes' type='bool'><value>NO</value></option>
   <option  id='OPTIMIZE_FOR_FORTRAN' default='yes' type='bool'><value>NO</value></option>
   <option  id='OPTIMIZE_OUTPUT_VHDL' default='yes' type='bool'><value>NO</value></option>
   <option  id='OPTIMIZE_OUTPUT_SLICE' default='yes' type='bool'><value>NO</value></option>
-  <option  id='EXTENSION_MAPPING' default='no' type='stringlist'>
-    <value><![CDATA[in=C]]></value>
+  <option  id='EXTENSION_MAPPING' default='yes' type='stringlist'>
   </option>
   <option  id='MARKDOWN_SUPPORT' default='yes' type='bool'><value>YES</value></option>
   <option  id='TOC_INCLUDE_HEADINGS' default='yes' type='int'><value>5</value></option>
@@ -59,12 +58,12 @@
   <option  id='CPP_CLI_SUPPORT' default='yes' type='bool'><value>NO</value></option>
   <option  id='SIP_SUPPORT' default='yes' type='bool'><value>NO</value></option>
   <option  id='IDL_PROPERTY_SUPPORT' default='yes' type='bool'><value>YES</value></option>
-  <option  id='DISTRIBUTE_GROUP_DOC' default='no' type='bool'><value>YES</value></option>
+  <option  id='DISTRIBUTE_GROUP_DOC' default='yes' type='bool'><value>NO</value></option>
   <option  id='GROUP_NESTED_COMPOUNDS' default='yes' type='bool'><value>NO</value></option>
   <option  id='SUBGROUPING' default='yes' type='bool'><value>YES</value></option>
   <option  id='INLINE_GROUPED_CLASSES' default='yes' type='bool'><value>NO</value></option>
   <option  id='INLINE_SIMPLE_STRUCTS' default='yes' type='bool'><value>NO</value></option>
-  <option  id='TYPEDEF_HIDES_STRUCT' default='no' type='bool'><value>YES</value></option>
+  <option  id='TYPEDEF_HIDES_STRUCT' default='yes' type='bool'><value>NO</value></option>
   <option  id='LOOKUP_CACHE_SIZE' default='yes' type='int'><value>0</value></option>
   <option  id='NUM_PROC_THREADS' default='yes' type='int'><value>1</value></option>
   <option  id='TIMESTAMP' default='yes' type='string'><value>NO</value></option>
@@ -72,7 +71,7 @@
   <option  id='EXTRACT_PRIVATE' default='yes' type='bool'><value>NO</value></option>
   <option  id='EXTRACT_PRIV_VIRTUAL' default='yes' type='bool'><value>NO</value></option>
   <option  id='EXTRACT_PACKAGE' default='yes' type='bool'><value>NO</value></option>
-  <option  id='EXTRACT_STATIC' default='yes' type='bool'><value>NO</value></option>
+  <option  id='EXTRACT_STATIC' default='no' type='bool'><value>YES</value></option>
   <option  id='EXTRACT_LOCAL_CLASSES' default='yes' type='bool'><value>YES</value></option>
   <option  id='EXTRACT_LOCAL_METHODS' default='yes' type='bool'><value>NO</value></option>
   <option  id='EXTRACT_ANON_NSPACES' default='yes' type='bool'><value>NO</value></option>
@@ -82,7 +81,7 @@
   <option  id='HIDE_FRIEND_COMPOUNDS' default='yes' type='bool'><value>NO</value></option>
   <option  id='HIDE_IN_BODY_DOCS' default='yes' type='bool'><value>NO</value></option>
   <option  id='INTERNAL_DOCS' default='yes' type='bool'><value>NO</value></option>
-  <option  id='CASE_SENSE_NAMES' default='no' type='string'><value>NO</value></option>
+  <option  id='CASE_SENSE_NAMES' default='yes' type='string'><value>SYSTEM</value></option>
   <option  id='HIDE_SCOPE_NAMES' default='yes' type='bool'><value>NO</value></option>
   <option  id='HIDE_COMPOUND_REFERENCE' default='yes' type='bool'><value>NO</value></option>
   <option  id='SHOW_HEADERFILE' default='yes' type='bool'><value>YES</value></option>
@@ -115,16 +114,17 @@
   <option  id='WARN_IF_UNDOCUMENTED' default='yes' type='bool'><value>YES</value></option>
   <option  id='WARN_IF_DOC_ERROR' default='yes' type='bool'><value>YES</value></option>
   <option  id='WARN_IF_INCOMPLETE_DOC' default='yes' type='bool'><value>YES</value></option>
-  <option  id='WARN_NO_PARAMDOC' default='no' type='bool'><value>YES</value></option>
+  <option  id='WARN_NO_PARAMDOC' default='yes' type='bool'><value>NO</value></option>
   <option  id='WARN_IF_UNDOC_ENUM_VAL' default='yes' type='bool'><value>NO</value></option>
-  <option  id='WARN_AS_ERROR' default='no' type='string'><value>YES</value></option>
+  <option  id='WARN_AS_ERROR' default='yes' type='string'><value>NO</value></option>
   <option  id='WARN_FORMAT' default='yes' type='string'><value><![CDATA["$file:$line: $text"]]></value></option>
   <option  id='WARN_LINE_FORMAT' default='yes' type='string'><value><![CDATA["at line $line of file $file"]]></value></option>
   <option  id='WARN_LOGFILE' default='yes' type='string'><value><![CDATA[]]></value></option>
   <option  id='INPUT' default='no' type='stringlist'>
-    <value><![CDATA[../../frontend/include]]></value>
+    <value><![CDATA[../..//frontend/include]]></value>
     <value><![CDATA[../../backend/include]]></value>
     <value><![CDATA[../../data_sdk/include]]></value>
+    <value><![CDATA[../../samples]]></value>
   </option>
   <option  id='INPUT_ENCODING' default='yes' type='string'><value><![CDATA[UTF-8]]></value></option>
   <option  id='INPUT_FILE_ENCODING' default='yes' type='stringlist'>
@@ -133,8 +133,12 @@
     <value><![CDATA[*.c]]></value>
     <value><![CDATA[*.cc]]></value>
     <value><![CDATA[*.cxx]]></value>
+    <value><![CDATA[*.cxxm]]></value>
     <value><![CDATA[*.cpp]]></value>
+    <value><![CDATA[*.cppm]]></value>
+    <value><![CDATA[*.ccm]]></value>
     <value><![CDATA[*.c++]]></value>
+    <value><![CDATA[*.c++m]]></value>
     <value><![CDATA[*.java]]></value>
     <value><![CDATA[*.ii]]></value>
     <value><![CDATA[*.ixx]]></value>
@@ -149,6 +153,8 @@
     <value><![CDATA[*.hxx]]></value>
     <value><![CDATA[*.hpp]]></value>
     <value><![CDATA[*.h++]]></value>
+    <value><![CDATA[*.ixx]]></value>
+    <value><![CDATA[*.l]]></value>
     <value><![CDATA[*.cs]]></value>
     <value><![CDATA[*.d]]></value>
     <value><![CDATA[*.php]]></value>
@@ -162,31 +168,40 @@
     <value><![CDATA[*.mm]]></value>
     <value><![CDATA[*.dox]]></value>
     <value><![CDATA[*.py]]></value>
+    <value><![CDATA[*.pyw]]></value>
     <value><![CDATA[*.f90]]></value>
+    <value><![CDATA[*.f95]]></value>
+    <value><![CDATA[*.f03]]></value>
+    <value><![CDATA[*.f08]]></value>
+    <value><![CDATA[*.f18]]></value>
     <value><![CDATA[*.f]]></value>
     <value><![CDATA[*.for]]></value>
-    <value><![CDATA[*.tcl]]></value>
     <value><![CDATA[*.vhd]]></value>
     <value><![CDATA[*.vhdl]]></value>
     <value><![CDATA[*.ucf]]></value>
     <value><![CDATA[*.qsf]]></value>
-    <value><![CDATA[*.as]]></value>
-    <value><![CDATA[*.js]]></value>
+    <value><![CDATA[*.ice]]></value>
   </option>
-  <option  id='RECURSIVE' default='yes' type='bool'><value>NO</value></option>
-  <option  id='EXCLUDE' default='yes' type='stringlist'>
+  <option  id='RECURSIVE' default='no' type='bool'><value>YES</value></option>
+  <option  id='EXCLUDE' default='no' type='stringlist'>
+    <value><![CDATA[./frontend/include/hipdnn_frontend/detail]]></value>
+    <value><![CDATA[./frontend/include/hipdnn_frontend/node/detail]]></value>
   </option>
   <option  id='EXCLUDE_SYMLINKS' default='yes' type='bool'><value>NO</value></option>
-  <option  id='EXCLUDE_PATTERNS' default='yes' type='stringlist'>
+  <option  id='EXCLUDE_PATTERNS' default='no' type='stringlist'>
+    <value><![CDATA[*/detail/*]]></value>
+    <value><![CDATA[*_generated.h]]></value>
+    <value><![CDATA[*/tests/*]]></value>
   </option>
-  <option  id='EXCLUDE_SYMBOLS' default='yes' type='stringlist'>
+  <option  id='EXCLUDE_SYMBOLS' default='no' type='stringlist'>
+    <value><![CDATA[*::detail::*]]></value>
   </option>
   <option  id='EXAMPLE_PATH' default='yes' type='stringlist'>
   </option>
   <option  id='EXAMPLE_PATTERNS' default='yes' type='stringlist'>
     <value><![CDATA[*]]></value>
   </option>
-  <option  id='EXAMPLE_RECURSIVE' default='yes' type='bool'><value>NO</value></option>
+  <option  id='EXAMPLE_RECURSIVE' default='no' type='bool'><value>YES</value></option>
   <option  id='IMAGE_PATH' default='yes' type='stringlist'>
   </option>
   <option  id='INPUT_FILTER' default='yes' type='string'><value><![CDATA[]]></value></option>
@@ -259,17 +274,17 @@
   <option  id='DISABLE_INDEX' default='yes' type='bool'><value>NO</value></option>
   <option  id='GENERATE_TREEVIEW' default='yes' type='bool'><value>NO</value></option>
   <option  id='FULL_SIDEBAR' default='yes' type='bool'><value>NO</value></option>
-  <option  id='ENUM_VALUES_PER_LINE' default='no' type='int'><value>1</value></option>
+  <option  id='ENUM_VALUES_PER_LINE' default='yes' type='int'><value>4</value></option>
   <option  id='TREEVIEW_WIDTH' default='yes' type='int'><value>250</value></option>
   <option  id='EXT_LINKS_IN_WINDOW' default='yes' type='bool'><value>NO</value></option>
   <option  id='OBFUSCATE_EMAILS' default='yes' type='bool'><value>YES</value></option>
   <option  id='HTML_FORMULA_FORMAT' default='yes' type='string'><value>png</value></option>
   <option  id='FORMULA_FONTSIZE' default='yes' type='int'><value>10</value></option>
   <option  id='FORMULA_MACROFILE' default='yes' type='string'><value><![CDATA[]]></value></option>
-  <option  id='USE_MATHJAX' default='no' type='bool'><value>YES</value></option>
+  <option  id='USE_MATHJAX' default='yes' type='bool'><value>NO</value></option>
   <option  id='MATHJAX_VERSION' default='yes' type='string'><value>MathJax_2</value></option>
   <option  id='MATHJAX_FORMAT' default='yes' type='string'><value>HTML-CSS</value></option>
-  <option  id='MATHJAX_RELPATH' default='no' type='string'><value><![CDATA[http://cdn.mathjax.org/mathjax/latest]]></value></option>
+  <option  id='MATHJAX_RELPATH' default='yes' type='string'><value><![CDATA[]]></value></option>
   <option  id='MATHJAX_EXTENSIONS' default='yes' type='stringlist'>
   </option>
   <option  id='MATHJAX_CODEFILE' default='yes' type='string'><value><![CDATA[]]></value></option>
@@ -283,7 +298,7 @@
   </option>
   <option  id='GENERATE_LATEX' default='no' type='bool'><value>NO</value></option>
   <option  id='LATEX_OUTPUT' default='yes' type='string'><value><![CDATA[latex]]></value></option>
-  <option  id='LATEX_CMD_NAME' default='no' type='string'><value><![CDATA[latex]]></value></option>
+  <option  id='LATEX_CMD_NAME' default='yes' type='string'><value><![CDATA[]]></value></option>
   <option  id='MAKEINDEX_CMD_NAME' default='yes' type='string'><value><![CDATA[makeindex]]></value></option>
   <option  id='LATEX_MAKEINDEX_CMD' default='yes' type='string'><value><![CDATA[makeindex]]></value></option>
   <option  id='COMPACT_LATEX' default='yes' type='bool'><value>NO</value></option>
@@ -353,7 +368,7 @@
   <option  id='DOT_EDGE_ATTR' default='yes' type='string'><value><![CDATA["labelfontname=Helvetica,labelfontsize=10"]]></value></option>
   <option  id='DOT_NODE_ATTR' default='yes' type='string'><value><![CDATA["shape=box,height=0.2,width=0.4"]]></value></option>
   <option  id='DOT_FONTPATH' default='yes' type='string'><value><![CDATA[]]></value></option>
-  <option  id='CLASS_GRAPH' default='no' type='string'><value>TEXT</value></option>
+  <option  id='CLASS_GRAPH' default='yes' type='string'><value>YES</value></option>
   <option  id='COLLABORATION_GRAPH' default='yes' type='bool'><value>YES</value></option>
   <option  id='GROUP_GRAPHS' default='yes' type='bool'><value>YES</value></option>
   <option  id='UML_LOOK' default='yes' type='bool'><value>NO</value></option>

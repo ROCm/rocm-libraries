@@ -1,0 +1,303 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__data__sdk_1_1data__objects" kind="namespace" language="C++">
+    <compoundname>hipdnn_data_sdk::data_objects</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a08d7da297e5a5c734185817c677b5f63" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const char *</type>
+        <definition>const char * hipdnn_data_sdk::data_objects::toString</definition>
+        <argsstring>(NodeAttributes attributes)</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::toString</qualifiedname>
+        <param>
+          <type>NodeAttributes</type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" line="14" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" bodystart="14" bodyend="17"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a53e71fb23644d03107575d37d6b11d67" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const char *</type>
+        <definition>const char * hipdnn_data_sdk::data_objects::toString</definition>
+        <argsstring>(DataType dataType)</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::toString</qualifiedname>
+        <param>
+          <type>DataType</type>
+          <declname>dataType</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" line="19" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" bodystart="19" bodyend="22"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a1350eea6843d5e17341d757fba999468" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>const char *</type>
+        <definition>const char * hipdnn_data_sdk::data_objects::toString</definition>
+        <argsstring>(PointwiseMode pointwiseMode)</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::toString</qualifiedname>
+        <param>
+          <type>PointwiseMode</type>
+          <declname>pointwiseMode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" line="24" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" bodystart="24" bodyend="27"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a6551c7b9336dcf71c04c38b95f24218a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::data_objects::to_json</definition>
+        <argsstring>(nlohmann::json &amp;batchnormJson, const BatchnormAttributes &amp;bn)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>batchnormJson</declname>
+        </param>
+        <param>
+          <type>const BatchnormAttributes &amp;</type>
+          <declname>bn</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp" line="12" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp" bodystart="12" bodyend="31"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a9076ce2fd5a5372a4d307bb0bc2b23e7" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::data_objects::to_json</definition>
+        <argsstring>(nlohmann::json &amp;batchnormJson, const BatchnormBackwardAttributes &amp;bn)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>batchnormJson</declname>
+        </param>
+        <param>
+          <type>const BatchnormBackwardAttributes &amp;</type>
+          <declname>bn</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp" line="11" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp" bodystart="11" bodyend="26"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a4feaff15094f2068df70aff4e15497af" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::data_objects::to_json</definition>
+        <argsstring>(nlohmann::json &amp;batchnormJson, const BatchnormInferenceAttributes &amp;bn)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>batchnormJson</declname>
+        </param>
+        <param>
+          <type>const BatchnormInferenceAttributes &amp;</type>
+          <declname>bn</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp" line="11" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp" bodystart="11" bodyend="22"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a0b9c46258d8fc719a902e2ef7ee80927" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::data_objects::to_json</definition>
+        <argsstring>(nlohmann::json &amp;batchnormJson, const BatchnormInferenceAttributesVarianceExt &amp;bn)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>batchnormJson</declname>
+        </param>
+        <param>
+          <type>const BatchnormInferenceAttributesVarianceExt &amp;</type>
+          <declname>bn</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp" line="11" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp" bodystart="11" bodyend="23"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1aec04615557d053c00598136dd3d6e032" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::data_objects::NLOHMANN_JSON_SERIALIZE_ENUM</definition>
+        <argsstring>(DataType, { {DataType::UNSET, &quot;unset&quot;}, {DataType::FLOAT, &quot;float&quot;}, {DataType::HALF, &quot;half&quot;}, {DataType::BFLOAT16, &quot;bfloat16&quot;}, {DataType::DOUBLE, &quot;double&quot;}, {DataType::UINT8, &quot;uint8&quot;}, {DataType::INT32, &quot;int32&quot;}, {DataType::INT8, &quot;int8&quot;}, }) NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue</argsstring>
+        <name>NLOHMANN_JSON_SERIALIZE_ENUM</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::NLOHMANN_JSON_SERIALIZE_ENUM</qualifiedname>
+        <param>
+          <type>DataType</type>
+        </param>
+        <param>
+          <type>{ {DataType::UNSET, &quot;unset&quot;}, {DataType::FLOAT, &quot;float&quot;}, {DataType::HALF, &quot;half&quot;}, {DataType::BFLOAT16, &quot;bfloat16&quot;}, {DataType::DOUBLE, &quot;double&quot;}, {DataType::UINT8, &quot;uint8&quot;}, {DataType::INT32, &quot;int32&quot;}, {DataType::INT8, &quot;int8&quot;}, }</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Common.hpp" line="73" column="1"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a0c146ada4daf150a370cd57b31516e01" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::data_objects::to_json</definition>
+        <argsstring>(nlohmann::json &amp;convJson, const ConvolutionBwdAttributes &amp;conv)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>convJson</declname>
+        </param>
+        <param>
+          <type>const ConvolutionBwdAttributes &amp;</type>
+          <declname>conv</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp" line="11" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp" bodystart="11" bodyend="26"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1ad517af6192aa7aba0b3407b596ef7be1" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::data_objects::to_json</definition>
+        <argsstring>(nlohmann::json &amp;convJson, const ConvolutionFwdAttributes &amp;conv)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>convJson</declname>
+        </param>
+        <param>
+          <type>const ConvolutionFwdAttributes &amp;</type>
+          <declname>conv</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp" line="11" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp" bodystart="11" bodyend="26"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a3a1dc3ce3d4408fda5949741a57e4d28" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::data_objects::to_json</definition>
+        <argsstring>(nlohmann::json &amp;convJson, const ConvolutionWrwAttributes &amp;conv)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>convJson</declname>
+        </param>
+        <param>
+          <type>const ConvolutionWrwAttributes &amp;</type>
+          <declname>conv</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp" line="11" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp" bodystart="11" bodyend="26"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1a3de73ac3ea169d67d25ff44662820874" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::data_objects::NLOHMANN_JSON_SERIALIZE_ENUM</definition>
+        <argsstring>(NodeAttributes, {{NodeAttributes::BatchnormInferenceAttributes, &quot;BatchnormInferenceAttributes&quot;}, {NodeAttributes::BatchnormInferenceAttributesVarianceExt, &quot;BatchnormInferenceAttributesVarianceExt&quot;}, {NodeAttributes::PointwiseAttributes, &quot;PointwiseAttributes&quot;}, {NodeAttributes::BatchnormBackwardAttributes, &quot;BatchnormBackwardAttributes&quot;}, {NodeAttributes::BatchnormAttributes, &quot;BatchnormAttributes&quot;}, {NodeAttributes::ConvolutionFwdAttributes, &quot;ConvolutionFwdAttributes&quot;}, {NodeAttributes::ConvolutionBwdAttributes, &quot;ConvolutionBwdAttributes&quot;}, {NodeAttributes::ConvolutionWrwAttributes, &quot;ConvolutionWrwAttributes&quot;}, {NodeAttributes::NONE, &quot;&quot;}}) NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode</argsstring>
+        <name>NLOHMANN_JSON_SERIALIZE_ENUM</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::NLOHMANN_JSON_SERIALIZE_ENUM</qualifiedname>
+        <param>
+          <type>NodeAttributes</type>
+        </param>
+        <param>
+          <type>{{NodeAttributes::BatchnormInferenceAttributes, &quot;BatchnormInferenceAttributes&quot;}, {NodeAttributes::BatchnormInferenceAttributesVarianceExt, &quot;BatchnormInferenceAttributesVarianceExt&quot;}, {NodeAttributes::PointwiseAttributes, &quot;PointwiseAttributes&quot;}, {NodeAttributes::BatchnormBackwardAttributes, &quot;BatchnormBackwardAttributes&quot;}, {NodeAttributes::BatchnormAttributes, &quot;BatchnormAttributes&quot;}, {NodeAttributes::ConvolutionFwdAttributes, &quot;ConvolutionFwdAttributes&quot;}, {NodeAttributes::ConvolutionBwdAttributes, &quot;ConvolutionBwdAttributes&quot;}, {NodeAttributes::ConvolutionWrwAttributes, &quot;ConvolutionWrwAttributes&quot;}, {NodeAttributes::NONE, &quot;&quot;}}</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp" line="19" column="1"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1aa31bb53a81ce4e310f62cb4b52dcbdd5" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::data_objects::NLOHMANN_JSON_SERIALIZE_ENUM</definition>
+        <argsstring>(PointwiseMode, {{PointwiseMode::UNSET, &quot;unset&quot;}, {PointwiseMode::ABS, &quot;abs&quot;}, {PointwiseMode::ADD, &quot;add&quot;}, {PointwiseMode::ADD_SQUARE, &quot;add_square&quot;}, {PointwiseMode::BINARY_SELECT, &quot;binary_select&quot;}, {PointwiseMode::CEIL, &quot;ceil&quot;}, {PointwiseMode::CMP_EQ, &quot;cmp_eq&quot;}, {PointwiseMode::CMP_GE, &quot;cmp_ge&quot;}, {PointwiseMode::CMP_GT, &quot;cmp_gt&quot;}, {PointwiseMode::CMP_LE, &quot;cmp_le&quot;}, {PointwiseMode::CMP_LT, &quot;cmp_lt&quot;}, {PointwiseMode::CMP_NEQ, &quot;cmp_neq&quot;}, {PointwiseMode::DIV, &quot;div&quot;}, {PointwiseMode::ELU_BWD, &quot;elu_bwd&quot;}, {PointwiseMode::ELU_FWD, &quot;elu_fwd&quot;}, {PointwiseMode::ERF, &quot;erf&quot;}, {PointwiseMode::EXP, &quot;exp&quot;}, {PointwiseMode::FLOOR, &quot;floor&quot;}, {PointwiseMode::GELU_APPROX_TANH_BWD, &quot;gelu_approx_tanh_bwd&quot;}, {PointwiseMode::GELU_APPROX_TANH_FWD, &quot;gelu_approx_tanh_fwd&quot;}, {PointwiseMode::GELU_BWD, &quot;gelu_bwd&quot;}, {PointwiseMode::GELU_FWD, &quot;gelu_fwd&quot;}, {PointwiseMode::GEN_INDEX, &quot;gen_index&quot;}, {PointwiseMode::IDENTITY, &quot;identity&quot;}, {PointwiseMode::LOG, &quot;log&quot;}, {PointwiseMode::LOGICAL_AND, &quot;logical_and&quot;}, {PointwiseMode::LOGICAL_NOT, &quot;logical_not&quot;}, {PointwiseMode::LOGICAL_OR, &quot;logical_or&quot;}, {PointwiseMode::MAX_OP, &quot;max_op&quot;}, {PointwiseMode::MIN_OP, &quot;min_op&quot;}, {PointwiseMode::MUL, &quot;mul&quot;}, {PointwiseMode::NEG, &quot;neg&quot;}, {PointwiseMode::RECIPROCAL, &quot;reciprocal&quot;}, {PointwiseMode::RELU_BWD, &quot;relu_bwd&quot;}, {PointwiseMode::RELU_FWD, &quot;relu_fwd&quot;}, {PointwiseMode::RSQRT, &quot;rsqrt&quot;}, {PointwiseMode::SIGMOID_BWD, &quot;sigmoid_bwd&quot;}, {PointwiseMode::SIGMOID_FWD, &quot;sigmoid_fwd&quot;}, {PointwiseMode::SIN, &quot;sin&quot;}, {PointwiseMode::SOFTPLUS_BWD, &quot;softplus_bwd&quot;}, {PointwiseMode::SOFTPLUS_FWD, &quot;softplus_fwd&quot;}, {PointwiseMode::SQRT, &quot;sqrt&quot;}, {PointwiseMode::SUB, &quot;sub&quot;}, {PointwiseMode::SWISH_BWD, &quot;swish_bwd&quot;}, {PointwiseMode::SWISH_FWD, &quot;swish_fwd&quot;}, {PointwiseMode::TAN, &quot;tan&quot;}, {PointwiseMode::TANH_BWD, &quot;tanh_bwd&quot;}, {PointwiseMode::TANH_FWD, &quot;tanh_fwd&quot;}}) inline void to_json(nlohmann</argsstring>
+        <name>NLOHMANN_JSON_SERIALIZE_ENUM</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::NLOHMANN_JSON_SERIALIZE_ENUM</qualifiedname>
+        <param>
+          <type>PointwiseMode</type>
+        </param>
+        <param>
+          <type>{{PointwiseMode::UNSET, &quot;unset&quot;}, {PointwiseMode::ABS, &quot;abs&quot;}, {PointwiseMode::ADD, &quot;add&quot;}, {PointwiseMode::ADD_SQUARE, &quot;add_square&quot;}, {PointwiseMode::BINARY_SELECT, &quot;binary_select&quot;}, {PointwiseMode::CEIL, &quot;ceil&quot;}, {PointwiseMode::CMP_EQ, &quot;cmp_eq&quot;}, {PointwiseMode::CMP_GE, &quot;cmp_ge&quot;}, {PointwiseMode::CMP_GT, &quot;cmp_gt&quot;}, {PointwiseMode::CMP_LE, &quot;cmp_le&quot;}, {PointwiseMode::CMP_LT, &quot;cmp_lt&quot;}, {PointwiseMode::CMP_NEQ, &quot;cmp_neq&quot;}, {PointwiseMode::DIV, &quot;div&quot;}, {PointwiseMode::ELU_BWD, &quot;elu_bwd&quot;}, {PointwiseMode::ELU_FWD, &quot;elu_fwd&quot;}, {PointwiseMode::ERF, &quot;erf&quot;}, {PointwiseMode::EXP, &quot;exp&quot;}, {PointwiseMode::FLOOR, &quot;floor&quot;}, {PointwiseMode::GELU_APPROX_TANH_BWD, &quot;gelu_approx_tanh_bwd&quot;}, {PointwiseMode::GELU_APPROX_TANH_FWD, &quot;gelu_approx_tanh_fwd&quot;}, {PointwiseMode::GELU_BWD, &quot;gelu_bwd&quot;}, {PointwiseMode::GELU_FWD, &quot;gelu_fwd&quot;}, {PointwiseMode::GEN_INDEX, &quot;gen_index&quot;}, {PointwiseMode::IDENTITY, &quot;identity&quot;}, {PointwiseMode::LOG, &quot;log&quot;}, {PointwiseMode::LOGICAL_AND, &quot;logical_and&quot;}, {PointwiseMode::LOGICAL_NOT, &quot;logical_not&quot;}, {PointwiseMode::LOGICAL_OR, &quot;logical_or&quot;}, {PointwiseMode::MAX_OP, &quot;max_op&quot;}, {PointwiseMode::MIN_OP, &quot;min_op&quot;}, {PointwiseMode::MUL, &quot;mul&quot;}, {PointwiseMode::NEG, &quot;neg&quot;}, {PointwiseMode::RECIPROCAL, &quot;reciprocal&quot;}, {PointwiseMode::RELU_BWD, &quot;relu_bwd&quot;}, {PointwiseMode::RELU_FWD, &quot;relu_fwd&quot;}, {PointwiseMode::RSQRT, &quot;rsqrt&quot;}, {PointwiseMode::SIGMOID_BWD, &quot;sigmoid_bwd&quot;}, {PointwiseMode::SIGMOID_FWD, &quot;sigmoid_fwd&quot;}, {PointwiseMode::SIN, &quot;sin&quot;}, {PointwiseMode::SOFTPLUS_BWD, &quot;softplus_bwd&quot;}, {PointwiseMode::SOFTPLUS_FWD, &quot;softplus_fwd&quot;}, {PointwiseMode::SQRT, &quot;sqrt&quot;}, {PointwiseMode::SUB, &quot;sub&quot;}, {PointwiseMode::SWISH_BWD, &quot;swish_bwd&quot;}, {PointwiseMode::SWISH_FWD, &quot;swish_fwd&quot;}, {PointwiseMode::TAN, &quot;tan&quot;}, {PointwiseMode::TANH_BWD, &quot;tanh_bwd&quot;}, {PointwiseMode::TANH_FWD, &quot;tanh_fwd&quot;}}</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp" line="10" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp" bodystart="10" bodyend="77"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1data__objects_1ad1deb2a24ba1d6e4178820d428e81697" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::data_objects::to_json</definition>
+        <argsstring>(nlohmann::json &amp;tensorAttrJson, const data_objects::TensorAttributes &amp;tensorAttr)</argsstring>
+        <name>to_json</name>
+        <qualifiedname>hipdnn_data_sdk::data_objects::to_json</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>tensorAttrJson</declname>
+        </param>
+        <param>
+          <type>const data_objects::TensorAttributes &amp;</type>
+          <declname>tensorAttr</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/TensorAttributes.hpp" line="12" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/TensorAttributes.hpp" bodystart="12" bodyend="51"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" line="11" column="1"/>
+  </compounddef>
+</doxygen>

@@ -1,0 +1,580 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1Attributes" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::Attributes</compoundname>
+    <includes refid="Attributes_8hpp" local="no">Attributes.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>typename DerivedT</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a35a15e675ee8564745405e8c791303d8" prot="public" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::name</definition>
+        <argsstring></argsstring>
+        <name>name</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::name</qualifiedname>
+        <briefdescription>
+<para>Operation name for debugging. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="74" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="74" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a1f611be5dadd5ac864d57e70426bc657" prot="public" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::compute_data_type</definition>
+        <argsstring></argsstring>
+        <name>compute_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::compute_data_type</qualifiedname>
+        <initializer>= <ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca1c250a21210b7b88a14db9a0cbe71162" kindref="member">DataType::NOT_SET</ref></initializer>
+        <briefdescription>
+<para>Compute/accumulation data type (NOLINT) </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="75" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="75" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a4f30d9e3ca854f8e0db8f8ef7e81371d" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>DerivedT &amp;</type>
+        <definition>DerivedT &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::self</definition>
+        <argsstring>()</argsstring>
+        <name>self</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::self</qualifiedname>
+        <briefdescription>
+<para>Get mutable reference to derived class. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Reference to *this cast to DerivedT&amp; </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="59" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="59" bodyend="62"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a16832e88afeec6f6db8c34be5f26036e" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const DerivedT &amp;</type>
+        <definition>const DerivedT &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::self</definition>
+        <argsstring>() const</argsstring>
+        <name>self</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::self</qualifiedname>
+        <briefdescription>
+<para>Get const reference to derived class. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Reference to *this cast to const DerivedT&amp; </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="68" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="68" bodyend="71"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a3a6b6b3fa84673526d14abb73441a477" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>DerivedT &amp;</type>
+        <definition>DerivedT &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::set_name</definition>
+        <argsstring>(const std::string &amp;nameValue)</argsstring>
+        <name>set_name</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::set_name</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>nameValue</declname>
+        </param>
+        <briefdescription>
+<para>Set the operation name. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>nameValue</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The name to assign </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to derived class for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="82" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="82" bodyend="86"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a2a9ace69e5f920fb4daf7af96bffefc1" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::string &amp;</type>
+        <definition>const std::string &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::get_name</definition>
+        <argsstring>() const</argsstring>
+        <name>get_name</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::get_name</qualifiedname>
+        <briefdescription>
+<para>Get the operation name. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The current operation name </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="92" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="92" bodyend="95"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1ac066abf7d7a6b2a45cebfe233fb15213" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>DerivedT &amp;</type>
+        <definition>DerivedT &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::set_compute_data_type</definition>
+        <argsstring>(DataType value)</argsstring>
+        <name>set_compute_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::set_compute_data_type</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+<para>Set the compute data type for this operation. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>value</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The data type to use for computation/accumulation </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to derived class for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="103" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="103" bodyend="107"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a72744d6c95d6b80eb370354717065da2" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::get_compute_data_type</definition>
+        <argsstring>() const</argsstring>
+        <name>get_compute_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::get_compute_data_type</qualifiedname>
+        <briefdescription>
+<para>Get the compute data type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The current compute data type </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="114" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="114" bodyend="117"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a7e777086ef899eb3e8111f8d37a769e5" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::fill_from_context</definition>
+        <argsstring>(const GraphAttributes &amp;graphAttributes)</argsstring>
+        <name>fill_from_context</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::fill_from_context</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+          <declname>graphAttributes</declname>
+        </param>
+        <briefdescription>
+<para>Fill unset properties from graph context. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>graphAttributes</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The graph attributes to copy from </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+Propagates graph-level settings to all input and output tensors that don&apos;t have explicit values set. Also sets the compute data type if not already specified. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="129" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="129" bodyend="153"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="protected-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" prot="protected" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename InputNameT</type>
+          </param>
+        </templateparamlist>
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::getInput</definition>
+        <argsstring>(InputNameT inputName) const</argsstring>
+        <name>getInput</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::getInput</qualifiedname>
+        <param>
+          <type>InputNameT</type>
+          <declname>inputName</declname>
+        </param>
+        <briefdescription>
+<para>Get an input tensor by name. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>InputNameT</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The input name enum or type </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>inputName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The input identifier </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Shared pointer to the tensor, or nullptr if not found </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="163" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="163" bodyend="171"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" prot="protected" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename OutputNameT</type>
+          </param>
+        </templateparamlist>
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::getOutput</definition>
+        <argsstring>(OutputNameT outputName) const</argsstring>
+        <name>getOutput</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::getOutput</qualifiedname>
+        <param>
+          <type>OutputNameT</type>
+          <declname>outputName</declname>
+        </param>
+        <briefdescription>
+<para>Get an output tensor by name. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>OutputNameT</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The output name enum or type </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>outputName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The output identifier </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Shared pointer to the tensor, or nullptr if not found </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="180" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="180" bodyend="188"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" prot="protected" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename InputNameT</type>
+          </param>
+        </templateparamlist>
+        <type>DerivedT &amp;</type>
+        <definition>DerivedT &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::setInput</definition>
+        <argsstring>(InputNameT inputName, const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>setInput</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::setInput</qualifiedname>
+        <param>
+          <type>InputNameT</type>
+          <declname>inputName</declname>
+        </param>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+<para>Set an input tensor by name (copy) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>InputNameT</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The input name enum or type </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>inputName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The input identifier </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>value</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The tensor attributes to set </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to derived class for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="198" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="198" bodyend="202"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a70ec6d24e78284d214aa983fd02bfbbb" prot="protected" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename InputNameT</type>
+          </param>
+        </templateparamlist>
+        <type>DerivedT &amp;</type>
+        <definition>DerivedT &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::setInput</definition>
+        <argsstring>(InputNameT inputName, std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>setInput</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::setInput</qualifiedname>
+        <param>
+          <type>InputNameT</type>
+          <declname>inputName</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+<para>Set an input tensor by name (move) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>InputNameT</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The input name enum or type </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>inputName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The input identifier </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>value</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The tensor attributes to move </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to derived class for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="212" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="212" bodyend="216"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" prot="protected" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename OutputNameT</type>
+          </param>
+        </templateparamlist>
+        <type>DerivedT &amp;</type>
+        <definition>DerivedT &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::setOutput</definition>
+        <argsstring>(OutputNameT outputName, const std::shared_ptr&lt; TensorAttributes &gt; &amp;value)</argsstring>
+        <name>setOutput</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::setOutput</qualifiedname>
+        <param>
+          <type>OutputNameT</type>
+          <declname>outputName</declname>
+        </param>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+<para>Set an output tensor by name (copy) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>OutputNameT</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The output name enum or type </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>outputName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The output identifier </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>value</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The tensor attributes to set </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to derived class for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="226" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="226" bodyend="230"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Attributes_1a5f49c2c19da1ca5f648ae0e4d8e89b55" prot="protected" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename OutputNameT</type>
+          </param>
+        </templateparamlist>
+        <type>DerivedT &amp;</type>
+        <definition>DerivedT &amp; hipdnn_frontend::graph::Attributes&lt; DerivedT &gt;::setOutput</definition>
+        <argsstring>(OutputNameT outputName, std::shared_ptr&lt; TensorAttributes &gt; &amp;&amp;value)</argsstring>
+        <name>setOutput</name>
+        <qualifiedname>hipdnn_frontend::graph::Attributes::setOutput</qualifiedname>
+        <param>
+          <type>OutputNameT</type>
+          <declname>outputName</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;&amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+<para>Set an output tensor by name (move) </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>OutputNameT</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The output name enum or type </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>outputName</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The output identifier </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>value</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The tensor attributes to move </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to derived class for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="240" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="240" bodyend="244"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>CRTP base class for operation attribute classes. </para>
+    </briefdescription>
+    <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>DerivedT</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The derived attribute class type</para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+This template class provides common functionality shared by all operation attribute classes:<itemizedlist>
+<listitem><para>Name management for debugging and logging</para>
+</listitem><listitem><para>Compute data type configuration</para>
+</listitem><listitem><para>Automatic tensor property propagation from graph context</para>
+</listitem></itemizedlist>
+</para>
+<para>Derived classes must define <computeroutput>inputs</computeroutput> and <computeroutput>outputs</computeroutput> maps with <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> values. These maps are used by <ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7e777086ef899eb3e8111f8d37a769e5" kindref="member">fill_from_context()</ref> to propagate graph-level settings to tensors.</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="keyword">class<sp/></highlight><highlight class="normal">MyOperationAttributes<sp/>:<sp/></highlight><highlight class="keyword">public</highlight><highlight class="normal"><sp/>Attributes&lt;MyOperationAttributes&gt;</highlight></codeline>
+<codeline><highlight class="normal">{</highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;InputName,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/>inputs;</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;OutputName,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/>outputs;</highlight></codeline>
+<codeline><highlight class="normal">};</highlight></codeline>
+</programlisting> </para>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="52" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" bodystart="53" bodyend="245"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a1f611be5dadd5ac864d57e70426bc657" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7e777086ef899eb3e8111f8d37a769e5" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>fill_from_context</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a72744d6c95d6b80eb370354717065da2" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>get_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a2a9ace69e5f920fb4daf7af96bffefc1" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>get_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>getInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>getOutput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a35a15e675ee8564745405e8c791303d8" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a4f30d9e3ca854f8e0db8f8ef7e81371d" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>self</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a16832e88afeec6f6db8c34be5f26036e" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>self</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ac066abf7d7a6b2a45cebfe233fb15213" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>set_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a3a6b6b3fa84673526d14abb73441a477" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>set_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>setInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a70ec6d24e78284d214aa983fd02bfbbb" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>setInput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>setOutput</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a5f49c2c19da1ca5f648ae0e4d8e89b55" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Attributes</scope><name>setOutput</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

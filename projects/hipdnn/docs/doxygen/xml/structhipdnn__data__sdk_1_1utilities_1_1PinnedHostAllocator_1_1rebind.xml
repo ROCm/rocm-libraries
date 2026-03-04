@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator_1_1rebind" kind="struct" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::PinnedHostAllocator::rebind</compoundname>
+    <includes refid="Allocators_8hpp" local="no">Allocators.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>typename U</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="public-type">
+      <memberdef kind="typedef" id="structhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator_1_1rebind_1a799d8f324d765765a9f7fd8153b6681d" prot="public" static="no">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator" kindref="compound">PinnedHostAllocator</ref>&lt; U &gt;</type>
+        <definition>using hipdnn_data_sdk::utilities::PinnedHostAllocator&lt; T &gt;::rebind&lt; U &gt;::other =  PinnedHostAllocator&lt;U&gt;</definition>
+        <argsstring></argsstring>
+        <name>other</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::PinnedHostAllocator::rebind::other</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="178" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="178" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="176" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="177" bodyend="179"/>
+    <listofallmembers>
+      <member refid="structhipdnn__data__sdk_1_1utilities_1_1PinnedHostAllocator_1_1rebind_1a799d8f324d765765a9f7fd8153b6681d" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::PinnedHostAllocator::rebind</scope><name>other</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

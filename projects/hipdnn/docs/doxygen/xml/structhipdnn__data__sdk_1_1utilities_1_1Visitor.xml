@@ -1,0 +1,44 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structhipdnn__data__sdk_1_1utilities_1_1Visitor" kind="struct" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::Visitor</compoundname>
+    <basecompoundref prot="public" virt="non-virtual">hipdnn_data_sdk::utilities::Ts</basecompoundref>
+    <includes refid="Visitor_8hpp" local="no">Visitor.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>class...</type>
+        <declname>Ts</declname>
+        <defname>Ts</defname>
+      </param>
+    </templateparamlist>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>Ts</label>
+      </node>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::Visitor&lt; Ts &gt;</label>
+        <link refid="structhipdnn__data__sdk_1_1utilities_1_1Visitor"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="2">
+        <label>Ts</label>
+      </node>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::Visitor&lt; Ts &gt;</label>
+        <link refid="structhipdnn__data__sdk_1_1utilities_1_1Visitor"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Visitor.hpp" line="13" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Visitor.hpp" bodystart="14" bodyend="16"/>
+    <listofallmembers>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

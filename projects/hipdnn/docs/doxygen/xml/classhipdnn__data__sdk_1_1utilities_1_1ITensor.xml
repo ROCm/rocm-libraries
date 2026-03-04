@@ -1,0 +1,470 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1utilities_1_1ITensor" kind="class" language="C++" prot="public" abstract="yes">
+    <compoundname>hipdnn_data_sdk::utilities::ITensor</compoundname>
+    <derivedcompoundref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase" prot="public" virt="non-virtual">hipdnn_data_sdk::utilities::TensorBase&lt; T &gt;</derivedcompoundref>
+    <includes refid="Tensor_8hpp" local="no">Tensor.hpp</includes>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a6530022ab7a914b5da930fa2e22ccf64" prot="public" static="no" const="no" explicit="no" inline="no" virt="virtual">
+        <type></type>
+        <definition>virtual hipdnn_data_sdk::utilities::ITensor::~ITensor</definition>
+        <argsstring>()=default</argsstring>
+        <name>~ITensor</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::~ITensor</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="176" column="13"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a4c6dffc30f9d4a892206f57d1ba528be" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>virtual const std::vector&lt; int64_t &gt; &amp; hipdnn_data_sdk::utilities::ITensor::dims</definition>
+        <argsstring>() const =0</argsstring>
+        <name>dims</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::dims</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a0e3508fac7b80907e6c60ba6fecf92d1">dims</reimplementedby>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor_1a292c120407ae5d40f4443923156d6344">dims</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="178" column="31"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a703f550417012e31a406c8692ad0628d" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>virtual const std::vector&lt; int64_t &gt; &amp; hipdnn_data_sdk::utilities::ITensor::strides</definition>
+        <argsstring>() const =0</argsstring>
+        <name>strides</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::strides</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1abb58204a7e06f482f21aa2e9d3450d18">strides</reimplementedby>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor_1a3bd5a212c8d82e793836cf50524d08ba">strides</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="179" column="31"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a5f110a1937c2d7068b155735f24fb2cd" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>void *</type>
+        <definition>virtual void * hipdnn_data_sdk::utilities::ITensor::rawHostData</definition>
+        <argsstring>()=0</argsstring>
+        <name>rawHostData</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::rawHostData</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a11862f5ed66cc8ce4b7f48f454977ae0">rawHostData</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="181" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1aa9759def1e3d77fc8d001390184103c5" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>void *</type>
+        <definition>virtual void * hipdnn_data_sdk::utilities::ITensor::rawDeviceData</definition>
+        <argsstring>()=0</argsstring>
+        <name>rawDeviceData</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::rawDeviceData</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a075c315be84beb2c04a95e4225a728fd">rawDeviceData</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="182" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1abb5a2f2701b7f24ac57daa87a29b4514" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>size_t</type>
+        <definition>virtual size_t hipdnn_data_sdk::utilities::ITensor::elementCount</definition>
+        <argsstring>() const =0</argsstring>
+        <name>elementCount</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::elementCount</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a677f4d5e07f57199113585a7110353e7">elementCount</reimplementedby>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor_1a9f95ef631704a0404ab8a8c7b56a0814">elementCount</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="184" column="20"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a314df9a1d1c2996581dc88edc9656af8" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>size_t</type>
+        <definition>virtual size_t hipdnn_data_sdk::utilities::ITensor::elementSpace</definition>
+        <argsstring>() const =0</argsstring>
+        <name>elementSpace</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::elementSpace</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ab74f60ed9ceda5f5ecb1970b19fe98b8">elementSpace</reimplementedby>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor_1ab9d683d3054c47074175a83fcf901854">elementSpace</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="185" column="20"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a078daf2742cd5feaa103bab3ba1d48a3" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>size_t</type>
+        <definition>virtual size_t hipdnn_data_sdk::utilities::ITensor::elementSize</definition>
+        <argsstring>() const =0</argsstring>
+        <name>elementSize</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::elementSize</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a236f65ac44632d83a8e7fdbe3e1b993f">elementSize</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="186" column="20"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a66114df5db2a0c3106b04a4ef1a04d36" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>void *</type>
+        <definition>virtual void * hipdnn_data_sdk::utilities::ITensor::hostDataOffsetFromIndex</definition>
+        <argsstring>(int64_t index)=0</argsstring>
+        <name>hostDataOffsetFromIndex</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::hostDataOffsetFromIndex</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a5e8d8ff947a73b22c880ac5ac409c68d">hostDataOffsetFromIndex</reimplementedby>
+        <param>
+          <type>int64_t</type>
+          <declname>index</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="187" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a24f938098078357a350f1e7b9419b3f7" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const void *</type>
+        <definition>virtual const void * hipdnn_data_sdk::utilities::ITensor::hostDataOffsetFromIndex</definition>
+        <argsstring>(int64_t index) const =0</argsstring>
+        <name>hostDataOffsetFromIndex</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::hostDataOffsetFromIndex</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a9b16afdd90b384b85d5a2645b8de118b">hostDataOffsetFromIndex</reimplementedby>
+        <param>
+          <type>int64_t</type>
+          <declname>index</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="188" column="24"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1aa020396fce770a33fdf2e1f93510207d" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>void</type>
+        <definition>virtual void hipdnn_data_sdk::utilities::ITensor::fillTensorWithValue</definition>
+        <argsstring>(float value)=0</argsstring>
+        <name>fillTensorWithValue</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::fillTensorWithValue</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a88aa3d70156623b4f0173d6334aa3e9e">fillTensorWithValue</reimplementedby>
+        <param>
+          <type>float</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="190" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a0c2b8fcb413734c779c0c704c98adcd2" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>void</type>
+        <definition>virtual void hipdnn_data_sdk::utilities::ITensor::fillTensorWithRandomValues</definition>
+        <argsstring>(float min, float max, unsigned int seed=std::random_device{}())=0</argsstring>
+        <name>fillTensorWithRandomValues</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::fillTensorWithRandomValues</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1aee701a30a1e573dc28f87336c7ce91f8">fillTensorWithRandomValues</reimplementedby>
+        <param>
+          <type>float</type>
+          <declname>min</declname>
+        </param>
+        <param>
+          <type>float</type>
+          <declname>max</declname>
+        </param>
+        <param>
+          <type>unsigned int</type>
+          <declname>seed</declname>
+          <defval>std::random_device{}()</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="192" column="9"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a507698c63b1ec2f6ef46cad6b92c059c" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>size_t</type>
+        <definition>virtual size_t hipdnn_data_sdk::utilities::ITensor::fillWithData</definition>
+        <argsstring>(const void *data, size_t bytesCopied)=0</argsstring>
+        <name>fillWithData</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::fillWithData</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ad34e5f3ed3bc268744487ae3d3f15c23">fillWithData</reimplementedby>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor_1afe94c19438c83a693c708fc2e029bfb8">fillWithData</reimplementedby>
+        <param>
+          <type>const void *</type>
+          <declname>data</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>bytesCopied</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="194" column="20"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a79f58fb00491b2c963fb2d26e9cdbd22" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename...</type>
+            <declname>Args</declname>
+            <defname>Args</defname>
+          </param>
+        </templateparamlist>
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_data_sdk::utilities::ITensor::getIndex</definition>
+        <argsstring>(Args... indices) const</argsstring>
+        <name>getIndex</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::getIndex</qualifiedname>
+        <param>
+          <type>Args...</type>
+          <declname>indices</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="197" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="197" bodyend="205"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a89e3ea2bcc4253905d331896cfe32101" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename IndexType</type>
+          </param>
+        </templateparamlist>
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_data_sdk::utilities::ITensor::getIndex</definition>
+        <argsstring>(const std::vector&lt; IndexType &gt; &amp;indices) const</argsstring>
+        <name>getIndex</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::getIndex</qualifiedname>
+        <param>
+          <type>const std::vector&lt; IndexType &gt; &amp;</type>
+          <declname>indices</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="208" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="208" bodyend="221"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a1cf1702a3b132079e58082625460d8af" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" kindref="compound">ITensorIterator</ref>&lt; false &gt;</type>
+        <definition>virtual ITensorIterator&lt; false &gt; hipdnn_data_sdk::utilities::ITensor::begin</definition>
+        <argsstring>()=0</argsstring>
+        <name>begin</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::begin</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a0a9483819eb79559465cac2111bf380d">begin</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="223" column="29"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a4dac9c89e6978e3651f3087262c15738" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" kindref="compound">ITensorIterator</ref>&lt; false &gt;</type>
+        <definition>virtual ITensorIterator&lt; false &gt; hipdnn_data_sdk::utilities::ITensor::end</definition>
+        <argsstring>()=0</argsstring>
+        <name>end</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::end</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a37624faca7d9fbc9d2d0b47ae25b04c4">end</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="224" column="29"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a0dd7f9b65fc1c4897ffcd01fa9d1a857" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" kindref="compound">ITensorIterator</ref>&lt; true &gt;</type>
+        <definition>virtual ITensorIterator&lt; true &gt; hipdnn_data_sdk::utilities::ITensor::cbegin</definition>
+        <argsstring>() const =0</argsstring>
+        <name>cbegin</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::cbegin</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1af817c1e7da516b597d2aaff6d674cd66">cbegin</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="225" column="29"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1aab7f64e621bdec9311d60046bbb36268" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensorIterator" kindref="compound">ITensorIterator</ref>&lt; true &gt;</type>
+        <definition>virtual ITensorIterator&lt; true &gt; hipdnn_data_sdk::utilities::ITensor::cend</definition>
+        <argsstring>() const =0</argsstring>
+        <name>cend</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::cend</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a3e978a09a1c96ed8edec5e0da22c4a50">cend</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="226" column="29"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1af63aec40d10fbe798f0177d0299fbec6" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>bool</type>
+        <definition>virtual bool hipdnn_data_sdk::utilities::ITensor::isPacked</definition>
+        <argsstring>() const =0</argsstring>
+        <name>isPacked</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::isPacked</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a1617f06d47e08f3b3434b1db313e1244">isPacked</reimplementedby>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor_1ac51f6be2d44ef236f736300d9f9c3c22">isPacked</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="228" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a013e274a4beae58b6820a2b2b24575a4" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>void</type>
+        <definition>virtual void hipdnn_data_sdk::utilities::ITensor::markHostModified</definition>
+        <argsstring>()=0</argsstring>
+        <name>markHostModified</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::markHostModified</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1ad9bb6a066f12e00e4c71cb12927cc011">markHostModified</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="230" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1afeac9441c2bc1473874cd7d8baeaf777" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>void</type>
+        <definition>virtual void hipdnn_data_sdk::utilities::ITensor::markDeviceModified</definition>
+        <argsstring>()=0</argsstring>
+        <name>markDeviceModified</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::markDeviceModified</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a6bcaf7fe4c4018bc8c47c538ca5798cd">markDeviceModified</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="231" column="18"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="protected-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1abdb14633cd0b5a6b16b7c6ac202afb72" prot="protected" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>int64_t hipdnn_data_sdk::utilities::ITensor::throwIfOutOfBounds</definition>
+        <argsstring>(int64_t index) const</argsstring>
+        <name>throwIfOutOfBounds</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ITensor::throwIfOutOfBounds</qualifiedname>
+        <param>
+          <type>int64_t</type>
+          <declname>index</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="235" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="235" bodyend="246"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::ITensor</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor"/>
+      </node>
+      <node id="3">
+        <label>hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_data_sdk::utilities::Tensor&lt; T, HostAlloc, DeviceAlloc &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk::utilities::TensorBase&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" line="173" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Tensor.hpp" bodystart="174" bodyend="247"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a1cf1702a3b132079e58082625460d8af" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>begin</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a0dd7f9b65fc1c4897ffcd01fa9d1a857" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>cbegin</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1aab7f64e621bdec9311d60046bbb36268" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>cend</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a4c6dffc30f9d4a892206f57d1ba528be" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>dims</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1abb5a2f2701b7f24ac57daa87a29b4514" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>elementCount</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a078daf2742cd5feaa103bab3ba1d48a3" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>elementSize</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a314df9a1d1c2996581dc88edc9656af8" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>elementSpace</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a4dac9c89e6978e3651f3087262c15738" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>end</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a0c2b8fcb413734c779c0c704c98adcd2" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>fillTensorWithRandomValues</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1aa020396fce770a33fdf2e1f93510207d" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>fillTensorWithValue</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a507698c63b1ec2f6ef46cad6b92c059c" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>fillWithData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a79f58fb00491b2c963fb2d26e9cdbd22" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>getIndex</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a89e3ea2bcc4253905d331896cfe32101" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>getIndex</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a66114df5db2a0c3106b04a4ef1a04d36" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>hostDataOffsetFromIndex</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a24f938098078357a350f1e7b9419b3f7" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>hostDataOffsetFromIndex</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1af63aec40d10fbe798f0177d0299fbec6" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>isPacked</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1afeac9441c2bc1473874cd7d8baeaf777" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>markDeviceModified</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a013e274a4beae58b6820a2b2b24575a4" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>markHostModified</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1aa9759def1e3d77fc8d001390184103c5" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>rawDeviceData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a5f110a1937c2d7068b155735f24fb2cd" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>rawHostData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a703f550417012e31a406c8692ad0628d" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>strides</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1abdb14633cd0b5a6b16b7c6ac202afb72" prot="protected" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>throwIfOutOfBounds</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a6530022ab7a914b5da930fa2e22ccf64" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ITensor</scope><name>~ITensor</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

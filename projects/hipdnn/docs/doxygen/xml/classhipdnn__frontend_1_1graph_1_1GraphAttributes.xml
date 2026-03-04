@@ -1,0 +1,335 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::GraphAttributes</compoundname>
+    <includes refid="GraphAttributes_8hpp" local="no">GraphAttributes.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a47fd6e1c3b9fef2bca91b20125fd18c5" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::graph::GraphAttributes::_name</definition>
+        <argsstring></argsstring>
+        <name>_name</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::_name</qualifiedname>
+        <briefdescription>
+<para><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> name for debugging. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="166" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="166" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aeef26f8b5cf5c39f09a35ec81b78db39" prot="private" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::GraphAttributes::_computeType</definition>
+        <argsstring></argsstring>
+        <name>_computeType</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::_computeType</qualifiedname>
+        <initializer>= <ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca1c250a21210b7b88a14db9a0cbe71162" kindref="member">DataType::NOT_SET</ref></initializer>
+        <briefdescription>
+<para>Compute/accumulation data type. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="167" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="167" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aeef43ecefd9b83b491b9c77be38c7708" prot="private" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::GraphAttributes::_intermediateType</definition>
+        <argsstring></argsstring>
+        <name>_intermediateType</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::_intermediateType</qualifiedname>
+        <initializer>= <ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca1c250a21210b7b88a14db9a0cbe71162" kindref="member">DataType::NOT_SET</ref></initializer>
+        <briefdescription>
+<para>Intermediate tensor data type. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="168" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="168" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aeae1953f8f809152029000569a34af86" prot="private" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::GraphAttributes::_ioType</definition>
+        <argsstring></argsstring>
+        <name>_ioType</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::_ioType</qualifiedname>
+        <initializer>= <ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca1c250a21210b7b88a14db9a0cbe71162" kindref="member">DataType::NOT_SET</ref></initializer>
+        <briefdescription>
+<para>Input/output tensor data type. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="169" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="169" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a3483f3f29b335b95496faa7ff63ef603" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::string &amp;</type>
+        <definition>const std::string &amp; hipdnn_frontend::graph::GraphAttributes::get_name</definition>
+        <argsstring>() const</argsstring>
+        <name>get_name</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::get_name</qualifiedname>
+        <briefdescription>
+<para>Get the name of the graph. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The graph name </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="50" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="50" bodyend="53"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1acfc9ed7a88a56407f1469be96d141677" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::GraphAttributes::get_compute_data_type</definition>
+        <argsstring>() const</argsstring>
+        <name>get_compute_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::get_compute_data_type</qualifiedname>
+        <briefdescription>
+<para>Get the compute data type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The data type used for computations/accumulation </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="59" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="59" bodyend="62"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a0f56350589b7cce098d2fb91f0b994cb" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::GraphAttributes::get_intermediate_data_type</definition>
+        <argsstring>() const</argsstring>
+        <name>get_intermediate_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::get_intermediate_data_type</qualifiedname>
+        <briefdescription>
+<para>Get the intermediate data type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The data type for virtual/intermediate tensors </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="69" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="69" bodyend="72"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a19ca504c92ef3d3e95ff7bee2841c276" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::GraphAttributes::get_io_data_type</definition>
+        <argsstring>() const</argsstring>
+        <name>get_io_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::get_io_data_type</qualifiedname>
+        <briefdescription>
+<para>Get the I/O data type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The data type for input/output tensors </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="79" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="79" bodyend="82"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a4727f5ee0a2748efd08dfc81cfba1bd5" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+        <definition>GraphAttributes &amp; hipdnn_frontend::graph::GraphAttributes::set_compute_data_type</definition>
+        <argsstring>(DataType computeType)</argsstring>
+        <name>set_compute_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::set_compute_data_type</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>computeType</declname>
+        </param>
+        <briefdescription>
+<para>Set the compute data type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>computeType</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The data type for computations/accumulation </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="90" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="90" bodyend="94"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aee4d9ce26087a7d81745bfdc88287c5f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+        <definition>GraphAttributes &amp; hipdnn_frontend::graph::GraphAttributes::set_intermediate_data_type</definition>
+        <argsstring>(DataType intermediateType)</argsstring>
+        <name>set_intermediate_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::set_intermediate_data_type</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>intermediateType</declname>
+        </param>
+        <briefdescription>
+<para>Set the intermediate data type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>intermediateType</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The data type for virtual/intermediate tensors </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="102" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="102" bodyend="106"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aa349fa433d48ce4aac341cd6636f3a81" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+        <definition>GraphAttributes &amp; hipdnn_frontend::graph::GraphAttributes::set_io_data_type</definition>
+        <argsstring>(DataType ioType)</argsstring>
+        <name>set_io_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::set_io_data_type</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>ioType</declname>
+        </param>
+        <briefdescription>
+<para>Set the I/O data type. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>ioType</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The data type for input/output tensors </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="114" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="114" bodyend="118"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a8b2965adea270af6b302b36e31a73c6f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+        <definition>GraphAttributes &amp; hipdnn_frontend::graph::GraphAttributes::set_name</definition>
+        <argsstring>(const std::string &amp;name)</argsstring>
+        <name>set_name</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::set_name</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>name</declname>
+        </param>
+        <briefdescription>
+<para>Set the name of the graph. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>name</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The graph name (for debugging and logging) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="126" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="126" bodyend="130"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a57dbeef4aea33e7975e19e2eb3d9567a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+        <definition>GraphAttributes &amp; hipdnn_frontend::graph::GraphAttributes::fill_missing_properties</definition>
+        <argsstring>(const GraphAttributes &amp;other)</argsstring>
+        <name>fill_missing_properties</name>
+        <qualifiedname>hipdnn_frontend::graph::GraphAttributes::fill_missing_properties</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+<para>Fill unset properties from another <ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> object. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>other</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The source to copy missing properties from </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Reference to this for method chaining</para>
+</simplesect>
+Only properties that are NOT_SET or empty will be copied from other. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="140" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="140" bodyend="163"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Configuration settings that apply to an entire computational graph. </para>
+    </briefdescription>
+    <detaileddescription>
+<para><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> holds default settings for a graph, including:<itemizedlist>
+<listitem><para><bold>compute_data_type</bold>: The data type used for computations (e.g., FLOAT for accumulation)</para>
+</listitem><listitem><para><bold>intermediate_data_type</bold>: The data type for intermediate/virtual tensors</para>
+</listitem><listitem><para><bold>io_data_type</bold>: The data type for input/output tensors</para>
+</listitem></itemizedlist>
+</para>
+<para>These settings are inherited by tensors and operations that don&apos;t explicitly specify their own data types.</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="normal">Graph<sp/>graph;</highlight></codeline>
+<codeline><highlight class="normal">graph.set_io_data_type(<ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca87e955627b59c274ec4cbdd3a130f9bb" kindref="member">DataType::HALF</ref>)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>.set_compute_data_type(<ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7becae738c26bf4ce1037fa81b039a915cbf6" kindref="member">DataType::FLOAT</ref>)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>.set_intermediate_data_type(<ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca87e955627b59c274ec4cbdd3a130f9bb" kindref="member">DataType::HALF</ref>)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>.set_name(</highlight><highlight class="stringliteral">&quot;my_graph&quot;</highlight><highlight class="normal">);</highlight></codeline>
+</programlisting> </para>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="42" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="43" bodyend="170"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aeef26f8b5cf5c39f09a35ec81b78db39" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>_computeType</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aeef43ecefd9b83b491b9c77be38c7708" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>_intermediateType</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aeae1953f8f809152029000569a34af86" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>_ioType</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a47fd6e1c3b9fef2bca91b20125fd18c5" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a57dbeef4aea33e7975e19e2eb3d9567a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>fill_missing_properties</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1acfc9ed7a88a56407f1469be96d141677" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>get_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a0f56350589b7cce098d2fb91f0b994cb" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>get_intermediate_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a19ca504c92ef3d3e95ff7bee2841c276" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>get_io_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a3483f3f29b335b95496faa7ff63ef603" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>get_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a4727f5ee0a2748efd08dfc81cfba1bd5" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>set_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aee4d9ce26087a7d81745bfdc88287c5f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>set_intermediate_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1aa349fa433d48ce4aac341cd6636f3a81" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>set_io_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes_1a8b2965adea270af6b302b36e31a73c6f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::GraphAttributes</scope><name>set_name</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

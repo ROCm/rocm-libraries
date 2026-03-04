@@ -1,0 +1,265 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="README_8md" kind="file" language="Markdown">
+    <compoundname>README.md</compoundname>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline><highlight class="normal">#<sp/>hipDNN<sp/>Samples</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">##<sp/>How<sp/>to<sp/>Build</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">1.<sp/>**Prerequisites:**</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>-<sp/>Follow<sp/>the<sp/>instructions<sp/>in<sp/>[Building.md](../docs/Building.md)<sp/>to<sp/>install<sp/>the<sp/>needed<sp/>dependencies,<sp/>compilers,<sp/>and<sp/>libraries<sp/>for<sp/>building<sp/>hipDNN<sp/>projects.<sp/>Specifically:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>*<sp/>CMake</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>*<sp/>Ninja</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>*<sp/>ROCm<sp/>/<sp/>TheRock</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>-<sp/>A<sp/>ROCm-compatible<sp/>GPU<sp/>is<sp/>required<sp/>to<sp/>run<sp/>the<sp/>samples</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">2.<sp/>**Build<sp/>Samples:**<sp/>From<sp/>this<sp/>`samples`<sp/>directory:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>```bash</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>mkdir<sp/>build<sp/>&amp;&amp;<sp/>cd<sp/>build</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>cmake<sp/>-DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++<sp/>-G<sp/>Ninja<sp/>..</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>ninja</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>```</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>-<sp/>Note:<sp/>If<sp/>you<sp/>have<sp/>installed<sp/>hipdnn<sp/>to<sp/>a<sp/>custom<sp/>location<sp/>you<sp/>just<sp/>need<sp/>to<sp/>specify<sp/>the<sp/>`CMAKE_PREFIX_PATH`<sp/>to<sp/>point<sp/>to<sp/>the<sp/>install<sp/>location.<sp/><sp/>Ensure<sp/>you<sp/>specify<sp/>the<sp/>full<sp/>path<sp/>and<sp/>not<sp/>a<sp/>relative<sp/>one.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">The<sp/>sample<sp/>executables<sp/>will<sp/>be<sp/>created<sp/>in<sp/>the<sp/>`build`<sp/>directory.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">##<sp/>Running<sp/>Samples</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">All<sp/>samples<sp/>accept<sp/>the<sp/>following<sp/>command<sp/>line<sp/>options:</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>`--verify-cpu`<sp/>-<sp/>Enable<sp/>CPU<sp/>reference<sp/>validation<sp/>of<sp/>results</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>`--help`<sp/>-<sp/>Displays<sp/>help<sp/>message</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Example:</highlight></codeline>
+<codeline><highlight class="normal">```bash</highlight></codeline>
+<codeline><highlight class="normal">./build/conv_forward<sp/>--verify-cpu</highlight></codeline>
+<codeline><highlight class="normal">```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">##<sp/>Profiling<sp/>Samples</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Samples<sp/>can<sp/>be<sp/>profiled<sp/>using<sp/>ROCprofiler-SDK<sp/>(`rocprofv3`),<sp/>included<sp/>in<sp/>ROCm<sp/>version<sp/>6.2<sp/>or<sp/>later.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">```bash</highlight></codeline>
+<codeline><highlight class="normal">#<sp/>Profile<sp/>a<sp/>sample<sp/>with<sp/>system<sp/>trace<sp/>and<sp/>perfetto<sp/>output<sp/>format</highlight></codeline>
+<codeline><highlight class="normal">rocprofv3<sp/>--sys-trace<sp/>-f<sp/>pftrace<sp/>-o<sp/>./profile_output<sp/>--<sp/>./bn_inference</highlight></codeline>
+<codeline><highlight class="normal">```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Since<sp/>`rocprofv3`<sp/>has<sp/>limited<sp/>host-side<sp/>tracing,<sp/>`hipDeviceSynchronize()`<sp/>calls<sp/>can<sp/>be<sp/>added<sp/>to<sp/>gauge<sp/>granular<sp/>performance.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">```cpp</highlight></codeline>
+<codeline><highlight class="normal">HIP_CHECK(hipDeviceSynchronize());<sp/>//<sp/>Flush<sp/>previous<sp/>work<sp/>and<sp/>record<sp/>in<sp/>trace</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">HIPDNN_FE_CHECK(graph-&gt;execute(handle,<sp/>variantPack,<sp/>nullptr));</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">HIP_CHECK(hipDeviceSynchronize());<sp/>//<sp/>Await<sp/>completion<sp/>and<sp/>record<sp/>in<sp/>trace<sp/>for<sp/>approximate<sp/>delta</highlight></codeline>
+<codeline><highlight class="normal">```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">##<sp/>Available<sp/>Samples</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">All<sp/>samples<sp/>are<sp/>templated<sp/>for<sp/>mixed-precision<sp/>execution<sp/>with<sp/>Fp32,<sp/>Fp16,<sp/>and<sp/>Bfp16<sp/>input/output<sp/>data<sp/>types,<sp/>with<sp/>Fp32<sp/>intermediate<sp/>accumulation.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">&gt;<sp/>[!TIP]</highlight></codeline>
+<codeline><highlight class="normal">&gt;<sp/>💡<sp/>Set<sp/>`HIPDNN_LOG_LEVEL=info`<sp/>to<sp/>observe<sp/>detailed<sp/>logs<sp/>from<sp/>the<sp/>samples.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">The<sp/>current<sp/>samples<sp/>include:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">###<sp/>[**`BnTraining`**](./batchnorm/BnTraining.cpp)</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Executes<sp/>the<sp/>forward<sp/>pass<sp/>of<sp/>a<sp/>batch<sp/>normalization<sp/>training<sp/>graph<sp/>on<sp/>a<sp/>4D<sp/>input<sp/>tensor.</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>For<sp/>an<sp/>input<sp/>`x`<sp/>of<sp/>shape<sp/>`(N,<sp/>C,<sp/>H,<sp/>W)`,<sp/>the<sp/>mean<sp/>and<sp/>variance<sp/>are<sp/>calculated<sp/>over<sp/>the<sp/>`N`,<sp/>`H`,<sp/>and<sp/>`W`<sp/>dimensions<sp/>for<sp/>each<sp/>of<sp/>the<sp/>`C`<sp/>channels,<sp/>resulting<sp/>in<sp/>a<sp/>`mean`<sp/>and<sp/>`inv_variance`<sp/>of<sp/>shape<sp/>`(1,<sp/>C,<sp/>1,<sp/>1)`.<sp/>It<sp/>then<sp/>transforms<sp/>the<sp/>input<sp/>and<sp/>updates<sp/>the<sp/>running<sp/>statistics:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>y<sp/>=<sp/>scale<sp/>*<sp/>((x<sp/>-<sp/>mean)<sp/>*<sp/>inv_variance)<sp/>+<sp/>bias</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>next_running_mean<sp/>=<sp/>(1<sp/>-<sp/>momentum)<sp/>*<sp/>prev_running_mean<sp/>+<sp/>momentum<sp/>*<sp/>batch_mean</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>next_running_variance<sp/>=<sp/>(1<sp/>-<sp/>momentum)<sp/>*<sp/>prev_running_variance<sp/>+<sp/>momentum<sp/>*<sp/>batch_variance</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>The<sp/>graph<sp/>outputs<sp/>the<sp/>normalized<sp/>tensor<sp/>`y`,<sp/>along<sp/>with<sp/>the<sp/>batch<sp/>mean/variance<sp/>(`mean`,<sp/>`inv_variance`)<sp/>required<sp/>for<sp/>the<sp/>backward<sp/>pass,<sp/>and<sp/>the<sp/>updated<sp/>population<sp/>statistics<sp/>(`next_running_mean`,<sp/>`next_running_variance`)<sp/>required<sp/>for<sp/>inference.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">###<sp/>[**`BnBackward`**](./batchnorm/BnBackward.cpp)</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Executes<sp/>the<sp/>backward<sp/>pass<sp/>of<sp/>a<sp/>batch<sp/>normalization<sp/>graph<sp/>to<sp/>compute<sp/>gradients<sp/>of<sp/>the<sp/>loss<sp/>function.</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Given<sp/>the<sp/>upstream<sp/>gradient<sp/>`dy`<sp/>of<sp/>shape<sp/>`(N,<sp/>C,<sp/>H,<sp/>W)`,<sp/>the<sp/>downstream<sp/>learnable<sp/>gradients<sp/>are<sp/>computed<sp/>with<sp/>the<sp/>chain-rule<sp/>over<sp/>the<sp/>batch<sp/>and<sp/>spatial<sp/>dimensions<sp/>(`N,<sp/>H,<sp/>W`)<sp/>using<sp/>saved<sp/>batch<sp/>statistics:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>dbias<sp/>=<sp/>sum(dy)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>x_hat<sp/>=<sp/>(x<sp/>-<sp/>mean)<sp/>*<sp/>inv_variance</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>dscale<sp/>=<sp/>sum(dy<sp/>*<sp/>x_hat)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>dx<sp/>=<sp/>(scale<sp/>*<sp/>inv_variance)<sp/>*<sp/>(dy<sp/>-<sp/>(dbias<sp/>+<sp/>x_hat<sp/>*<sp/>dscale)<sp/>/<sp/>nhw)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>where<sp/>`nhw<sp/>=<sp/>N<sp/>*<sp/>H<sp/>*<sp/>W`<sp/>is<sp/>the<sp/>number<sp/>of<sp/>elements<sp/>averaged<sp/>per<sp/>channel.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">###<sp/>[**`FusedBnInfDReluBnBwd`**](./batchnorm/FusedBnInfDReluBnBwd.cpp)</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Executes<sp/>a<sp/>fused<sp/>3-operation<sp/>graph<sp/>demonstrating<sp/>batchnorm<sp/>inference<sp/>followed<sp/>by<sp/>activation<sp/>backward<sp/>and<sp/>batchnorm<sp/>backward<sp/>passes.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">The<sp/>fused<sp/>graph<sp/>consists<sp/>of<sp/>three<sp/>operations:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">1.<sp/>**Batchnorm<sp/>Inference<sp/>(Forward)**:<sp/>Normalizes<sp/>input<sp/>`x`<sp/>using<sp/>saved<sp/>statistics</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>bn_y<sp/>=<sp/>scale<sp/>*<sp/>((x<sp/>-<sp/>mean)<sp/>*<sp/>inv_variance)<sp/>+<sp/>bias</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">2.<sp/>**Activation<sp/>Backward<sp/>(ReLU)**:<sp/>Computes<sp/>gradient<sp/>through<sp/>ReLU<sp/>activation</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>#<sp/>ReLU<sp/>backward:<sp/>gradient<sp/>flows<sp/>through<sp/>only<sp/>where<sp/>forward<sp/>output<sp/>was<sp/>positive</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>dx_drelu[i]<sp/>=<sp/>dy[i]<sp/>if<sp/>bn_y[i]<sp/>&gt;<sp/>0<sp/>else<sp/>0</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">3.<sp/>**Batchnorm<sp/>Backward**:<sp/>Computes<sp/>gradients<sp/>with<sp/>respect<sp/>to<sp/>inputs<sp/>and<sp/>parameters</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>dbias<sp/>=<sp/>sum(dx_drelu)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>x_hat<sp/>=<sp/>(x<sp/>-<sp/>mean)<sp/>*<sp/>inv_variance</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>dscale<sp/>=<sp/>sum(dx_drelu<sp/>*<sp/>x_hat)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>dx<sp/>=<sp/>(scale<sp/>*<sp/>inv_variance)<sp/>*<sp/>(dx_drelu<sp/>-<sp/>(dbias<sp/>+<sp/>x_hat<sp/>*<sp/>dscale)<sp/>/<sp/>nhw)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">**Key<sp/>Features:**</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Demonstrates<sp/>multi-operation<sp/>graph<sp/>fusion<sp/>with<sp/>virtual<sp/>intermediate<sp/>tensors</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>The<sp/>intermediate<sp/>outputs<sp/>(`bn_y`<sp/>and<sp/>`dx_drelu`)<sp/>are<sp/>marked<sp/>as<sp/>virtual,<sp/>allowing<sp/>the<sp/>backend<sp/>to<sp/>optimize<sp/>memory<sp/>usage</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Uses<sp/>`CpuReferenceGraphExecutor`<sp/>for<sp/>validation,<sp/>which<sp/>executes<sp/>the<sp/>entire<sp/>fused<sp/>graph<sp/>on<sp/>CPU</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">**Graph<sp/>Flow:**</highlight></codeline>
+<codeline><highlight class="normal">```</highlight></codeline>
+<codeline><highlight class="normal">Inputs:<sp/>x,<sp/>dy,<sp/>scale,<sp/>bias,<sp/>mean,<sp/>inv_variance</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>bn_y<sp/>=<sp/>batchnorm_inference(x,<sp/>mean,<sp/>inv_variance,<sp/>scale,<sp/>bias)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓<sp/>(virtual<sp/>tensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>dx_drelu<sp/>=<sp/>activation_backward(bn_y,<sp/>dy)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓<sp/>(virtual<sp/>tensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>[dx,<sp/>dscale,<sp/>dbias]<sp/>=<sp/>batchnorm_backward(dx_drelu,<sp/>x,<sp/>scale,<sp/>mean,<sp/>inv_variance)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓</highlight></codeline>
+<codeline><highlight class="normal">Outputs:<sp/>dx,<sp/>dscale,<sp/>dbias</highlight></codeline>
+<codeline><highlight class="normal">```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">###<sp/>[**`ConvFprop`**](./convolution/ConvFprop.cpp)</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Executes<sp/>the<sp/>forward<sp/>pass<sp/>of<sp/>a<sp/>2D<sp/>convolution<sp/>operation<sp/>on<sp/>a<sp/>4D<sp/>input<sp/>tensor.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">-<sp/>For<sp/>an<sp/>input<sp/>tensor<sp/>`x`<sp/>of<sp/>shape<sp/>`(N,<sp/>C,<sp/>H_in,<sp/>W_in)`<sp/>and<sp/>a<sp/>filter<sp/>tensor<sp/>`w`<sp/>of<sp/>shape<sp/>`(K,<sp/>C,<sp/>R,<sp/>S)`,<sp/>the<sp/>convolution<sp/>operation<sp/>computes<sp/>the<sp/>output<sp/>tensor<sp/>`y`<sp/>of<sp/>shape<sp/>`(N,<sp/>K,<sp/>H_out,<sp/>W_out)`.<sp/>At<sp/>a<sp/>high-level,<sp/>each<sp/>output<sp/>element<sp/>is<sp/>computed<sp/>by<sp/>the<sp/>following<sp/>summation<sp/>over<sp/>input<sp/>channels<sp/>and<sp/>filter<sp/>spatial<sp/>positions:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>y[n,<sp/>k,<sp/>p,<sp/>q]<sp/>=<sp/>sum(sum(sum(x[n,<sp/>c,<sp/>h,<sp/>w]<sp/>*<sp/>w[k,<sp/>c,<sp/>r,<sp/>s]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>c<sp/>in<sp/>range(C))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>r<sp/>in<sp/>range(R))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>s<sp/>in<sp/>range(S))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>where<sp/>the<sp/>input<sp/>spatial<sp/>indices<sp/>`(h,<sp/>w)`<sp/>are<sp/>determined<sp/>by<sp/>the<sp/>output<sp/>position<sp/>`(p,<sp/>q)`,<sp/>stride,<sp/>padding,<sp/>and<sp/>dilation:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>h<sp/>=<sp/>p<sp/>*<sp/>stride_h<sp/>-<sp/>pad_h<sp/>+<sp/>r<sp/>*<sp/>dilation_h</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>w<sp/>=<sp/>q<sp/>*<sp/>stride_w<sp/>-<sp/>pad_w<sp/>+<sp/>s<sp/>*<sp/>dilation_w</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>The<sp/>output<sp/>spatial<sp/>dimensions<sp/>are<sp/>calculated<sp/>as:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>H_out<sp/>=<sp/>floor((H_in<sp/>+<sp/>2*pad_h<sp/>-<sp/>dilation_h*(R<sp/>-<sp/>1)<sp/>-<sp/>1)<sp/>/<sp/>stride_h)<sp/>+<sp/>1</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>W_out<sp/>=<sp/>floor((W_in<sp/>+<sp/>2*pad_w<sp/>-<sp/>dilation_w*(S<sp/>-<sp/>1)<sp/>-<sp/>1)<sp/>/<sp/>stride_w)<sp/>+<sp/>1</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">###<sp/>[**`ConvDgrad`**](./convolution/ConvDgrad.cpp)</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Executes<sp/>the<sp/>backward<sp/>pass<sp/>(data<sp/>gradient)<sp/>of<sp/>a<sp/>2D<sp/>convolution<sp/>operation<sp/>to<sp/>compute<sp/>input<sp/>gradients.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">-<sp/>For<sp/>an<sp/>output<sp/>gradient<sp/>tensor<sp/>`dy`<sp/>of<sp/>shape<sp/>`(N,<sp/>K,<sp/>H_out,<sp/>W_out)`<sp/>and<sp/>a<sp/>filter<sp/>tensor<sp/>`w`<sp/>of<sp/>shape<sp/>`(K,<sp/>C,<sp/>R,<sp/>S)`,<sp/>the<sp/>convolution<sp/>backward<sp/>data<sp/>operation<sp/>computes<sp/>the<sp/>input<sp/>gradient<sp/>tensor<sp/>`dx`<sp/>of<sp/>shape<sp/>`(N,<sp/>C,<sp/>H_in,<sp/>W_in)`.<sp/>At<sp/>a<sp/>high-level,<sp/>each<sp/>input<sp/>gradient<sp/>element<sp/>is<sp/>computed<sp/>by<sp/>accumulating<sp/>contributions<sp/>from<sp/>all<sp/>output<sp/>gradients<sp/>that<sp/>were<sp/>influenced<sp/>by<sp/>that<sp/>input<sp/>position:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>dx[n,<sp/>c,<sp/>h,<sp/>w]<sp/>=<sp/>sum(sum(sum(dy[n,<sp/>k,<sp/>p,<sp/>q]<sp/>*<sp/>w[k,<sp/>c,<sp/>r,<sp/>s]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>k<sp/>in<sp/>range(K))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>r<sp/>in<sp/>range(R))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>s<sp/>in<sp/>range(S))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>where<sp/>for<sp/>each<sp/>input<sp/>position<sp/>`(h,<sp/>w)`<sp/>and<sp/>filter<sp/>position<sp/>`(r,<sp/>s)`,<sp/>the<sp/>corresponding<sp/>output<sp/>position<sp/>`(p,<sp/>q)`<sp/>that<sp/>contribute<sp/>is<sp/>computed<sp/>as:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>p<sp/>=<sp/>(h<sp/>+<sp/>pad_h<sp/>-<sp/>r<sp/>*<sp/>dilation_h)<sp/>/<sp/>stride_h<sp/><sp/>#<sp/>must<sp/>be<sp/>integer<sp/>in<sp/>[0,<sp/>H_out)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>q<sp/>=<sp/>(w<sp/>+<sp/>pad_w<sp/>-<sp/>s<sp/>*<sp/>dilation_w)<sp/>/<sp/>stride_w<sp/><sp/>#<sp/>must<sp/>be<sp/>integer<sp/>in<sp/>[0,<sp/>W_out)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>Only<sp/>positions<sp/>where<sp/>both<sp/>divisions<sp/>yield<sp/>integers<sp/>within<sp/>the<sp/>valid<sp/>output<sp/>range<sp/>contribute<sp/>to<sp/>the<sp/>gradient.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>The<sp/>input<sp/>gradient<sp/>dimensions<sp/>are<sp/>calculated<sp/>as<sp/>the<sp/>inverse<sp/>of<sp/>the<sp/>forward<sp/>convolution:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>H_in<sp/>=<sp/>stride_h<sp/>*<sp/>(H_out<sp/>-<sp/>1)<sp/>+<sp/>dilation_h<sp/>*<sp/>(R<sp/>-<sp/>1)<sp/>+<sp/>1<sp/>-<sp/>2*pad_h</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>W_in<sp/>=<sp/>stride_w<sp/>*<sp/>(W_out<sp/>-<sp/>1)<sp/>+<sp/>dilation_w<sp/>*<sp/>(S<sp/>-<sp/>1)<sp/>+<sp/>1<sp/>-<sp/>2*pad_w</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">###<sp/>[**`ConvWgrad`**](./convolution/ConvWgrad.cpp)</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Executes<sp/>the<sp/>backward<sp/>pass<sp/>(filter<sp/>gradient)<sp/>of<sp/>a<sp/>2D<sp/>convolution<sp/>operation<sp/>to<sp/>compute<sp/>filter<sp/>gradients.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">-<sp/>For<sp/>an<sp/>output<sp/>gradient<sp/>tensor<sp/>`dy`<sp/>of<sp/>shape<sp/>`(N,<sp/>K,<sp/>H_out,<sp/>W_out)`<sp/>and<sp/>an<sp/>input<sp/>tensor<sp/>`x`<sp/>of<sp/>shape<sp/>`(N,<sp/>C,<sp/>H_in,<sp/>W_in)`,<sp/>the<sp/>convolution<sp/>backward<sp/>filter<sp/>operation<sp/>computes<sp/>the<sp/>filter<sp/>gradient<sp/>tensor<sp/>`dw`<sp/>of<sp/>shape<sp/>`(K,<sp/>C,<sp/>R,<sp/>S)`.<sp/>At<sp/>a<sp/>high-level,<sp/>each<sp/>filter<sp/>gradient<sp/>element<sp/>is<sp/>computed<sp/>by<sp/>accumulating<sp/>contributions<sp/>from<sp/>all<sp/>batch<sp/>samples<sp/>and<sp/>valid<sp/>spatial<sp/>positions:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>dw[k,<sp/>c,<sp/>r,<sp/>s]<sp/>=<sp/>sum(sum(sum(dy[n,<sp/>k,<sp/>p,<sp/>q]<sp/>*<sp/>x[n,<sp/>c,<sp/>h,<sp/>w]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>n<sp/>in<sp/>range(N))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>p<sp/>in<sp/>range(H_out))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>for<sp/>q<sp/>in<sp/>range(W_out))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>where<sp/>for<sp/>each<sp/>output<sp/>position<sp/>`(p,<sp/>q)`<sp/>and<sp/>filter<sp/>position<sp/>`(r,<sp/>s)`,<sp/>the<sp/>corresponding<sp/>input<sp/>position<sp/>`(h,<sp/>w)`<sp/>is<sp/>computed<sp/>as:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>h<sp/>=<sp/>p<sp/>*<sp/>stride_h<sp/>-<sp/>pad_h<sp/>+<sp/>r<sp/>*<sp/>dilation_h</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>w<sp/>=<sp/>q<sp/>*<sp/>stride_w<sp/>-<sp/>pad_w<sp/>+<sp/>s<sp/>*<sp/>dilation_w</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>For<sp/>each<sp/>valid<sp/>output<sp/>position,<sp/>the<sp/>input<sp/>position<sp/>`(h,<sp/>w)`<sp/>must<sp/>fall<sp/>within<sp/>the<sp/>input<sp/>bounds<sp/>`[0,<sp/>H_in)<sp/>×<sp/>[0,<sp/>W_in)`<sp/>to<sp/>contribute<sp/>to<sp/>the<sp/>gradient.<sp/>Input<sp/>positions<sp/>outside<sp/>these<sp/>bounds<sp/>(from<sp/>padding<sp/>regions)<sp/>do<sp/>not<sp/>contribute.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>The<sp/>filter<sp/>gradient<sp/>dimensions<sp/>match<sp/>the<sp/>original<sp/>filter<sp/>tensor<sp/>from<sp/>the<sp/>forward<sp/>pass:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>dw.shape<sp/>=<sp/>w.shape<sp/>=<sp/>(K,<sp/>C,<sp/>R,<sp/>S)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>where:</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>-<sp/>`K`<sp/>=<sp/>number<sp/>of<sp/>output<sp/>channels<sp/>(filters)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>-<sp/>`C`<sp/>=<sp/>number<sp/>of<sp/>input<sp/>channels<sp/>per<sp/>filter</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>-<sp/>`R,<sp/>S`<sp/>=<sp/>filter<sp/>spatial<sp/>dimensions<sp/>(height,<sp/>width)</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">###<sp/>[**`FusedConvFpropActiv`**](./convolution/FusedConvFpropActiv.cpp)</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">Executes<sp/>a<sp/>fused<sp/>convolution<sp/>forward<sp/>pass<sp/>with<sp/>activation<sp/>function<sp/>in<sp/>a<sp/>single<sp/>graph.</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">The<sp/>fused<sp/>graph<sp/>consists<sp/>of<sp/>two<sp/>operations:</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">1.<sp/>**Convolution<sp/>Forward**:<sp/>Performs<sp/>standard<sp/>convolution</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>conv_y<sp/>=<sp/>conv(x,<sp/>w,<sp/>stride,<sp/>padding,<sp/>dilation)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">2.<sp/>**Activation<sp/>(Clamped<sp/>ReLU)**:<sp/>Applies<sp/>ReLU<sp/>activation<sp/>with<sp/>upper<sp/>and<sp/>lower<sp/>clipping<sp/>bounds<sp/>to<sp/>convolution<sp/>output</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```python</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>y<sp/>=<sp/>clamp(relu(conv_y),<sp/>lower_clip,<sp/>upper_clip)<sp/>=<sp/>min(max(conv_y,<sp/>lower_clip),<sp/>upper_clip)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">**Key<sp/>Features:**</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Demonstrates<sp/>kernel<sp/>fusion<sp/>by<sp/>combining<sp/>convolution<sp/>and<sp/>activation<sp/>in<sp/>a<sp/>single<sp/>graph</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>The<sp/>intermediate<sp/>convolution<sp/>output<sp/>(`conv_y`)<sp/>is<sp/>marked<sp/>as<sp/>virtual,<sp/>allowing<sp/>the<sp/>backend<sp/>to<sp/>optimize<sp/>memory<sp/>usage<sp/>and<sp/>potentially<sp/>fuse<sp/>operations</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Shows<sp/>performance<sp/>benefits<sp/>of<sp/>operation<sp/>fusion<sp/>compared<sp/>to<sp/>separate<sp/>kernel<sp/>launches</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Uses<sp/>`CpuReferenceGraphExecutor`<sp/>for<sp/>validation,<sp/>which<sp/>executes<sp/>the<sp/>entire<sp/>fused<sp/>graph<sp/>on<sp/>CPU</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">**Graph<sp/>Flow:**</highlight></codeline>
+<codeline><highlight class="normal">```</highlight></codeline>
+<codeline><highlight class="normal">Inputs:<sp/>x<sp/>(input<sp/>tensor),<sp/>w<sp/>(filter<sp/>weights)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>conv_y<sp/>=<sp/>convolution_forward(x,<sp/>w,<sp/>stride,<sp/>padding,<sp/>dilation)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓<sp/>(virtual<sp/>tensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>y<sp/>=<sp/>activation_forward(conv_y,<sp/>mode=RELU,<sp/>lower_clip=0.2,<sp/>upper_clip=0.7)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓</highlight></codeline>
+<codeline><highlight class="normal">Output:<sp/>y<sp/>(activated<sp/>convolution<sp/>result)</highlight></codeline>
+<codeline><highlight class="normal">```</highlight></codeline>
+<codeline></codeline>
+<codeline><highlight class="normal">**Performance<sp/>Benefits:**</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Reduces<sp/>memory<sp/>bandwidth<sp/>by<sp/>avoiding<sp/>intermediate<sp/>tensor<sp/>writes/reads</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Eliminates<sp/>kernel<sp/>launch<sp/>overhead<sp/>between<sp/>operations</highlight></codeline>
+<codeline><highlight class="normal">-<sp/>Enables<sp/>better<sp/>cache<sp/>utilization<sp/>by<sp/>processing<sp/>data<sp/>in<sp/>a<sp/>single<sp/>pass</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/README.md"/>
+  </compounddef>
+</doxygen>

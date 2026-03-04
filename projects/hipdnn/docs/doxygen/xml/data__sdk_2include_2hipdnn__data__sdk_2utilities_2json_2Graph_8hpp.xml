@@ -1,0 +1,434 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2Graph_8hpp" kind="file" language="C++">
+    <compoundname>Graph.hpp</compoundname>
+    <includes local="no">hipdnn_data_sdk/data_objects/graph_generated.h</includes>
+    <includes refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormAttributes_8hpp" local="no">hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp</includes>
+    <includes refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormBackwardAttributes_8hpp" local="no">hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp</includes>
+    <includes refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributes_8hpp" local="no">hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp</includes>
+    <includes refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributesVarianceExt_8hpp" local="no">hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp</includes>
+    <includes refid="Common_8hpp" local="no">hipdnn_data_sdk/utilities/json/Common.hpp</includes>
+    <includes refid="ConvolutionBwdAttributes_8hpp" local="no">hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp</includes>
+    <includes refid="ConvolutionFwdAttributes_8hpp" local="no">hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp</includes>
+    <includes refid="ConvolutionWrwAttributes_8hpp" local="no">hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp</includes>
+    <includes refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2PointwiseAttributes_8hpp" local="no">hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp</includes>
+    <includes refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2TensorAttributes_8hpp" local="no">hipdnn_data_sdk/utilities/json/TensorAttributes.hpp</includes>
+    <includedby refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</includedby>
+    <incdepgraph>
+      <node id="3">
+        <label>hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormAttributes_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="10">
+        <label>hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormBackwardAttributes_8hpp"/>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="12">
+        <label>hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributes_8hpp"/>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="14">
+        <label>hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributesVarianceExt_8hpp"/>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="5">
+        <label>hipdnn_data_sdk/utilities/json/Common.hpp</label>
+        <link refid="Common_8hpp"/>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+      </node>
+      <node id="16">
+        <label>hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp</label>
+        <link refid="ConvolutionBwdAttributes_8hpp"/>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="18">
+        <label>hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp</label>
+        <link refid="ConvolutionFwdAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="20">
+        <label>hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp</label>
+        <link refid="ConvolutionWrwAttributes_8hpp"/>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2Graph_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+      </node>
+      <node id="22">
+        <label>hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2PointwiseAttributes_8hpp"/>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="24">
+        <label>hipdnn_data_sdk/utilities/json/TensorAttributes.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2TensorAttributes_8hpp"/>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+      </node>
+      <node id="6">
+        <label>flatbuffers/flatbuffer_builder.h</label>
+      </node>
+      <node id="4">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h</label>
+      </node>
+      <node id="11">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h</label>
+      </node>
+      <node id="13">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h</label>
+      </node>
+      <node id="15">
+        <label>hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h</label>
+      </node>
+      <node id="17">
+        <label>hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h</label>
+      </node>
+      <node id="19">
+        <label>hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h</label>
+      </node>
+      <node id="21">
+        <label>hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h</label>
+      </node>
+      <node id="7">
+        <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
+      </node>
+      <node id="23">
+        <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
+      </node>
+      <node id="25">
+        <label>hipdnn_data_sdk/data_objects/tensor_attributes_generated.h</label>
+      </node>
+      <node id="8">
+        <label>nlohmann/detail/macro_scope.hpp</label>
+      </node>
+      <node id="9">
+        <label>nlohmann/json.hpp</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp</label>
+        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2Graph_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <innernamespace refid="namespacehipdnn__data__sdk">hipdnn_data_sdk</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1data__objects">hipdnn_data_sdk::data_objects</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1json">hipdnn_data_sdk::json</innernamespace>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/data_objects/graph_generated.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormAttributes_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="7"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormBackwardAttributes_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="8"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributes_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="9"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributesVarianceExt_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="10"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Common_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/Common.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="11"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="ConvolutionBwdAttributes_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="ConvolutionFwdAttributes_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="ConvolutionWrwAttributes_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2PointwiseAttributes_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2TensorAttributes_8hpp" kindref="compound">hipdnn_data_sdk/utilities/json/TensorAttributes.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1data__objects" kindref="compound">hipdnn_data_sdk::data_objects</ref></highlight></codeline>
+<codeline lineno="18"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="19" refid="namespacehipdnn__data__sdk_1_1data__objects_1a3de73ac3ea169d67d25ff44662820874" refkind="member"><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1data__objects_1aec04615557d053c00598136dd3d6e032" kindref="member">NLOHMANN_JSON_SERIALIZE_ENUM</ref>(</highlight></codeline>
+<codeline lineno="20"><highlight class="normal"><sp/><sp/><sp/><sp/>NodeAttributes,</highlight></codeline>
+<codeline lineno="21"><highlight class="normal"><sp/><sp/><sp/><sp/>{{NodeAttributes::BatchnormInferenceAttributes,<sp/></highlight><highlight class="stringliteral">&quot;BatchnormInferenceAttributes&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="22"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>{NodeAttributes::BatchnormInferenceAttributesVarianceExt,</highlight></codeline>
+<codeline lineno="23"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;BatchnormInferenceAttributesVarianceExt&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="24"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>{NodeAttributes::PointwiseAttributes,<sp/></highlight><highlight class="stringliteral">&quot;PointwiseAttributes&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="25"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>{NodeAttributes::BatchnormBackwardAttributes,<sp/></highlight><highlight class="stringliteral">&quot;BatchnormBackwardAttributes&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="26"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>{NodeAttributes::BatchnormAttributes,<sp/></highlight><highlight class="stringliteral">&quot;BatchnormAttributes&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="27"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>{NodeAttributes::ConvolutionFwdAttributes,<sp/></highlight><highlight class="stringliteral">&quot;ConvolutionFwdAttributes&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="28"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>{NodeAttributes::ConvolutionBwdAttributes,<sp/></highlight><highlight class="stringliteral">&quot;ConvolutionBwdAttributes&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="29"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>{NodeAttributes::ConvolutionWrwAttributes,<sp/></highlight><highlight class="stringliteral">&quot;ConvolutionWrwAttributes&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="30"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>{NodeAttributes::NONE,<sp/></highlight><highlight class="stringliteral">&quot;&quot;</highlight><highlight class="normal">}})</highlight></codeline>
+<codeline lineno="31"><highlight class="normal"></highlight></codeline>
+<codeline lineno="32"><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1data__objects_1aec04615557d053c00598136dd3d6e032" kindref="member">NLOHMANN_JSON_SERIALIZE_ENUM</ref>(ConvMode,</highlight></codeline>
+<codeline lineno="33"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{{ConvMode::UNSET,<sp/></highlight><highlight class="stringliteral">&quot;UNSET&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="34"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{ConvMode::CONVOLUTION,<sp/></highlight><highlight class="stringliteral">&quot;CONVOLUTION&quot;</highlight><highlight class="normal">},</highlight></codeline>
+<codeline lineno="35"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{ConvMode::CROSS_CORRELATION,<sp/></highlight><highlight class="stringliteral">&quot;CROSS_CORRELATION&quot;</highlight><highlight class="normal">}})</highlight></codeline>
+<codeline lineno="36"><highlight class="normal"></highlight></codeline>
+<codeline lineno="37"><highlight class="normal"></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="38"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1data__objects_1a6551c7b9336dcf71c04c38b95f24218a" kindref="member">to_json</ref>(nlohmann::json&amp;<sp/>nodeJson,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>data_objects::Node&amp;<sp/>node)</highlight></codeline>
+<codeline lineno="39"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="40"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>type<sp/>=<sp/>node.attributes_type();</highlight></codeline>
+<codeline lineno="41"><highlight class="normal"></highlight></codeline>
+<codeline lineno="42"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">switch</highlight><highlight class="normal">(type)</highlight></codeline>
+<codeline lineno="43"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="44"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::BatchnormInferenceAttributes:</highlight></codeline>
+<codeline lineno="45"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>nodeJson<sp/>=<sp/>*node.attributes_as_BatchnormInferenceAttributes();</highlight></codeline>
+<codeline lineno="46"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="47"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:</highlight></codeline>
+<codeline lineno="48"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>nodeJson<sp/>=<sp/>*node.attributes_as_BatchnormInferenceAttributesVarianceExt();</highlight></codeline>
+<codeline lineno="49"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="50"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::BatchnormBackwardAttributes:</highlight></codeline>
+<codeline lineno="51"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>nodeJson<sp/>=<sp/>*node.attributes_as_BatchnormBackwardAttributes();</highlight></codeline>
+<codeline lineno="52"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="53"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::BatchnormAttributes:</highlight></codeline>
+<codeline lineno="54"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>nodeJson<sp/>=<sp/>*node.attributes_as_BatchnormAttributes();</highlight></codeline>
+<codeline lineno="55"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="56"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::PointwiseAttributes:</highlight></codeline>
+<codeline lineno="57"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>nodeJson<sp/>=<sp/>*node.attributes_as_PointwiseAttributes();</highlight></codeline>
+<codeline lineno="58"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="59"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::ConvolutionFwdAttributes:</highlight></codeline>
+<codeline lineno="60"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>nodeJson<sp/>=<sp/>*node.attributes_as_ConvolutionFwdAttributes();</highlight></codeline>
+<codeline lineno="61"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="62"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::ConvolutionBwdAttributes:</highlight></codeline>
+<codeline lineno="63"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>nodeJson<sp/>=<sp/>*node.attributes_as_ConvolutionBwdAttributes();</highlight></codeline>
+<codeline lineno="64"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="65"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::ConvolutionWrwAttributes:</highlight></codeline>
+<codeline lineno="66"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>nodeJson<sp/>=<sp/>*node.attributes_as_ConvolutionWrwAttributes();</highlight></codeline>
+<codeline lineno="67"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">break</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="68"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">default</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="69"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">throw</highlight><highlight class="normal"><sp/>std::runtime_error(</highlight></codeline>
+<codeline lineno="70"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;hipdnn_data_sdk::data_objects::to_json(Node):<sp/>Unsupported<sp/>NodeAttributes<sp/>type:<sp/>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="71"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>+<sp/>std::to_string(</highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="normal">int8_t</highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(node.attributes_type())));</highlight></codeline>
+<codeline lineno="72"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="73"><highlight class="normal"><sp/><sp/><sp/><sp/>nodeJson[</highlight><highlight class="stringliteral">&quot;name&quot;</highlight><highlight class="normal">]<sp/>=<sp/>node.name()-&gt;c_str();</highlight></codeline>
+<codeline lineno="74"><highlight class="normal"><sp/><sp/><sp/><sp/>nodeJson[</highlight><highlight class="stringliteral">&quot;type&quot;</highlight><highlight class="normal">]<sp/>=<sp/>node.attributes_type();</highlight></codeline>
+<codeline lineno="75"><highlight class="normal"><sp/><sp/><sp/><sp/>nodeJson[</highlight><highlight class="stringliteral">&quot;compute_data_type&quot;</highlight><highlight class="normal">]<sp/>=<sp/>node.compute_data_type();</highlight></codeline>
+<codeline lineno="76"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="77"><highlight class="normal"></highlight></codeline>
+<codeline lineno="78"><highlight class="normal"></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="79"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1data__objects_1a6551c7b9336dcf71c04c38b95f24218a" kindref="member">to_json</ref>(nlohmann::json&amp;<sp/>graphJson,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>data_objects::Graph&amp;<sp/>graph)</highlight></codeline>
+<codeline lineno="80"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"><sp/><sp/><sp/><sp/>graphJson[</highlight><highlight class="stringliteral">&quot;nodes&quot;</highlight><highlight class="normal">]<sp/>=<sp/>graph.nodes();</highlight></codeline>
+<codeline lineno="82"><highlight class="normal"><sp/><sp/><sp/><sp/>graphJson[</highlight><highlight class="stringliteral">&quot;compute_data_type&quot;</highlight><highlight class="normal">]<sp/>=<sp/>graph.compute_data_type();</highlight></codeline>
+<codeline lineno="83"><highlight class="normal"><sp/><sp/><sp/><sp/>graphJson[</highlight><highlight class="stringliteral">&quot;io_data_type&quot;</highlight><highlight class="normal">]<sp/>=<sp/>graph.io_data_type();</highlight></codeline>
+<codeline lineno="84"><highlight class="normal"><sp/><sp/><sp/><sp/>graphJson[</highlight><highlight class="stringliteral">&quot;intermediate_data_type&quot;</highlight><highlight class="normal">]<sp/>=<sp/>graph.intermediate_data_type();</highlight></codeline>
+<codeline lineno="85"><highlight class="normal"><sp/><sp/><sp/><sp/>graphJson[</highlight><highlight class="stringliteral">&quot;name&quot;</highlight><highlight class="normal">]<sp/>=<sp/>graph.name()-&gt;c_str();</highlight></codeline>
+<codeline lineno="86"><highlight class="normal"><sp/><sp/><sp/><sp/>graphJson[</highlight><highlight class="stringliteral">&quot;tensors&quot;</highlight><highlight class="normal">]<sp/>=<sp/>graph.tensors();</highlight></codeline>
+<codeline lineno="87"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="88"><highlight class="normal"></highlight></codeline>
+<codeline lineno="89"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="90"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1json" kindref="compound">hipdnn_data_sdk::json</ref></highlight></codeline>
+<codeline lineno="91"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;&gt;</highlight></codeline>
+<codeline lineno="93" refid="namespacehipdnn__data__sdk_1_1json_1a0c66750f564cdd528bd2efbee209585b" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a0c66750f564cdd528bd2efbee209585b" kindref="member">to&lt;data_objects::Node&gt;</ref>(flatbuffers::FlatBufferBuilder&amp;<sp/>builder,</highlight></codeline>
+<codeline lineno="94"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>nlohmann::json&amp;<sp/>entry)</highlight></codeline>
+<codeline lineno="95"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="96"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>type<sp/>=<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;type&quot;</highlight><highlight class="normal">).get&lt;data_objects::NodeAttributes&gt;();</highlight></codeline>
+<codeline lineno="97"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>name<sp/>=<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;name&quot;</highlight><highlight class="normal">).get&lt;std::string&gt;();</highlight></codeline>
+<codeline lineno="98"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>computeDataType<sp/>=<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;compute_data_type&quot;</highlight><highlight class="normal">).get&lt;data_objects::DataType&gt;();</highlight></codeline>
+<codeline lineno="99"><highlight class="normal"></highlight></codeline>
+<codeline lineno="100"><highlight class="normal"><sp/><sp/><sp/><sp/>flatbuffers::Offset&lt;void&gt;<sp/>node<sp/>=<sp/>[&amp;]()<sp/>{</highlight></codeline>
+<codeline lineno="101"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">switch</highlight><highlight class="normal">(type)</highlight></codeline>
+<codeline lineno="102"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="103"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::BatchnormInferenceAttributes:</highlight></codeline>
+<codeline lineno="104"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1ae8589b89e4e7faf5531db58abce09053" kindref="member">to&lt;data_objects::BatchnormInferenceAttributes&gt;</ref>(builder,<sp/>entry).Union();</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:</highlight></codeline>
+<codeline lineno="106"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a381ce0767cdce135c5b7199295a6042f" kindref="member">to&lt;data_objects::BatchnormInferenceAttributesVarianceExt&gt;</ref>(builder,<sp/>entry)</highlight></codeline>
+<codeline lineno="107"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.Union();</highlight></codeline>
+<codeline lineno="108"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::BatchnormBackwardAttributes:</highlight></codeline>
+<codeline lineno="109"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a9a29b61bbbe30a1f3087509f0318cf1a" kindref="member">to&lt;data_objects::BatchnormBackwardAttributes&gt;</ref>(builder,<sp/>entry).Union();</highlight></codeline>
+<codeline lineno="110"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::BatchnormAttributes:</highlight></codeline>
+<codeline lineno="111"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a951e221c9c1bd6c25e05fde4298a1f47" kindref="member">to&lt;data_objects::BatchnormAttributes&gt;</ref>(builder,<sp/>entry).Union();</highlight></codeline>
+<codeline lineno="112"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::PointwiseAttributes:</highlight></codeline>
+<codeline lineno="113"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a15381c0f0f7341d77b17f0c0128104b8" kindref="member">to&lt;data_objects::PointwiseAttributes&gt;</ref>(builder,<sp/>entry).Union();</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::ConvolutionFwdAttributes:</highlight></codeline>
+<codeline lineno="115"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a32e3f02f0b94b6dffd30a17cfc1a361c" kindref="member">to&lt;data_objects::ConvolutionFwdAttributes&gt;</ref>(builder,<sp/>entry).Union();</highlight></codeline>
+<codeline lineno="116"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::ConvolutionBwdAttributes:</highlight></codeline>
+<codeline lineno="117"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a43550114f62c71b64e78cb76a71dbc39" kindref="member">to&lt;data_objects::ConvolutionBwdAttributes&gt;</ref>(builder,<sp/>entry).Union();</highlight></codeline>
+<codeline lineno="118"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">case</highlight><highlight class="normal"><sp/>data_objects::NodeAttributes::ConvolutionWrwAttributes:</highlight></codeline>
+<codeline lineno="119"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a7a2a05f987d6f55776f1b01392d72095" kindref="member">to&lt;data_objects::ConvolutionWrwAttributes&gt;</ref>(builder,<sp/>entry).Union();</highlight></codeline>
+<codeline lineno="120"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">default</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="121"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">throw</highlight><highlight class="normal"><sp/>std::runtime_error(</highlight></codeline>
+<codeline lineno="122"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="stringliteral">&quot;hipdnn_data_sdk::json::to&lt;data_objects::Node&gt;():<sp/>Unsupported<sp/>NodeAttributes<sp/>type:<sp/>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="123"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>+<sp/>std::string{EnumNameNodeAttributes(type)});</highlight></codeline>
+<codeline lineno="124"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="125"><highlight class="normal"><sp/><sp/><sp/><sp/>}();</highlight></codeline>
+<codeline lineno="126"><highlight class="normal"></highlight></codeline>
+<codeline lineno="127"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>data_objects::CreateNodeDirect(builder,<sp/>name.c_str(),<sp/>computeDataType,<sp/>type,<sp/>node);</highlight></codeline>
+<codeline lineno="128"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="129"><highlight class="normal"></highlight></codeline>
+<codeline lineno="130"><highlight class="normal"></highlight><highlight class="keyword">template</highlight><highlight class="normal"><sp/>&lt;&gt;</highlight></codeline>
+<codeline lineno="131" refid="namespacehipdnn__data__sdk_1_1json_1a965b8caf41f783df214ec488be5e7fc6" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1json_1a965b8caf41f783df214ec488be5e7fc6" kindref="member">to&lt;data_objects::Graph&gt;</ref>(flatbuffers::FlatBufferBuilder&amp;<sp/>builder,</highlight></codeline>
+<codeline lineno="132"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>nlohmann::json&amp;<sp/>entry)</highlight></codeline>
+<codeline lineno="133"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="134"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/>namespace<sp/></highlight><highlight class="normal">data_objects;</highlight></codeline>
+<codeline lineno="135"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">using<sp/>namespace<sp/></highlight><highlight class="normal"><ref refid="namespaceflatbuffers" kindref="compound">flatbuffers</ref>;</highlight></codeline>
+<codeline lineno="136"><highlight class="normal"></highlight></codeline>
+<codeline lineno="137"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>name<sp/>=<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;name&quot;</highlight><highlight class="normal">).get&lt;std::string&gt;();</highlight></codeline>
+<codeline lineno="138"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>computeType<sp/>=<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;compute_data_type&quot;</highlight><highlight class="normal">).get&lt;data_objects::DataType&gt;();</highlight></codeline>
+<codeline lineno="139"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>ioType<sp/>=<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;io_data_type&quot;</highlight><highlight class="normal">).get&lt;data_objects::DataType&gt;();</highlight></codeline>
+<codeline lineno="140"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>intermediateType<sp/>=<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;intermediate_data_type&quot;</highlight><highlight class="normal">).get&lt;data_objects::DataType&gt;();</highlight></codeline>
+<codeline lineno="141"><highlight class="normal"></highlight></codeline>
+<codeline lineno="142"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>nodes<sp/>=<sp/>toVector&lt;Node&gt;(builder,<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;nodes&quot;</highlight><highlight class="normal">));</highlight></codeline>
+<codeline lineno="143"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>tensors<sp/>=<sp/>toVector&lt;TensorAttributes&gt;(builder,<sp/>entry.at(</highlight><highlight class="stringliteral">&quot;tensors&quot;</highlight><highlight class="normal">));</highlight></codeline>
+<codeline lineno="144"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>data_objects::CreateGraphDirect(</highlight></codeline>
+<codeline lineno="145"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>builder,<sp/>name.c_str(),<sp/>computeType,<sp/>intermediateType,<sp/>ioType,<sp/>&amp;tensors,<sp/>&amp;nodes);</highlight></codeline>
+<codeline lineno="146"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="147"><highlight class="normal"></highlight></codeline>
+<codeline lineno="148"><highlight class="normal">}</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json/Graph.hpp"/>
+  </compounddef>
+</doxygen>

@@ -1,0 +1,638 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="PointwiseValidation_8hpp" kind="file" language="C++">
+    <compoundname>PointwiseValidation.hpp</compoundname>
+    <includes local="no">bitset</includes>
+    <includes local="no">hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</includes>
+    <includedby refid="Types_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp</includedby>
+    <incdepgraph>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp</label>
+        <link refid="PointwiseValidation_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>bitset</label>
+      </node>
+      <node id="3">
+        <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp</label>
+        <link refid="PointwiseValidation_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="15">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Error.hpp</label>
+        <link refid="Error_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="36" relation="include">
+        </childnode>
+        <childnode refid="40" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="32" relation="include">
+        </childnode>
+        <childnode refid="42" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+      </node>
+      <node id="19">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="16">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp</label>
+        <link refid="Handle_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Types.hpp</label>
+        <link refid="Types_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="43" relation="include">
+        </childnode>
+        <childnode refid="34" relation="include">
+        </childnode>
+        <childnode refid="36" relation="include">
+        </childnode>
+        <childnode refid="40" relation="include">
+        </childnode>
+      </node>
+      <node id="37">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp</label>
+        <link refid="Utilities_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="38" relation="include">
+        </childnode>
+        <childnode refid="39" relation="include">
+        </childnode>
+        <childnode refid="40" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="32" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+        <childnode refid="41" relation="include">
+        </childnode>
+      </node>
+      <node id="17">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp</label>
+        <link refid="Attributes_8hpp"/>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="33" relation="include">
+        </childnode>
+        <childnode refid="34" relation="include">
+        </childnode>
+      </node>
+      <node id="18">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+      </node>
+      <node id="21">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormBackwardAttributes_8hpp"/>
+        <childnode refid="22" relation="include">
+        </childnode>
+      </node>
+      <node id="23">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormInferenceAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+      </node>
+      <node id="25">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormInferenceAttributesVarianceExt_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+      </node>
+      <node id="27">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp</label>
+        <link refid="ConvolutionDgradAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+      </node>
+      <node id="29">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp</label>
+        <link refid="ConvolutionFpropAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="31">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp</label>
+        <link refid="ConvolutionWgradAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="32" relation="include">
+        </childnode>
+      </node>
+      <node id="43">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp</label>
+        <link refid="GraphAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="36" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="32" relation="include">
+        </childnode>
+        <childnode refid="42" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+      </node>
+      <node id="33">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/MatmulAttributes.hpp</label>
+        <link refid="MatmulAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="34">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/PointwiseAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2PointwiseAttributes_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+      </node>
+      <node id="36">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp"/>
+        <childnode refid="37" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+        <childnode refid="31" relation="include">
+        </childnode>
+        <childnode refid="33" relation="include">
+        </childnode>
+        <childnode refid="34" relation="include">
+        </childnode>
+        <childnode refid="42" relation="include">
+        </childnode>
+      </node>
+      <node id="38">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
+        <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+      <node id="39">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>
+        <link refid="Knob_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="40">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp</label>
+        <link refid="KnobConstraint_8hpp"/>
+        <childnode refid="39" relation="include">
+        </childnode>
+      </node>
+      <node id="22">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
+        <link refid="BatchnormBackwardNode_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="24">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNode.hpp</label>
+        <link refid="BatchnormInferenceNode_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="26">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp</label>
+        <link refid="BatchnormInferenceNodeVarianceExt_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="20">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormNode.hpp</label>
+        <link refid="BatchnormNode_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="28">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
+        <link refid="ConvolutionDgradNode_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="30">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionFpropNode.hpp</label>
+        <link refid="ConvolutionFpropNode_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="32">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionWgradNode.hpp</label>
+        <link refid="ConvolutionWgradNode_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="42">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp</label>
+        <link refid="Node_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="32" relation="include">
+        </childnode>
+        <childnode refid="35" relation="include">
+        </childnode>
+      </node>
+      <node id="35">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/PointwiseNode.hpp</label>
+        <link refid="PointwiseNode_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="41">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp</label>
+        <link refid="TopologicalSortingUtils_8hpp"/>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <innernamespace refid="namespacehipdnn__data__sdk">hipdnn_data_sdk</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1utilities">hipdnn_data_sdk::utilities</innernamespace>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/><sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="4"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="5"><highlight class="normal"></highlight></codeline>
+<codeline lineno="6"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;bitset&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="7"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="8"><highlight class="normal"></highlight></codeline>
+<codeline lineno="9"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1utilities" kindref="compound">hipdnn_data_sdk::utilities</ref></highlight></codeline>
+<codeline lineno="10"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="11"><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Bitset<sp/>size<sp/>based<sp/>on<sp/>the<sp/>maximum<sp/>PointwiseMode<sp/>value<sp/>+<sp/>1</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13" refid="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">constexpr</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" kindref="member">POINTWISE_MODE_COUNT</ref></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"><sp/><sp/><sp/><sp/>=<sp/></highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="keywordtype">size_t</highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(data_objects::PointwiseMode::MAX)<sp/>+<sp/>1;</highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight></codeline>
+<codeline lineno="16" refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">using<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>=<sp/>std::bitset&lt;POINTWISE_MODE_COUNT&gt;;</highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight></codeline>
+<codeline lineno="18" refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">constexpr</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode<sp/>mode)</highlight></codeline>
+<codeline lineno="19"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="20"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">static_cast&lt;</highlight><highlight class="keywordtype">size_t</highlight><highlight class="keyword">&gt;</highlight><highlight class="normal">(mode);</highlight></codeline>
+<codeline lineno="21"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="22"><highlight class="normal"></highlight></codeline>
+<codeline lineno="23"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Get<sp/>operations<sp/>that<sp/>have<sp/>implemented<sp/>functors<sp/>for<sp/>unary<sp/>operations</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="24" refid="namespacehipdnn__data__sdk_1_1utilities_1a21d79975938289a6c020af6938b17273" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref>&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a21d79975938289a6c020af6938b17273" kindref="member">getImplementedUnaryModesBitset</ref>()</highlight></codeline>
+<codeline lineno="25"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="26"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>s_implementedUnaryModes<sp/>=<sp/>[]()<sp/>{</highlight></codeline>
+<codeline lineno="27"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>bitset;</highlight></codeline>
+<codeline lineno="28"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Only<sp/>include<sp/>operations<sp/>with<sp/>implemented<sp/>functors<sp/>in<sp/>ReferencePointwiseBase</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="29"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::RELU_FWD));</highlight></codeline>
+<codeline lineno="30"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SIGMOID_FWD));</highlight></codeline>
+<codeline lineno="31"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::TANH_FWD));</highlight></codeline>
+<codeline lineno="32"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::ABS));</highlight></codeline>
+<codeline lineno="33"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::NEG));</highlight></codeline>
+<codeline lineno="34"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>bitset;</highlight></codeline>
+<codeline lineno="35"><highlight class="normal"><sp/><sp/><sp/><sp/>}();</highlight></codeline>
+<codeline lineno="36"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>s_implementedUnaryModes;</highlight></codeline>
+<codeline lineno="37"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="38"><highlight class="normal"></highlight></codeline>
+<codeline lineno="39"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Get<sp/>operations<sp/>that<sp/>have<sp/>implemented<sp/>functors<sp/>for<sp/>binary<sp/>operations</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="40" refid="namespacehipdnn__data__sdk_1_1utilities_1a4e09934e49976a0981c4ad96a963e183" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref>&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4e09934e49976a0981c4ad96a963e183" kindref="member">getImplementedBinaryModesBitset</ref>()</highlight></codeline>
+<codeline lineno="41"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="42"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>s_implementedBinaryModes<sp/>=<sp/>[]()<sp/>{</highlight></codeline>
+<codeline lineno="43"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>bitset;</highlight></codeline>
+<codeline lineno="44"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Only<sp/>include<sp/>operations<sp/>with<sp/>implemented<sp/>functors<sp/>in<sp/>ReferencePointwiseBase</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="45"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::ADD));</highlight></codeline>
+<codeline lineno="46"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SUB));</highlight></codeline>
+<codeline lineno="47"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::MUL));</highlight></codeline>
+<codeline lineno="48"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::RELU_BWD));</highlight></codeline>
+<codeline lineno="49"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SIGMOID_BWD));</highlight></codeline>
+<codeline lineno="50"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::TANH_BWD));</highlight></codeline>
+<codeline lineno="51"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>bitset;</highlight></codeline>
+<codeline lineno="52"><highlight class="normal"><sp/><sp/><sp/><sp/>}();</highlight></codeline>
+<codeline lineno="53"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>s_implementedBinaryModes;</highlight></codeline>
+<codeline lineno="54"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="55"><highlight class="normal"></highlight></codeline>
+<codeline lineno="56"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Get<sp/>all<sp/>unary<sp/>operations<sp/>(for<sp/>frontend<sp/>compatibility)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="57" refid="namespacehipdnn__data__sdk_1_1utilities_1add506dfed78cde1f6bd30f2a4148f933" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref>&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1add506dfed78cde1f6bd30f2a4148f933" kindref="member">getUnaryModesBitset</ref>()</highlight></codeline>
+<codeline lineno="58"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="59"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>s_unaryModes<sp/>=<sp/>[]()<sp/>{</highlight></codeline>
+<codeline lineno="60"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>bitset;</highlight></codeline>
+<codeline lineno="61"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::ABS));</highlight></codeline>
+<codeline lineno="62"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::CEIL));</highlight></codeline>
+<codeline lineno="63"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::ELU_FWD));</highlight></codeline>
+<codeline lineno="64"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::ERF));</highlight></codeline>
+<codeline lineno="65"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::EXP));</highlight></codeline>
+<codeline lineno="66"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::FLOOR));</highlight></codeline>
+<codeline lineno="67"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::GELU_APPROX_TANH_FWD));</highlight></codeline>
+<codeline lineno="68"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::GELU_FWD));</highlight></codeline>
+<codeline lineno="69"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::GEN_INDEX));</highlight></codeline>
+<codeline lineno="70"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::IDENTITY));</highlight></codeline>
+<codeline lineno="71"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::LOG));</highlight></codeline>
+<codeline lineno="72"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::LOGICAL_NOT));</highlight></codeline>
+<codeline lineno="73"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::NEG));</highlight></codeline>
+<codeline lineno="74"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::RECIPROCAL));</highlight></codeline>
+<codeline lineno="75"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::RELU_FWD));</highlight></codeline>
+<codeline lineno="76"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::RSQRT));</highlight></codeline>
+<codeline lineno="77"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SIGMOID_FWD));</highlight></codeline>
+<codeline lineno="78"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SIN));</highlight></codeline>
+<codeline lineno="79"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SOFTPLUS_FWD));</highlight></codeline>
+<codeline lineno="80"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SQRT));</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SWISH_FWD));</highlight></codeline>
+<codeline lineno="82"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::TAN));</highlight></codeline>
+<codeline lineno="83"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::TANH_FWD));</highlight></codeline>
+<codeline lineno="84"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>bitset;</highlight></codeline>
+<codeline lineno="85"><highlight class="normal"><sp/><sp/><sp/><sp/>}();</highlight></codeline>
+<codeline lineno="86"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>s_unaryModes;</highlight></codeline>
+<codeline lineno="87"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="88"><highlight class="normal"></highlight></codeline>
+<codeline lineno="89"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Get<sp/>all<sp/>binary<sp/>operations<sp/>(for<sp/>frontend<sp/>compatibility)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="90" refid="namespacehipdnn__data__sdk_1_1utilities_1a51e0c9be722e03d6e397e6242116c1bf" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref>&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a51e0c9be722e03d6e397e6242116c1bf" kindref="member">getBinaryModesBitset</ref>()</highlight></codeline>
+<codeline lineno="91"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>s_binaryModes<sp/>=<sp/>[]()<sp/>{</highlight></codeline>
+<codeline lineno="93"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>bitset;</highlight></codeline>
+<codeline lineno="94"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::ADD));</highlight></codeline>
+<codeline lineno="95"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::ADD_SQUARE));</highlight></codeline>
+<codeline lineno="96"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::CMP_EQ));</highlight></codeline>
+<codeline lineno="97"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::CMP_GE));</highlight></codeline>
+<codeline lineno="98"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::CMP_GT));</highlight></codeline>
+<codeline lineno="99"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::CMP_LE));</highlight></codeline>
+<codeline lineno="100"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::CMP_LT));</highlight></codeline>
+<codeline lineno="101"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::CMP_NEQ));</highlight></codeline>
+<codeline lineno="102"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::DIV));</highlight></codeline>
+<codeline lineno="103"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::ELU_BWD));</highlight></codeline>
+<codeline lineno="104"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::GELU_APPROX_TANH_BWD));</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::GELU_BWD));</highlight></codeline>
+<codeline lineno="106"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::LOGICAL_AND));</highlight></codeline>
+<codeline lineno="107"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::LOGICAL_OR));</highlight></codeline>
+<codeline lineno="108"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::MAX_OP));</highlight></codeline>
+<codeline lineno="109"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::MIN_OP));</highlight></codeline>
+<codeline lineno="110"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::MUL));</highlight></codeline>
+<codeline lineno="111"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::RELU_BWD));</highlight></codeline>
+<codeline lineno="112"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SIGMOID_BWD));</highlight></codeline>
+<codeline lineno="113"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SOFTPLUS_BWD));</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SUB));</highlight></codeline>
+<codeline lineno="115"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::SWISH_BWD));</highlight></codeline>
+<codeline lineno="116"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::TANH_BWD));</highlight></codeline>
+<codeline lineno="117"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>bitset;</highlight></codeline>
+<codeline lineno="118"><highlight class="normal"><sp/><sp/><sp/><sp/>}();</highlight></codeline>
+<codeline lineno="119"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>s_binaryModes;</highlight></codeline>
+<codeline lineno="120"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="121"><highlight class="normal"></highlight></codeline>
+<codeline lineno="122"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Get<sp/>all<sp/>ternary<sp/>operations<sp/>(for<sp/>frontend<sp/>compatibility)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="123" refid="namespacehipdnn__data__sdk_1_1utilities_1afaaf27c04cce74eccc6db2171480571e" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref>&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1afaaf27c04cce74eccc6db2171480571e" kindref="member">getTernaryModesBitset</ref>()</highlight></codeline>
+<codeline lineno="124"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="125"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>s_ternaryModes<sp/>=<sp/>[]()<sp/>{</highlight></codeline>
+<codeline lineno="126"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4b038b952e483e8dda0e6e90e307b646" kindref="member">PointwiseModeBitset</ref><sp/>bitset;</highlight></codeline>
+<codeline lineno="127"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>bitset.set(<ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(data_objects::PointwiseMode::BINARY_SELECT));</highlight></codeline>
+<codeline lineno="128"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>bitset;</highlight></codeline>
+<codeline lineno="129"><highlight class="normal"><sp/><sp/><sp/><sp/>}();</highlight></codeline>
+<codeline lineno="130"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>s_ternaryModes;</highlight></codeline>
+<codeline lineno="131"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="132"><highlight class="normal"></highlight></codeline>
+<codeline lineno="133" refid="namespacehipdnn__data__sdk_1_1utilities_1a57197d1bc33f48c7ff3e349c5d599591" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a57197d1bc33f48c7ff3e349c5d599591" kindref="member">isUnaryPointwiseMode</ref>(data_objects::PointwiseMode<sp/>mode)</highlight></codeline>
+<codeline lineno="134"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="135"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>position<sp/>=<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(mode);</highlight></codeline>
+<codeline lineno="136"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>position<sp/>&lt;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" kindref="member">POINTWISE_MODE_COUNT</ref><sp/>&amp;&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1add506dfed78cde1f6bd30f2a4148f933" kindref="member">getUnaryModesBitset</ref>().test(position);</highlight></codeline>
+<codeline lineno="137"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="138"><highlight class="normal"></highlight></codeline>
+<codeline lineno="139" refid="namespacehipdnn__data__sdk_1_1utilities_1a3312d12f0aeaaef3d924fb10d238edcc" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a3312d12f0aeaaef3d924fb10d238edcc" kindref="member">isBinaryPointwiseMode</ref>(data_objects::PointwiseMode<sp/>mode)</highlight></codeline>
+<codeline lineno="140"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="141"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>position<sp/>=<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(mode);</highlight></codeline>
+<codeline lineno="142"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>position<sp/>&lt;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" kindref="member">POINTWISE_MODE_COUNT</ref><sp/>&amp;&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a51e0c9be722e03d6e397e6242116c1bf" kindref="member">getBinaryModesBitset</ref>().test(position);</highlight></codeline>
+<codeline lineno="143"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="144"><highlight class="normal"></highlight></codeline>
+<codeline lineno="145" refid="namespacehipdnn__data__sdk_1_1utilities_1a0cd1a0e7dc1d5ed4caae58990fd0e8b5" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a0cd1a0e7dc1d5ed4caae58990fd0e8b5" kindref="member">isTernaryPointwiseMode</ref>(data_objects::PointwiseMode<sp/>mode)</highlight></codeline>
+<codeline lineno="146"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="147"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>position<sp/>=<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(mode);</highlight></codeline>
+<codeline lineno="148"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>position<sp/>&lt;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" kindref="member">POINTWISE_MODE_COUNT</ref><sp/>&amp;&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1afaaf27c04cce74eccc6db2171480571e" kindref="member">getTernaryModesBitset</ref>().test(position);</highlight></codeline>
+<codeline lineno="149"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="150"><highlight class="normal"></highlight></codeline>
+<codeline lineno="151"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Check<sp/>if<sp/>operations<sp/>have<sp/>implemented<sp/>functors<sp/>(for<sp/>ReferencePointwiseBase<sp/>usage)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="152" refid="namespacehipdnn__data__sdk_1_1utilities_1a94809294e2630d21572c5ccb9e5b7355" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a94809294e2630d21572c5ccb9e5b7355" kindref="member">isImplementedUnaryPointwiseMode</ref>(data_objects::PointwiseMode<sp/>mode)</highlight></codeline>
+<codeline lineno="153"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="154"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>position<sp/>=<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(mode);</highlight></codeline>
+<codeline lineno="155"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>position<sp/>&lt;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" kindref="member">POINTWISE_MODE_COUNT</ref><sp/>&amp;&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a21d79975938289a6c020af6938b17273" kindref="member">getImplementedUnaryModesBitset</ref>().test(position);</highlight></codeline>
+<codeline lineno="156"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="157"><highlight class="normal"></highlight></codeline>
+<codeline lineno="158" refid="namespacehipdnn__data__sdk_1_1utilities_1a2ada1683f5e1b7927931be15abecf9a0" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a2ada1683f5e1b7927931be15abecf9a0" kindref="member">isImplementedBinaryPointwiseMode</ref>(data_objects::PointwiseMode<sp/>mode)</highlight></codeline>
+<codeline lineno="159"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="160"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>position<sp/>=<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a8271624e32156444670234241b600932" kindref="member">toBitPosition</ref>(mode);</highlight></codeline>
+<codeline lineno="161"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>position<sp/>&lt;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4fc552cdc9fa1410cbdb59a2d30ef27a" kindref="member">POINTWISE_MODE_COUNT</ref><sp/>&amp;&amp;<sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1a4e09934e49976a0981c4ad96a963e183" kindref="member">getImplementedBinaryModesBitset</ref>().test(position);</highlight></codeline>
+<codeline lineno="162"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="163"><highlight class="normal"></highlight></codeline>
+<codeline lineno="164" refid="namespacehipdnn__data__sdk_1_1utilities_1ac441371ee5b50a3ea2b9b7f933cf4521" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">inline</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">bool</highlight><highlight class="normal"><sp/><ref refid="namespacehipdnn__data__sdk_1_1utilities_1ac441371ee5b50a3ea2b9b7f933cf4521" kindref="member">isImplementedTernaryPointwiseMode</ref>(data_objects::PointwiseMode<sp/></highlight><highlight class="comment">/*<sp/>mode<sp/>*/</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="165"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="166"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Currently<sp/>no<sp/>ternary<sp/>operations<sp/>are<sp/>implemented</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="167"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">false</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="168"><highlight class="normal">}</highlight></codeline>
+<codeline lineno="169"><highlight class="normal"></highlight></codeline>
+<codeline lineno="170"><highlight class="normal">}<sp/></highlight><highlight class="comment">//<sp/>namespace<sp/>hipdnn_data_sdk::utilities</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/PointwiseValidation.hpp"/>
+  </compounddef>
+</doxygen>

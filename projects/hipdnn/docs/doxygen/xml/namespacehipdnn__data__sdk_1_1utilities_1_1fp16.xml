@@ -1,0 +1,89 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__data__sdk_1_1utilities_1_1fp16" kind="namespace" language="C++">
+    <compoundname>hipdnn_data_sdk::utilities::fp16</compoundname>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1_1fp16_1a2afe2b10387af12d0682060395377bdf" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>__HOST_DEVICE__ half</type>
+        <definition>__HOST_DEVICE__ half hipdnn_data_sdk::utilities::fp16::ushort_as_half</definition>
+        <argsstring>(unsigned short x)</argsstring>
+        <name>ushort_as_half</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::fp16::ushort_as_half</qualifiedname>
+        <param>
+          <type>unsigned short</type>
+          <declname>x</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" line="20" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" bodystart="20" bodyend="25"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1_1fp16_1acfd5ababa9257f06580ec703be31e963" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>__HOST_DEVICE__ half</type>
+        <definition>__HOST_DEVICE__ half hipdnn_data_sdk::utilities::fp16::habs</definition>
+        <argsstring>(half num)</argsstring>
+        <name>habs</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::fp16::habs</qualifiedname>
+        <param>
+          <type>half</type>
+          <declname>num</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" line="27" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" bodystart="27" bodyend="32"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1_1fp16_1ab8b72ba35c4ac785e47bdd4b5f7c8860" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>__HOST_DEVICE__ bool</type>
+        <definition>__HOST_DEVICE__ bool hipdnn_data_sdk::utilities::fp16::hisnan</definition>
+        <argsstring>(__half x)</argsstring>
+        <name>hisnan</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::fp16::hisnan</qualifiedname>
+        <param>
+          <type>__half</type>
+          <declname>x</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" line="34" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" bodystart="34" bodyend="38"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__data__sdk_1_1utilities_1_1fp16_1af2c7ff4916dd316b7572c28c2781e2ca" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>__HOST_DEVICE__ half</type>
+        <definition>__HOST_DEVICE__ half hipdnn_data_sdk::utilities::fp16::hmax</definition>
+        <argsstring>(const half a, const half b)</argsstring>
+        <name>hmax</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::fp16::hmax</qualifiedname>
+        <param>
+          <type>const half</type>
+          <declname>a</declname>
+        </param>
+        <param>
+          <type>const half</type>
+          <declname>b</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" line="40" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" bodystart="40" bodyend="59"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/UtilsFp16.hpp" line="17" column="1"/>
+  </compounddef>
+</doxygen>

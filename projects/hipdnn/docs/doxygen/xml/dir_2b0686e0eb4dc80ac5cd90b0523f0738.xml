@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_2b0686e0eb4dc80ac5cd90b0523f0738" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities</compoundname>
+    <innerfile refid="EngineConfigWrapper_8hpp">EngineConfigWrapper.hpp</innerfile>
+    <innerfile refid="EngineDetailsWrapper_8hpp">EngineDetailsWrapper.hpp</innerfile>
+    <innerfile refid="FlatbufferTypeHelpers_8hpp">FlatbufferTypeHelpers.hpp</innerfile>
+    <innerfile refid="GraphWrapper_8hpp">GraphWrapper.hpp</innerfile>
+    <innerfile refid="NodeWrapper_8hpp">NodeWrapper.hpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/"/>
+  </compounddef>
+</doxygen>

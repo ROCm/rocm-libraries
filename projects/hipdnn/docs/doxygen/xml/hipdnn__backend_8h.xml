@@ -4,54 +4,58 @@
     <compoundname>hipdnn_backend.h</compoundname>
     <includes local="no">hip/hip_runtime_api.h</includes>
     <includes local="yes">hipdnn_backend_export.h</includes>
-    <includes refid="_hipdnn_backend_attribute_name_8h" local="yes">HipdnnBackendAttributeName.h</includes>
-    <includes refid="_hipdnn_backend_attribute_type_8h" local="yes">HipdnnBackendAttributeType.h</includes>
-    <includes refid="_hipdnn_backend_callback_types_8h" local="yes">HipdnnBackendCallbackTypes.h</includes>
-    <includes refid="_hipdnn_backend_descriptor_type_8h" local="yes">HipdnnBackendDescriptorType.h</includes>
-    <includes refid="_hipdnn_backend_heuristic_type_8h" local="yes">HipdnnBackendHeuristicType.h</includes>
-    <includes refid="_hipdnn_backend_limits_8h" local="yes">HipdnnBackendLimits.h</includes>
-    <includes refid="_hipdnn_backend_plugin_loading_mode_8h" local="yes">HipdnnBackendPluginLoadingMode.h</includes>
-    <includes refid="_hipdnn_backend_plugin_unloading_mode_8h" local="yes">HipdnnBackendPluginUnloadingMode.h</includes>
-    <includes refid="_hipdnn_status_8h" local="yes">HipdnnStatus.h</includes>
+    <includes refid="HipdnnBackendAttributeName_8h" local="yes">HipdnnBackendAttributeName.h</includes>
+    <includes refid="HipdnnBackendAttributeType_8h" local="yes">HipdnnBackendAttributeType.h</includes>
+    <includes refid="HipdnnBackendCallbackTypes_8h" local="yes">HipdnnBackendCallbackTypes.h</includes>
+    <includes refid="HipdnnBackendDescriptorType_8h" local="yes">HipdnnBackendDescriptorType.h</includes>
+    <includes refid="HipdnnBackendHeuristicType_8h" local="yes">HipdnnBackendHeuristicType.h</includes>
+    <includes refid="HipdnnBackendLimits_8h" local="yes">HipdnnBackendLimits.h</includes>
+    <includes refid="HipdnnBackendPluginLoadingMode_8h" local="yes">HipdnnBackendPluginLoadingMode.h</includes>
+    <includes refid="HipdnnBackendPluginUnloadingMode_8h" local="yes">HipdnnBackendPluginUnloadingMode.h</includes>
+    <includes refid="HipdnnStatus_8h" local="yes">HipdnnStatus.h</includes>
+    <includedby refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</includedby>
+    <includedby refid="Utilities_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp</includedby>
+    <includedby refid="HipdnnBackendInterface_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/HipdnnBackendInterface.hpp</includedby>
+    <includedby refid="Helpers_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</includedby>
     <incdepgraph>
       <node id="4">
         <label>HipdnnBackendAttributeName.h</label>
-        <link refid="_hipdnn_backend_attribute_name_8h"/>
+        <link refid="HipdnnBackendAttributeName_8h"/>
       </node>
       <node id="5">
         <label>HipdnnBackendAttributeType.h</label>
-        <link refid="_hipdnn_backend_attribute_type_8h"/>
+        <link refid="HipdnnBackendAttributeType_8h"/>
       </node>
       <node id="6">
         <label>HipdnnBackendCallbackTypes.h</label>
-        <link refid="_hipdnn_backend_callback_types_8h"/>
+        <link refid="HipdnnBackendCallbackTypes_8h"/>
       </node>
       <node id="7">
         <label>HipdnnBackendDescriptorType.h</label>
-        <link refid="_hipdnn_backend_descriptor_type_8h"/>
+        <link refid="HipdnnBackendDescriptorType_8h"/>
       </node>
       <node id="8">
         <label>HipdnnBackendHeuristicType.h</label>
-        <link refid="_hipdnn_backend_heuristic_type_8h"/>
+        <link refid="HipdnnBackendHeuristicType_8h"/>
       </node>
       <node id="9">
         <label>HipdnnBackendLimits.h</label>
-        <link refid="_hipdnn_backend_limits_8h"/>
+        <link refid="HipdnnBackendLimits_8h"/>
       </node>
       <node id="10">
         <label>HipdnnBackendPluginLoadingMode.h</label>
-        <link refid="_hipdnn_backend_plugin_loading_mode_8h"/>
+        <link refid="HipdnnBackendPluginLoadingMode_8h"/>
       </node>
       <node id="11">
         <label>HipdnnBackendPluginUnloadingMode.h</label>
-        <link refid="_hipdnn_backend_plugin_unloading_mode_8h"/>
+        <link refid="HipdnnBackendPluginUnloadingMode_8h"/>
       </node>
       <node id="12">
         <label>HipdnnStatus.h</label>
-        <link refid="_hipdnn_status_8h"/>
+        <link refid="HipdnnStatus_8h"/>
       </node>
       <node id="1">
-        <label>hipdnn_backend.h</label>
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h</label>
         <link refid="hipdnn__backend_8h"/>
         <childnode refid="2" relation="include">
         </childnode>
@@ -83,6 +87,234 @@
         <label>hipdnn_backend_export.h</label>
       </node>
     </incdepgraph>
+    <invincdepgraph>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="16">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp</label>
+        <link refid="Handle_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="15">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp</label>
+        <link refid="Utilities_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+      </node>
+      <node id="30">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendWrapper.hpp</label>
+        <link refid="BackendWrapper_8hpp"/>
+        <childnode refid="17" relation="include">
+        </childnode>
+      </node>
+      <node id="29">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/HipdnnBackendInterface.hpp</label>
+        <link refid="HipdnnBackendInterface_8hpp"/>
+        <childnode refid="30" relation="include">
+        </childnode>
+      </node>
+      <node id="17">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
+        <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+      <node id="18">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>
+        <link refid="Knob_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="19">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp</label>
+        <link refid="KnobConstraint_8hpp"/>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="20">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
+        <link refid="BatchnormBackwardNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="21">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNode.hpp</label>
+        <link refid="BatchnormInferenceNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="22">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp</label>
+        <link refid="BatchnormInferenceNodeVarianceExt_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="23">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormNode.hpp</label>
+        <link refid="BatchnormNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="24">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
+        <link refid="ConvolutionDgradNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="25">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionFpropNode.hpp</label>
+        <link refid="ConvolutionFpropNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="26">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionWgradNode.hpp</label>
+        <link refid="ConvolutionWgradNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="27">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/PointwiseNode.hpp</label>
+        <link refid="PointwiseNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="28">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp</label>
+        <link refid="TopologicalSortingUtils_8hpp"/>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
     <sectiondef kind="typedef">
       <memberdef kind="typedef" id="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" prot="public" static="no">
         <type>struct hipdnnHandle *</type>
@@ -115,7 +347,7 @@
     </sectiondef>
     <sectiondef kind="func">
       <memberdef kind="function" id="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnCreate</definition>
         <argsstring>(hipdnnHandle_t *handle)</argsstring>
         <name>hipdnnCreate</name>
@@ -168,7 +400,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="81" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="81" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnDestroy</definition>
         <argsstring>(hipdnnHandle_t handle)</argsstring>
         <name>hipdnnDestroy</name>
@@ -213,7 +445,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="91" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="91" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a29e2d50c13a76cd2c0ca8f88070e57f7" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetStream</definition>
         <argsstring>(hipdnnHandle_t handle, hipStream_t streamId)</argsstring>
         <name>hipdnnSetStream</name>
@@ -270,7 +502,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="102" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="102" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a3899c8c216c8866c9e7b9294433ade73" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetStream</definition>
         <argsstring>(hipdnnHandle_t handle, hipStream_t *streamId)</argsstring>
         <name>hipdnnGetStream</name>
@@ -334,12 +566,12 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="119" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="119" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor</definition>
         <argsstring>(hipdnnBackendDescriptorType_t descriptorType, hipdnnBackendDescriptor_t *descriptor)</argsstring>
         <name>hipdnnBackendCreateDescriptor</name>
         <param>
-          <type><ref refid="_hipdnn_backend_descriptor_type_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref></type>
+          <type><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref></type>
           <declname>descriptorType</declname>
         </param>
         <param>
@@ -400,7 +632,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="134" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="134" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a0a378c9807eefb3506edb8084ad9930b" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendDestroyDescriptor</definition>
         <argsstring>(hipdnnBackendDescriptor_t descriptor)</argsstring>
         <name>hipdnnBackendDestroyDescriptor</name>
@@ -447,7 +679,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="154" column="5" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="154" declcolumn="5"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendExecute</definition>
         <argsstring>(hipdnnHandle_t handle, hipdnnBackendDescriptor_t executionPlan, hipdnnBackendDescriptor_t variantPack)</argsstring>
         <name>hipdnnBackendExecute</name>
@@ -537,7 +769,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="175" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="175" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendFinalize</definition>
         <argsstring>(hipdnnBackendDescriptor_t descriptor)</argsstring>
         <name>hipdnnBackendFinalize</name>
@@ -599,7 +831,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="193" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="193" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetAttribute</definition>
         <argsstring>(hipdnnBackendDescriptor_t descriptor, hipdnnBackendAttributeName_t attributeName, hipdnnBackendAttributeType_t attributeType, int64_t requestedElementCount, int64_t *elementCount, void *arrayOfElements)</argsstring>
         <name>hipdnnBackendGetAttribute</name>
@@ -608,11 +840,11 @@
           <declname>descriptor</declname>
         </param>
         <param>
-          <type><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref></type>
+          <type><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref></type>
           <declname>attributeName</declname>
         </param>
         <param>
-          <type><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref></type>
+          <type><ref refid="HipdnnBackendAttributeType_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref></type>
           <declname>attributeType</declname>
         </param>
         <param>
@@ -713,7 +945,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="226" column="5" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="226" declcolumn="5"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetAttribute</definition>
         <argsstring>(hipdnnBackendDescriptor_t descriptor, hipdnnBackendAttributeName_t attributeName, hipdnnBackendAttributeType_t attributeType, int64_t elementCount, const void *arrayOfElements)</argsstring>
         <name>hipdnnBackendSetAttribute</name>
@@ -722,11 +954,11 @@
           <declname>descriptor</declname>
         </param>
         <param>
-          <type><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref></type>
+          <type><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref></type>
           <declname>attributeName</declname>
         </param>
         <param>
-          <type><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref></type>
+          <type><ref refid="HipdnnBackendAttributeType_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref></type>
           <declname>attributeType</declname>
         </param>
         <param>
@@ -828,7 +1060,7 @@
         <argsstring>(hipdnnStatus_t status)</argsstring>
         <name>hipdnnGetErrorString</name>
         <param>
-          <type><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+          <type><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
           <declname>status</declname>
         </param>
         <briefdescription>
@@ -938,7 +1170,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="314" column="28" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="314" declcolumn="28"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext</definition>
         <argsstring>(hipdnnBackendDescriptor_t *descriptor, const uint8_t *serializedGraph, size_t graphByteSize)</argsstring>
         <name>hipdnnBackendCreateAndDeserializeGraph_ext</name>
@@ -1035,7 +1267,7 @@
         <argsstring>(hipdnnSeverity_t severity, const char *msg)</argsstring>
         <name>hipdnnLoggingCallback_ext</name>
         <param>
-          <type><ref refid="_hipdnn_backend_callback_types_8h_1aa3f15482bbaf7bcbc31a7b5737e6ff07" kindref="member">hipdnnSeverity_t</ref></type>
+          <type><ref refid="HipdnnBackendCallbackTypes_8h_1aa3f15482bbaf7bcbc31a7b5737e6ff07" kindref="member">hipdnnSeverity_t</ref></type>
           <declname>severity</declname>
         </param>
         <param>
@@ -1071,7 +1303,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="351" column="28" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="351" declcolumn="28"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1ad1bc6574b113dd78ce5ffbfafca66d16" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext</definition>
         <argsstring>(size_t numPaths, const char *const *pluginPaths, hipdnnPluginLoadingMode_ext_t loadingMode)</argsstring>
         <name>hipdnnSetEnginePluginPaths_ext</name>
@@ -1084,7 +1316,7 @@
           <declname>pluginPaths</declname>
         </param>
         <param>
-          <type><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref></type>
+          <type><ref refid="HipdnnBackendPluginLoadingMode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref></type>
           <declname>loadingMode</declname>
         </param>
         <briefdescription>
@@ -1158,12 +1390,12 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="373" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="373" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a5c3664c522be2d0b343238abff0e3851" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetPluginUnloadMode_ext</definition>
         <argsstring>(hipdnnPluginUnloadingMode_ext_t unloadingMode)</argsstring>
         <name>hipdnnSetPluginUnloadMode_ext</name>
         <param>
-          <type><ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref></type>
+          <type><ref refid="HipdnnBackendPluginUnloadingMode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref></type>
           <declname>unloadingMode</declname>
         </param>
         <briefdescription>
@@ -1205,7 +1437,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="393" column="5" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="393" declcolumn="5"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a712599886637bd8ee91dfae0f7c97d04" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext</definition>
         <argsstring>(hipdnnHandle_t handle, size_t *numPluginPaths, char **pluginPaths, size_t *maxStringLen)</argsstring>
         <name>hipdnnGetLoadedEnginePluginPaths_ext</name>
@@ -1308,7 +1540,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="417" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="417" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a8eed6a17c31728e5af2b27ab090770ea" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext</definition>
         <argsstring>(hipdnnHandle_t handle, size_t *numEngines)</argsstring>
         <name>hipdnnGetEngineCount_ext</name>
@@ -1373,7 +1605,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="432" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="432" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a1f9525b20ec31d3ba768b4864bc0878e" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext</definition>
         <argsstring>(hipdnnHandle_t handle, size_t engineIndex, int64_t *engineId, char *engineName, size_t *engineNameLen, char *pluginName, size_t *pluginNameLen, char *version, size_t *versionLen, char *type, size_t *typeLen)</argsstring>
         <name>hipdnnGetEngineInfo_ext</name>
@@ -1555,7 +1787,7 @@
         <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" line="465" column="38" declfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h" declline="465" declcolumn="38"/>
       </memberdef>
       <memberdef kind="function" id="hipdnn__backend_8h_1a8cb8a526e824c31d84875221a2917b0c" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
-        <type>HIPDNN_BACKEND_EXPORT <ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+        <type>HIPDNN_BACKEND_EXPORT <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
         <definition>HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext</definition>
         <argsstring>(const char **version)</argsstring>
         <name>hipdnnGetVersion_ext</name>
@@ -1608,15 +1840,15 @@
 <codeline lineno="44"><highlight class="normal"></highlight><highlight class="comment">//<sp/>Cmake<sp/>Generated<sp/>export<sp/>header.</highlight><highlight class="normal"></highlight></codeline>
 <codeline lineno="45"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;hipdnn_backend_export.h&quot;</highlight><highlight class="normal"></highlight></codeline>
 <codeline lineno="46"><highlight class="normal"></highlight></codeline>
-<codeline lineno="47"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_attribute_name_8h" kindref="compound">HipdnnBackendAttributeName.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="48"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_attribute_type_8h" kindref="compound">HipdnnBackendAttributeType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="49"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_callback_types_8h" kindref="compound">HipdnnBackendCallbackTypes.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="50"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_descriptor_type_8h" kindref="compound">HipdnnBackendDescriptorType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="51"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_heuristic_type_8h" kindref="compound">HipdnnBackendHeuristicType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="52"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_limits_8h" kindref="compound">HipdnnBackendLimits.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="53"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_plugin_loading_mode_8h" kindref="compound">HipdnnBackendPluginLoadingMode.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="54"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_backend_plugin_unloading_mode_8h" kindref="compound">HipdnnBackendPluginUnloadingMode.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="55"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="_hipdnn_status_8h" kindref="compound">HipdnnStatus.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="47"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnBackendAttributeName_8h" kindref="compound">HipdnnBackendAttributeName.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="48"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnBackendAttributeType_8h" kindref="compound">HipdnnBackendAttributeType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="49"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnBackendCallbackTypes_8h" kindref="compound">HipdnnBackendCallbackTypes.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="50"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnBackendDescriptorType_8h" kindref="compound">HipdnnBackendDescriptorType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="51"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnBackendHeuristicType_8h" kindref="compound">HipdnnBackendHeuristicType.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="52"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnBackendLimits_8h" kindref="compound">HipdnnBackendLimits.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="53"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnBackendPluginLoadingMode_8h" kindref="compound">HipdnnBackendPluginLoadingMode.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="54"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnBackendPluginUnloadingMode_8h" kindref="compound">HipdnnBackendPluginUnloadingMode.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="55"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="HipdnnStatus_8h" kindref="compound">HipdnnStatus.h</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
 <codeline lineno="56"><highlight class="normal"></highlight></codeline>
 <codeline lineno="57"><highlight class="normal"></highlight><highlight class="comment">//<sp/>NOLINTBEGIN</highlight><highlight class="normal"></highlight></codeline>
 <codeline lineno="58"><highlight class="normal"></highlight><highlight class="preprocessor">#ifdef<sp/>__cplusplus</highlight><highlight class="normal"></highlight></codeline>
@@ -1627,42 +1859,42 @@
 <codeline lineno="66"><highlight class="normal"></highlight></codeline>
 <codeline lineno="70" refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">struct<sp/></highlight><highlight class="normal">HipdnnBackendDescriptor*<sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>;</highlight></codeline>
 <codeline lineno="71"><highlight class="normal"></highlight></codeline>
-<codeline lineno="81" refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" kindref="member">hipdnnCreate</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref>*<sp/>handle);</highlight></codeline>
+<codeline lineno="81" refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" kindref="member">hipdnnCreate</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref>*<sp/>handle);</highlight></codeline>
 <codeline lineno="82"><highlight class="normal"></highlight></codeline>
-<codeline lineno="91" refid="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" kindref="member">hipdnnDestroy</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle);</highlight></codeline>
+<codeline lineno="91" refid="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1aa287c6560fd8b88fa0cce371a499d191" kindref="member">hipdnnDestroy</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle);</highlight></codeline>
 <codeline lineno="92"><highlight class="normal"></highlight></codeline>
-<codeline lineno="102" refid="hipdnn__backend_8h_1a29e2d50c13a76cd2c0ca8f88070e57f7" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a29e2d50c13a76cd2c0ca8f88070e57f7" kindref="member">hipdnnSetStream</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,<sp/>hipStream_t<sp/>streamId);</highlight></codeline>
+<codeline lineno="102" refid="hipdnn__backend_8h_1a29e2d50c13a76cd2c0ca8f88070e57f7" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a29e2d50c13a76cd2c0ca8f88070e57f7" kindref="member">hipdnnSetStream</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,<sp/>hipStream_t<sp/>streamId);</highlight></codeline>
 <codeline lineno="103"><highlight class="normal"></highlight></codeline>
-<codeline lineno="119" refid="hipdnn__backend_8h_1a3899c8c216c8866c9e7b9294433ade73" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a3899c8c216c8866c9e7b9294433ade73" kindref="member">hipdnnGetStream</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,<sp/>hipStream_t*<sp/>streamId);</highlight></codeline>
+<codeline lineno="119" refid="hipdnn__backend_8h_1a3899c8c216c8866c9e7b9294433ade73" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a3899c8c216c8866c9e7b9294433ade73" kindref="member">hipdnnGetStream</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,<sp/>hipStream_t*<sp/>streamId);</highlight></codeline>
 <codeline lineno="120"><highlight class="normal"></highlight></codeline>
-<codeline lineno="134" refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor</ref>(</highlight></codeline>
-<codeline lineno="135"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_descriptor_type_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref><sp/>descriptorType,<sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>*<sp/>descriptor);</highlight></codeline>
+<codeline lineno="134" refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor</ref>(</highlight></codeline>
+<codeline lineno="135"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref><sp/>descriptorType,<sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>*<sp/>descriptor);</highlight></codeline>
 <codeline lineno="136"><highlight class="normal"></highlight></codeline>
-<codeline lineno="153"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
+<codeline lineno="153"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
 <codeline lineno="154" refid="hipdnn__backend_8h_1a0a378c9807eefb3506edb8084ad9930b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1a0a378c9807eefb3506edb8084ad9930b" kindref="member">hipdnnBackendDestroyDescriptor</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor);</highlight></codeline>
 <codeline lineno="155"><highlight class="normal"></highlight></codeline>
-<codeline lineno="175" refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" kindref="member">hipdnnBackendExecute</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="175" refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" kindref="member">hipdnnBackendExecute</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
 <codeline lineno="176"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>executionPlan,</highlight></codeline>
 <codeline lineno="177"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>variantPack);</highlight></codeline>
 <codeline lineno="178"><highlight class="normal"></highlight></codeline>
-<codeline lineno="193" refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" kindref="member">hipdnnBackendFinalize</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor);</highlight></codeline>
+<codeline lineno="193" refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" kindref="member">hipdnnBackendFinalize</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor);</highlight></codeline>
 <codeline lineno="194"><highlight class="normal"></highlight></codeline>
-<codeline lineno="225"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
+<codeline lineno="225"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
 <codeline lineno="226" refid="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" kindref="member">hipdnnBackendGetAttribute</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor,</highlight></codeline>
-<codeline lineno="227"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref><sp/>attributeName,</highlight></codeline>
-<codeline lineno="228"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref><sp/>attributeType,</highlight></codeline>
+<codeline lineno="227"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref><sp/>attributeName,</highlight></codeline>
+<codeline lineno="228"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeType_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref><sp/>attributeType,</highlight></codeline>
 <codeline lineno="229"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>int64_t<sp/>requestedElementCount,</highlight></codeline>
 <codeline lineno="230"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>int64_t*<sp/>elementCount,</highlight></codeline>
 <codeline lineno="231"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal">*<sp/>arrayOfElements);</highlight></codeline>
 <codeline lineno="232"><highlight class="normal"></highlight></codeline>
-<codeline lineno="259"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
+<codeline lineno="259"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
 <codeline lineno="260" refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" kindref="member">hipdnnBackendSetAttribute</ref>(<ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref><sp/>descriptor,</highlight></codeline>
-<codeline lineno="261"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_name_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref><sp/>attributeName,</highlight></codeline>
-<codeline lineno="262"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="_hipdnn_backend_attribute_type_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref><sp/>attributeType,</highlight></codeline>
+<codeline lineno="261"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref><sp/>attributeName,</highlight></codeline>
+<codeline lineno="262"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeType_8h_1a16cf2465cfc6d4f269b8c658352326b7" kindref="member">hipdnnBackendAttributeType_t</ref><sp/>attributeType,</highlight></codeline>
 <codeline lineno="263"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>int64_t<sp/>elementCount,</highlight></codeline>
 <codeline lineno="264"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal">*<sp/>arrayOfElements);</highlight></codeline>
 <codeline lineno="265"><highlight class="normal"></highlight></codeline>
-<codeline lineno="275" refid="hipdnn__backend_8h_1a49844a9cbd47a4337d8d4def63ed5841" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="hipdnn__backend_8h_1a49844a9cbd47a4337d8d4def63ed5841" kindref="member">hipdnnGetErrorString</ref>(<ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/>status);</highlight></codeline>
+<codeline lineno="275" refid="hipdnn__backend_8h_1a49844a9cbd47a4337d8d4def63ed5841" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/><ref refid="hipdnn__backend_8h_1a49844a9cbd47a4337d8d4def63ed5841" kindref="member">hipdnnGetErrorString</ref>(<ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/>status);</highlight></codeline>
 <codeline lineno="276"><highlight class="normal"></highlight></codeline>
 <codeline lineno="290" refid="hipdnn__backend_8h_1a5ff452bc8cc292866a8a96f43aa0ba28" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="hipdnn__backend_8h_1a5ff452bc8cc292866a8a96f43aa0ba28" kindref="member">hipdnnGetLastErrorString</ref>(</highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>message,<sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>maxSize);</highlight></codeline>
 <codeline lineno="291"><highlight class="normal"></highlight></codeline>
@@ -1676,26 +1908,26 @@
 <codeline lineno="299"><highlight class="normal"></highlight></codeline>
 <codeline lineno="314" refid="hipdnn__backend_8h_1a6345631d2a28bec73ace21a4877123d3" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="hipdnn__backend_8h_1a6345631d2a28bec73ace21a4877123d3" kindref="member">hipdnnPeekLastErrorString_ext</ref>(</highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>message,<sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>maxSize);</highlight></codeline>
 <codeline lineno="315"><highlight class="normal"></highlight></codeline>
-<codeline lineno="339" refid="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" kindref="member">hipdnnBackendCreateAndDeserializeGraph_ext</ref>(</highlight></codeline>
+<codeline lineno="339" refid="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1abf73b48dad63b5dcb448def755e2dd41" kindref="member">hipdnnBackendCreateAndDeserializeGraph_ext</ref>(</highlight></codeline>
 <codeline lineno="340"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref>*<sp/>descriptor,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>uint8_t*<sp/>serializedGraph,<sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>graphByteSize);</highlight></codeline>
 <codeline lineno="341"><highlight class="normal"></highlight></codeline>
-<codeline lineno="351" refid="hipdnn__backend_8h_1a442118a1f9d3cec7c467671fca0e32bc" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="hipdnn__backend_8h_1a442118a1f9d3cec7c467671fca0e32bc" kindref="member">hipdnnLoggingCallback_ext</ref>(<ref refid="_hipdnn_backend_callback_types_8h_1aa3f15482bbaf7bcbc31a7b5737e6ff07" kindref="member">hipdnnSeverity_t</ref><sp/>severity,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>msg);</highlight></codeline>
+<codeline lineno="351" refid="hipdnn__backend_8h_1a442118a1f9d3cec7c467671fca0e32bc" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal"><sp/><ref refid="hipdnn__backend_8h_1a442118a1f9d3cec7c467671fca0e32bc" kindref="member">hipdnnLoggingCallback_ext</ref>(<ref refid="HipdnnBackendCallbackTypes_8h_1aa3f15482bbaf7bcbc31a7b5737e6ff07" kindref="member">hipdnnSeverity_t</ref><sp/>severity,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>msg);</highlight></codeline>
 <codeline lineno="352"><highlight class="normal"></highlight></codeline>
-<codeline lineno="373" refid="hipdnn__backend_8h_1ad1bc6574b113dd78ce5ffbfafca66d16" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1ad1bc6574b113dd78ce5ffbfafca66d16" kindref="member">hipdnnSetEnginePluginPaths_ext</ref>(</highlight></codeline>
-<codeline lineno="374"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>numPaths,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal">*<sp/>pluginPaths,<sp/><ref refid="_hipdnn_backend_plugin_loading_mode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref><sp/>loadingMode);</highlight></codeline>
+<codeline lineno="373" refid="hipdnn__backend_8h_1ad1bc6574b113dd78ce5ffbfafca66d16" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1ad1bc6574b113dd78ce5ffbfafca66d16" kindref="member">hipdnnSetEnginePluginPaths_ext</ref>(</highlight></codeline>
+<codeline lineno="374"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>numPaths,<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal">*<sp/>pluginPaths,<sp/><ref refid="HipdnnBackendPluginLoadingMode_8h_1a51d3b5d4dd140eaf46fa19908ceb302a" kindref="member">hipdnnPluginLoadingMode_ext_t</ref><sp/>loadingMode);</highlight></codeline>
 <codeline lineno="375"><highlight class="normal"></highlight></codeline>
-<codeline lineno="392"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
-<codeline lineno="393" refid="hipdnn__backend_8h_1a5c3664c522be2d0b343238abff0e3851" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1a5c3664c522be2d0b343238abff0e3851" kindref="member">hipdnnSetPluginUnloadMode_ext</ref>(<ref refid="_hipdnn_backend_plugin_unloading_mode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref><sp/>unloadingMode);</highlight></codeline>
+<codeline lineno="392"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></highlight></codeline>
+<codeline lineno="393" refid="hipdnn__backend_8h_1a5c3664c522be2d0b343238abff0e3851" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="hipdnn__backend_8h_1a5c3664c522be2d0b343238abff0e3851" kindref="member">hipdnnSetPluginUnloadMode_ext</ref>(<ref refid="HipdnnBackendPluginUnloadingMode_8h_1a61368e3eebd0b0a65cbb08033999ae1a" kindref="member">hipdnnPluginUnloadingMode_ext_t</ref><sp/>unloadingMode);</highlight></codeline>
 <codeline lineno="394"><highlight class="normal"></highlight></codeline>
-<codeline lineno="417" refid="hipdnn__backend_8h_1a712599886637bd8ee91dfae0f7c97d04" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a712599886637bd8ee91dfae0f7c97d04" kindref="member">hipdnnGetLoadedEnginePluginPaths_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="417" refid="hipdnn__backend_8h_1a712599886637bd8ee91dfae0f7c97d04" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a712599886637bd8ee91dfae0f7c97d04" kindref="member">hipdnnGetLoadedEnginePluginPaths_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
 <codeline lineno="418"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>numPluginPaths,</highlight></codeline>
 <codeline lineno="419"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">**<sp/>pluginPaths,</highlight></codeline>
 <codeline lineno="420"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>maxStringLen);</highlight></codeline>
 <codeline lineno="421"><highlight class="normal"></highlight></codeline>
-<codeline lineno="432" refid="hipdnn__backend_8h_1a8eed6a17c31728e5af2b27ab090770ea" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a8eed6a17c31728e5af2b27ab090770ea" kindref="member">hipdnnGetEngineCount_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="432" refid="hipdnn__backend_8h_1a8eed6a17c31728e5af2b27ab090770ea" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a8eed6a17c31728e5af2b27ab090770ea" kindref="member">hipdnnGetEngineCount_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
 <codeline lineno="433"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>numEngines);</highlight></codeline>
 <codeline lineno="434"><highlight class="normal"></highlight></codeline>
-<codeline lineno="465" refid="hipdnn__backend_8h_1a1f9525b20ec31d3ba768b4864bc0878e" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a1f9525b20ec31d3ba768b4864bc0878e" kindref="member">hipdnnGetEngineInfo_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
+<codeline lineno="465" refid="hipdnn__backend_8h_1a1f9525b20ec31d3ba768b4864bc0878e" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a1f9525b20ec31d3ba768b4864bc0878e" kindref="member">hipdnnGetEngineInfo_ext</ref>(<ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle,</highlight></codeline>
 <codeline lineno="466"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal"><sp/>engineIndex,</highlight></codeline>
 <codeline lineno="467"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>int64_t*<sp/>engineId,</highlight></codeline>
 <codeline lineno="468"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>engineName,</highlight></codeline>
@@ -1707,7 +1939,7 @@
 <codeline lineno="474"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">*<sp/>type,</highlight></codeline>
 <codeline lineno="475"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordtype">size_t</highlight><highlight class="normal">*<sp/>typeLen);</highlight></codeline>
 <codeline lineno="476"><highlight class="normal"></highlight></codeline>
-<codeline lineno="477" refid="hipdnn__backend_8h_1a8cb8a526e824c31d84875221a2917b0c" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="_hipdnn_status_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a8cb8a526e824c31d84875221a2917b0c" kindref="member">hipdnnGetVersion_ext</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">**<sp/>version);</highlight></codeline>
+<codeline lineno="477" refid="hipdnn__backend_8h_1a8cb8a526e824c31d84875221a2917b0c" refkind="member"><highlight class="normal">HIPDNN_BACKEND_EXPORT<sp/><ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref><sp/><ref refid="hipdnn__backend_8h_1a8cb8a526e824c31d84875221a2917b0c" kindref="member">hipdnnGetVersion_ext</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="keywordtype">char</highlight><highlight class="normal">**<sp/>version);</highlight></codeline>
 <codeline lineno="478"><highlight class="normal"></highlight></codeline>
 <codeline lineno="479"><highlight class="normal"></highlight><highlight class="preprocessor">#ifdef<sp/>__cplusplus</highlight><highlight class="normal"></highlight></codeline>
 <codeline lineno="480"><highlight class="normal">}</highlight></codeline>

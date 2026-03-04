@@ -1,8 +1,8 @@
 <?xml version='1.0' encoding='UTF-8' standalone='no'?>
 <doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
   <compounddef id="dir_8c739bbef76d64b22d6b0911c526dd76" kind="dir">
-    <compoundname>backend</compoundname>
-    <innerdir refid="dir_afc1e89bdcbaba0f1e323dc5f755439c">include</innerdir>
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/backend</compoundname>
+    <innerdir refid="dir_afc1e89bdcbaba0f1e323dc5f755439c">/home/matwilli/rocm-libraries/projects/hipdnn/backend/include</innerdir>
     <briefdescription>
     </briefdescription>
     <detaileddescription>

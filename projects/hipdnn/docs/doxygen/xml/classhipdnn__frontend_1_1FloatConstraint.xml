@@ -1,0 +1,205 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1FloatConstraint" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::FloatConstraint</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1IConstraint" prot="public" virt="non-virtual">hipdnn_frontend::IConstraint</basecompoundref>
+    <includes refid="KnobConstraint_8hpp" local="no">KnobConstraint.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1FloatConstraint_1a29c647139be3c5722034cd1d467ea098" prot="private" static="no" mutable="no">
+        <type>double</type>
+        <definition>double hipdnn_frontend::FloatConstraint::_minValue</definition>
+        <argsstring></argsstring>
+        <name>_minValue</name>
+        <qualifiedname>hipdnn_frontend::FloatConstraint::_minValue</qualifiedname>
+        <briefdescription>
+<para>Minimum allowed value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="230" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="230" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1FloatConstraint_1aa4d7a107d63181450257da1977bda46b" prot="private" static="no" mutable="no">
+        <type>double</type>
+        <definition>double hipdnn_frontend::FloatConstraint::_maxValue</definition>
+        <argsstring></argsstring>
+        <name>_maxValue</name>
+        <qualifiedname>hipdnn_frontend::FloatConstraint::_maxValue</qualifiedname>
+        <briefdescription>
+<para>Maximum allowed value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="231" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="231" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1FloatConstraint_1a0f50f95fb5de8a342625401d4038fde1" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::FloatConstraint::FloatConstraint</definition>
+        <argsstring>(double minValue, double maxValue)</argsstring>
+        <name>FloatConstraint</name>
+        <qualifiedname>hipdnn_frontend::FloatConstraint::FloatConstraint</qualifiedname>
+        <param>
+          <type>double</type>
+          <declname>minValue</declname>
+        </param>
+        <param>
+          <type>double</type>
+          <declname>maxValue</declname>
+        </param>
+        <briefdescription>
+<para>Construct a <ref refid="classhipdnn__frontend_1_1FloatConstraint" kindref="compound">FloatConstraint</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>minValue</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Minimum allowed value </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>maxValue</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Maximum allowed value </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="184" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="184" bodyend="188"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1FloatConstraint_1aa8339728e2e59a90ca41ce9deb063612" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::FloatConstraint::validateKnobSetting</definition>
+        <argsstring>(const KnobSetting &amp;setting) const override</argsstring>
+        <name>validateKnobSetting</name>
+        <qualifiedname>hipdnn_frontend::FloatConstraint::validateKnobSetting</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1IConstraint_1a6ab00265f7278a5fa54bfc2c33bc1e92">validateKnobSetting</reimplements>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> &amp;</type>
+          <declname>setting</declname>
+        </param>
+        <briefdescription>
+<para>Validate a knob setting against this constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>setting</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> to validate </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or describing the validation failure </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="190" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="190" bodyend="208"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1FloatConstraint_1a779dc3ae16ae5b29b8ef722e0b08a407" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::FloatConstraint::toString</definition>
+        <argsstring>() const override</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_frontend::FloatConstraint::toString</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1IConstraint_1ad415b6bb1b75cc43d38a06f18d74db9e">toString</reimplements>
+        <briefdescription>
+<para>Get a string representation of this constraint. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Human-readable string for debugging/logging </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="210" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="210" bodyend="215"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1FloatConstraint_1a0a8a737053042a8ba7c04bacd6850f3f" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>double</type>
+        <definition>double hipdnn_frontend::FloatConstraint::getMinValue</definition>
+        <argsstring>() const</argsstring>
+        <name>getMinValue</name>
+        <qualifiedname>hipdnn_frontend::FloatConstraint::getMinValue</qualifiedname>
+        <briefdescription>
+<para>Get the minimum allowed value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="218" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="218" bodyend="221"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1FloatConstraint_1a9e7abb549c6742ba1c12348345f3e94c" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>double</type>
+        <definition>double hipdnn_frontend::FloatConstraint::getMaxValue</definition>
+        <argsstring>() const</argsstring>
+        <name>getMaxValue</name>
+        <qualifiedname>hipdnn_frontend::FloatConstraint::getMaxValue</qualifiedname>
+        <briefdescription>
+<para>Get the maximum allowed value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="224" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="224" bodyend="227"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Constraint for floating-point valued knobs. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>Validates that float knob values are within a specified range. </para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>hipdnn_frontend::FloatConstraint</label>
+        <link refid="classhipdnn__frontend_1_1FloatConstraint"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend::IConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IConstraint"/>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>hipdnn_frontend::FloatConstraint</label>
+        <link refid="classhipdnn__frontend_1_1FloatConstraint"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend::IConstraint</label>
+        <link refid="classhipdnn__frontend_1_1IConstraint"/>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" line="176" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp" bodystart="177" bodyend="232"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1FloatConstraint_1aa4d7a107d63181450257da1977bda46b" prot="private" virt="non-virtual"><scope>hipdnn_frontend::FloatConstraint</scope><name>_maxValue</name></member>
+      <member refid="classhipdnn__frontend_1_1FloatConstraint_1a29c647139be3c5722034cd1d467ea098" prot="private" virt="non-virtual"><scope>hipdnn_frontend::FloatConstraint</scope><name>_minValue</name></member>
+      <member refid="classhipdnn__frontend_1_1FloatConstraint_1a0f50f95fb5de8a342625401d4038fde1" prot="public" virt="non-virtual"><scope>hipdnn_frontend::FloatConstraint</scope><name>FloatConstraint</name></member>
+      <member refid="classhipdnn__frontend_1_1FloatConstraint_1a9e7abb549c6742ba1c12348345f3e94c" prot="public" virt="non-virtual"><scope>hipdnn_frontend::FloatConstraint</scope><name>getMaxValue</name></member>
+      <member refid="classhipdnn__frontend_1_1FloatConstraint_1a0a8a737053042a8ba7c04bacd6850f3f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::FloatConstraint</scope><name>getMinValue</name></member>
+      <member refid="classhipdnn__frontend_1_1FloatConstraint_1a779dc3ae16ae5b29b8ef722e0b08a407" prot="public" virt="virtual"><scope>hipdnn_frontend::FloatConstraint</scope><name>toString</name></member>
+      <member refid="classhipdnn__frontend_1_1FloatConstraint_1aa8339728e2e59a90ca41ce9deb063612" prot="public" virt="virtual"><scope>hipdnn_frontend::FloatConstraint</scope><name>validateKnobSetting</name></member>
+      <member refid="classhipdnn__frontend_1_1IConstraint_1aff435d1b005226f942d3943c72fcd95a" prot="public" virt="virtual"><scope>hipdnn_frontend::FloatConstraint</scope><name>~IConstraint</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

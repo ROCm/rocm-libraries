@@ -1,0 +1,196 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::BatchnormBackwardNode</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; BatchnormBackwardNode &gt;</basecompoundref>
+    <includes refid="BatchnormBackwardNode_8hpp" local="no">BatchnormBackwardNode.hpp</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1adc8f6a29172288095ea3daaef6095607" prot="public" static="no" mutable="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref></type>
+        <definition>BatchnormBackwardAttributes hipdnn_frontend::graph::BatchnormBackwardNode::attributes</definition>
+        <argsstring></argsstring>
+        <name>attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormBackwardNode::attributes</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" line="19" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" bodystart="19" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a5d25e9b46c1c07491926e641daf2b396" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::graph::BatchnormBackwardNode::BatchnormBackwardNode</definition>
+        <argsstring>(BatchnormBackwardAttributes &amp;&amp;batchnormAttrs, const GraphAttributes &amp;graphAttrs)</argsstring>
+        <name>BatchnormBackwardNode</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormBackwardNode::BatchnormBackwardNode</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref> &amp;&amp;</type>
+          <declname>batchnormAttrs</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+          <declname>graphAttrs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" line="21" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" bodystart="21" bodyend="26"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a7e214b8577942f727db19fcedc83da6b" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::BatchnormBackwardNode::pre_validate_node</definition>
+        <argsstring>() const override</argsstring>
+        <name>pre_validate_node</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormBackwardNode::pre_validate_node</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1graph_1_1INode_1aa2b999b5be1babae092b12a616e47142">pre_validate_node</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" line="28" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" bodystart="28" bodyend="154"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1ab8ec3955a7c047194db52d7d0af0d937" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::BatchnormBackwardNode::infer_properties_node</definition>
+        <argsstring>() override</argsstring>
+        <name>infer_properties_node</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormBackwardNode::infer_properties_node</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1graph_1_1INode_1a8b28f89f18758ed3a1dfc5b9b2ad63a0">infer_properties_node</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" line="156" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" bodystart="156" bodyend="216"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a4bf24c993bde3abb66cd16a6a199289c" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>void</type>
+        <definition>void hipdnn_frontend::graph::BatchnormBackwardNode::gather_hipdnn_tensors</definition>
+        <argsstring>(std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;allTensors) const override</argsstring>
+        <name>gather_hipdnn_tensors</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormBackwardNode::gather_hipdnn_tensors</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1">gather_hipdnn_tensors</reimplements>
+        <param>
+          <type>std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+          <declname>allTensors</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" line="218" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" bodystart="218" bodyend="230"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a6fdc6bef7396a5f634946c16fa23be44" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::Node &gt;</type>
+        <definition>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::Node &gt; hipdnn_frontend::graph::BatchnormBackwardNode::pack_node</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder) const override</argsstring>
+        <name>pack_node</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchnormBackwardNode::pack_node</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1graph_1_1INode_1a4561977ed6bd0bf33b9c8840f8cf1164">pack_node</reimplements>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" line="233" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" bodystart="233" bodyend="241"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_frontend::graph::BaseNode&lt; BatchnormBackwardNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="3" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::BatchnormBackwardNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>hipdnn_frontend::graph::INode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1INode"/>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="6">
+        <label>hipdnn_frontend::graph::Attributes&lt; BatchnormBackwardAttributes &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Attributes"/>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend::graph::BaseNode&lt; BatchnormBackwardNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="3" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="5">
+        <label>hipdnn_frontend::graph::BatchnormBackwardAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes"/>
+        <childnode refid="6" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::BatchnormBackwardNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+        <childnode refid="5" relation="usage">
+          <edgelabel>attributes</edgelabel>
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_frontend::graph::GraphAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes"/>
+      </node>
+      <node id="3">
+        <label>hipdnn_frontend::graph::INode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1INode"/>
+        <childnode refid="4" relation="usage">
+          <edgelabel>graph_attributes</edgelabel>
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" line="16" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" bodystart="17" bodyend="242"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a0d40adb0a0b71eeae9cd946495b7705e" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>_sub_nodes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1adc8f6a29172288095ea3daaef6095607" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a5d25e9b46c1c07491926e641daf2b396" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>BatchnormBackwardNode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a4bf24c993bde3abb66cd16a6a199289c" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>gather_hipdnn_tensors</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a1f9eb34676b9472a82f5f121c4763492" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>gatherHipdnnTensorsSubtree</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>getNodeInputTensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>getNodeOutputTensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1aacfcb1f1ec9b376ac7a7afb6b4f7389a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>graph_attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1ab8ec3955a7c047194db52d7d0af0d937" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>infer_properties_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a5487d58d8e51312358e341ff75157f2b" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>INode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a6fdc6bef7396a5f634946c16fa23be44" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>pack_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>post_validate_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode_1a7e214b8577942f727db19fcedc83da6b" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>pre_validate_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a20295372f663ad76910d185982baabe3" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>validateSubtree</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a88228ffa2f038c274dfcaf8316f55227" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>visit</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a84993f3eb21c56cd0f00c35655d828bd" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>visit</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a504092d3f0e9ffffbd874e562a5251aa" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::BatchnormBackwardNode</scope><name>~INode</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

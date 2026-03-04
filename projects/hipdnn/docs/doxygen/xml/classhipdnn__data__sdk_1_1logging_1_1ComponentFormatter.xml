@@ -1,0 +1,109 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter" kind="class" language="C++" prot="public" final="yes">
+    <compoundname>hipdnn_data_sdk::logging::ComponentFormatter</compoundname>
+    <basecompoundref prot="public" virt="non-virtual">spdlog::formatter</basecompoundref>
+    <includes refid="ComponentFormatter_8hpp" local="no">ComponentFormatter.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter_1aea1847048cce376dcac215ebc3e57c4e" prot="private" static="no" mutable="no">
+        <type>std::unique_ptr&lt; spdlog::pattern_formatter &gt;</type>
+        <definition>std::unique_ptr&lt;spdlog::pattern_formatter&gt; hipdnn_data_sdk::logging::ComponentFormatter::_passThroughFormatter</definition>
+        <argsstring></argsstring>
+        <name>_passThroughFormatter</name>
+        <qualifiedname>hipdnn_data_sdk::logging::ComponentFormatter::_passThroughFormatter</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" line="44" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" bodystart="44" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter_1a1f7384943b22337303639e6139f14fbe" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::logging::ComponentFormatter::ComponentFormatter</definition>
+        <argsstring>()</argsstring>
+        <name>ComponentFormatter</name>
+        <qualifiedname>hipdnn_data_sdk::logging::ComponentFormatter::ComponentFormatter</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" line="18" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" bodystart="18" bodyend="21"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter_1a91672907582b16bc7c6c543e14353a3b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::logging::ComponentFormatter::format</definition>
+        <argsstring>(const spdlog::details::log_msg &amp;msg, spdlog::memory_buf_t &amp;dest) override</argsstring>
+        <name>format</name>
+        <qualifiedname>hipdnn_data_sdk::logging::ComponentFormatter::format</qualifiedname>
+        <param>
+          <type>const spdlog::details::log_msg &amp;</type>
+          <declname>msg</declname>
+        </param>
+        <param>
+          <type>spdlog::memory_buf_t &amp;</type>
+          <declname>dest</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" line="23" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" bodystart="23" bodyend="36"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter_1a3ee0bfe39470da52ac2409914478a039" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::unique_ptr&lt; spdlog::formatter &gt;</type>
+        <definition>std::unique_ptr&lt; spdlog::formatter &gt; hipdnn_data_sdk::logging::ComponentFormatter::clone</definition>
+        <argsstring>() const override</argsstring>
+        <name>clone</name>
+        <qualifiedname>hipdnn_data_sdk::logging::ComponentFormatter::clone</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" line="38" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" bodystart="38" bodyend="41"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>hipdnn_data_sdk::logging::ComponentFormatter</label>
+        <link refid="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>spdlog::formatter</label>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>hipdnn_data_sdk::logging::ComponentFormatter</label>
+        <link refid="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>spdlog::formatter</label>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" line="15" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/logging/ComponentFormatter.hpp" bodystart="16" bodyend="45"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter_1aea1847048cce376dcac215ebc3e57c4e" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::logging::ComponentFormatter</scope><name>_passThroughFormatter</name></member>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter_1a3ee0bfe39470da52ac2409914478a039" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::logging::ComponentFormatter</scope><name>clone</name></member>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter_1a1f7384943b22337303639e6139f14fbe" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::logging::ComponentFormatter</scope><name>ComponentFormatter</name></member>
+      <member refid="classhipdnn__data__sdk_1_1logging_1_1ComponentFormatter_1a91672907582b16bc7c6c543e14353a3b" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::logging::ComponentFormatter</scope><name>format</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

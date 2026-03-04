@@ -1,0 +1,184 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__plugin__sdk_1_1IGraph" kind="class" language="C++" prot="public" abstract="yes">
+    <compoundname>hipdnn_plugin_sdk::IGraph</compoundname>
+    <derivedcompoundref refid="classhipdnn__plugin__sdk_1_1GraphWrapper" prot="public" virt="non-virtual">hipdnn_plugin_sdk::GraphWrapper</derivedcompoundref>
+    <includes refid="GraphWrapper_8hpp" local="no">GraphWrapper.hpp</includes>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1a38f50ebf74cfb22dc36c0cf301b79958" prot="public" static="no" const="no" explicit="no" inline="no" virt="virtual">
+        <type></type>
+        <definition>virtual hipdnn_plugin_sdk::IGraph::~IGraph</definition>
+        <argsstring>()=default</argsstring>
+        <name>~IGraph</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::~IGraph</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="24" column="13"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1a5efe7d1b8c0f7c74756974e6ed9e84e2" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const hipdnn_data_sdk::data_objects::Graph &amp;</type>
+        <definition>virtual const hipdnn_data_sdk::data_objects::Graph &amp; hipdnn_plugin_sdk::IGraph::getGraph</definition>
+        <argsstring>() const =0</argsstring>
+        <name>getGraph</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::getGraph</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1GraphWrapper_1a1a8aa8ef24ac74185f24dee7c93d279b">getGraph</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="26" column="56"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1abe2e9ccc335364097862284031b356e2" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>bool</type>
+        <definition>virtual bool hipdnn_plugin_sdk::IGraph::isValid</definition>
+        <argsstring>() const =0</argsstring>
+        <name>isValid</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::isValid</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1GraphWrapper_1a743bf4474b18368d4263faef7f9a4d0c">isValid</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="27" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1a7b79c12b5848c24776faddc8a3108fd7" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>uint32_t</type>
+        <definition>virtual uint32_t hipdnn_plugin_sdk::IGraph::nodeCount</definition>
+        <argsstring>() const =0</argsstring>
+        <name>nodeCount</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::nodeCount</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1GraphWrapper_1a508598316e2d4a5a6ac28dc88e9d37fd">nodeCount</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="28" column="22"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1a68460b0fbaf7a5df9d8ebf0b28043157" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>bool</type>
+        <definition>virtual bool hipdnn_plugin_sdk::IGraph::hasOnlySupportedAttributes</definition>
+        <argsstring>(std::set&lt; hipdnn_data_sdk::data_objects::NodeAttributes &gt; supportedAttributes) const =0</argsstring>
+        <name>hasOnlySupportedAttributes</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::hasOnlySupportedAttributes</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1GraphWrapper_1a4a738b3e4365a29c98892f9804ee6660">hasOnlySupportedAttributes</reimplementedby>
+        <param>
+          <type>std::set&lt; hipdnn_data_sdk::data_objects::NodeAttributes &gt;</type>
+          <declname>supportedAttributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="29" column="18"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1ae11e34bbe03ba04b687c1d83951de500" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const hipdnn_data_sdk::data_objects::Node &amp;</type>
+        <definition>virtual const hipdnn_data_sdk::data_objects::Node &amp; hipdnn_plugin_sdk::IGraph::getNode</definition>
+        <argsstring>(uint32_t index) const =0</argsstring>
+        <name>getNode</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::getNode</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1GraphWrapper_1a7b08dd5921d8cdccbe3caf7e377b36fe">getNode</reimplementedby>
+        <param>
+          <type>uint32_t</type>
+          <declname>index</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="32" column="55"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1a19040f4a37bf39b7af875abff1a05da0" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const <ref refid="classhipdnn__plugin__sdk_1_1INodeWrapper" kindref="compound">INodeWrapper</ref> &amp;</type>
+        <definition>virtual const INodeWrapper &amp; hipdnn_plugin_sdk::IGraph::getNodeWrapper</definition>
+        <argsstring>(uint32_t index) const =0</argsstring>
+        <name>getNodeWrapper</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::getNodeWrapper</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1GraphWrapper_1ab53f8cf9df878b2d224788f2ae9cf1c9">getNodeWrapper</reimplementedby>
+        <param>
+          <type>uint32_t</type>
+          <declname>index</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="33" column="32"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1a19a2705fb7d28d4b8fa2b78284e26529" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const std::vector&lt; std::unique_ptr&lt; <ref refid="classhipdnn__plugin__sdk_1_1INodeWrapper" kindref="compound">INodeWrapper</ref> &gt; &gt; &amp;</type>
+        <definition>virtual const std::vector&lt; std::unique_ptr&lt; INodeWrapper &gt; &gt; &amp; hipdnn_plugin_sdk::IGraph::nodeWrappers</definition>
+        <argsstring>() const =0</argsstring>
+        <name>nodeWrappers</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::nodeWrappers</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1GraphWrapper_1a7bad6fca0f1782aa03ea718e7496e3b2">nodeWrappers</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="34" column="31"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__plugin__sdk_1_1IGraph_1aa90d113634ac7a8a1e80bcf70f7a2da8" prot="public" static="no" const="yes" explicit="no" inline="no" virt="pure-virtual">
+        <type>const std::unordered_map&lt; int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes * &gt; &amp;</type>
+        <definition>virtual const std::unordered_map&lt; int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes * &gt; &amp; hipdnn_plugin_sdk::IGraph::getTensorMap</definition>
+        <argsstring>() const =0</argsstring>
+        <name>getTensorMap</name>
+        <qualifiedname>hipdnn_plugin_sdk::IGraph::getTensorMap</qualifiedname>
+        <reimplementedby refid="classhipdnn__plugin__sdk_1_1GraphWrapper_1a2eea252cbe8959f942868f2ee04086f2">getTensorMap</reimplementedby>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="37" column="9"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_plugin_sdk::GraphWrapper</label>
+        <link refid="classhipdnn__plugin__sdk_1_1GraphWrapper"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>hipdnn_plugin_sdk::IGraph</label>
+        <link refid="classhipdnn__plugin__sdk_1_1IGraph"/>
+      </node>
+    </inheritancegraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" line="21" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp" bodystart="22" bodyend="39"/>
+    <listofallmembers>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1a5efe7d1b8c0f7c74756974e6ed9e84e2" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>getGraph</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1ae11e34bbe03ba04b687c1d83951de500" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>getNode</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1a19040f4a37bf39b7af875abff1a05da0" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>getNodeWrapper</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1aa90d113634ac7a8a1e80bcf70f7a2da8" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>getTensorMap</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1a68460b0fbaf7a5df9d8ebf0b28043157" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>hasOnlySupportedAttributes</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1abe2e9ccc335364097862284031b356e2" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>isValid</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1a7b79c12b5848c24776faddc8a3108fd7" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>nodeCount</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1a19a2705fb7d28d4b8fa2b78284e26529" prot="public" virt="pure-virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>nodeWrappers</name></member>
+      <member refid="classhipdnn__plugin__sdk_1_1IGraph_1a38f50ebf74cfb22dc36c0cf301b79958" prot="public" virt="virtual"><scope>hipdnn_plugin_sdk::IGraph</scope><name>~IGraph</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

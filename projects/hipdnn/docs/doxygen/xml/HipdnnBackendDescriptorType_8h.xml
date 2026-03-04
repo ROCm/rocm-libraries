@@ -1,0 +1,434 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="HipdnnBackendDescriptorType_8h" kind="file" language="C++">
+    <compoundname>HipdnnBackendDescriptorType.h</compoundname>
+    <includedby refid="hipdnn__backend_8h" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h</includedby>
+    <invincdepgraph>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendDescriptorType.h</label>
+        <link refid="HipdnnBackendDescriptorType_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="17">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp</label>
+        <link refid="Handle_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="16">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp</label>
+        <link refid="Utilities_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+      </node>
+      <node id="31">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendWrapper.hpp</label>
+        <link refid="BackendWrapper_8hpp"/>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="30">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/HipdnnBackendInterface.hpp</label>
+        <link refid="HipdnnBackendInterface_8hpp"/>
+        <childnode refid="31" relation="include">
+        </childnode>
+      </node>
+      <node id="18">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
+        <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+      <node id="19">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>
+        <link refid="Knob_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="20">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp</label>
+        <link refid="KnobConstraint_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="21">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
+        <link refid="BatchnormBackwardNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="22">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNode.hpp</label>
+        <link refid="BatchnormInferenceNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="23">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp</label>
+        <link refid="BatchnormInferenceNodeVarianceExt_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="24">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormNode.hpp</label>
+        <link refid="BatchnormNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="25">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
+        <link refid="ConvolutionDgradNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="26">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionFpropNode.hpp</label>
+        <link refid="ConvolutionFpropNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="27">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionWgradNode.hpp</label>
+        <link refid="ConvolutionWgradNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="28">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/PointwiseNode.hpp</label>
+        <link refid="PointwiseNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="29">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp</label>
+        <link refid="TopologicalSortingUtils_8hpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="15">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593" prot="public" static="no" strong="no">
+        <type></type>
+        <name>hipdnnBackendDescriptorType_t</name>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a4d6bdb75b666f208575cb1b9a1878378" prot="public">
+          <name>HIPDNN_INVALID_TYPE</name>
+          <initializer>= 0</initializer>
+          <briefdescription>
+<para>Invalid descriptor type - used for error detection. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a84b247b9fc703b38fbc7f5afe570e73a" prot="public">
+          <name>HIPDNN_BACKEND_ENGINE_DESCRIPTOR</name>
+          <briefdescription>
+<para>Engine descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Represents a specific execution engine that can run an operation graph. Engines are discovered through heuristics and provide different performance/precision trade-offs. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a1bc47d82570580c01a8996b340f9c3b6" prot="public">
+          <name>HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR</name>
+          <briefdescription>
+<para>Engine configuration descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Holds the configuration for an engine, including knob settings and workspace requirements. Created from an engine descriptor. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae78401c68e1e359faaa173939fecf80f" prot="public">
+          <name>HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR</name>
+          <briefdescription>
+<para>Engine heuristic descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Used to query available engines for an operation graph. Set the operation graph and heuristic mode, then query results to get ranked engine configurations. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a65828adbed1bf3ded34e291ebdda7e14" prot="public">
+          <name>HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR</name>
+          <briefdescription>
+<para>Execution plan descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>The final compiled plan ready for execution. Created from an engine configuration and used with <ref refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" kindref="member">hipdnnBackendExecute()</ref>. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593af12d8259a76f37a65e7a24531b6f26f2" prot="public">
+          <name>HIPDNN_BACKEND_INTERMEDIATE_INFO_DESCRIPTOR</name>
+          <briefdescription>
+<para>Intermediate tensor info descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Contains information about intermediate (virtual) tensors in a fused operation graph. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aa1343d26c1f698fb13c5dc6bbe305164" prot="public">
+          <name>HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR</name>
+          <briefdescription>
+<para>Knob choice descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Represents a specific value for an engine tuning knob. Used to configure engine behavior. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aa6ce5e01ed5d52b61f1b417dc08074e1" prot="public">
+          <name>HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR</name>
+          <briefdescription>
+<para>Knob info descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Contains metadata about an engine knob, including valid value ranges and default values. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aac6dbd93db19c633f59f50cccac476fd" prot="public">
+          <name>HIPDNN_BACKEND_LAYOUT_INFO_DESCRIPTOR</name>
+          <briefdescription>
+<para>Layout info descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Contains information about tensor layout requirements and supported formats for an engine. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae98948922820db385185c1ed137b7c00" prot="public">
+          <name>HIPDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR</name>
+          <briefdescription>
+<para>Generate statistics operation descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Represents an operation that generates statistics (e.g., for batch normalization running mean/variance). </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a133aa1718cb39f7ed9231076790a4e27" prot="public">
+          <name>HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR</name>
+          <briefdescription>
+<para>Operation graph descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>The main descriptor representing a computational graph. Contains tensors and operations to be executed. Typically created from serialized FlatBuffer data. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae72841005d9b500a01b5131d3316694c" prot="public">
+          <name>HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR</name>
+          <briefdescription>
+<para>Variant pack descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Maps tensor UIDs to device memory pointers and workspace for execution. Passed to <ref refid="hipdnn__backend_8h_1a2f36ebd8bf08a585779920ed28571772" kindref="member">hipdnnBackendExecute()</ref>. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a166a88b99ec79adb4592ce83fe461c62" prot="public">
+          <name>HIPDNN_BACKEND_KERNEL_CACHE_DESCRIPTOR</name>
+          <briefdescription>
+<para>Kernel cache descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Manages caching of compiled GPU kernels for faster subsequent execution plan creation. </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593af1a1ecbe03777faccf4a1f774b69db7e" prot="public">
+          <name>HIPDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR</name>
+          <briefdescription>
+<para>Paged cache load operation descriptor. </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Represents a paged memory cache loading operation. </para>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Types of backend descriptors. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>Backend descriptors are opaque handles that store configuration data. Use <ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor()</ref> with one of these types to create a new descriptor, then configure it with <ref refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" kindref="member">hipdnnBackendSetAttribute()</ref>.</para>
+<para><simplesect kind="see"><para><ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor()</ref> </para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" kindref="member">hipdnnBackendSetAttribute()</ref> </para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="hipdnn__backend_8h_1a637abdadd85af3d8c93616c7303334ff" kindref="member">hipdnnBackendFinalize()</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendDescriptorType.h" line="27" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendDescriptorType.h" bodystart="28" bodyend="138"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Descriptor type identifiers for hipDNN backend API. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the types of backend descriptors that can be created using <ref refid="hipdnn__backend_8h_1add7c56b95b297de2b29303dc464608e1" kindref="member">hipdnnBackendCreateDescriptor()</ref>. Each descriptor type holds specific configuration for different aspects of graph execution. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight></codeline>
+<codeline lineno="27" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">enum</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="28"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="30" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a4d6bdb75b666f208575cb1b9a1878378" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a4d6bdb75b666f208575cb1b9a1878378" kindref="member">HIPDNN_INVALID_TYPE</ref><sp/>=<sp/>0,</highlight></codeline>
+<codeline lineno="31"><highlight class="normal"></highlight></codeline>
+<codeline lineno="39" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a84b247b9fc703b38fbc7f5afe570e73a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a84b247b9fc703b38fbc7f5afe570e73a" kindref="member">HIPDNN_BACKEND_ENGINE_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="40"><highlight class="normal"></highlight></codeline>
+<codeline lineno="47" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a1bc47d82570580c01a8996b340f9c3b6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a1bc47d82570580c01a8996b340f9c3b6" kindref="member">HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="48"><highlight class="normal"></highlight></codeline>
+<codeline lineno="56" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae78401c68e1e359faaa173939fecf80f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae78401c68e1e359faaa173939fecf80f" kindref="member">HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="57"><highlight class="normal"></highlight></codeline>
+<codeline lineno="64" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a65828adbed1bf3ded34e291ebdda7e14" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a65828adbed1bf3ded34e291ebdda7e14" kindref="member">HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="65"><highlight class="normal"></highlight></codeline>
+<codeline lineno="72" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593af12d8259a76f37a65e7a24531b6f26f2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593af12d8259a76f37a65e7a24531b6f26f2" kindref="member">HIPDNN_BACKEND_INTERMEDIATE_INFO_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="73"><highlight class="normal"></highlight></codeline>
+<codeline lineno="80" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aa1343d26c1f698fb13c5dc6bbe305164" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aa1343d26c1f698fb13c5dc6bbe305164" kindref="member">HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"></highlight></codeline>
+<codeline lineno="88" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aa6ce5e01ed5d52b61f1b417dc08074e1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aa6ce5e01ed5d52b61f1b417dc08074e1" kindref="member">HIPDNN_BACKEND_KNOB_INFO_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="89"><highlight class="normal"></highlight></codeline>
+<codeline lineno="96" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aac6dbd93db19c633f59f50cccac476fd" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593aac6dbd93db19c633f59f50cccac476fd" kindref="member">HIPDNN_BACKEND_LAYOUT_INFO_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="97"><highlight class="normal"></highlight></codeline>
+<codeline lineno="104" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae98948922820db385185c1ed137b7c00" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae98948922820db385185c1ed137b7c00" kindref="member">HIPDNN_BACKEND_OPERATION_GEN_STATS_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"></highlight></codeline>
+<codeline lineno="113" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a133aa1718cb39f7ed9231076790a4e27" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a133aa1718cb39f7ed9231076790a4e27" kindref="member">HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"></highlight></codeline>
+<codeline lineno="121" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae72841005d9b500a01b5131d3316694c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593ae72841005d9b500a01b5131d3316694c" kindref="member">HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="122"><highlight class="normal"></highlight></codeline>
+<codeline lineno="129" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a166a88b99ec79adb4592ce83fe461c62" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593a166a88b99ec79adb4592ce83fe461c62" kindref="member">HIPDNN_BACKEND_KERNEL_CACHE_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="130"><highlight class="normal"></highlight></codeline>
+<codeline lineno="136" refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593af1a1ecbe03777faccf4a1f774b69db7e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593af1a1ecbe03777faccf4a1f774b69db7e" kindref="member">HIPDNN_BACKEND_OPERATION_PAGED_CACHE_LOAD_DESCRIPTOR</ref>,</highlight></codeline>
+<codeline lineno="137"><highlight class="normal"></highlight></codeline>
+<codeline lineno="138"><highlight class="normal">}<sp/><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref>;</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendDescriptorType.h"/>
+  </compounddef>
+</doxygen>

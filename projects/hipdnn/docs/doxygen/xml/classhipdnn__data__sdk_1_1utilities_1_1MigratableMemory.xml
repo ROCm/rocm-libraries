@@ -1,0 +1,717 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::MigratableMemory</compoundname>
+    <basecompoundref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase" prot="public" virt="non-virtual">hipdnn_data_sdk::utilities::MigratableMemoryBase&lt; T &gt;</basecompoundref>
+    <includes refid="MigratableMemory_8hpp" local="no">MigratableMemory.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>class T</type>
+      </param>
+      <param>
+        <type>class HostAlloc</type>
+        <defval><ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">HostAllocator</ref>&lt;T&gt;</defval>
+      </param>
+      <param>
+        <type>class DeviceAlloc</type>
+        <defval><ref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" kindref="compound">DeviceAllocator</ref>&lt;T&gt;</defval>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a6940dfa9cd51e28f6dddced7baa16c8c" prot="private" static="no" mutable="no">
+        <type>void *</type>
+        <definition>void* hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_hostPtr</definition>
+        <argsstring></argsstring>
+        <name>_hostPtr</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_hostPtr</qualifiedname>
+        <initializer>{nullptr}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="357" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="357" bodyend="357"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a305ded02f793aa017fe0141db4711880" prot="private" static="no" mutable="no">
+        <type>void *</type>
+        <definition>void* hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_devicePtr</definition>
+        <argsstring></argsstring>
+        <name>_devicePtr</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_devicePtr</qualifiedname>
+        <initializer>{nullptr}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="358" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="358" bodyend="358"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1afd7f2d4c1119ace9b7490a21b0bf1fa2" prot="private" static="no" mutable="no">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_count</definition>
+        <argsstring></argsstring>
+        <name>_count</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_count</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="359" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="359" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a6d5064a3f8d0aa5505bca9d1f42bfca1" prot="private" static="no" mutable="no">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_itemSize</definition>
+        <argsstring></argsstring>
+        <name>_itemSize</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_itemSize</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="360" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="360" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a17508cdf2f85b83e16aef4b4e9b65e76" prot="private" static="no" mutable="no">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_totalSize</definition>
+        <argsstring></argsstring>
+        <name>_totalSize</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_totalSize</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="361" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="361" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ae79f1379cf24b2cdf852838d1f868f3f" prot="private" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__data__sdk_1_1utilities_1af07a17b909f8d706953cd3255f1431bf" kindref="member">MemoryLocation</ref></type>
+        <definition>MemoryLocation hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_currentLocation</definition>
+        <argsstring></argsstring>
+        <name>_currentLocation</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_currentLocation</qualifiedname>
+        <initializer>{<ref refid="namespacehipdnn__data__sdk_1_1utilities_1af07a17b909f8d706953cd3255f1431bfab50339a10e1de285ac99d4c3990b8693" kindref="member">MemoryLocation::NONE</ref>}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="362" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="362" bodyend="362"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a9cf394c203aef7cff1c387fc195f13c8" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_hostValid</definition>
+        <argsstring></argsstring>
+        <name>_hostValid</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_hostValid</qualifiedname>
+        <initializer>{false}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="363" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="363" bodyend="363"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a9bc6d9ead7794d5b8839b0ba64ebeb02" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_deviceValid</definition>
+        <argsstring></argsstring>
+        <name>_deviceValid</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_deviceValid</qualifiedname>
+        <initializer>{false}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="364" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="364" bodyend="364"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a536aefa7b7ffb0d47bca494ea228bb4c" prot="private" static="no" mutable="no">
+        <type>hipStream_t</type>
+        <definition>hipStream_t hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_stream</definition>
+        <argsstring></argsstring>
+        <name>_stream</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_stream</qualifiedname>
+        <initializer>{nullptr}</initializer>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="365" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="365" bodyend="365"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ae4446807dd2512d55970645958fcc846" prot="private" static="no" mutable="no">
+        <type>HostAlloc</type>
+        <definition>HostAlloc hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_hostAllocator</definition>
+        <argsstring></argsstring>
+        <name>_hostAllocator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_hostAllocator</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="366" column="15" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="366" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ad403e8b103cb2ec59c56201c0cafa267" prot="private" static="no" mutable="no">
+        <type>DeviceAlloc</type>
+        <definition>DeviceAlloc hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::_deviceAllocator</definition>
+        <argsstring></argsstring>
+        <name>_deviceAllocator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::_deviceAllocator</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="367" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="367" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ad6d858416f5159c3639da062ac8cfe23" prot="public" static="no" const="no" explicit="yes" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::MigratableMemory</definition>
+        <argsstring>(size_t count=0, hipStream_t stream=nullptr)</argsstring>
+        <name>MigratableMemory</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::MigratableMemory</qualifiedname>
+        <param>
+          <type>size_t</type>
+          <declname>count</declname>
+          <defval>0</defval>
+        </param>
+        <param>
+          <type>hipStream_t</type>
+          <declname>stream</declname>
+          <defval>nullptr</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="67" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="67" bodyend="77"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1aeb80fb9b77131cb56342dd9390b0529d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::~MigratableMemory</definition>
+        <argsstring>() override</argsstring>
+        <name>~MigratableMemory</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::~MigratableMemory</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="79" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="79" bodyend="82"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a0204645423b4e0740e4cf9e5a7373e3b" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::MigratableMemory</definition>
+        <argsstring>(MigratableMemory &amp;&amp;other) noexcept</argsstring>
+        <name>MigratableMemory</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::MigratableMemory</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory" kindref="compound">MigratableMemory</ref> &amp;&amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="84" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="84" bodyend="106"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a51e3cc0dd853dc2eb2a4480733a279ce" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory" kindref="compound">MigratableMemory</ref> &amp;</type>
+        <definition>MigratableMemory &amp; hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::operator=</definition>
+        <argsstring>(MigratableMemory &amp;&amp;other) noexcept</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::operator=</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory" kindref="compound">MigratableMemory</ref> &amp;&amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="108" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="108" bodyend="136"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a449fce206e55d02998c2ec2c0a1c355b" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::MigratableMemory</definition>
+        <argsstring>(const MigratableMemory &amp;)=delete</argsstring>
+        <name>MigratableMemory</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::MigratableMemory</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory" kindref="compound">MigratableMemory</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="138" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a74efb05a9c348ff2dac632d22ede395b" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory" kindref="compound">MigratableMemory</ref> &amp;</type>
+        <definition>MigratableMemory &amp; hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::operator=</definition>
+        <argsstring>(const MigratableMemory &amp;)=delete</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::operator=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory" kindref="compound">MigratableMemory</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="139" column="22"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a2da8468746322ac3987cf9d110a82702" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::resize</definition>
+        <argsstring>(size_t newCount) override</argsstring>
+        <name>resize</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::resize</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1a0722b4eadda226a05226954de50957e2">resize</reimplements>
+        <param>
+          <type>size_t</type>
+          <declname>newCount</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="141" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="141" bodyend="153"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a79f1bbffe8d8636e07a5c463863f80aa" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>T *</type>
+        <definition>T * hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::hostData</definition>
+        <argsstring>() override</argsstring>
+        <name>hostData</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::hostData</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase_1a9f490d4dcc75cf6d4cded658cda5a1a0">hostData</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="156" column="7" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="156" bodyend="160"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1aced13451033d338b1eb104f1aec33af8" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>T *</type>
+        <definition>T * hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::hostDataAsync</definition>
+        <argsstring>() override</argsstring>
+        <name>hostDataAsync</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::hostDataAsync</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase_1a0e125c14e035e898920cdb4c146c61c7">hostDataAsync</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="162" column="7" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="162" bodyend="166"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a28ca00e1236986c28d8db68ae2127ce6" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>const T *</type>
+        <definition>const T * hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::hostData</definition>
+        <argsstring>() const override</argsstring>
+        <name>hostData</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::hostData</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase_1abc24a13a89c995f1251b25d0e90a87d8">hostData</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="169" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="169" bodyend="173"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a8258bb3e20e7dcb5090a5c0694539f9a" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>const T *</type>
+        <definition>const T * hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::hostDataAsync</definition>
+        <argsstring>() const override</argsstring>
+        <name>hostDataAsync</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::hostDataAsync</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase_1a7371ac64ac57ccb0515c414e8f2000aa">hostDataAsync</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="175" column="13" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="175" bodyend="179"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1adb611cadf28437eeb6d305f106ee8eb2" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>void *</type>
+        <definition>void * hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::deviceData</definition>
+        <argsstring>() override</argsstring>
+        <name>deviceData</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::deviceData</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1a6e9b8bbe452fbbf147c41b0fd801e519">deviceData</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="181" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="181" bodyend="185"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a30493dff5eca4d7a5a9c8579082da507" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>void *</type>
+        <definition>void * hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::deviceDataAsync</definition>
+        <argsstring>() override</argsstring>
+        <name>deviceDataAsync</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::deviceDataAsync</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1a1aa03e77f79fa1100928496985e9ccba">deviceDataAsync</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="187" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="187" bodyend="191"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a805b4b766877bdec745bd855ebf9b072" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::markHostModified</definition>
+        <argsstring>() override</argsstring>
+        <name>markHostModified</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::markHostModified</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1a361741920a6ebd03a77331c781353920">markHostModified</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="194" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="194" bodyend="199"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a1ed6a0d4a5bfdc634da432a95b1fc374" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::markDeviceModified</definition>
+        <argsstring>() override</argsstring>
+        <name>markDeviceModified</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::markDeviceModified</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1af84f4b325e7dca5ad680274d1005ff07">markDeviceModified</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="202" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="202" bodyend="207"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a580b914cdea282c5acdf927f00ad457a" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::count</definition>
+        <argsstring>() const override</argsstring>
+        <name>count</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::count</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1a9adfe7cc7de8671dd5e755fe719fa0ce">count</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="209" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="209" bodyend="212"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a3a1b1f46994933fdb19f9e523336de5d" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::empty</definition>
+        <argsstring>() const override</argsstring>
+        <name>empty</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::empty</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1a332cba7d6e90c748198a7981bf3df226">empty</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="214" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="214" bodyend="217"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a352d5b36f2426d5487689960d8533c46" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="namespacehipdnn__data__sdk_1_1utilities_1af07a17b909f8d706953cd3255f1431bf" kindref="member">MemoryLocation</ref></type>
+        <definition>MemoryLocation hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::location</definition>
+        <argsstring>() const override</argsstring>
+        <name>location</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::location</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1af9ef7d28b7454c285268dd210e5b45ac">location</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="219" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="219" bodyend="222"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a9de14acd9b93915d0d366b44a2861fb4" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::clear</definition>
+        <argsstring>() override</argsstring>
+        <name>clear</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::clear</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1a313e594a16d3fd9ef8bdf5dcce5d03bd">clear</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="224" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="224" bodyend="233"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-static-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a7e28c15d0919dfa521b6aa67a2034b2a" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>static void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::throwOnError</definition>
+        <argsstring>(hipError_t err, const char *msg)</argsstring>
+        <name>throwOnError</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::throwOnError</qualifiedname>
+        <param>
+          <type>hipError_t</type>
+          <declname>err</declname>
+        </param>
+        <param>
+          <type>const char *</type>
+          <declname>msg</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="236" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="236" bodyend="242"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ab31d72b4d46ab28f9a0bf48645f0100c" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>static void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::logOnError</definition>
+        <argsstring>(hipError_t err, const char *msg)</argsstring>
+        <name>logOnError</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::logOnError</qualifiedname>
+        <param>
+          <type>hipError_t</type>
+          <declname>err</declname>
+        </param>
+        <param>
+          <type>const char *</type>
+          <declname>msg</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="244" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="244" bodyend="250"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a53dfc80ffe708913e43d85e3f972d20e" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::allocateHost</definition>
+        <argsstring>()</argsstring>
+        <name>allocateHost</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::allocateHost</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="252" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="252" bodyend="260"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a8f5595f8b0c096a8f36a658b968e1f22" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::allocateDevice</definition>
+        <argsstring>()</argsstring>
+        <name>allocateDevice</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::allocateDevice</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="262" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="262" bodyend="268"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a970651c1538ac9b61a95afe3908de7cb" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::ensureConstHostValid</definition>
+        <argsstring>() const</argsstring>
+        <name>ensureConstHostValid</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::ensureConstHostValid</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="270" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="270" bodyend="282"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a78fce9b1a089c1f83f7cd9685350d644" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::ensureHostValid</definition>
+        <argsstring>(bool async=false)</argsstring>
+        <name>ensureHostValid</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::ensureHostValid</qualifiedname>
+        <param>
+          <type>bool</type>
+          <declname>async</declname>
+          <defval>false</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="284" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="284" bodyend="310"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1abb62679207b82f3730aa9d16037e7ece" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::ensureDeviceValid</definition>
+        <argsstring>(bool async=false)</argsstring>
+        <name>ensureDeviceValid</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::ensureDeviceValid</qualifiedname>
+        <param>
+          <type>bool</type>
+          <declname>async</declname>
+          <defval>false</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="312" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="312" bodyend="338"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a38671bff2427421742faa781bf1c52ed" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;::cleanup</definition>
+        <argsstring>()</argsstring>
+        <name>cleanup</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::MigratableMemory::cleanup</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="340" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="340" bodyend="355"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="3">
+        <label>hipdnn_data_sdk::utilities::IMigratableMemory</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk::utilities::MigratableMemoryBase&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase"/>
+        <childnode refid="3" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="3">
+        <label>hipdnn_data_sdk::utilities::IMigratableMemory</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::MigratableMemory&lt; T, HostAlloc, DeviceAlloc &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk::utilities::MigratableMemoryBase&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase"/>
+        <childnode refid="3" relation="public-inheritance">
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" line="59" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/MigratableMemory.hpp" bodystart="60" bodyend="368"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1afd7f2d4c1119ace9b7490a21b0bf1fa2" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_count</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ae79f1379cf24b2cdf852838d1f868f3f" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_currentLocation</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ad403e8b103cb2ec59c56201c0cafa267" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_deviceAllocator</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a305ded02f793aa017fe0141db4711880" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_devicePtr</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a9bc6d9ead7794d5b8839b0ba64ebeb02" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_deviceValid</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ae4446807dd2512d55970645958fcc846" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_hostAllocator</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a6940dfa9cd51e28f6dddced7baa16c8c" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_hostPtr</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a9cf394c203aef7cff1c387fc195f13c8" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_hostValid</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a6d5064a3f8d0aa5505bca9d1f42bfca1" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_itemSize</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a536aefa7b7ffb0d47bca494ea228bb4c" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_stream</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a17508cdf2f85b83e16aef4b4e9b65e76" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>_totalSize</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a8f5595f8b0c096a8f36a658b968e1f22" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>allocateDevice</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a53dfc80ffe708913e43d85e3f972d20e" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>allocateHost</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a38671bff2427421742faa781bf1c52ed" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>cleanup</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a9de14acd9b93915d0d366b44a2861fb4" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>clear</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a580b914cdea282c5acdf927f00ad457a" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>count</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1adb611cadf28437eeb6d305f106ee8eb2" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>deviceData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a30493dff5eca4d7a5a9c8579082da507" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>deviceDataAsync</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a3a1b1f46994933fdb19f9e523336de5d" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>empty</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a970651c1538ac9b61a95afe3908de7cb" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>ensureConstHostValid</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1abb62679207b82f3730aa9d16037e7ece" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>ensureDeviceValid</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a78fce9b1a089c1f83f7cd9685350d644" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>ensureHostValid</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a79f1bbffe8d8636e07a5c463863f80aa" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>hostData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a28ca00e1236986c28d8db68ae2127ce6" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>hostData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1aced13451033d338b1eb104f1aec33af8" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>hostDataAsync</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a8258bb3e20e7dcb5090a5c0694539f9a" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>hostDataAsync</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a352d5b36f2426d5487689960d8533c46" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>location</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ab31d72b4d46ab28f9a0bf48645f0100c" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>logOnError</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a1ed6a0d4a5bfdc634da432a95b1fc374" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>markDeviceModified</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a805b4b766877bdec745bd855ebf9b072" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>markHostModified</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1ad6d858416f5159c3639da062ac8cfe23" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>MigratableMemory</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a0204645423b4e0740e4cf9e5a7373e3b" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>MigratableMemory</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a449fce206e55d02998c2ec2c0a1c355b" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>MigratableMemory</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a51e3cc0dd853dc2eb2a4480733a279ce" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>operator=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a74efb05a9c348ff2dac632d22ede395b" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>operator=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a2da8468746322ac3987cf9d110a82702" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>resize</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1a7e28c15d0919dfa521b6aa67a2034b2a" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>throwOnError</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IMigratableMemory_1a26e767342d747fca29aed6e1e7d45f46" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>~IMigratableMemory</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemory_1aeb80fb9b77131cb56342dd9390b0529d" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>~MigratableMemory</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase_1aa9f00fe9795f0f754b6570cb986f3c3d" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::MigratableMemory</scope><name>~MigratableMemoryBase</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

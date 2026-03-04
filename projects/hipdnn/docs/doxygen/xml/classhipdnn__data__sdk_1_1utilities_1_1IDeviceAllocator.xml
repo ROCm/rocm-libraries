@@ -1,0 +1,251 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator" kind="class" language="C++" prot="public" abstract="yes">
+    <compoundname>hipdnn_data_sdk::utilities::IDeviceAllocator</compoundname>
+    <derivedcompoundref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" prot="public" virt="non-virtual">hipdnn_data_sdk::utilities::DeviceAllocator&lt; char &gt;</derivedcompoundref>
+    <derivedcompoundref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" prot="public" virt="non-virtual">hipdnn_data_sdk::utilities::DeviceAllocator&lt; T &gt;</derivedcompoundref>
+    <includes refid="Allocators_8hpp" local="no">Allocators.hpp</includes>
+    <innerclass refid="structhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1_1rebind" prot="public">hipdnn_data_sdk::utilities::IDeviceAllocator::rebind</innerclass>
+    <templateparamlist>
+      <param>
+        <type>typename T</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="public-type">
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a13c983ef66bfdef196aa19eb6bed16dd" prot="public" static="no">
+        <type>T</type>
+        <definition>using hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::value_type =  T</definition>
+        <argsstring></argsstring>
+        <name>value_type</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::value_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="68" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="68" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a22d10e38441b6956a53e2921b1bfb6f6" prot="public" static="no">
+        <type>std::size_t</type>
+        <definition>using hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::size_type =  std::size_t</definition>
+        <argsstring></argsstring>
+        <name>size_type</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::size_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="69" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="69" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a0eb9644bf69cde22f86267b6063e7fe7" prot="public" static="no">
+        <type>std::ptrdiff_t</type>
+        <definition>using hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::difference_type =  std::ptrdiff_t</definition>
+        <argsstring></argsstring>
+        <name>difference_type</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::difference_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="70" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="70" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a0704864998cc1c18426d11a1ddf3e037" prot="public" static="no">
+        <type>T *</type>
+        <definition>using hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::pointer =  T*</definition>
+        <argsstring></argsstring>
+        <name>pointer</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::pointer</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="71" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="71" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1af0ed0ad025f58c26038977fbe941a135" prot="public" static="no">
+        <type>const T *</type>
+        <definition>using hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::const_pointer =  const T*</definition>
+        <argsstring></argsstring>
+        <name>const_pointer</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::const_pointer</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="72" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="72" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a1982fc6892d73600bbc3293788e3b12e" prot="public" static="no">
+        <type>T &amp;</type>
+        <definition>using hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::reference =  T&amp;</definition>
+        <argsstring></argsstring>
+        <name>reference</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::reference</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="73" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="73" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a114b8b6fd3be0135c1af9e0f13a5f8a7" prot="public" static="no">
+        <type>const T &amp;</type>
+        <definition>using hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::const_reference =  const T&amp;</definition>
+        <argsstring></argsstring>
+        <name>const_reference</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::const_reference</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="74" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="74" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a549c91e4d8d40e3857250007423a15b7" prot="public" static="no" const="no" explicit="no" inline="no" virt="virtual">
+        <type></type>
+        <definition>virtual hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::~IDeviceAllocator</definition>
+        <argsstring>()=default</argsstring>
+        <name>~IDeviceAllocator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::~IDeviceAllocator</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="82" column="13"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1ae5fcc22de1c076de9e461c2eae5cfdb1" prot="public" static="no" const="no" explicit="no" inline="no" virt="pure-virtual">
+        <type>T *</type>
+        <definition>virtual T * hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::allocate</definition>
+        <argsstring>(std::size_t n)=0</argsstring>
+        <name>allocate</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::allocate</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator_1a1c8cf1d8a9e3a48c5c9c6646291bb1cb">allocate</reimplementedby>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator_1a1c8cf1d8a9e3a48c5c9c6646291bb1cb">allocate</reimplementedby>
+        <param>
+          <type>std::size_t</type>
+          <declname>n</declname>
+        </param>
+        <briefdescription>
+<para>Allocate device memory. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>n</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Number of elements to allocate </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Pointer to allocated device memory </para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>std::bad_alloc</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>if allocation fails </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="88" column="16"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a77e74f6151784f5971a0ce14162b194c" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="pure-virtual">
+        <type>void</type>
+        <definition>virtual void hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;::deallocate</definition>
+        <argsstring>(T *p, std::size_t n) noexcept=0</argsstring>
+        <name>deallocate</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::IDeviceAllocator::deallocate</qualifiedname>
+        <reimplementedby refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator_1a3c2ffb12a5220ba815c2e88c6e6ba63b">deallocate</reimplementedby>
+        <param>
+          <type>T *</type>
+          <declname>p</declname>
+        </param>
+        <param>
+          <type>std::size_t</type>
+          <declname>n</declname>
+        </param>
+        <briefdescription>
+<para>Deallocate device memory. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>p</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to device memory to deallocate </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>n</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Number of elements (may be used by some allocators) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="93" column="18"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Interface for device memory allocators. </para>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_data_sdk::utilities::DeviceAllocator&lt; char &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>hipdnn_data_sdk::utilities::DeviceAllocator&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator"/>
+        <childnode refid="1" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::IDeviceAllocator&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator"/>
+      </node>
+    </inheritancegraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="65" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="66" bodyend="94"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1ae5fcc22de1c076de9e461c2eae5cfdb1" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>allocate</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1af0ed0ad025f58c26038977fbe941a135" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>const_pointer</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a114b8b6fd3be0135c1af9e0f13a5f8a7" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>const_reference</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a77e74f6151784f5971a0ce14162b194c" prot="public" virt="pure-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>deallocate</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a0eb9644bf69cde22f86267b6063e7fe7" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>difference_type</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a0704864998cc1c18426d11a1ddf3e037" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>pointer</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a1982fc6892d73600bbc3293788e3b12e" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>reference</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a22d10e38441b6956a53e2921b1bfb6f6" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>size_type</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a13c983ef66bfdef196aa19eb6bed16dd" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>value_type</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IDeviceAllocator_1a549c91e4d8d40e3857250007423a15b7" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::IDeviceAllocator</scope><name>~IDeviceAllocator</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

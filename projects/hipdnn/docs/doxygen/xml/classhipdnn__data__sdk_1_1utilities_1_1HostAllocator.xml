@@ -1,0 +1,315 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::HostAllocator</compoundname>
+    <basecompoundref refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator" prot="public" virt="non-virtual">hipdnn_data_sdk::utilities::IHostAllocator&lt; T &gt;</basecompoundref>
+    <includes refid="Allocators_8hpp" local="no">Allocators.hpp</includes>
+    <innerclass refid="structhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1_1rebind" prot="public">hipdnn_data_sdk::utilities::HostAllocator::rebind</innerclass>
+    <templateparamlist>
+      <param>
+        <type>typename T</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="public-type">
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a4b7781ab7371f9510b6d3c5c9025de1b" prot="public" static="no">
+        <type>T</type>
+        <definition>using hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::value_type =  T</definition>
+        <argsstring></argsstring>
+        <name>value_type</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::value_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="103" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="103" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a29cd81a0588fb1fe8ec501815a135d1b" prot="public" static="no">
+        <type>std::size_t</type>
+        <definition>using hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::size_type =  std::size_t</definition>
+        <argsstring></argsstring>
+        <name>size_type</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::size_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="104" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="104" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1af67616f316c35269e3c97c0dc8033c04" prot="public" static="no">
+        <type>std::ptrdiff_t</type>
+        <definition>using hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::difference_type =  std::ptrdiff_t</definition>
+        <argsstring></argsstring>
+        <name>difference_type</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::difference_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="105" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="105" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a46d0c8227151680f6013822f40d96955" prot="public" static="no">
+        <type>T *</type>
+        <definition>using hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::pointer =  T*</definition>
+        <argsstring></argsstring>
+        <name>pointer</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::pointer</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="106" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="106" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a45ba555f514db5946ee39de467792d67" prot="public" static="no">
+        <type>const T *</type>
+        <definition>using hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::const_pointer =  const T*</definition>
+        <argsstring></argsstring>
+        <name>const_pointer</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::const_pointer</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="107" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="107" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1ac22805c2ab391f1401f7ec1128d2748c" prot="public" static="no">
+        <type>T &amp;</type>
+        <definition>using hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::reference =  T&amp;</definition>
+        <argsstring></argsstring>
+        <name>reference</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::reference</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="108" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="108" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a2a0a67526762a5db55374b35eb5bdef1" prot="public" static="no">
+        <type>const T &amp;</type>
+        <definition>using hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::const_reference =  const T&amp;</definition>
+        <argsstring></argsstring>
+        <name>const_reference</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::const_reference</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="109" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="109" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a5cf14f261d91a2872056ffc0b18f83a5" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::HostAllocator</definition>
+        <argsstring>() noexcept=default</argsstring>
+        <name>HostAllocator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::HostAllocator</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="117" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a38eedd90bac8d0c38f65e24b7be33723" prot="public" static="no" const="no" explicit="no" inline="no" noexcept="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::HostAllocator</definition>
+        <argsstring>(const HostAllocator &amp;) noexcept=default</argsstring>
+        <name>HostAllocator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::HostAllocator</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">HostAllocator</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="118" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1acc170055ab390da458959759f4bf5356" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename U</type>
+          </param>
+        </templateparamlist>
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::HostAllocator</definition>
+        <argsstring>(const HostAllocator&lt; U &gt; &amp;other) noexcept</argsstring>
+        <name>HostAllocator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::HostAllocator</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">HostAllocator</ref>&lt; U &gt; &amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="121" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="121" bodyend="123"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1ab87a0042f5a6f816675d08298eb9898b" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::~HostAllocator</definition>
+        <argsstring>() override=default</argsstring>
+        <name>~HostAllocator</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::~HostAllocator</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="125" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a7118abea6de689a237d20d92f442e86a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>T *</type>
+        <definition>T * hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::allocate</definition>
+        <argsstring>(std::size_t n) override</argsstring>
+        <name>allocate</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::allocate</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator_1adc225721ecfee45df11bdd755f7506b1">allocate</reimplements>
+        <param>
+          <type>std::size_t</type>
+          <declname>n</declname>
+        </param>
+        <briefdescription>
+<para>Allocate memory. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>n</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Number of elements to allocate </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Pointer to allocated memory </para>
+</simplesect>
+<parameterlist kind="exception"><parameteritem>
+<parameternamelist>
+<parametername>std::bad_alloc</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>if allocation fails </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="127" column="8" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="127" bodyend="140"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a4fe1ff3fa34ebc945bd5ea184b142f51" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;::deallocate</definition>
+        <argsstring>(T *p, std::size_t n) noexcept override</argsstring>
+        <name>deallocate</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::HostAllocator::deallocate</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator_1ac113e6c01776372b40ad1827807f061c">deallocate</reimplements>
+        <param>
+          <type>T *</type>
+          <declname>p</declname>
+        </param>
+        <param>
+          <type>std::size_t</type>
+          <declname>n</declname>
+        </param>
+        <briefdescription>
+<para>Deallocate memory. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>p</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to memory to deallocate </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>n</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Number of elements (may be used by some allocators) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="142" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="142" bodyend="145"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Standard host allocator using malloc/free. </para>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk::utilities::IHostAllocator&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator"/>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::HostAllocator&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk::utilities::IHostAllocator&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator"/>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" line="100" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/Allocators.hpp" bodystart="101" bodyend="146"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a7118abea6de689a237d20d92f442e86a" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>allocate</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a45ba555f514db5946ee39de467792d67" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>const_pointer</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a2a0a67526762a5db55374b35eb5bdef1" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>const_reference</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator_1a46f6fe33ac00cd105c65fc22ec7de471" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>construct</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a4fe1ff3fa34ebc945bd5ea184b142f51" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>deallocate</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator_1a40f6edb1e6082e6550437d8f5a95c5f1" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>destroy</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1af67616f316c35269e3c97c0dc8033c04" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>difference_type</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a5cf14f261d91a2872056ffc0b18f83a5" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>HostAllocator</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a38eedd90bac8d0c38f65e24b7be33723" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>HostAllocator</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1acc170055ab390da458959759f4bf5356" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>HostAllocator</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a46d0c8227151680f6013822f40d96955" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>pointer</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1ac22805c2ab391f1401f7ec1128d2748c" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>reference</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a29cd81a0588fb1fe8ec501815a135d1b" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>size_type</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1a4b7781ab7371f9510b6d3c5c9025de1b" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>value_type</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator_1ab87a0042f5a6f816675d08298eb9898b" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>~HostAllocator</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1IHostAllocator_1adfe81eac05b52212d072a3a48a96fc62" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::HostAllocator</scope><name>~IHostAllocator</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

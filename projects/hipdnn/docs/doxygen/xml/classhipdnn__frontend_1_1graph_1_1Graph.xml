@@ -1,0 +1,1970 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1Graph" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::Graph</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1graph_1_1INode" prot="public" virt="non-virtual">hipdnn_frontend::graph::INode</basecompoundref>
+    <includes refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">Graph.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0b7fbfe6ef429497effb626a8756e840" prot="private" static="no" mutable="no">
+        <type>std::unique_ptr&lt; detail::ScopedHipdnnBackendDescriptor &gt;</type>
+        <definition>std::unique_ptr&lt;detail::ScopedHipdnnBackendDescriptor&gt; hipdnn_frontend::graph::Graph::_graphDesc</definition>
+        <argsstring></argsstring>
+        <name>_graphDesc</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::_graphDesc</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="120" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="120" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab579229fcd20e59d982fb1a81d48ab38" prot="private" static="no" mutable="no">
+        <type>std::unique_ptr&lt; detail::ScopedHipdnnBackendDescriptor &gt;</type>
+        <definition>std::unique_ptr&lt;detail::ScopedHipdnnBackendDescriptor&gt; hipdnn_frontend::graph::Graph::_engineConfigDesc</definition>
+        <argsstring></argsstring>
+        <name>_engineConfigDesc</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::_engineConfigDesc</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="121" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="121" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Graph_1af205b763205a79ae75c2eb0eda236882" prot="private" static="no" mutable="no">
+        <type>std::unique_ptr&lt; detail::ScopedHipdnnBackendDescriptor &gt;</type>
+        <definition>std::unique_ptr&lt;detail::ScopedHipdnnBackendDescriptor&gt; hipdnn_frontend::graph::Graph::_executionPlanDesc</definition>
+        <argsstring></argsstring>
+        <name>_executionPlanDesc</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::_executionPlanDesc</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="122" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="122" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae2af81621c5463b711c276a2b8e93909" prot="private" static="no" mutable="no">
+        <type>std::optional&lt; int64_t &gt;</type>
+        <definition>std::optional&lt;int64_t&gt; hipdnn_frontend::graph::Graph::_preferredEngineId</definition>
+        <argsstring></argsstring>
+        <name>_preferredEngineId</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::_preferredEngineId</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="124" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="124" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-static-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1afaed112e20c1f363c506e63e014fb6d5" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::optional&lt; int64_t &gt;</type>
+        <definition>static std::optional&lt; int64_t &gt; hipdnn_frontend::graph::Graph::getDefaultEngineId</definition>
+        <argsstring>()</argsstring>
+        <name>getDefaultEngineId</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::getDefaultEngineId</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="126" column="26" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="126" bodyend="141"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a207efaf48993bbcc9436ee2f6b466452" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>static std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::outputTensor</definition>
+        <argsstring>(const std::string &amp;name)</argsstring>
+        <name>outputTensor</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::outputTensor</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>name</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="151" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="151" bodyend="156"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a52c4ab4333630302ad46fc1ed0513291" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::unordered_set&lt; int64_t &gt;</type>
+        <definition>static std::unordered_set&lt; int64_t &gt; hipdnn_frontend::graph::Graph::getUsedIds</definition>
+        <argsstring>(const std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;allTensors)</argsstring>
+        <name>getUsedIds</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::getUsedIds</qualifiedname>
+        <param>
+          <type>const std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+          <declname>allTensors</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="300" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="300" bodyend="311"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a195f28eb0e60b09a818efcbb23433bce" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>int64_t</type>
+        <definition>static int64_t hipdnn_frontend::graph::Graph::getUnusedTensorUid</definition>
+        <argsstring>(int64_t &amp;currentTensorId, std::unordered_set&lt; int64_t &gt; &amp;usedIds)</argsstring>
+        <name>getUnusedTensorUid</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::getUnusedTensorUid</qualifiedname>
+        <param>
+          <type>int64_t &amp;</type>
+          <declname>currentTensorId</declname>
+        </param>
+        <param>
+          <type>std::unordered_set&lt; int64_t &gt; &amp;</type>
+          <declname>usedIds</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="313" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="313" bodyend="322"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab23089c246e20947cf11a4793d5ea896" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>static void hipdnn_frontend::graph::Graph::populateHipdnnTensorIds</definition>
+        <argsstring>(const std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &amp;allTensors, std::unordered_set&lt; int64_t &gt; &amp;usedIds)</argsstring>
+        <name>populateHipdnnTensorIds</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::populateHipdnnTensorIds</qualifiedname>
+        <param>
+          <type>const std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &amp;</type>
+          <declname>allTensors</declname>
+        </param>
+        <param>
+          <type>std::unordered_set&lt; int64_t &gt; &amp;</type>
+          <declname>usedIds</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="324" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="324" bodyend="342"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a70ba163814ed2b93a6c1928465be3622" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>static Error hipdnn_frontend::graph::Graph::checkTensorUidsSetImpl</definition>
+        <argsstring>(std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; const &amp;allTensors)</argsstring>
+        <name>checkTensorUidsSetImpl</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::checkTensorUidsSetImpl</qualifiedname>
+        <param>
+          <type>std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; const &amp;</type>
+          <declname>allTensors</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="344" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="344" bodyend="371"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a236ba5f7feaedd607941e58954333b15" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>static Error hipdnn_frontend::graph::Graph::checkNoDuplicateTensorIdsImpl</definition>
+        <argsstring>(std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; const &amp;allTensors)</argsstring>
+        <name>checkNoDuplicateTensorIdsImpl</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::checkNoDuplicateTensorIdsImpl</qualifiedname>
+        <param>
+          <type>std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; const &amp;</type>
+          <declname>allTensors</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="373" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="373" bodyend="403"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a45ce6953fc3b098f3b88edca8553ed3e" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_frontend::graph::Graph::assignUnsetTensorUids</definition>
+        <argsstring>()</argsstring>
+        <name>assignUnsetTensorUids</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::assignUnsetTensorUids</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="143" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="143" bodyend="149"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1af5885e03491a2f285685fa56d1d9d12f" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::initializeEngineConfig</definition>
+        <argsstring>(hipdnnBackendDescriptor_t engineHeuristicDesc)</argsstring>
+        <name>initializeEngineConfig</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::initializeEngineConfig</qualifiedname>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>engineHeuristicDesc</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="158" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="158" bodyend="216"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a02d9f2a3579af574e962f351cf3eb0db" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::initializeEngineConfig</definition>
+        <argsstring>(int64_t engineId)</argsstring>
+        <name>initializeEngineConfig</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::initializeEngineConfig</qualifiedname>
+        <param>
+          <type>int64_t</type>
+          <declname>engineId</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Initialize engine config for a specific engine ID. <parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>engineId</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The engine to configure </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="note"><para>This method does NOT finalize the engine config. The caller must finalize after setting any knobs on the config. </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="222" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="222" bodyend="242"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a7017e97cc8517bbaa515db4bbb190dae" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>detail::GraphStructure</type>
+        <definition>detail::GraphStructure hipdnn_frontend::graph::Graph::buildAdjacencyList</definition>
+        <argsstring>(const std::unordered_map&lt; std::shared_ptr&lt; TensorAttributes &gt;, size_t &gt; &amp;tensorToOriginNode) const</argsstring>
+        <name>buildAdjacencyList</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::buildAdjacencyList</qualifiedname>
+        <param>
+          <type>const std::unordered_map&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;, size_t &gt; &amp;</type>
+          <declname>tensorToOriginNode</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="244" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="244" bodyend="267"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a36c06bf5a65828a4cb362edf8273cc74" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::unordered_map&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;, size_t &gt;</type>
+        <definition>std::unordered_map&lt; std::shared_ptr&lt; TensorAttributes &gt;, size_t &gt; hipdnn_frontend::graph::Graph::buildTensorToOriginNodeMap</definition>
+        <argsstring>() const</argsstring>
+        <name>buildTensorToOriginNodeMap</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::buildTensorToOriginNodeMap</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="269" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="269" bodyend="284"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a299d72a3ba989a78df6f9c290c77ca43" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>void hipdnn_frontend::graph::Graph::reorderNodesTopologically</definition>
+        <argsstring>(const std::vector&lt; size_t &gt; &amp;topologicalOrder)</argsstring>
+        <name>reorderNodesTopologically</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::reorderNodesTopologically</qualifiedname>
+        <param>
+          <type>const std::vector&lt; size_t &gt; &amp;</type>
+          <declname>topologicalOrder</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="286" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="286" bodyend="297"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae9a3ce41d84ec034578be9d39612471c" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::pair&lt; std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;, std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &gt;</type>
+        <definition>std::pair&lt; std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt;, std::unordered_set&lt; std::shared_ptr&lt; TensorAttributes &gt; &gt; &gt; hipdnn_frontend::graph::Graph::getGraphInputTensorAttributesAndRemainder</definition>
+        <argsstring>() const</argsstring>
+        <name>getGraphInputTensorAttributesAndRemainder</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::getGraphInputTensorAttributesAndRemainder</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="407" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="407" bodyend="428"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a6803a1e01627a2d85b3f2bb0f50af893" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>flatbuffers::DetachedBuffer</type>
+        <definition>flatbuffers::DetachedBuffer hipdnn_frontend::graph::Graph::buildFlatbufferOperationGraphConst</definition>
+        <argsstring>() const</argsstring>
+        <name>buildFlatbufferOperationGraphConst</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::buildFlatbufferOperationGraphConst</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="430" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="430" bodyend="467"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab4cea4c928237dc8c67956a474096446" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::deserializeFromFlatBuffer</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::Graph *fbGraph)</argsstring>
+        <name>deserializeFromFlatBuffer</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::deserializeFromFlatBuffer</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::Graph *</type>
+          <declname>fbGraph</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="469" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="469" bodyend="624"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a2ea63953b586d5478da64f0f6ed8dc6d" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::deserializeImpl</definition>
+        <argsstring>(const nlohmann::json &amp;j)</argsstring>
+        <name>deserializeImpl</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::deserializeImpl</qualifiedname>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>j</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="627" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="627" bodyend="637"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab2a6b278b329e8e315b8b1d006f5dda3" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::graph::Graph::Graph</definition>
+        <argsstring>()</argsstring>
+        <name>Graph</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::Graph</qualifiedname>
+        <briefdescription>
+<para>Construct an empty <ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="644" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="644" bodyend="648"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a194507ac8529fded4c3605df4b92f345" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::validate</definition>
+        <argsstring>()</argsstring>
+        <name>validate</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::validate</qualifiedname>
+        <briefdescription>
+<para>Validate the graph structure and tensor configurations. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or describing validation failures</para>
+</simplesect>
+Validates that:<itemizedlist>
+<listitem><para>All tensors have required attributes set</para>
+</listitem><listitem><para>No duplicate tensor UIDs exist</para>
+</listitem><listitem><para><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> is a valid DAG (no cycles)</para>
+</listitem><listitem><para><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> is connected (no orphaned nodes) </para>
+</listitem></itemizedlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="660" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="660" bodyend="682"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aa6451c50d3def1073e1dcf590d2de0c7" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::checkNoDuplicateTensorIds</definition>
+        <argsstring>()</argsstring>
+        <name>checkNoDuplicateTensorIds</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::checkNoDuplicateTensorIds</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="684" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="684" bodyend="690"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a6e7da48e88e0b1240b3a19c8973dade8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::checkTensorUidsSet</definition>
+        <argsstring>() const</argsstring>
+        <name>checkTensorUidsSet</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::checkTensorUidsSet</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Checks if all tensors in the graph have UIDs assigned. Returns an error if any tensor is missing a UID. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="694" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="694" bodyend="700"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1adb3a21e87f07dd38b4bf3fbc4a0ffff1" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::unordered_map&lt; int64_t, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>std::unordered_map&lt; int64_t, std::shared_ptr&lt; TensorAttributes &gt; &gt; hipdnn_frontend::graph::Graph::getTensorsByUid</definition>
+        <argsstring>() const</argsstring>
+        <name>getTensorsByUid</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::getTensorsByUid</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Returns a map of UID -&gt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> for all tensors in the graph. Tensors without UIDs are skipped (no error is generated). <simplesect kind="return"><para>Map from tensor UID to tensor attributes </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="705" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="705" bodyend="721"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab50df0a8755717cea0216fd87c965008" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::unordered_map&lt; std::string, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
+        <definition>std::unordered_map&lt; std::string, std::shared_ptr&lt; TensorAttributes &gt; &gt; hipdnn_frontend::graph::Graph::getTensorsByName</definition>
+        <argsstring>() const</argsstring>
+        <name>getTensorsByName</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::getTensorsByName</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Returns a map of name -&gt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> for all tensors in the graph. Tensors without names are skipped (no error is generated). <simplesect kind="return"><para>Map from tensor name to tensor attributes </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="726" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="726" bodyend="742"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ad33b5c23a6f7c6c32e4b431a540d29bd" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::topologicallySortGraph</definition>
+        <argsstring>()</argsstring>
+        <name>topologicallySortGraph</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::topologicallySortGraph</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="744" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="744" bodyend="773"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0cc5646c43045e90b1a1171c3e494e5f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>flatbuffers::DetachedBuffer</type>
+        <definition>flatbuffers::DetachedBuffer hipdnn_frontend::graph::Graph::buildFlatbufferOperationGraph</definition>
+        <argsstring>()</argsstring>
+        <name>buildFlatbufferOperationGraph</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::buildFlatbufferOperationGraph</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="775" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="775" bodyend="780"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a69540a5c9d7cd4120f622bc0734f6acc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::build_operation_graph</definition>
+        <argsstring>(hipdnnHandle_t handle)</argsstring>
+        <name>build_operation_graph</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::build_operation_graph</qualifiedname>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <briefdescription>
+<para>Build the operation graph descriptor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The hipDNN handle </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+This is typically called internally by <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876fac245b98150d5467f6a9c" kindref="member">build()</ref>. It creates the backend operation graph descriptor from the frontend graph representation. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="790" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="790" bodyend="817"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac0c194feadee590aa3a67d35a4435a55" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::get_knobs_for_engine</definition>
+        <argsstring>(int64_t engineId, std::vector&lt; Knob &gt; &amp;knobs) const</argsstring>
+        <name>get_knobs_for_engine</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_knobs_for_engine</qualifiedname>
+        <param>
+          <type>int64_t</type>
+          <declname>engineId</declname>
+        </param>
+        <param>
+          <type>std::vector&lt; <ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref> &gt; &amp;</type>
+          <declname>knobs</declname>
+        </param>
+        <briefdescription>
+<para>Get available configuration knobs for a specific engine. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>engineId</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The engine ID to query </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>knobs</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Output vector of available <ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref> objects </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+<simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref>, <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="828" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="828" bodyend="845"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a019ad6c23ead1a0ece0fbeff746674c8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::get_knob_lookup_for_engine</definition>
+        <argsstring>(int64_t engineId, std::unordered_map&lt; KnobType_t, Knob &gt; &amp;knobs) const</argsstring>
+        <name>get_knob_lookup_for_engine</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_knob_lookup_for_engine</qualifiedname>
+        <param>
+          <type>int64_t</type>
+          <declname>engineId</declname>
+        </param>
+        <param>
+          <type>std::unordered_map&lt; <ref refid="namespacehipdnn__frontend_1aac81fbb89e1355ef993b6d3375c79d85" kindref="member">KnobType_t</ref>, <ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref> &gt; &amp;</type>
+          <declname>knobs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="848" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="848" bodyend="860"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aefb4b99190d3776fd75d5ea455fb5c6d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::get_ranked_engine_ids</definition>
+        <argsstring>(std::vector&lt; int64_t &gt; &amp;rankedEngineIds, const std::vector&lt; HeuristicMode &gt; &amp;modes={HeuristicMode::FALLBACK})</argsstring>
+        <name>get_ranked_engine_ids</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_ranked_engine_ids</qualifiedname>
+        <param>
+          <type>std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>rankedEngineIds</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; <ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9" kindref="member">HeuristicMode</ref> &gt; &amp;</type>
+          <declname>modes</declname>
+          <defval>{<ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9af35b388d8d4adeab05bce916c73d7a72" kindref="member">HeuristicMode::FALLBACK</ref>}</defval>
+        </param>
+        <briefdescription>
+<para>Get a ranked list of engine IDs based on heuristics. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>rankedEngineIds</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Output vector of engine IDs, ranked by expected performance </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>modes</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Heuristic modes to use for ranking </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="869" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="869" bodyend="881"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a1cf5c8da156a2d55738eb612aebc030d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::create_execution_plans</definition>
+        <argsstring>(const std::vector&lt; HeuristicMode &gt; &amp;modes={HeuristicMode::FALLBACK})</argsstring>
+        <name>create_execution_plans</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::create_execution_plans</qualifiedname>
+        <param>
+          <type>const std::vector&lt; <ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9" kindref="member">HeuristicMode</ref> &gt; &amp;</type>
+          <declname>modes</declname>
+          <defval>{<ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9af35b388d8d4adeab05bce916c73d7a72" kindref="member">HeuristicMode::FALLBACK</ref>}</defval>
+        </param>
+        <briefdescription>
+<para>Create execution plans using heuristics. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>modes</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Heuristic modes to use for engine selection </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+Creates execution plans by querying the backend for available engines and selecting based on the specified heuristic modes. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="892" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="892" bodyend="920"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a94b04cc1dcc1fd90fafd0dfb0a47b1c9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::create_execution_plan_ext</definition>
+        <argsstring>(int64_t engineId, const std::vector&lt; KnobSetting &gt; &amp;settings)</argsstring>
+        <name>create_execution_plan_ext</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::create_execution_plan_ext</qualifiedname>
+        <param>
+          <type>int64_t</type>
+          <declname>engineId</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> &gt; &amp;</type>
+          <declname>settings</declname>
+        </param>
+        <briefdescription>
+<para>Create an execution plan with specific engine and knob settings. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>engineId</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The engine ID to use </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>settings</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Vector of <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> objects to configure the engine </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+This method allows fine-grained control over engine selection and configuration through knob settings.</para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref>, <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref>, <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1ac0c194feadee590aa3a67d35a4435a55" kindref="member">get_knobs_for_engine()</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="934" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="934" bodyend="1023"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a1fdbfd3ceaa56c6e81d450c01df057b2" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::check_support</definition>
+        <argsstring>()</argsstring>
+        <name>check_support</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::check_support</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1025" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1025" bodyend="1037"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1abeebf34d4b5918dc57448ec9794df180" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::toFlatBuffer</definition>
+        <argsstring>(flatbuffers::DetachedBuffer &amp;buffer) const</argsstring>
+        <name>toFlatBuffer</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::toFlatBuffer</qualifiedname>
+        <param>
+          <type>flatbuffers::DetachedBuffer &amp;</type>
+          <declname>buffer</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Serialize to FlatBuffer DetachedBuffer (const version) Returns error if tensor UIDs are not set </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1041" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1041" bodyend="1046"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0945c7cc33ff100496c406a98688e56b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>flatbuffers::DetachedBuffer</type>
+        <definition>flatbuffers::DetachedBuffer hipdnn_frontend::graph::Graph::toFlatBuffer</definition>
+        <argsstring>()</argsstring>
+        <name>toFlatBuffer</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::toFlatBuffer</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Serialize to FlatBuffer DetachedBuffer (non-const version) Assigns tensor UIDs if not already set </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1050" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1050" bodyend="1054"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a3191cc363d3fdda39005836e7577f3db" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::fromFlatBuffer</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::Graph *fbGraph)</argsstring>
+        <name>fromFlatBuffer</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::fromFlatBuffer</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::Graph *</type>
+          <declname>fbGraph</declname>
+        </param>
+        <briefdescription>
+<para>Deserialize from FlatBuffer <ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> object. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1057" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1057" bodyend="1073"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1af9438cc2f144815eb525e79a60a1d65d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::fromFlatBuffer</definition>
+        <argsstring>(const flatbuffers::DetachedBuffer &amp;buffer)</argsstring>
+        <name>fromFlatBuffer</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::fromFlatBuffer</qualifiedname>
+        <param>
+          <type>const flatbuffers::DetachedBuffer &amp;</type>
+          <declname>buffer</declname>
+        </param>
+        <briefdescription>
+<para>Deserialize from FlatBuffer DetachedBuffer. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1076" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1076" bodyend="1080"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a591cf37a983e8a17f9078035820d91b2" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::serialize</definition>
+        <argsstring>(flatbuffers::DetachedBuffer &amp;buffer) const</argsstring>
+        <name>serialize</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::serialize</qualifiedname>
+        <param>
+          <type>flatbuffers::DetachedBuffer &amp;</type>
+          <declname>buffer</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Serialize to FlatBuffer DetachedBuffer (const version) Returns error if tensor UIDs are not set </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1084" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1084" bodyend="1087"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a2baaf08f28555a64b1ebd08f3a46651a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::deserialize</definition>
+        <argsstring>(const hipdnn_data_sdk::data_objects::Graph *fbGraph)</argsstring>
+        <name>deserialize</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::deserialize</qualifiedname>
+        <param>
+          <type>const hipdnn_data_sdk::data_objects::Graph *</type>
+          <declname>fbGraph</declname>
+        </param>
+        <briefdescription>
+<para>Deserialize from FlatBuffer <ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> object. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1090" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1090" bodyend="1093"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac9703ececeadb6c02482edf690bf5cfe" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::deserialize</definition>
+        <argsstring>(const flatbuffers::DetachedBuffer &amp;buffer)</argsstring>
+        <name>deserialize</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::deserialize</qualifiedname>
+        <param>
+          <type>const flatbuffers::DetachedBuffer &amp;</type>
+          <declname>buffer</declname>
+        </param>
+        <briefdescription>
+<para>Deserialize from FlatBuffer DetachedBuffer. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1096" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1096" bodyend="1099"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae2440994aea7c4aa8a8f4671f73cacd1" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::serialize</definition>
+        <argsstring>(std::vector&lt; uint8_t &gt; &amp;data) const</argsstring>
+        <name>serialize</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::serialize</qualifiedname>
+        <param>
+          <type>std::vector&lt; uint8_t &gt; &amp;</type>
+          <declname>data</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Serialize to binary (const version) Returns error if tensor UIDs are not set </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1103" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1103" bodyend="1109"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a7695482b19ef02b7c4d55d60dce2c494" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::vector&lt; uint8_t &gt;</type>
+        <definition>std::vector&lt; uint8_t &gt; hipdnn_frontend::graph::Graph::toBinary</definition>
+        <argsstring>()</argsstring>
+        <name>toBinary</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::toBinary</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Serialize to binary (non-const version) Assigns tensor UIDs if not already set </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1113" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1113" bodyend="1118"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aafcb1412361c33708809efa525bcd85a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::deserialize</definition>
+        <argsstring>(hipdnnHandle_t handle, const std::vector&lt; uint8_t &gt; &amp;data)</argsstring>
+        <name>deserialize</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::deserialize</qualifiedname>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; uint8_t &gt; &amp;</type>
+          <declname>data</declname>
+        </param>
+        <briefdescription>
+<para>Deserialize from binary packed FlatBuffer. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1121" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1121" bodyend="1125"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aa7cd3b8456acd58f62b7dbac125d45d2" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::serialize</definition>
+        <argsstring>(nlohmann::json &amp;j) const</argsstring>
+        <name>serialize</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::serialize</qualifiedname>
+        <param>
+          <type>nlohmann::json &amp;</type>
+          <declname>j</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Serialize to JSON (const version) Returns error if tensor UIDs are not set</para>
+<para>Flow: Frontend → FlatBuffer binary → JSON GetGraph() is zero-copy (just a pointer into the buffer), so the only serialization cost is buildFlatbufferOperationGraphConst(). This keeps JSON serialization logic centralized in data_sdk. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1135" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1135" bodyend="1145"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aaa2cdbd15ead9796e35f3ffaad65c2a6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>nlohmann::json</type>
+        <definition>nlohmann::json hipdnn_frontend::graph::Graph::toJson</definition>
+        <argsstring>()</argsstring>
+        <name>toJson</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::toJson</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+<para>Serialize to JSON (non-const version) Assigns tensor UIDs if not already set </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1149" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1149" bodyend="1156"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a06fa0fc056d4194f87182fe0b2318d3a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::deserialize</definition>
+        <argsstring>(const nlohmann::json &amp;j)</argsstring>
+        <name>deserialize</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::deserialize</qualifiedname>
+        <param>
+          <type>const nlohmann::json &amp;</type>
+          <declname>j</declname>
+        </param>
+        <briefdescription>
+<para>Deserialize from JSON. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1159" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1159" bodyend="1180"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0b59602678812f5587472768a2602b90" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::build_plans</definition>
+        <argsstring>()</argsstring>
+        <name>build_plans</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::build_plans</qualifiedname>
+        <briefdescription>
+<para>Finalize the execution plan. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+Called internally by <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876fac245b98150d5467f6a9c" kindref="member">build()</ref> after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a1cf5c8da156a2d55738eb612aebc030d" kindref="member">create_execution_plans()</ref>. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1189" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1189" bodyend="1206"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876fac245b98150d5467f6a9c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::build</definition>
+        <argsstring>(hipdnnHandle_t handle, std::vector&lt; HeuristicMode &gt; const &amp;modes={HeuristicMode::FALLBACK}, BuildPlanPolicy policy=BuildPlanPolicy::HEURISTICS_CHOICE, bool do_multithreaded_builds=false)</argsstring>
+        <name>build</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::build</qualifiedname>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>std::vector&lt; <ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9" kindref="member">HeuristicMode</ref> &gt; const &amp;</type>
+          <declname>modes</declname>
+          <defval>{<ref refid="namespacehipdnn__frontend_1a8ea01c8d4c428b130cb63a0f31e464f9af35b388d8d4adeab05bce916c73d7a72" kindref="member">HeuristicMode::FALLBACK</ref>}</defval>
+        </param>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1ae16a963c279ec068c5ec825ef2dbd345" kindref="member">BuildPlanPolicy</ref></type>
+          <declname>policy</declname>
+          <defval><ref refid="namespacehipdnn__frontend_1ae16a963c279ec068c5ec825ef2dbd345a2354ac555eda3ac09572d8a4c16a3c8f" kindref="member">BuildPlanPolicy::HEURISTICS_CHOICE</ref></defval>
+        </param>
+        <param>
+          <type>bool</type>
+          <declname>do_multithreaded_builds</declname>
+          <defval>false</defval>
+        </param>
+        <briefdescription>
+<para>Build the complete graph and create execution plans. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The hipDNN handle </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>modes</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Heuristic modes for engine selection </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>policy</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Build plan policy (currently only HEURISTICS_CHOICE is used) </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>do_multithreaded_builds</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Reserved for future use </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+This is the main method to prepare a graph for execution. It performs:<orderedlist>
+<listitem><para><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> validation</para>
+</listitem><listitem><para>Operation graph building</para>
+</listitem><listitem><para>Execution plan creation</para>
+</listitem><listitem><para>Plan building</para>
+</listitem></orderedlist>
+</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref><sp/>handle;</highlight></codeline>
+<codeline><highlight class="normal"><ref refid="hipdnn__backend_8h_1a324561ed97fee17c8d93151d2495b9bb" kindref="member">hipdnnCreate</ref>(&amp;handle);</highlight></codeline>
+<codeline><highlight class="normal">Error<sp/>err<sp/>=<sp/>graph.build(handle);</highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(err.is_bad())<sp/>{<sp/>handleError();<sp/>}</highlight></codeline>
+</programlisting> </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1230" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1230" bodyend="1250"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a135440c5353fb4c0a6352b9c904e32b6" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::get_workspace_size</definition>
+        <argsstring>(int64_t &amp;workspaceSize) const</argsstring>
+        <name>get_workspace_size</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_workspace_size</qualifiedname>
+        <param>
+          <type>int64_t &amp;</type>
+          <declname>workspaceSize</declname>
+        </param>
+        <briefdescription>
+<para>Get the workspace memory size required for execution. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>workspaceSize</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Output parameter for the workspace size in bytes </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876fac245b98150d5467f6a9c" kindref="member">build()</ref> to determine how much workspace memory to allocate. </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1260" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1260" bodyend="1272"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a8185b8809f07f29d292197938938af49" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::execute</definition>
+        <argsstring>(hipdnnHandle_t handle, std::unordered_map&lt; std::shared_ptr&lt; TensorAttributes &gt;, void * &gt; &amp;tensorLookup, void *workspace) const</argsstring>
+        <name>execute</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::execute</qualifiedname>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>std::unordered_map&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;, void * &gt; &amp;</type>
+          <declname>tensorLookup</declname>
+        </param>
+        <param>
+          <type>void *</type>
+          <declname>workspace</declname>
+        </param>
+        <briefdescription>
+<para>Execute the graph with tensor pointers mapped by tensor handles. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The hipDNN handle </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>tensorLookup</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Map from std::shared_ptr&lt;TensorAttributes&gt; (tensor handles) to device memory pointers </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>workspace</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to workspace memory (can be nullptr if size is 0) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+<programlisting filename=".cpp"><codeline><highlight class="normal">std::unordered_map&lt;std::shared_ptr&lt;TensorAttributes&gt;,<sp/></highlight><highlight class="keywordtype">void</highlight><highlight class="normal">*&gt;<sp/>tensorLookup<sp/>=<sp/>{</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>{inputTensor,<sp/>d_input},</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>{outputTensor,<sp/>d_output}</highlight></codeline>
+<codeline><highlight class="normal">};</highlight></codeline>
+<codeline><highlight class="normal">graph.execute(handle,<sp/>tensorLookup,<sp/>workspace);</highlight></codeline>
+</programlisting> </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1289" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1289" bodyend="1308"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a1cd777a6e355ed42bbf3c269e075745e" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::Graph::execute</definition>
+        <argsstring>(hipdnnHandle_t handle, std::unordered_map&lt; int64_t, void * &gt; &amp;variantPack, void *workspace) const</argsstring>
+        <name>execute</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::execute</qualifiedname>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1a33910be0bef9f56e913ec10712a6494f" kindref="member">hipdnnHandle_t</ref></type>
+          <declname>handle</declname>
+        </param>
+        <param>
+          <type>std::unordered_map&lt; int64_t, void * &gt; &amp;</type>
+          <declname>variantPack</declname>
+        </param>
+        <param>
+          <type>void *</type>
+          <declname>workspace</declname>
+        </param>
+        <briefdescription>
+<para>Execute the graph with tensor pointers mapped by UID. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>handle</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The hipDNN handle </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>variantPack</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Map from tensor UID to device memory pointers </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>workspace</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Pointer to workspace memory (can be nullptr if size is 0) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref> indicating success or failure</para>
+</simplesect>
+<programlisting filename=".cpp"><codeline><highlight class="normal">std::unordered_map&lt;int64_t,<sp/>void*&gt;<sp/>variantPack<sp/>=<sp/>{</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>{0,<sp/>d_input},<sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>UID<sp/>0<sp/>-&gt;<sp/>input<sp/>tensor</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>{1,<sp/>d_weights},<sp/></highlight><highlight class="comment">//<sp/>UID<sp/>1<sp/>-&gt;<sp/>weights</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>{2,<sp/>d_output}<sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>UID<sp/>2<sp/>-&gt;<sp/>output<sp/>tensor</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal">};</highlight></codeline>
+<codeline><highlight class="normal">graph.execute(handle,<sp/>variantPack,<sp/>workspace);</highlight></codeline>
+</programlisting> </para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1326" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1326" bodyend="1384"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ade399645bdf2719f4e53d7a643295555" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::string &amp;</type>
+        <definition>const std::string &amp; hipdnn_frontend::graph::Graph::get_name</definition>
+        <argsstring>() const</argsstring>
+        <name>get_name</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_name</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1386" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1386" bodyend="1389"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac7fc31ba9ecbb443ec4c02e7273fe5fd" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::Graph::get_compute_data_type</definition>
+        <argsstring>() const</argsstring>
+        <name>get_compute_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_compute_data_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1391" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1391" bodyend="1394"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae0eee428f2f092002f70149bd7536335" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::Graph::get_intermediate_data_type</definition>
+        <argsstring>() const</argsstring>
+        <name>get_intermediate_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_intermediate_data_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1395" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1395" bodyend="1398"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a5a8483f53e470f580335e38fb3fe73f2" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+        <definition>DataType hipdnn_frontend::graph::Graph::get_io_data_type</definition>
+        <argsstring>() const</argsstring>
+        <name>get_io_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_io_data_type</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1399" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1399" bodyend="1402"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1afe276c96a52851d4a03574df09c01e80" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::optional&lt; int64_t &gt;</type>
+        <definition>std::optional&lt; int64_t &gt; hipdnn_frontend::graph::Graph::get_preferred_engine_id_ext</definition>
+        <argsstring>() const</argsstring>
+        <name>get_preferred_engine_id_ext</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::get_preferred_engine_id_ext</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1405" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1405" bodyend="1409"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a2d633fef077697c10fb8601ac0c08efb" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
+        <definition>Graph &amp; hipdnn_frontend::graph::Graph::set_name</definition>
+        <argsstring>(const std::string &amp;name)</argsstring>
+        <name>set_name</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::set_name</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>name</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1412" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1412" bodyend="1416"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac1c880e39d3a30e16ea9498f54e890e5" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
+        <definition>Graph &amp; hipdnn_frontend::graph::Graph::set_compute_data_type</definition>
+        <argsstring>(DataType computeType)</argsstring>
+        <name>set_compute_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::set_compute_data_type</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>computeType</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1417" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1417" bodyend="1421"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1acdf46d97b6a4fabe2a9b951662f6e489" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
+        <definition>Graph &amp; hipdnn_frontend::graph::Graph::set_intermediate_data_type</definition>
+        <argsstring>(DataType intermediateType)</argsstring>
+        <name>set_intermediate_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::set_intermediate_data_type</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>intermediateType</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1423" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1423" bodyend="1427"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a779e5b15446c7eed507ded141281a8a9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
+        <definition>Graph &amp; hipdnn_frontend::graph::Graph::set_io_data_type</definition>
+        <argsstring>(DataType ioType)</argsstring>
+        <name>set_io_data_type</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::set_io_data_type</qualifiedname>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>ioType</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1428" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1428" bodyend="1432"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a53b90f93b423b437e5fb2930c9552d3a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::array&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;, 5 &gt;</type>
+        <definition>std::array&lt; std::shared_ptr&lt; TensorAttributes &gt;, 5 &gt; hipdnn_frontend::graph::Graph::batchnorm</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; x, std::shared_ptr&lt; TensorAttributes &gt; scale, std::shared_ptr&lt; TensorAttributes &gt; bias, BatchnormAttributes attributes)</argsstring>
+        <name>batchnorm</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::batchnorm</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>x</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>scale</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>bias</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1435" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1435" bodyend="1474"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a081126ff1a5611bc9b5e171fd2bcd746" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::array&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;, 3 &gt;</type>
+        <definition>std::array&lt; std::shared_ptr&lt; TensorAttributes &gt;, 3 &gt; hipdnn_frontend::graph::Graph::batchnorm_backward</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; dy, std::shared_ptr&lt; TensorAttributes &gt; x, std::shared_ptr&lt; TensorAttributes &gt; scale, BatchnormBackwardAttributes attributes)</argsstring>
+        <name>batchnorm_backward</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::batchnorm_backward</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>dy</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>x</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>scale</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1477" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1477" bodyend="1502"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1adfa2b22fd6304c33e3e55aafc54484f3" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::batchnorm_inference</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; x, std::shared_ptr&lt; TensorAttributes &gt; mean, std::shared_ptr&lt; TensorAttributes &gt; invVariance, std::shared_ptr&lt; TensorAttributes &gt; scale, std::shared_ptr&lt; TensorAttributes &gt; bias, BatchnormInferenceAttributes attributes)</argsstring>
+        <name>batchnorm_inference</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::batchnorm_inference</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>x</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>mean</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>invVariance</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>scale</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>bias</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceAttributes" kindref="compound">BatchnormInferenceAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1505" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1505" bodyend="1530"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0146db8d659518a0c8e282ae5a328f07" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::batchnorm_inference_variance_ext</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; x, std::shared_ptr&lt; TensorAttributes &gt; mean, std::shared_ptr&lt; TensorAttributes &gt; variance, std::shared_ptr&lt; TensorAttributes &gt; scale, std::shared_ptr&lt; TensorAttributes &gt; bias, std::shared_ptr&lt; TensorAttributes &gt; epsilon, BatchnormInferenceAttributesVarianceExt attributes)</argsstring>
+        <name>batchnorm_inference_variance_ext</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::batchnorm_inference_variance_ext</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>x</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>mean</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>variance</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>scale</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>bias</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>epsilon</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceAttributesVarianceExt" kindref="compound">BatchnormInferenceAttributesVarianceExt</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1533" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1533" bodyend="1561"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac42175d3f70a59e48eda3ce0f82d31c7" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::pointwise</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; in0, PointwiseAttributes attributes)</argsstring>
+        <name>pointwise</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::pointwise</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>in0</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1563" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1563" bodyend="1584"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1afb8e47cc282318abcb6eaf54f969d433" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::pointwise</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; in0, std::shared_ptr&lt; TensorAttributes &gt; in1, PointwiseAttributes attributes)</argsstring>
+        <name>pointwise</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::pointwise</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>in0</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>in1</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1586" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1586" bodyend="1613"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a860fb9f516dc309a276a57510f185813" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::pointwise</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; in0, std::shared_ptr&lt; TensorAttributes &gt; in1, std::shared_ptr&lt; TensorAttributes &gt; in2, PointwiseAttributes attributes)</argsstring>
+        <name>pointwise</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::pointwise</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>in0</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>in1</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>in2</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1615" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1615" bodyend="1648"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1af2d1c9e476330a0b02e57e21b1100d42" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::matmul</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; a, std::shared_ptr&lt; TensorAttributes &gt; b, MatmulAttributes attributes)</argsstring>
+        <name>matmul</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::matmul</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>a</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>b</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1650" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1650" bodyend="1677"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab3d9547d6b1e6d3318275825b200acba" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::conv_fprop</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; x, std::shared_ptr&lt; TensorAttributes &gt; w, ConvFpropAttributes attributes)</argsstring>
+        <name>conv_fprop</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::conv_fprop</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>x</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>w</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvFpropAttributes" kindref="compound">ConvFpropAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1680" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1680" bodyend="1708"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ad618ae897d2130313ecb423c04a3edc1" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::conv_dgrad</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; dy, std::shared_ptr&lt; TensorAttributes &gt; w, ConvDgradAttributes attributes)</argsstring>
+        <name>conv_dgrad</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::conv_dgrad</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>dy</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>w</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1711" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1711" bodyend="1739"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a4e849e0638bd68c3bd6013f7f01710d6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::conv_wgrad</definition>
+        <argsstring>(std::shared_ptr&lt; TensorAttributes &gt; dy, std::shared_ptr&lt; TensorAttributes &gt; x, ConvWgradAttributes attributes)</argsstring>
+        <name>conv_wgrad</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::conv_wgrad</qualifiedname>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>dy</declname>
+        </param>
+        <param>
+          <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+          <declname>x</declname>
+        </param>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref></type>
+          <declname>attributes</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1742" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1742" bodyend="1770"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae435a3046e88e5dbf6b58c19c43d5b7c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
+        <definition>Graph &amp; hipdnn_frontend::graph::Graph::set_preferred_engine_id_ext</definition>
+        <argsstring>(std::optional&lt; int64_t &gt; engineId)</argsstring>
+        <name>set_preferred_engine_id_ext</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::set_preferred_engine_id_ext</qualifiedname>
+        <param>
+          <type>std::optional&lt; int64_t &gt;</type>
+          <declname>engineId</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1773" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1773" bodyend="1778"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a45a6648108862ac2352b4d49e9bdd9e6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
+        <definition>Graph &amp; hipdnn_frontend::graph::Graph::set_preferred_engine_id_ext</definition>
+        <argsstring>(const std::string &amp;engineName)</argsstring>
+        <name>set_preferred_engine_id_ext</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::set_preferred_engine_id_ext</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>engineName</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1781" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1781" bodyend="1796"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-static-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1af1db8fac05e3d7749b6949f7dcd5eadf" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>static std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::tensor_like</definition>
+        <argsstring>(const std::shared_ptr&lt; TensorAttributes &gt; &amp;tensor, const std::string &amp;name=&quot;&quot;)</argsstring>
+        <name>tensor_like</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::tensor_like</qualifiedname>
+        <param>
+          <type>const std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &amp;</type>
+          <declname>tensor</declname>
+        </param>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>name</declname>
+          <defval>&quot;&quot;</defval>
+        </param>
+        <briefdescription>
+<para>Create a new tensor with similar properties to an existing tensor. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>tensor</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The tensor to copy properties from </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>name</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Optional name for the new tensor </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Shared pointer to the newly created <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref></para>
+</simplesect>
+Creates a new <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> object by copying properties from the provided tensor, but clears the UID and optionally assigns a new name. This is useful for creating tensors with similar dimensions and data types but representing different data.</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="comment">//<sp/>Create<sp/>a<sp/>tensor<sp/>similar<sp/>to<sp/>x<sp/>but<sp/>with<sp/>a<sp/>different<sp/>UID</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>y<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1af1db8fac05e3d7749b6949f7dcd5eadf" kindref="member">Graph::tensor_like</ref>(x,<sp/></highlight><highlight class="stringliteral">&quot;output&quot;</highlight><highlight class="normal">);</highlight></codeline>
+<codeline><highlight class="normal">y-&gt;set_uid(2);</highlight></codeline>
+</programlisting></para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a43a2785c764c003010b456b59bffac8f" kindref="member">tensor()</ref> for creating a <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a43a2785c764c003010b456b59bffac8f" kindref="member">tensor</ref> with all properties preserved </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1819" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1819" bodyend="1828"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a43a2785c764c003010b456b59bffac8f" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
+        <definition>static std::shared_ptr&lt; TensorAttributes &gt; hipdnn_frontend::graph::Graph::tensor</definition>
+        <argsstring>(const TensorAttributes &amp;tensor)</argsstring>
+        <name>tensor</name>
+        <qualifiedname>hipdnn_frontend::graph::Graph::tensor</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+          <declname>tensor</declname>
+        </param>
+        <briefdescription>
+<para>Create a new tensor from existing tensor attributes. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>tensor</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The tensor attributes to copy </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>Shared pointer to the newly created <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref></para>
+</simplesect>
+Creates a new <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> object as a copy of the provided tensor, preserving all properties including UID. This is the standard way to create a tensor for use in graph operations.</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="comment">//<sp/>Create<sp/>a<sp/>tensor<sp/>from<sp/>attributes</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="keyword">auto</highlight><highlight class="normal"><sp/>x<sp/>=<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a43a2785c764c003010b456b59bffac8f" kindref="member">Graph::tensor</ref>(TensorAttributes()</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.set_dim({1,<sp/>64,<sp/>28,<sp/>28})</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.set_stride({50176,<sp/>784,<sp/>28,<sp/>1})</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.set_data_type(<ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7beca87e955627b59c274ec4cbdd3a130f9bb" kindref="member">DataType::HALF</ref>)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>.set_uid(0));</highlight></codeline>
+</programlisting></para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1af1db8fac05e3d7749b6949f7dcd5eadf" kindref="member">tensor_like()</ref> for creating a <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a43a2785c764c003010b456b59bffac8f" kindref="member">tensor</ref> with cleared UID and custom name </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1850" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1850" bodyend="1855"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>The main class for building and executing hipDNN computational graphs. </para>
+    </briefdescription>
+    <detaileddescription>
+<para><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> is the central class in hipDNN Frontend. It allows users to:<itemizedlist>
+<listitem><para>Define tensors and their properties</para>
+</listitem><listitem><para>Add operation nodes (convolution, batchnorm, pointwise, matmul)</para>
+</listitem><listitem><para>Build execution plans</para>
+</listitem><listitem><para>Execute the graph on AMD GPUs</para>
+</listitem></itemizedlist>
+</para>
+<para>The <ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> class uses a fluent interface pattern, where setter methods return a reference to the graph for method chaining.</para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref>, <ref refid="classhipdnn__frontend_1_1graph_1_1ConvFpropAttributes" kindref="compound">ConvFpropAttributes</ref>, <ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref>, <ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref> </para>
+</simplesect>
+</para>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="1">
+        <label>hipdnn_frontend::graph::Graph</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Graph"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend::graph::INode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1INode"/>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="1">
+        <label>hipdnn_frontend::graph::Graph</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Graph"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>hipdnn_frontend::graph::GraphAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes"/>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend::graph::INode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1INode"/>
+        <childnode refid="3" relation="usage">
+          <edgelabel>graph_attributes</edgelabel>
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="117" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="118" bodyend="1856"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ab579229fcd20e59d982fb1a81d48ab38" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>_engineConfigDesc</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1af205b763205a79ae75c2eb0eda236882" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>_executionPlanDesc</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a0b7fbfe6ef429497effb626a8756e840" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>_graphDesc</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ae2af81621c5463b711c276a2b8e93909" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>_preferredEngineId</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a0d40adb0a0b71eeae9cd946495b7705e" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>_sub_nodes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a45ce6953fc3b098f3b88edca8553ed3e" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>assignUnsetTensorUids</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a53b90f93b423b437e5fb2930c9552d3a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>batchnorm</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a081126ff1a5611bc9b5e171fd2bcd746" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>batchnorm_backward</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1adfa2b22fd6304c33e3e55aafc54484f3" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>batchnorm_inference</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a0146db8d659518a0c8e282ae5a328f07" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>batchnorm_inference_variance_ext</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876fac245b98150d5467f6a9c" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>build</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a69540a5c9d7cd4120f622bc0734f6acc" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>build_operation_graph</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a0b59602678812f5587472768a2602b90" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>build_plans</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a7017e97cc8517bbaa515db4bbb190dae" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>buildAdjacencyList</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a0cc5646c43045e90b1a1171c3e494e5f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>buildFlatbufferOperationGraph</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a6803a1e01627a2d85b3f2bb0f50af893" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>buildFlatbufferOperationGraphConst</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a36c06bf5a65828a4cb362edf8273cc74" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>buildTensorToOriginNodeMap</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a1fdbfd3ceaa56c6e81d450c01df057b2" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>check_support</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1aa6451c50d3def1073e1dcf590d2de0c7" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>checkNoDuplicateTensorIds</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a236ba5f7feaedd607941e58954333b15" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>checkNoDuplicateTensorIdsImpl</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a6e7da48e88e0b1240b3a19c8973dade8" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>checkTensorUidsSet</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a70ba163814ed2b93a6c1928465be3622" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>checkTensorUidsSetImpl</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ad618ae897d2130313ecb423c04a3edc1" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>conv_dgrad</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ab3d9547d6b1e6d3318275825b200acba" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>conv_fprop</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a4e849e0638bd68c3bd6013f7f01710d6" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>conv_wgrad</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a94b04cc1dcc1fd90fafd0dfb0a47b1c9" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>create_execution_plan_ext</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a1cf5c8da156a2d55738eb612aebc030d" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>create_execution_plans</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a2baaf08f28555a64b1ebd08f3a46651a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>deserialize</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ac9703ececeadb6c02482edf690bf5cfe" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>deserialize</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1aafcb1412361c33708809efa525bcd85a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>deserialize</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a06fa0fc056d4194f87182fe0b2318d3a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>deserialize</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ab4cea4c928237dc8c67956a474096446" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>deserializeFromFlatBuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a2ea63953b586d5478da64f0f6ed8dc6d" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>deserializeImpl</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a8185b8809f07f29d292197938938af49" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>execute</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a1cd777a6e355ed42bbf3c269e075745e" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>execute</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a3191cc363d3fdda39005836e7577f3db" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>fromFlatBuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1af9438cc2f144815eb525e79a60a1d65d" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>fromFlatBuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a004660761457ea01996ce149618cee10" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>gather_hipdnn_tensors</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a1f9eb34676b9472a82f5f121c4763492" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>gatherHipdnnTensorsSubtree</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ac7fc31ba9ecbb443ec4c02e7273fe5fd" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ae0eee428f2f092002f70149bd7536335" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_intermediate_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a5a8483f53e470f580335e38fb3fe73f2" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_io_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a019ad6c23ead1a0ece0fbeff746674c8" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_knob_lookup_for_engine</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ac0c194feadee590aa3a67d35a4435a55" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_knobs_for_engine</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ade399645bdf2719f4e53d7a643295555" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1afe276c96a52851d4a03574df09c01e80" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_preferred_engine_id_ext</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1aefb4b99190d3776fd75d5ea455fb5c6d" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_ranked_engine_ids</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a135440c5353fb4c0a6352b9c904e32b6" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>get_workspace_size</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1afaed112e20c1f363c506e63e014fb6d5" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>getDefaultEngineId</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ae9a3ce41d84ec034578be9d39612471c" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>getGraphInputTensorAttributesAndRemainder</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a9b39efdf9b873e1f1664ada8dc311a2b" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>getNodeInputTensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a5e0ee1763d5213b2a8e0ebf99009c93b" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>getNodeOutputTensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ab50df0a8755717cea0216fd87c965008" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>getTensorsByName</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1adb3a21e87f07dd38b4bf3fbc4a0ffff1" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>getTensorsByUid</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a195f28eb0e60b09a818efcbb23433bce" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>getUnusedTensorUid</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a52c4ab4333630302ad46fc1ed0513291" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>getUsedIds</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ab2a6b278b329e8e315b8b1d006f5dda3" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>Graph</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1aacfcb1f1ec9b376ac7a7afb6b4f7389a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>graph_attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a8b28f89f18758ed3a1dfc5b9b2ad63a0" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>infer_properties_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1af5885e03491a2f285685fa56d1d9d12f" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>initializeEngineConfig</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a02d9f2a3579af574e962f351cf3eb0db" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>initializeEngineConfig</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a5487d58d8e51312358e341ff75157f2b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>INode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1af2d1c9e476330a0b02e57e21b1100d42" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>matmul</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a207efaf48993bbcc9436ee2f6b466452" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>outputTensor</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a4561977ed6bd0bf33b9c8840f8cf1164" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>pack_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ac42175d3f70a59e48eda3ce0f82d31c7" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>pointwise</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1afb8e47cc282318abcb6eaf54f969d433" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>pointwise</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a860fb9f516dc309a276a57510f185813" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>pointwise</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ab23089c246e20947cf11a4793d5ea896" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>populateHipdnnTensorIds</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1af801cad4058b88879fca83028e296c6b" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>post_validate_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1aa2b999b5be1babae092b12a616e47142" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>pre_validate_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a299d72a3ba989a78df6f9c290c77ca43" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>reorderNodesTopologically</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a591cf37a983e8a17f9078035820d91b2" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>serialize</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ae2440994aea7c4aa8a8f4671f73cacd1" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>serialize</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1aa7cd3b8456acd58f62b7dbac125d45d2" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>serialize</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ac1c880e39d3a30e16ea9498f54e890e5" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>set_compute_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1acdf46d97b6a4fabe2a9b951662f6e489" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>set_intermediate_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a779e5b15446c7eed507ded141281a8a9" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>set_io_data_type</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a2d633fef077697c10fb8601ac0c08efb" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>set_name</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ae435a3046e88e5dbf6b58c19c43d5b7c" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>set_preferred_engine_id_ext</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a45a6648108862ac2352b4d49e9bdd9e6" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>set_preferred_engine_id_ext</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a43a2785c764c003010b456b59bffac8f" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>tensor</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1af1db8fac05e3d7749b6949f7dcd5eadf" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>tensor_like</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a7695482b19ef02b7c4d55d60dce2c494" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>toBinary</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1abeebf34d4b5918dc57448ec9794df180" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>toFlatBuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a0945c7cc33ff100496c406a98688e56b" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>toFlatBuffer</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1aaa2cdbd15ead9796e35f3ffaad65c2a6" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>toJson</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ad33b5c23a6f7c6c32e4b431a540d29bd" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>topologicallySortGraph</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1a194507ac8529fded4c3605df4b92f345" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>validate</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a20295372f663ad76910d185982baabe3" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>validateSubtree</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a88228ffa2f038c274dfcaf8316f55227" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>visit</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a84993f3eb21c56cd0f00c35655d828bd" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>visit</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a504092d3f0e9ffffbd874e562a5251aa" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>~INode</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

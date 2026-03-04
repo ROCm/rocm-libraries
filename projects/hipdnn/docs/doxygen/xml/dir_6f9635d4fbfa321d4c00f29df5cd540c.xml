@@ -1,0 +1,14 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_6f9635d4fbfa321d4c00f29df5cd540c" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/samples</compoundname>
+    <innerdir refid="dir_435ffe7929ec179b13c905aff5a6e2bf">/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm</innerdir>
+    <innerdir refid="dir_9017177a6004d2cf4c3da23bc4d9300f">/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution</innerdir>
+    <innerdir refid="dir_537ae580d30e2cb2383a8f44fb9ef8a2">/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils</innerdir>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/"/>
+  </compounddef>
+</doxygen>

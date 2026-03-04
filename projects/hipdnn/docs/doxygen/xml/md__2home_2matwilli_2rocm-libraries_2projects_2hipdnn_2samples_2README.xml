@@ -1,0 +1,222 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README" kind="page">
+    <compoundname>md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README</compoundname>
+    <title>hipDNN Samples</title>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+<para><anchor id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md0"/> </para>
+<sect1 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md1">
+<title>How to Build</title>
+<para><orderedlist>
+<listitem><para><bold>Prerequisites:</bold><itemizedlist>
+<listitem><para>Follow the instructions in Building.md to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:<itemizedlist>
+<listitem><para>CMake</para>
+</listitem><listitem><para>Ninja</para>
+</listitem><listitem><para>ROCm / TheRock</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para>A ROCm-compatible GPU is required to run the samples</para>
+</listitem></itemizedlist>
+</para>
+</listitem><listitem><para><bold>Build Samples:</bold> From this <computeroutput>samples</computeroutput> directory: <programlisting filename=".bash"><codeline><highlight class="normal">mkdir<sp/>build<sp/>&amp;&amp;<sp/>cd<sp/>build</highlight></codeline>
+<codeline><highlight class="normal">cmake<sp/>-DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++<sp/>-G<sp/>Ninja<sp/>..</highlight></codeline>
+<codeline><highlight class="normal">ninja</highlight></codeline>
+</programlisting><itemizedlist>
+<listitem><para>Note: If you have installed hipdnn to a custom location you just need to specify the <computeroutput>CMAKE_PREFIX_PATH</computeroutput> to point to the install location. Ensure you specify the full path and not a relative one.</para>
+</listitem></itemizedlist>
+</para>
+</listitem></orderedlist>
+</para>
+<para>The sample executables will be created in the <computeroutput>build</computeroutput> directory.</para>
+</sect1>
+<sect1 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md2">
+<title>Running Samples</title>
+<para>All samples accept the following command line options:<itemizedlist>
+<listitem><para><computeroutput>--verify-cpu</computeroutput> - Enable CPU reference validation of results</para>
+</listitem><listitem><para><computeroutput>--help</computeroutput> - Displays help message</para>
+</listitem></itemizedlist>
+</para>
+<para>Example: <programlisting filename=".bash"><codeline><highlight class="normal">./build/conv_forward<sp/>--verify-cpu</highlight></codeline>
+</programlisting></para>
+</sect1>
+<sect1 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md3">
+<title>Profiling Samples</title>
+<para>Samples can be profiled using ROCprofiler-SDK (<computeroutput>rocprofv3</computeroutput>), included in ROCm version 6.2 or later.</para>
+<para><programlisting filename=".bash"><codeline><highlight class="normal">#<sp/>Profile<sp/>a<sp/>sample<sp/>with<sp/>system<sp/>trace<sp/>and<sp/>perfetto<sp/>output<sp/>format</highlight></codeline>
+<codeline><highlight class="normal">rocprofv3<sp/>--sys-trace<sp/>-f<sp/>pftrace<sp/>-o<sp/>./profile_output<sp/>--<sp/>./bn_inference</highlight></codeline>
+</programlisting></para>
+<para>Since <computeroutput>rocprofv3</computeroutput> has limited host-side tracing, <computeroutput>hipDeviceSynchronize()</computeroutput> calls can be added to gauge granular performance.</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="normal"><ref refid="Helpers_8hpp_1aaf41965393ffaedeec1441c5bc1c04e9" kindref="member">HIP_CHECK</ref>(hipDeviceSynchronize());<sp/></highlight><highlight class="comment">//<sp/>Flush<sp/>previous<sp/>work<sp/>and<sp/>record<sp/>in<sp/>trace</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"><ref refid="Helpers_8hpp_1a0e796d6d03dad288ff04bef60b661df0" kindref="member">HIPDNN_FE_CHECK</ref>(graph-&gt;execute(handle,<sp/>variantPack,<sp/></highlight><highlight class="keyword">nullptr</highlight><highlight class="normal">));</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"><ref refid="Helpers_8hpp_1aaf41965393ffaedeec1441c5bc1c04e9" kindref="member">HIP_CHECK</ref>(hipDeviceSynchronize());<sp/></highlight><highlight class="comment">//<sp/>Await<sp/>completion<sp/>and<sp/>record<sp/>in<sp/>trace<sp/>for<sp/>approximate<sp/>delta</highlight></codeline>
+</programlisting></para>
+</sect1>
+<sect1 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md4">
+<title>Available Samples</title>
+<para>All samples are templated for mixed-precision execution with Fp32, Fp16, and Bfp16 input/output data types, with Fp32 intermediate accumulation.</para>
+<para><blockquote><para><zwj/>[!TIP] 💡 Set <computeroutput>HIPDNN_LOG_LEVEL=info</computeroutput> to observe detailed logs from the samples. </para>
+</blockquote>The current samples include:</para>
+<sect2 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md5">
+<title>&lt;a href=&quot;./batchnorm/BnTraining.cpp&quot; &gt;**&lt;tt&gt;BnTraining&lt;/tt&gt;**&lt;/a&gt;</title>
+<para>Executes the forward pass of a batch normalization training graph on a 4D input tensor.<itemizedlist>
+<listitem><para>For an input <computeroutput>x</computeroutput> of shape <computeroutput>(N, C, H, W)</computeroutput>, the mean and variance are calculated over the <computeroutput>N</computeroutput>, <computeroutput>H</computeroutput>, and <computeroutput>W</computeroutput> dimensions for each of the <computeroutput>C</computeroutput> channels, resulting in a <computeroutput>mean</computeroutput> and <computeroutput>inv_variance</computeroutput> of shape <computeroutput>(1, C, 1, 1)</computeroutput>. It then transforms the input and updates the running statistics: <programlisting filename=".py"><codeline><highlight class="normal">y<sp/>=<sp/>scale<sp/>*<sp/>((x<sp/>-<sp/>mean)<sp/>*<sp/>inv_variance)<sp/>+<sp/>bias</highlight></codeline>
+<codeline><highlight class="normal">next_running_mean<sp/>=<sp/>(1<sp/>-<sp/>momentum)<sp/>*<sp/>prev_running_mean<sp/>+<sp/>momentum<sp/>*<sp/>batch_mean</highlight></codeline>
+<codeline><highlight class="normal">next_running_variance<sp/>=<sp/>(1<sp/>-<sp/>momentum)<sp/>*<sp/>prev_running_variance<sp/>+<sp/>momentum<sp/>*<sp/>batch_variance</highlight></codeline>
+</programlisting></para>
+</listitem><listitem><para>The graph outputs the normalized tensor <computeroutput>y</computeroutput>, along with the batch mean/variance (<computeroutput>mean</computeroutput>, <computeroutput>inv_variance</computeroutput>) required for the backward pass, and the updated population statistics (<computeroutput>next_running_mean</computeroutput>, <computeroutput>next_running_variance</computeroutput>) required for inference.</para>
+</listitem></itemizedlist>
+</para>
+</sect2>
+<sect2 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md6">
+<title>&lt;a href=&quot;./batchnorm/BnBackward.cpp&quot; &gt;**&lt;tt&gt;BnBackward&lt;/tt&gt;**&lt;/a&gt;</title>
+<para>Executes the backward pass of a batch normalization graph to compute gradients of the loss function.<itemizedlist>
+<listitem><para>Given the upstream gradient <computeroutput>dy</computeroutput> of shape <computeroutput>(N, C, H, W)</computeroutput>, the downstream learnable gradients are computed with the chain-rule over the batch and spatial dimensions (<computeroutput>N, H, W</computeroutput>) using saved batch statistics: <programlisting filename=".py"><codeline><highlight class="normal">dbias<sp/>=<sp/>sum(dy)</highlight></codeline>
+<codeline><highlight class="normal">x_hat<sp/>=<sp/>(x<sp/>-<sp/>mean)<sp/>*<sp/>inv_variance</highlight></codeline>
+<codeline><highlight class="normal">dscale<sp/>=<sp/>sum(dy<sp/>*<sp/>x_hat)</highlight></codeline>
+<codeline><highlight class="normal">dx<sp/>=<sp/>(scale<sp/>*<sp/>inv_variance)<sp/>*<sp/>(dy<sp/>-<sp/>(dbias<sp/>+<sp/>x_hat<sp/>*<sp/>dscale)<sp/>/<sp/>nhw)</highlight></codeline>
+</programlisting> where <computeroutput>nhw = N * H * W</computeroutput> is the number of elements averaged per channel.</para>
+</listitem></itemizedlist>
+</para>
+</sect2>
+<sect2 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md7">
+<title>&lt;a href=&quot;./batchnorm/FusedBnInfDReluBnBwd.cpp&quot; &gt;**&lt;tt&gt;FusedBnInfDReluBnBwd&lt;/tt&gt;**&lt;/a&gt;</title>
+<para>Executes a fused 3-operation graph demonstrating batchnorm inference followed by activation backward and batchnorm backward passes.</para>
+<para>The fused graph consists of three operations:</para>
+<para><orderedlist>
+<listitem><para><bold>Batchnorm Inference (Forward)</bold>: Normalizes input <computeroutput>x</computeroutput> using saved statistics <programlisting filename=".py"><codeline><highlight class="normal">bn_y<sp/>=<sp/>scale<sp/>*<sp/>((x<sp/>-<sp/>mean)<sp/>*<sp/>inv_variance)<sp/>+<sp/>bias</highlight></codeline>
+</programlisting></para>
+</listitem><listitem><para><bold>Activation Backward (ReLU)</bold>: Computes gradient through ReLU activation <programlisting filename=".py"><codeline><highlight class="comment">#<sp/>ReLU<sp/>backward:<sp/>gradient<sp/>flows<sp/>through<sp/>only<sp/>where<sp/>forward<sp/>output<sp/>was<sp/>positive</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal">dx_drelu[i]<sp/>=<sp/>dy[i]<sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal"><sp/>bn_y[i]<sp/>&gt;<sp/>0<sp/></highlight><highlight class="keywordflow">else</highlight><highlight class="normal"><sp/>0</highlight></codeline>
+</programlisting></para>
+</listitem><listitem><para><bold>Batchnorm Backward</bold>: Computes gradients with respect to inputs and parameters <programlisting filename=".py"><codeline><highlight class="normal">dbias<sp/>=<sp/>sum(dx_drelu)</highlight></codeline>
+<codeline><highlight class="normal">x_hat<sp/>=<sp/>(x<sp/>-<sp/>mean)<sp/>*<sp/>inv_variance</highlight></codeline>
+<codeline><highlight class="normal">dscale<sp/>=<sp/>sum(dx_drelu<sp/>*<sp/>x_hat)</highlight></codeline>
+<codeline><highlight class="normal">dx<sp/>=<sp/>(scale<sp/>*<sp/>inv_variance)<sp/>*<sp/>(dx_drelu<sp/>-<sp/>(dbias<sp/>+<sp/>x_hat<sp/>*<sp/>dscale)<sp/>/<sp/>nhw)</highlight></codeline>
+</programlisting></para>
+</listitem></orderedlist>
+</para>
+<para><bold>Key Features:</bold><itemizedlist>
+<listitem><para>Demonstrates multi-operation graph fusion with virtual intermediate tensors</para>
+</listitem><listitem><para>The intermediate outputs (<computeroutput>bn_y</computeroutput> and <computeroutput>dx_drelu</computeroutput>) are marked as virtual, allowing the backend to optimize memory usage</para>
+</listitem><listitem><para>Uses <computeroutput>CpuReferenceGraphExecutor</computeroutput> for validation, which executes the entire fused graph on CPU</para>
+</listitem></itemizedlist>
+</para>
+<para><bold>Graph Flow:</bold> <programlisting><codeline><highlight class="normal">Inputs:<sp/>x,<sp/>dy,<sp/>scale,<sp/>bias,<sp/>mean,<sp/>inv_variance</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>bn_y<sp/>=<sp/>batchnorm_inference(x,<sp/>mean,<sp/>inv_variance,<sp/>scale,<sp/>bias)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓<sp/>(virtual<sp/>tensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>dx_drelu<sp/>=<sp/>activation_backward(bn_y,<sp/>dy)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓<sp/>(virtual<sp/>tensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/>[dx,<sp/>dscale,<sp/>dbias]<sp/>=<sp/>batchnorm_backward(dx_drelu,<sp/>x,<sp/>scale,<sp/>mean,<sp/>inv_variance)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓</highlight></codeline>
+<codeline><highlight class="normal">Outputs:<sp/>dx,<sp/>dscale,<sp/>dbias</highlight></codeline>
+</programlisting></para>
+</sect2>
+<sect2 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md8">
+<title>&lt;a href=&quot;./convolution/ConvFprop.cpp&quot; &gt;**&lt;tt&gt;ConvFprop&lt;/tt&gt;**&lt;/a&gt;</title>
+<para>Executes the forward pass of a 2D convolution operation on a 4D input tensor.</para>
+<para><itemizedlist>
+<listitem><para>For an input tensor <computeroutput>x</computeroutput> of shape <computeroutput>(N, C, H_in, W_in)</computeroutput> and a filter tensor <computeroutput>w</computeroutput> of shape <computeroutput>(K, C, R, S)</computeroutput>, the convolution operation computes the output tensor <computeroutput>y</computeroutput> of shape <computeroutput>(N, K, H_out, W_out)</computeroutput>. At a high-level, each output element is computed by the following summation over input channels and filter spatial positions:</para>
+<para><programlisting filename=".py"><codeline><highlight class="normal">y[n,<sp/>k,<sp/>p,<sp/>q]<sp/>=<sp/>sum(sum(sum(x[n,<sp/>c,<sp/>h,<sp/>w]<sp/>*<sp/>w[k,<sp/>c,<sp/>r,<sp/>s]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>c<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(C))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>r<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(R))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>s<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(S))</highlight></codeline>
+</programlisting></para>
+<para>where the input spatial indices <computeroutput>(h, w)</computeroutput> are determined by the output position <computeroutput>(p, q)</computeroutput>, stride, padding, and dilation:</para>
+<para><programlisting filename=".py"><codeline><highlight class="normal">h<sp/>=<sp/>p<sp/>*<sp/>stride_h<sp/>-<sp/>pad_h<sp/>+<sp/>r<sp/>*<sp/>dilation_h</highlight></codeline>
+<codeline><highlight class="normal">w<sp/>=<sp/>q<sp/>*<sp/>stride_w<sp/>-<sp/>pad_w<sp/>+<sp/>s<sp/>*<sp/>dilation_w</highlight></codeline>
+</programlisting></para>
+<para>The output spatial dimensions are calculated as:</para>
+<para><computeroutput>python H_out = floor((H_in + 2*pad_h - dilation_h*(R - 1) - 1) / stride_h) + 1 W_out = floor((W_in + 2*pad_w - dilation_w*(S - 1) - 1) / stride_w) + 1 </computeroutput></para>
+</listitem></itemizedlist>
+</para>
+</sect2>
+<sect2 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md9">
+<title>&lt;a href=&quot;./convolution/ConvDgrad.cpp&quot; &gt;**&lt;tt&gt;ConvDgrad&lt;/tt&gt;**&lt;/a&gt;</title>
+<para>Executes the backward pass (data gradient) of a 2D convolution operation to compute input gradients.</para>
+<para><itemizedlist>
+<listitem><para>For an output gradient tensor <computeroutput>dy</computeroutput> of shape <computeroutput>(N, K, H_out, W_out)</computeroutput> and a filter tensor <computeroutput>w</computeroutput> of shape <computeroutput>(K, C, R, S)</computeroutput>, the convolution backward data operation computes the input gradient tensor <computeroutput>dx</computeroutput> of shape <computeroutput>(N, C, H_in, W_in)</computeroutput>. At a high-level, each input gradient element is computed by accumulating contributions from all output gradients that were influenced by that input position:</para>
+<para><programlisting filename=".py"><codeline><highlight class="normal">dx[n,<sp/>c,<sp/>h,<sp/>w]<sp/>=<sp/>sum(sum(sum(dy[n,<sp/>k,<sp/>p,<sp/>q]<sp/>*<sp/>w[k,<sp/>c,<sp/>r,<sp/>s]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>k<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(K))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>r<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(R))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>s<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(S))</highlight></codeline>
+</programlisting></para>
+<para>where for each input position <computeroutput>(h, w)</computeroutput> and filter position <computeroutput>(r, s)</computeroutput>, the corresponding output position <computeroutput>(p, q)</computeroutput> that contribute is computed as:</para>
+<para><programlisting filename=".py"><codeline><highlight class="normal">p<sp/>=<sp/>(h<sp/>+<sp/>pad_h<sp/>-<sp/>r<sp/>*<sp/>dilation_h)<sp/>/<sp/>stride_h<sp/><sp/></highlight><highlight class="comment">#<sp/>must<sp/>be<sp/>integer<sp/>in<sp/>[0,<sp/>H_out)</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal">q<sp/>=<sp/>(w<sp/>+<sp/>pad_w<sp/>-<sp/>s<sp/>*<sp/>dilation_w)<sp/>/<sp/>stride_w<sp/><sp/></highlight><highlight class="comment">#<sp/>must<sp/>be<sp/>integer<sp/>in<sp/>[0,<sp/>W_out)</highlight></codeline>
+</programlisting> Only positions where both divisions yield integers within the valid output range contribute to the gradient.</para>
+<para>The input gradient dimensions are calculated as the inverse of the forward convolution:</para>
+<para><programlisting filename=".py"><codeline><highlight class="normal">H_in<sp/>=<sp/>stride_h<sp/>*<sp/>(H_out<sp/>-<sp/>1)<sp/>+<sp/>dilation_h<sp/>*<sp/>(R<sp/>-<sp/>1)<sp/>+<sp/>1<sp/>-<sp/>2*pad_h</highlight></codeline>
+<codeline><highlight class="normal">W_in<sp/>=<sp/>stride_w<sp/>*<sp/>(W_out<sp/>-<sp/>1)<sp/>+<sp/>dilation_w<sp/>*<sp/>(S<sp/>-<sp/>1)<sp/>+<sp/>1<sp/>-<sp/>2*pad_w</highlight></codeline>
+</programlisting></para>
+</listitem></itemizedlist>
+</para>
+</sect2>
+<sect2 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md10">
+<title>&lt;a href=&quot;./convolution/ConvWgrad.cpp&quot; &gt;**&lt;tt&gt;ConvWgrad&lt;/tt&gt;**&lt;/a&gt;</title>
+<para>Executes the backward pass (filter gradient) of a 2D convolution operation to compute filter gradients.</para>
+<para><itemizedlist>
+<listitem><para>For an output gradient tensor <computeroutput>dy</computeroutput> of shape <computeroutput>(N, K, H_out, W_out)</computeroutput> and an input tensor <computeroutput>x</computeroutput> of shape <computeroutput>(N, C, H_in, W_in)</computeroutput>, the convolution backward filter operation computes the filter gradient tensor <computeroutput>dw</computeroutput> of shape <computeroutput>(K, C, R, S)</computeroutput>. At a high-level, each filter gradient element is computed by accumulating contributions from all batch samples and valid spatial positions:</para>
+<para><programlisting filename=".py"><codeline><highlight class="normal">dw[k,<sp/>c,<sp/>r,<sp/>s]<sp/>=<sp/>sum(sum(sum(dy[n,<sp/>k,<sp/>p,<sp/>q]<sp/>*<sp/>x[n,<sp/>c,<sp/>h,<sp/>w]</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>n<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(N))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>p<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(H_out))</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">for</highlight><highlight class="normal"><sp/>q<sp/></highlight><highlight class="keywordflow">in</highlight><highlight class="normal"><sp/>range(W_out))</highlight></codeline>
+</programlisting></para>
+<para>where for each output position <computeroutput>(p, q)</computeroutput> and filter position <computeroutput>(r, s)</computeroutput>, the corresponding input position <computeroutput>(h, w)</computeroutput> is computed as:</para>
+<para><programlisting filename=".py"><codeline><highlight class="normal">h<sp/>=<sp/>p<sp/>*<sp/>stride_h<sp/>-<sp/>pad_h<sp/>+<sp/>r<sp/>*<sp/>dilation_h</highlight></codeline>
+<codeline><highlight class="normal">w<sp/>=<sp/>q<sp/>*<sp/>stride_w<sp/>-<sp/>pad_w<sp/>+<sp/>s<sp/>*<sp/>dilation_w</highlight></codeline>
+</programlisting></para>
+<para>For each valid output position, the input position <computeroutput>(h, w)</computeroutput> must fall within the input bounds <computeroutput>[0, H_in) × [0, W_in)</computeroutput> to contribute to the gradient. Input positions outside these bounds (from padding regions) do not contribute.</para>
+<para>The filter gradient dimensions match the original filter tensor from the forward pass:</para>
+<para><computeroutput>python dw.shape = w.shape = (K, C, R, S) </computeroutput></para>
+<para>where:<itemizedlist>
+<listitem><para><computeroutput>K</computeroutput> = number of output channels (filters)</para>
+</listitem><listitem><para><computeroutput>C</computeroutput> = number of input channels per filter</para>
+</listitem><listitem><para><computeroutput>R, S</computeroutput> = filter spatial dimensions (height, width)</para>
+</listitem></itemizedlist>
+</para>
+</listitem></itemizedlist>
+</para>
+</sect2>
+<sect2 id="md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README_1autotoc_md11">
+<title>&lt;a href=&quot;./convolution/FusedConvFpropActiv.cpp&quot; &gt;**&lt;tt&gt;FusedConvFpropActiv&lt;/tt&gt;**&lt;/a&gt;</title>
+<para>Executes a fused convolution forward pass with activation function in a single graph.</para>
+<para>The fused graph consists of two operations:</para>
+<para><orderedlist>
+<listitem><para><bold>Convolution Forward</bold>: Performs standard convolution <programlisting filename=".py"><codeline><highlight class="normal">conv_y<sp/>=<sp/>conv(x,<sp/>w,<sp/>stride,<sp/>padding,<sp/>dilation)</highlight></codeline>
+</programlisting></para>
+</listitem><listitem><para><bold>Activation (Clamped ReLU)</bold>: Applies ReLU activation with upper and lower clipping bounds to convolution output <programlisting filename=".py"><codeline><highlight class="normal">y<sp/>=<sp/>clamp(relu(conv_y),<sp/>lower_clip,<sp/>upper_clip)<sp/>=<sp/>min(max(conv_y,<sp/>lower_clip),<sp/>upper_clip)</highlight></codeline>
+</programlisting></para>
+</listitem></orderedlist>
+</para>
+<para><bold>Key Features:</bold><itemizedlist>
+<listitem><para>Demonstrates kernel fusion by combining convolution and activation in a single graph</para>
+</listitem><listitem><para>The intermediate convolution output (<computeroutput>conv_y</computeroutput>) is marked as virtual, allowing the backend to optimize memory usage and potentially fuse operations</para>
+</listitem><listitem><para>Shows performance benefits of operation fusion compared to separate kernel launches</para>
+</listitem><listitem><para>Uses <computeroutput>CpuReferenceGraphExecutor</computeroutput> for validation, which executes the entire fused graph on CPU</para>
+</listitem></itemizedlist>
+</para>
+<para><bold>Graph Flow:</bold> <programlisting><codeline><highlight class="normal">Inputs:<sp/>x<sp/>(input<sp/>tensor),<sp/>w<sp/>(filter<sp/>weights)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>conv_y<sp/>=<sp/>convolution_forward(x,<sp/>w,<sp/>stride,<sp/>padding,<sp/>dilation)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓<sp/>(virtual<sp/>tensor)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/>y<sp/>=<sp/>activation_forward(conv_y,<sp/>mode=RELU,<sp/>lower_clip=0.2,<sp/>upper_clip=0.7)</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>↓</highlight></codeline>
+<codeline><highlight class="normal">Output:<sp/>y<sp/>(activated<sp/>convolution<sp/>result)</highlight></codeline>
+</programlisting></para>
+<para><bold>Performance Benefits:</bold><itemizedlist>
+<listitem><para>Reduces memory bandwidth by avoiding intermediate tensor writes/reads</para>
+</listitem><listitem><para>Eliminates kernel launch overhead between operations</para>
+</listitem><listitem><para>Enables better cache utilization by processing data in a single pass </para>
+</listitem></itemizedlist>
+</para>
+</sect2>
+</sect1>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/README.md"/>
+  </compounddef>
+</doxygen>

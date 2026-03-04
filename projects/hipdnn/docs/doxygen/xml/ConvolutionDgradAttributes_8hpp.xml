@@ -1,0 +1,567 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="ConvolutionDgradAttributes_8hpp" kind="file" language="C++">
+    <compoundname>ConvolutionDgradAttributes.hpp</compoundname>
+    <includes refid="Attributes_8hpp" local="yes">Attributes.hpp</includes>
+    <includes refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" local="yes">TensorAttributes.hpp</includes>
+    <includes local="no">hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h</includes>
+    <includes refid="Types_8hpp" local="no">hipdnn_frontend/Types.hpp</includes>
+    <includes local="no">memory</includes>
+    <includes local="no">unordered_map</includes>
+    <includes local="no">vector</includes>
+    <includedby refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</includedby>
+    <includedby refid="ConvolutionDgradNode_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp</includedby>
+    <incdepgraph>
+      <node id="5">
+        <label>HipdnnBackendHeuristicType.h</label>
+        <link refid="HipdnnBackendHeuristicType_8h"/>
+      </node>
+      <node id="11">
+        <label>hipdnn_data_sdk/utilities/PointwiseValidation.hpp</label>
+        <link refid="PointwiseValidation_8hpp"/>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+      </node>
+      <node id="23">
+        <label>hipdnn_frontend/Error.hpp</label>
+        <link refid="Error_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_frontend/Types.hpp</label>
+        <link refid="Types_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>Attributes.hpp</label>
+        <link refid="Attributes_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp</label>
+        <link refid="ConvolutionDgradAttributes_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>GraphAttributes.hpp</label>
+        <link refid="GraphAttributes_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="19">
+        <label>TensorAttributes.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+      </node>
+      <node id="12">
+        <label>bitset</label>
+      </node>
+      <node id="20">
+        <label>flatbuffers/flatbuffers.h</label>
+      </node>
+      <node id="28">
+        <label>hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h</label>
+      </node>
+      <node id="6">
+        <label>hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h</label>
+      </node>
+      <node id="7">
+        <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
+      </node>
+      <node id="21">
+        <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
+      </node>
+      <node id="8">
+        <label>hipdnn_data_sdk/data_objects/knob_value_generated.h</label>
+      </node>
+      <node id="9">
+        <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
+      </node>
+      <node id="22">
+        <label>hipdnn_data_sdk/data_objects/tensor_attributes_generated.h</label>
+      </node>
+      <node id="10">
+        <label>hipdnn_data_sdk/types.hpp</label>
+      </node>
+      <node id="17">
+        <label>memory</label>
+      </node>
+      <node id="24">
+        <label>optional</label>
+      </node>
+      <node id="13">
+        <label>ostream</label>
+      </node>
+      <node id="14">
+        <label>set</label>
+      </node>
+      <node id="15">
+        <label>string</label>
+      </node>
+      <node id="25">
+        <label>type_traits</label>
+      </node>
+      <node id="18">
+        <label>unordered_map</label>
+      </node>
+      <node id="27">
+        <label>utility</label>
+      </node>
+      <node id="16">
+        <label>variant</label>
+      </node>
+      <node id="26">
+        <label>vector</label>
+      </node>
+    </incdepgraph>
+    <invincdepgraph>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp</label>
+        <link refid="ConvolutionDgradAttributes_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="15">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
+        <link refid="ConvolutionDgradNode_8hpp"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" prot="public">hipdnn_frontend::graph::ConvDgradAttributes</innerclass>
+    <innernamespace refid="namespacehipdnn__frontend">hipdnn_frontend</innernamespace>
+    <innernamespace refid="namespacehipdnn__frontend_1_1graph">hipdnn_frontend::graph</innernamespace>
+    <briefdescription>
+<para>Attributes for convolution data gradient (backward data) operations. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the ConvDgradAttributes class for configuring backward convolution operations that compute the gradient with respect to input data. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="12"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="13"><highlight class="normal"></highlight></codeline>
+<codeline lineno="14"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="Attributes_8hpp" kindref="compound">Attributes.hpp</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&quot;<ref refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp" kindref="compound">TensorAttributes.hpp</ref>&quot;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="17"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Types_8hpp" kindref="compound">hipdnn_frontend/Types.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="18"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;memory&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="19"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;unordered_map&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="20"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;vector&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="21"><highlight class="normal"></highlight></codeline>
+<codeline lineno="22"><highlight class="normal"></highlight><highlight class="keyword">namespace<sp/></highlight><highlight class="normal"><ref refid="namespacehipdnn__frontend_1_1graph" kindref="compound">hipdnn_frontend::graph</ref></highlight></codeline>
+<codeline lineno="23"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="24"><highlight class="normal"></highlight></codeline>
+<codeline lineno="41" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" refkind="compound"><highlight class="normal"></highlight><highlight class="keyword">class<sp/></highlight><highlight class="normal"><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref><sp/>:<sp/></highlight><highlight class="keyword">public</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes" kindref="compound">Attributes</ref>&lt;ConvDgradAttributes&gt;</highlight></codeline>
+<codeline lineno="42"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="43"><highlight class="normal"></highlight><highlight class="keyword">public</highlight><highlight class="normal">:</highlight></codeline>
+<codeline lineno="45" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">enum<sp/>class</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4" kindref="member">InputNames</ref></highlight></codeline>
+<codeline lineno="46"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="47"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4a8e33631037901075c85616c9b60441e4" kindref="member">DY</ref><sp/>=<sp/>0,<sp/></highlight></codeline>
+<codeline lineno="48"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4a61e9c06ea9a85a5088a499df6458d276" kindref="member">W</ref><sp/>=<sp/>1<sp/></highlight></codeline>
+<codeline lineno="49"><highlight class="normal"><sp/><sp/><sp/><sp/>};</highlight></codeline>
+<codeline lineno="50" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a22be71226af0fc8f87e87f9800ae28c3" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4" kindref="member">InputNames</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a22be71226af0fc8f87e87f9800ae28c3" kindref="member">input_names</ref>;<sp/></highlight></codeline>
+<codeline lineno="51"><highlight class="normal"></highlight></codeline>
+<codeline lineno="53" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a89086ccfced429ef53938c4c2eb7070a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">enum<sp/>class</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a89086ccfced429ef53938c4c2eb7070a" kindref="member">OutputNames</ref></highlight></codeline>
+<codeline lineno="54"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="55"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a89086ccfced429ef53938c4c2eb7070aa72a530b2433264cef373d8fcca5662c1" kindref="member">DX</ref><sp/>=<sp/>0<sp/></highlight></codeline>
+<codeline lineno="56"><highlight class="normal"><sp/><sp/><sp/><sp/>};</highlight></codeline>
+<codeline lineno="57" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1af09a13665a18bd476cffa98c6ecc3441" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a89086ccfced429ef53938c4c2eb7070a" kindref="member">OutputNames</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1af09a13665a18bd476cffa98c6ecc3441" kindref="member">output_names</ref>;<sp/></highlight></codeline>
+<codeline lineno="58"><highlight class="normal"></highlight></codeline>
+<codeline lineno="59" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1abc23c155f6d27bec8d8d6eeac073ea93" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;InputNames,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1abc23c155f6d27bec8d8d6eeac073ea93" kindref="member">inputs</ref>;<sp/></highlight></codeline>
+<codeline lineno="60" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ae253bb0a662e9008d8c323ce8d87f843" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::unordered_map&lt;OutputNames,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ae253bb0a662e9008d8c323ce8d87f843" kindref="member">outputs</ref>;<sp/></highlight></codeline>
+<codeline lineno="61"><highlight class="normal"></highlight></codeline>
+<codeline lineno="62"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTBEGIN(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="63" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aa7fa9faf0daccf57e9958674d2e640bb" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::vector&lt;int64_t&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aa7fa9faf0daccf57e9958674d2e640bb" kindref="member">pre_padding</ref>;<sp/></highlight></codeline>
+<codeline lineno="64" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a605a431a5a5d7f1a94be3d15089607b8" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::vector&lt;int64_t&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a605a431a5a5d7f1a94be3d15089607b8" kindref="member">post_padding</ref>;<sp/></highlight></codeline>
+<codeline lineno="65" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a2bf17d74f863dfd5b239cbea6e4644e4" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::vector&lt;int64_t&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a2bf17d74f863dfd5b239cbea6e4644e4" kindref="member">stride</ref>;<sp/></highlight></codeline>
+<codeline lineno="66" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a77d962117464eb3367f68cbcf17efc47" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::vector&lt;int64_t&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a77d962117464eb3367f68cbcf17efc47" kindref="member">dilation</ref>;<sp/></highlight></codeline>
+<codeline lineno="68" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ac37e2e1712495bf045b798a23da65e71" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">ConvolutionMode</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ac37e2e1712495bf045b798a23da65e71" kindref="member">math_mode</ref><sp/>=<sp/><ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16a959e923799a82a4f7e11f7ae57586617" kindref="member">ConvolutionMode::CROSS_CORRELATION</ref>;</highlight></codeline>
+<codeline lineno="69"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTEND(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="70"><highlight class="normal"></highlight></codeline>
+<codeline lineno="72"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="73" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a31d924c74f2cd3789ca6eee5f89b556c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a31d924c74f2cd3789ca6eee5f89b556c" kindref="member">get_dy</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="74"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="75"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4a8e33631037901075c85616c9b60441e4" kindref="member">InputNames::DY</ref>);</highlight></codeline>
+<codeline lineno="76"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="78"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="79" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1af120a65592b029a3b533a860d0e7754f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1af120a65592b029a3b533a860d0e7754f" kindref="member">get_w</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="80"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1ad46a3038f1b320ae7685aa5e9d3914c1" kindref="member">getInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4a61e9c06ea9a85a5088a499df6458d276" kindref="member">InputNames::W</ref>);</highlight></codeline>
+<codeline lineno="82"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="84"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="85" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a298ab8adf0eadcedb0d9234f50d07fe1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/>std::shared_ptr&lt;TensorAttributes&gt;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a298ab8adf0eadcedb0d9234f50d07fe1" kindref="member">get_dx</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="86"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="87"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1af187436aa9d4528d391706e323810c43" kindref="member">getOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a89086ccfced429ef53938c4c2eb7070aa72a530b2433264cef373d8fcca5662c1" kindref="member">OutputNames::DX</ref>);</highlight></codeline>
+<codeline lineno="88"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="89"><highlight class="normal"></highlight></codeline>
+<codeline lineno="90"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>Setters<sp/>for<sp/>tensor</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="91"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="92" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a6f2cf1e0c22d1c026516a12a3e6a35fe" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a6f2cf1e0c22d1c026516a12a3e6a35fe" kindref="member">set_dy</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="93"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="94"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4a8e33631037901075c85616c9b60441e4" kindref="member">InputNames::DY</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="95"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="96"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="97" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ac94be12815c5d51e7eea3481ba4ba1b2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ac94be12815c5d51e7eea3481ba4ba1b2" kindref="member">set_dy</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="98"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="99"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4a8e33631037901075c85616c9b60441e4" kindref="member">InputNames::DY</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="100"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="101"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="102" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a4432037945b79c0a9bdeb389f5aceffe" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a4432037945b79c0a9bdeb389f5aceffe" kindref="member">set_w</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="103"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="104"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4a61e9c06ea9a85a5088a499df6458d276" kindref="member">InputNames::W</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="105"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="106"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="107" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aa344e522a172879ae29e03e3c0631648" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aa344e522a172879ae29e03e3c0631648" kindref="member">set_w</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="108"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="109"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1abc515e25033ce374e35bb07b69db9a19" kindref="member">setInput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0fdd3befa0cd68f4f78a6fd587afc7a4a61e9c06ea9a85a5088a499df6458d276" kindref="member">InputNames::W</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="110"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="111"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="112" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1af5766782ac449877d17cb91c376c4e57" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1af5766782ac449877d17cb91c376c4e57" kindref="member">set_dx</ref>(std::shared_ptr&lt;TensorAttributes&gt;&amp;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="113"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="114"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a89086ccfced429ef53938c4c2eb7070aa72a530b2433264cef373d8fcca5662c1" kindref="member">OutputNames::DX</ref>,<sp/>std::move(value));</highlight></codeline>
+<codeline lineno="115"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="116"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="117" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1afe519544fbfa73dbfaeb3a38a1f37f3e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1afe519544fbfa73dbfaeb3a38a1f37f3e" kindref="member">set_dx</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::shared_ptr&lt;TensorAttributes&gt;&amp;<sp/>value)</highlight></codeline>
+<codeline lineno="118"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="119"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1Attributes_1a7209c57777072364f345da3cad873f6f" kindref="member">setOutput</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a89086ccfced429ef53938c4c2eb7070aa72a530b2433264cef373d8fcca5662c1" kindref="member">OutputNames::DX</ref>,<sp/>value);</highlight></codeline>
+<codeline lineno="120"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="121"><highlight class="normal"></highlight></codeline>
+<codeline lineno="127"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="128" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a6db0860ead9e344347f36328f7040060" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a6db0860ead9e344347f36328f7040060" kindref="member">set_padding</ref>(std::vector&lt;int64_t&gt;<sp/>padding)</highlight></codeline>
+<codeline lineno="129"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="130"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a734f9480f066848c3dcf8f373f2e5dd2" kindref="member">set_pre_padding</ref>(padding);</highlight></codeline>
+<codeline lineno="131"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab462a0151f8e9dd9c2b3d710cec7ca48" kindref="member">set_post_padding</ref>(std::move(padding));</highlight></codeline>
+<codeline lineno="132"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="133"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="134"><highlight class="normal"></highlight></codeline>
+<codeline lineno="135"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="136" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a734f9480f066848c3dcf8f373f2e5dd2" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a734f9480f066848c3dcf8f373f2e5dd2" kindref="member">set_pre_padding</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/>padding)</highlight></codeline>
+<codeline lineno="137"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="138"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aa7fa9faf0daccf57e9958674d2e640bb" kindref="member">pre_padding</ref><sp/>=<sp/>padding;</highlight></codeline>
+<codeline lineno="139"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="140"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="141"><highlight class="normal"></highlight></codeline>
+<codeline lineno="142"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="143" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1acf419a47452034625f9939ce2650b259" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1acf419a47452034625f9939ce2650b259" kindref="member">set_pre_padding</ref>(std::vector&lt;int64_t&gt;&amp;&amp;<sp/>padding)</highlight></codeline>
+<codeline lineno="144"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="145"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aa7fa9faf0daccf57e9958674d2e640bb" kindref="member">pre_padding</ref><sp/>=<sp/>std::move(padding);</highlight></codeline>
+<codeline lineno="146"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="147"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="148"><highlight class="normal"></highlight></codeline>
+<codeline lineno="149"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="150" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab462a0151f8e9dd9c2b3d710cec7ca48" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab462a0151f8e9dd9c2b3d710cec7ca48" kindref="member">set_post_padding</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/>padding)</highlight></codeline>
+<codeline lineno="151"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="152"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a605a431a5a5d7f1a94be3d15089607b8" kindref="member">post_padding</ref><sp/>=<sp/>padding;</highlight></codeline>
+<codeline lineno="153"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="154"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="155"><highlight class="normal"></highlight></codeline>
+<codeline lineno="156"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="157" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab8a1c76dd277929e07ad59f10ace508b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab8a1c76dd277929e07ad59f10ace508b" kindref="member">set_post_padding</ref>(std::vector&lt;int64_t&gt;&amp;&amp;<sp/>padding)</highlight></codeline>
+<codeline lineno="158"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="159"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a605a431a5a5d7f1a94be3d15089607b8" kindref="member">post_padding</ref><sp/>=<sp/>std::move(padding);</highlight></codeline>
+<codeline lineno="160"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="161"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="162"><highlight class="normal"></highlight></codeline>
+<codeline lineno="168"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="169" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aade1b211e1366fea3e3c1cefefb4d454" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aade1b211e1366fea3e3c1cefefb4d454" kindref="member">set_stride</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/>strideVals)</highlight></codeline>
+<codeline lineno="170"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="171"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a2bf17d74f863dfd5b239cbea6e4644e4" kindref="member">stride</ref><sp/>=<sp/>strideVals;</highlight></codeline>
+<codeline lineno="172"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="173"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="174"><highlight class="normal"></highlight></codeline>
+<codeline lineno="175"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="176" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a4f18463638cb669ca72bc27556367199" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a4f18463638cb669ca72bc27556367199" kindref="member">set_stride</ref>(std::vector&lt;int64_t&gt;&amp;&amp;<sp/>strideVals)</highlight></codeline>
+<codeline lineno="177"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="178"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a2bf17d74f863dfd5b239cbea6e4644e4" kindref="member">stride</ref><sp/>=<sp/>std::move(strideVals);</highlight></codeline>
+<codeline lineno="179"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="180"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="181"><highlight class="normal"></highlight></codeline>
+<codeline lineno="187"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="188" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a9e3da76a023c39160058bd3f9ab79c03" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a9e3da76a023c39160058bd3f9ab79c03" kindref="member">set_dilation</ref>(</highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/>dilationVals)</highlight></codeline>
+<codeline lineno="189"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="190"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a77d962117464eb3367f68cbcf17efc47" kindref="member">dilation</ref><sp/>=<sp/>dilationVals;</highlight></codeline>
+<codeline lineno="191"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="192"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="193"><highlight class="normal"></highlight></codeline>
+<codeline lineno="194"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="195" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a5533bbe0153ae9c6c62562912525f617" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a5533bbe0153ae9c6c62562912525f617" kindref="member">set_dilation</ref>(std::vector&lt;int64_t&gt;&amp;&amp;<sp/>dilationVals)</highlight></codeline>
+<codeline lineno="196"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="197"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a77d962117464eb3367f68cbcf17efc47" kindref="member">dilation</ref><sp/>=<sp/>std::move(dilationVals);</highlight></codeline>
+<codeline lineno="198"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="199"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="200"><highlight class="normal"></highlight></codeline>
+<codeline lineno="201"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="202" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a097a53cd6272eea4b0529163864c183e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref>&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a097a53cd6272eea4b0529163864c183e" kindref="member">set_convolution_mode</ref>(<ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">ConvolutionMode</ref><sp/>mode)</highlight></codeline>
+<codeline lineno="203"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="204"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ac37e2e1712495bf045b798a23da65e71" kindref="member">math_mode</ref><sp/>=<sp/>mode;</highlight></codeline>
+<codeline lineno="205"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>*</highlight><highlight class="keyword">this</highlight><highlight class="normal">;</highlight></codeline>
+<codeline lineno="206"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="207"><highlight class="normal"></highlight></codeline>
+<codeline lineno="209"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="210" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab3051522e885303778e757acb614616f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab3051522e885303778e757acb614616f" kindref="member">get_pre_padding</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="211"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="212"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aa7fa9faf0daccf57e9958674d2e640bb" kindref="member">pre_padding</ref>;</highlight></codeline>
+<codeline lineno="213"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="214"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="215" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a36ec7e8260d46bc03377e2a9f16ff21f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a36ec7e8260d46bc03377e2a9f16ff21f" kindref="member">get_post_padding</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="216"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="217"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a605a431a5a5d7f1a94be3d15089607b8" kindref="member">post_padding</ref>;</highlight></codeline>
+<codeline lineno="218"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="219"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="220" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab1104743c5475ef3956c33a61f5c9b8f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab1104743c5475ef3956c33a61f5c9b8f" kindref="member">get_stride</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="221"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="222"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a2bf17d74f863dfd5b239cbea6e4644e4" kindref="member">stride</ref>;</highlight></codeline>
+<codeline lineno="223"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="224"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="225" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ae51423204931c9ee268fbeea7e9aa19b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::vector&lt;int64_t&gt;&amp;<sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ae51423204931c9ee268fbeea7e9aa19b" kindref="member">get_dilation</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="226"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="227"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a77d962117464eb3367f68cbcf17efc47" kindref="member">dilation</ref>;</highlight></codeline>
+<codeline lineno="228"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="229"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="comment">//<sp/>NOLINTNEXTLINE(readability-identifier-naming)</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="230" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1adfb03ba2c30b1c3c93c61155f8a38884" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1af586c5f5300fc66e8dec7de5a94c5c16" kindref="member">ConvolutionMode</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1adfb03ba2c30b1c3c93c61155f8a38884" kindref="member">get_convolution_mode</ref>()</highlight><highlight class="keyword"><sp/>const</highlight></codeline>
+<codeline lineno="231"><highlight class="keyword"><sp/><sp/><sp/><sp/></highlight><highlight class="normal">{</highlight></codeline>
+<codeline lineno="232"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ac37e2e1712495bf045b798a23da65e71" kindref="member">math_mode</ref>;</highlight></codeline>
+<codeline lineno="233"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="234"><highlight class="normal"></highlight></codeline>
+<codeline lineno="235"><highlight class="normal"><sp/><sp/><sp/><sp/>flatbuffers::Offset&lt;hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes&gt;</highlight></codeline>
+<codeline lineno="236" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aff9217b6e99ed4f06ac5cd15402265b8" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aff9217b6e99ed4f06ac5cd15402265b8" kindref="member">pack_attributes</ref>(flatbuffers::FlatBufferBuilder&amp;<sp/>builder)<sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/></highlight><highlight class="comment">//<sp/>NOLINT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="237"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="238"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::CreateConvolutionBwdAttributesDirect(</highlight></codeline>
+<codeline lineno="239"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>builder,</highlight></codeline>
+<codeline lineno="240"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a31d924c74f2cd3789ca6eee5f89b556c" kindref="member">get_dy</ref>()-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="241"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1af120a65592b029a3b533a860d0e7754f" kindref="member">get_w</ref>()-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="242"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a298ab8adf0eadcedb0d9234f50d07fe1" kindref="member">get_dx</ref>()-&gt;get_uid(),</highlight></codeline>
+<codeline lineno="243"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&amp;<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aa7fa9faf0daccf57e9958674d2e640bb" kindref="member">pre_padding</ref>,</highlight></codeline>
+<codeline lineno="244"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&amp;<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a605a431a5a5d7f1a94be3d15089607b8" kindref="member">post_padding</ref>,</highlight></codeline>
+<codeline lineno="245"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&amp;<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a2bf17d74f863dfd5b239cbea6e4644e4" kindref="member">stride</ref>,</highlight></codeline>
+<codeline lineno="246"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>&amp;<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a77d962117464eb3367f68cbcf17efc47" kindref="member">dilation</ref>,</highlight></codeline>
+<codeline lineno="247"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="namespacehipdnn__frontend_1a8dc29abe15fbba5da61a6b72889233b1" kindref="member">toSdkType</ref>(<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ac37e2e1712495bf045b798a23da65e71" kindref="member">math_mode</ref>));</highlight></codeline>
+<codeline lineno="248"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="249"><highlight class="normal"></highlight></codeline>
+<codeline lineno="250" refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0ee603723d4f6ff4df05e30fd8c0fa6e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">static</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a0ee603723d4f6ff4df05e30fd8c0fa6e" kindref="member">fromFlatBuffer</ref>(</highlight></codeline>
+<codeline lineno="251"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes*<sp/>fb,</highlight></codeline>
+<codeline lineno="252"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keyword">const</highlight><highlight class="normal"><sp/>std::unordered_map&lt;int64_t,<sp/>std::shared_ptr&lt;TensorAttributes&gt;&gt;&amp;<sp/>tensorMap)</highlight></codeline>
+<codeline lineno="253"><highlight class="normal"><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="254"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref><sp/>attr;</highlight></codeline>
+<codeline lineno="255"><highlight class="normal"></highlight></codeline>
+<codeline lineno="256"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a6f2cf1e0c22d1c026516a12a3e6a35fe" kindref="member">set_dy</ref>(tensorMap.at(fb-&gt;dy_tensor_uid()));</highlight></codeline>
+<codeline lineno="257"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a4432037945b79c0a9bdeb389f5aceffe" kindref="member">set_w</ref>(tensorMap.at(fb-&gt;w_tensor_uid()));</highlight></codeline>
+<codeline lineno="258"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1af5766782ac449877d17cb91c376c4e57" kindref="member">set_dx</ref>(tensorMap.at(fb-&gt;dx_tensor_uid()));</highlight></codeline>
+<codeline lineno="259"><highlight class="normal"></highlight></codeline>
+<codeline lineno="260"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;pre_padding()<sp/>!=<sp/></highlight><highlight class="keyword">nullptr</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="261"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="262"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::vector&lt;int64_t&gt;<sp/>prePadding(fb-&gt;pre_padding()-&gt;begin(),<sp/>fb-&gt;pre_padding()-&gt;end());</highlight></codeline>
+<codeline lineno="263"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a734f9480f066848c3dcf8f373f2e5dd2" kindref="member">set_pre_padding</ref>(std::move(prePadding));</highlight></codeline>
+<codeline lineno="264"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="265"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;post_padding()<sp/>!=<sp/></highlight><highlight class="keyword">nullptr</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="266"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="267"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::vector&lt;int64_t&gt;<sp/>postPadding(fb-&gt;post_padding()-&gt;begin(),</highlight></codeline>
+<codeline lineno="268"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>fb-&gt;post_padding()-&gt;end());</highlight></codeline>
+<codeline lineno="269"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1ab462a0151f8e9dd9c2b3d710cec7ca48" kindref="member">set_post_padding</ref>(std::move(postPadding));</highlight></codeline>
+<codeline lineno="270"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="271"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;stride()<sp/>!=<sp/></highlight><highlight class="keyword">nullptr</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="272"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="273"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::vector&lt;int64_t&gt;<sp/>strideVec(fb-&gt;stride()-&gt;begin(),<sp/>fb-&gt;stride()-&gt;end());</highlight></codeline>
+<codeline lineno="274"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1aade1b211e1366fea3e3c1cefefb4d454" kindref="member">set_stride</ref>(std::move(strideVec));</highlight></codeline>
+<codeline lineno="275"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="276"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">if</highlight><highlight class="normal">(fb-&gt;dilation()<sp/>!=<sp/></highlight><highlight class="keyword">nullptr</highlight><highlight class="normal">)</highlight></codeline>
+<codeline lineno="277"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>{</highlight></codeline>
+<codeline lineno="278"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>std::vector&lt;int64_t&gt;<sp/>dilationVec(fb-&gt;dilation()-&gt;begin(),<sp/>fb-&gt;dilation()-&gt;end());</highlight></codeline>
+<codeline lineno="279"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a9e3da76a023c39160058bd3f9ab79c03" kindref="member">set_dilation</ref>(std::move(dilationVec));</highlight></codeline>
+<codeline lineno="280"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="281"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/>attr.<ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes_1a097a53cd6272eea4b0529163864c183e" kindref="member">set_convolution_mode</ref>(<ref refid="namespacehipdnn__frontend_1a2bbcec4847cbe1a280221e9e8e9181f8" kindref="member">fromSdkType</ref>(fb-&gt;conv_mode()));</highlight></codeline>
+<codeline lineno="282"><highlight class="normal"></highlight></codeline>
+<codeline lineno="283"><highlight class="normal"><sp/><sp/><sp/><sp/><sp/><sp/><sp/><sp/></highlight><highlight class="keywordflow">return</highlight><highlight class="normal"><sp/>attr;</highlight></codeline>
+<codeline lineno="284"><highlight class="normal"><sp/><sp/><sp/><sp/>}</highlight></codeline>
+<codeline lineno="285"><highlight class="normal">};</highlight></codeline>
+<codeline lineno="286"><highlight class="normal"></highlight></codeline>
+<codeline lineno="287" refid="namespacehipdnn__frontend_1_1graph_1a1dbd4604ba5f5ac4e986e5ee215f3163" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref><sp/><ref refid="namespacehipdnn__frontend_1_1graph_1a1dbd4604ba5f5ac4e986e5ee215f3163" kindref="member">Conv_dgrad_attributes</ref>;<sp/></highlight></codeline>
+<codeline lineno="288"><highlight class="normal">}<sp/></highlight><highlight class="comment">//<sp/>namespace<sp/>hipdnn_frontend::graph</highlight><highlight class="normal"></highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp"/>
+  </compounddef>
+</doxygen>

@@ -1,0 +1,295 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1KnobSetting" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::KnobSetting</compoundname>
+    <includes refid="KnobSetting_8hpp" local="no">KnobSetting.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1KnobSetting_1a739504aef67dbf96986edef91c2596e1" prot="private" static="no" mutable="no">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::KnobSetting::_knobId</definition>
+        <argsstring></argsstring>
+        <name>_knobId</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::_knobId</qualifiedname>
+        <briefdescription>
+<para>The knob identifier. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="174" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="174" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1KnobSetting_1aade8ce1658882325443b5398f8e34664" prot="private" static="no" mutable="no">
+        <type><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref></type>
+        <definition>KnobValueVariant hipdnn_frontend::KnobSetting::_value</definition>
+        <argsstring></argsstring>
+        <name>_value</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::_value</qualifiedname>
+        <briefdescription>
+<para>The knob value. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="175" column="22" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="175" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1KnobSetting_1a6e523d43c6805b5633d135df65094767" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::KnobSetting::KnobSetting</definition>
+        <argsstring>(std::string knobId, KnobValueVariant value)</argsstring>
+        <name>KnobSetting</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::KnobSetting</qualifiedname>
+        <param>
+          <type>std::string</type>
+          <declname>knobId</declname>
+        </param>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref></type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+<para>Construct a <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> with ID and variant value. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>knobId</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The knob identifier string </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>value</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The value as a variant (int64_t, double, or string) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="57" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="57" bodyend="61"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1KnobSetting_1aff65d2ac4aa392352e8d9a6495e103ae" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type></type>
+        <definition>hipdnn_frontend::KnobSetting::KnobSetting</definition>
+        <argsstring>(std::string knobId, const T &amp;value)</argsstring>
+        <name>KnobSetting</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::KnobSetting</qualifiedname>
+        <param>
+          <type>std::string</type>
+          <declname>knobId</declname>
+        </param>
+        <param>
+          <type>const T &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+<para>Construct a <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> with ID and typed value. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>T</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Value type (int64_t, double, or std::string) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>knobId</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The knob identifier string </para>
+</parameterdescription>
+</parameteritem>
+<parameteritem>
+<parameternamelist>
+<parametername>value</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The value </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="70" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="70" bodyend="74"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1KnobSetting_1a467607e5efee60ed216e744829399e05" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const std::string &amp;</type>
+        <definition>const std::string &amp; hipdnn_frontend::KnobSetting::knobId</definition>
+        <argsstring>() const</argsstring>
+        <name>knobId</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::knobId</qualifiedname>
+        <briefdescription>
+<para>Get the knob identifier. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The knob ID string </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="80" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="80" bodyend="83"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1KnobSetting_1a14283d7908dedf9bd3df39406998fe63" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="namespacehipdnn__frontend_1aa2f7da96821843472620c834675dacf0" kindref="member">KnobValueVariant</ref> &amp;</type>
+        <definition>const KnobValueVariant &amp; hipdnn_frontend::KnobSetting::value</definition>
+        <argsstring>() const</argsstring>
+        <name>value</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::value</qualifiedname>
+        <briefdescription>
+<para>Get the knob value. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>The value as a variant </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="89" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="89" bodyend="92"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1KnobSetting_1a9ec287a6e6ed16146dbb51158d4b7da7" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>typename T</type>
+          </param>
+        </templateparamlist>
+        <type>void</type>
+        <definition>void hipdnn_frontend::KnobSetting::setValue</definition>
+        <argsstring>(const T &amp;value)</argsstring>
+        <name>setValue</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::setValue</qualifiedname>
+        <param>
+          <type>const T &amp;</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+<para>Set the knob value. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="templateparam"><parameteritem>
+<parameternamelist>
+<parametername>T</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>Value type (int64_t, double, or std::string) </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>value</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The new value </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="100" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="100" bodyend="103"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1KnobSetting_1a8f523af8518c0766ab414af1c77b18ef" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::KnobSetting &gt;</type>
+        <definition>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::KnobSetting &gt; hipdnn_frontend::KnobSetting::packKnobSetting</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder) const</argsstring>
+        <name>packKnobSetting</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::packKnobSetting</qualifiedname>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <briefdescription>
+<para>Serialize this <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> to a FlatBuffer. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><parameterlist kind="param"><parameteritem>
+<parameternamelist>
+<parametername>builder</parametername>
+</parameternamelist>
+<parameterdescription>
+<para>The FlatBufferBuilder to use </para>
+</parameterdescription>
+</parameteritem>
+</parameterlist>
+<simplesect kind="return"><para>FlatBuffer offset for the serialized <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="111" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="111" bodyend="145"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1KnobSetting_1ad497ae91aa3d9b7f04d1335e9c48afb6" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::string</type>
+        <definition>std::string hipdnn_frontend::KnobSetting::toString</definition>
+        <argsstring>() const</argsstring>
+        <name>toString</name>
+        <qualifiedname>hipdnn_frontend::KnobSetting::toString</qualifiedname>
+        <briefdescription>
+<para>Get a string representation of this <ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+<para><simplesect kind="return"><para>Human-readable string describing the setting </para>
+</simplesect>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="151" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="151" bodyend="171"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Represents a specific value assignment for an engine configuration knob. </para>
+    </briefdescription>
+    <detaileddescription>
+<para><ref refid="classhipdnn__frontend_1_1KnobSetting" kindref="compound">KnobSetting</ref> pairs a knob identifier with a value. This is used when creating execution plans with custom engine configurations.</para>
+<para><programlisting filename=".cpp"><codeline><highlight class="comment">//<sp/>Create<sp/>knob<sp/>settings</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal">std::vector&lt;KnobSetting&gt;<sp/>settings<sp/>=<sp/>{</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1KnobSetting_1a6e523d43c6805b5633d135df65094767" kindref="member">KnobSetting</ref>(</highlight><highlight class="stringliteral">&quot;HIPDNN_KNOB_TYPE_TILE_SIZE&quot;</highlight><highlight class="normal">,<sp/>int64_t{256}),</highlight></codeline>
+<codeline><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="classhipdnn__frontend_1_1KnobSetting_1a6e523d43c6805b5633d135df65094767" kindref="member">KnobSetting</ref>(</highlight><highlight class="stringliteral">&quot;HIPDNN_KNOB_TYPE_SPLIT_K&quot;</highlight><highlight class="normal">,<sp/>int64_t{2})</highlight></codeline>
+<codeline><highlight class="normal">};</highlight></codeline>
+<codeline><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal"></highlight><highlight class="comment">//<sp/>Use<sp/>in<sp/>execution<sp/>plan<sp/>creation</highlight><highlight class="normal"></highlight></codeline>
+<codeline><highlight class="normal">graph.create_execution_plan_ext(engineId,<sp/>settings);</highlight></codeline>
+</programlisting></para>
+<para><simplesect kind="see"><para><ref refid="classhipdnn__frontend_1_1Knob" kindref="compound">Knob</ref>, Graph::create_execution_plan_ext() </para>
+</simplesect>
+</para>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" line="49" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobSetting.hpp" bodystart="50" bodyend="176"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1a739504aef67dbf96986edef91c2596e1" prot="private" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>_knobId</name></member>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1aade8ce1658882325443b5398f8e34664" prot="private" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>_value</name></member>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1a467607e5efee60ed216e744829399e05" prot="public" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>knobId</name></member>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1a6e523d43c6805b5633d135df65094767" prot="public" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>KnobSetting</name></member>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1aff65d2ac4aa392352e8d9a6495e103ae" prot="public" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>KnobSetting</name></member>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1a8f523af8518c0766ab414af1c77b18ef" prot="public" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>packKnobSetting</name></member>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1a9ec287a6e6ed16146dbb51158d4b7da7" prot="public" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>setValue</name></member>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1ad497ae91aa3d9b7f04d1335e9c48afb6" prot="public" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>toString</name></member>
+      <member refid="classhipdnn__frontend_1_1KnobSetting_1a14283d7908dedf9bd3df39406998fe63" prot="public" virt="non-virtual"><scope>hipdnn_frontend::KnobSetting</scope><name>value</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

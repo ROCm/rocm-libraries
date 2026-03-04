@@ -1,0 +1,46 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="structhipdnnBackendFlatbufferData__t" kind="struct" language="C++" prot="public">
+    <compoundname>hipdnnBackendFlatbufferData_t</compoundname>
+    <includes refid="HipdnnBackendFlatbufferData_8h" local="no">HipdnnBackendFlatbufferData.h</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="structhipdnnBackendFlatbufferData__t_1a19cd5c816dea79a41ccb6ae96402c45e" prot="public" static="no" mutable="no">
+        <type>const void *</type>
+        <definition>const void* hipdnnBackendFlatbufferData_t::ptr</definition>
+        <argsstring></argsstring>
+        <name>ptr</name>
+        <qualifiedname>hipdnnBackendFlatbufferData_t::ptr</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendFlatbufferData.h" line="16" column="16" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendFlatbufferData.h" bodystart="16" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="structhipdnnBackendFlatbufferData__t_1aaa6e335ef2d3ed27ab80b7d3872403ed" prot="public" static="no" mutable="no">
+        <type>size_t</type>
+        <definition>size_t hipdnnBackendFlatbufferData_t::size</definition>
+        <argsstring></argsstring>
+        <name>size</name>
+        <qualifiedname>hipdnnBackendFlatbufferData_t::size</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendFlatbufferData.h" line="17" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendFlatbufferData.h" bodystart="17" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendFlatbufferData.h" line="14" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendFlatbufferData.h" bodystart="15" bodyend="18"/>
+    <listofallmembers>
+      <member refid="structhipdnnBackendFlatbufferData__t_1a19cd5c816dea79a41ccb6ae96402c45e" prot="public" virt="non-virtual"><scope>hipdnnBackendFlatbufferData_t</scope><name>ptr</name></member>
+      <member refid="structhipdnnBackendFlatbufferData__t_1aaa6e335ef2d3ed27ab80b7d3872403ed" prot="public" virt="non-virtual"><scope>hipdnnBackendFlatbufferData_t</scope><name>size</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

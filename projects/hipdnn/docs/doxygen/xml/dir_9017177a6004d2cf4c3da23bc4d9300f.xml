@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_9017177a6004d2cf4c3da23bc4d9300f" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution</compoundname>
+    <innerfile refid="ConvDgrad_8cpp">ConvDgrad.cpp</innerfile>
+    <innerfile refid="ConvFprop_8cpp">ConvFprop.cpp</innerfile>
+    <innerfile refid="ConvWgrad_8cpp">ConvWgrad.cpp</innerfile>
+    <innerfile refid="FusedConvFpropActiv_8cpp">FusedConvFpropActiv.cpp</innerfile>
+    <innerfile refid="FusedConvFpropBiasActiv_8cpp">FusedConvFpropBiasActiv.cpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/"/>
+  </compounddef>
+</doxygen>

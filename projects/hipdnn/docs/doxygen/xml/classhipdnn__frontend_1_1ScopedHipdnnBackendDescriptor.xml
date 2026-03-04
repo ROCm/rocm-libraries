@@ -1,0 +1,268 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::ScopedHipdnnBackendDescriptor</compoundname>
+    <includes refid="ScopedHipdnnBackendDescriptor_8hpp" local="no">ScopedHipdnnBackendDescriptor.hpp</includes>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a99cfc0c386509f93f061cd4896332e14" prot="private" static="no" mutable="no">
+        <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+        <definition>hipdnnBackendDescriptor_t hipdnn_frontend::ScopedHipdnnBackendDescriptor::_descriptor</definition>
+        <argsstring></argsstring>
+        <name>_descriptor</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::_descriptor</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="18" column="31" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="18" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a53390f529eb0e04d06d74e84d9464006" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::ScopedHipdnnBackendDescriptor::_valid</definition>
+        <argsstring></argsstring>
+        <name>_valid</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::_valid</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="19" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="19" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-static-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a40503623d3742236dfb4fa9d582a9576" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>static void hipdnn_frontend::ScopedHipdnnBackendDescriptor::logBackendError</definition>
+        <argsstring>(const std::string &amp;errorString, const hipdnnStatus_t status)</argsstring>
+        <name>logBackendError</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::logBackendError</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>errorString</declname>
+        </param>
+        <param>
+          <type>const <ref refid="HipdnnStatus_8h_1aea82d15fc8702bfe60f61f219d150345" kindref="member">hipdnnStatus_t</ref></type>
+          <declname>status</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="21" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="21" bodyend="28"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a7539c2c1b798288ecc9e349b118a9778" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</definition>
+        <argsstring>()</argsstring>
+        <name>ScopedHipdnnBackendDescriptor</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="31" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="31" bodyend="35"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a46f9885eaff7935f08fe47df0e822a25" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</definition>
+        <argsstring>(hipdnnBackendDescriptor_t descriptor)</argsstring>
+        <name>ScopedHipdnnBackendDescriptor</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</qualifiedname>
+        <param>
+          <type><ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref></type>
+          <declname>descriptor</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="37" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="37" bodyend="41"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a145829f3dc492e75523543f169bc4e62" prot="public" static="no" const="no" explicit="yes" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</definition>
+        <argsstring>(hipdnnBackendDescriptorType_t descriptorType)</argsstring>
+        <name>ScopedHipdnnBackendDescriptor</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</qualifiedname>
+        <param>
+          <type><ref refid="HipdnnBackendDescriptorType_8h_1ab324e43a52ff8234f8498803d73e1593" kindref="member">hipdnnBackendDescriptorType_t</ref></type>
+          <declname>descriptorType</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="43" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="43" bodyend="54"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1acc191067559bcba8964eb082acf682d0" prot="public" static="no" const="no" explicit="yes" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</definition>
+        <argsstring>(const uint8_t *serializedGraph, size_t graphByteSize)</argsstring>
+        <name>ScopedHipdnnBackendDescriptor</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</qualifiedname>
+        <param>
+          <type>const uint8_t *</type>
+          <declname>serializedGraph</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>graphByteSize</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="56" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="56" bodyend="68"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a82534749d9b736ba7a46594af32020f4" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::ScopedHipdnnBackendDescriptor::~ScopedHipdnnBackendDescriptor</definition>
+        <argsstring>()</argsstring>
+        <name>~ScopedHipdnnBackendDescriptor</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::~ScopedHipdnnBackendDescriptor</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="70" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="70" bodyend="81"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a6503b3c694ca352ba593a30b49f2cab4" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</definition>
+        <argsstring>(const ScopedHipdnnBackendDescriptor &amp;)=delete</argsstring>
+        <name>ScopedHipdnnBackendDescriptor</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor" kindref="compound">ScopedHipdnnBackendDescriptor</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="83" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a85fc1dc83975545c6128448641231fae" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor" kindref="compound">ScopedHipdnnBackendDescriptor</ref> &amp;</type>
+        <definition>ScopedHipdnnBackendDescriptor &amp; hipdnn_frontend::ScopedHipdnnBackendDescriptor::operator=</definition>
+        <argsstring>(const ScopedHipdnnBackendDescriptor &amp;)=delete</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::operator=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor" kindref="compound">ScopedHipdnnBackendDescriptor</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="84" column="35"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a24c3102bc41985a208e271e4edf3ac77" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</definition>
+        <argsstring>(ScopedHipdnnBackendDescriptor &amp;&amp;other) noexcept</argsstring>
+        <name>ScopedHipdnnBackendDescriptor</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::ScopedHipdnnBackendDescriptor</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor" kindref="compound">ScopedHipdnnBackendDescriptor</ref> &amp;&amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="86" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="86" bodyend="92"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1af4a8ce325c432a9dac1eb12398692b32" prot="public" static="no" const="no" explicit="no" inline="yes" noexcept="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor" kindref="compound">ScopedHipdnnBackendDescriptor</ref> &amp;</type>
+        <definition>ScopedHipdnnBackendDescriptor &amp; hipdnn_frontend::ScopedHipdnnBackendDescriptor::operator=</definition>
+        <argsstring>(ScopedHipdnnBackendDescriptor &amp;&amp;other) noexcept</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::operator=</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor" kindref="compound">ScopedHipdnnBackendDescriptor</ref> &amp;&amp;</type>
+          <declname>other</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="94" column="35" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="94" bodyend="113"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a22e4b26c9d9e02753ebe013ec7ba1300" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_frontend::ScopedHipdnnBackendDescriptor::valid</definition>
+        <argsstring>() const</argsstring>
+        <name>valid</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::valid</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="115" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="115" bodyend="118"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a39c82c80132fc2985c6e246feddc48ec" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
+        <type>const <ref refid="hipdnn__backend_8h_1ac7a9af25d3dc12cc7f168135107a2153" kindref="member">hipdnnBackendDescriptor_t</ref> &amp;</type>
+        <definition>const hipdnnBackendDescriptor_t &amp; hipdnn_frontend::ScopedHipdnnBackendDescriptor::get</definition>
+        <argsstring>() const</argsstring>
+        <name>get</name>
+        <qualifiedname>hipdnn_frontend::ScopedHipdnnBackendDescriptor::get</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="120" column="37" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="120" bodyend="123"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" line="15" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp" bodystart="16" bodyend="124"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a99cfc0c386509f93f061cd4896332e14" prot="private" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>_descriptor</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a53390f529eb0e04d06d74e84d9464006" prot="private" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>_valid</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a39c82c80132fc2985c6e246feddc48ec" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>get</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a40503623d3742236dfb4fa9d582a9576" prot="private" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>logBackendError</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a85fc1dc83975545c6128448641231fae" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>operator=</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1af4a8ce325c432a9dac1eb12398692b32" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>operator=</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a7539c2c1b798288ecc9e349b118a9778" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>ScopedHipdnnBackendDescriptor</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a46f9885eaff7935f08fe47df0e822a25" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>ScopedHipdnnBackendDescriptor</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a145829f3dc492e75523543f169bc4e62" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>ScopedHipdnnBackendDescriptor</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1acc191067559bcba8964eb082acf682d0" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>ScopedHipdnnBackendDescriptor</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a6503b3c694ca352ba593a30b49f2cab4" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>ScopedHipdnnBackendDescriptor</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a24c3102bc41985a208e271e4edf3ac77" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>ScopedHipdnnBackendDescriptor</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a22e4b26c9d9e02753ebe013ec7ba1300" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>valid</name></member>
+      <member refid="classhipdnn__frontend_1_1ScopedHipdnnBackendDescriptor_1a82534749d9b736ba7a46594af32020f4" prot="public" virt="non-virtual"><scope>hipdnn_frontend::ScopedHipdnnBackendDescriptor</scope><name>~ScopedHipdnnBackendDescriptor</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

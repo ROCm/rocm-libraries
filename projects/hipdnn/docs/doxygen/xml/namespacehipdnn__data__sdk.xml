@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__data__sdk" kind="namespace" language="C++">
+    <compoundname>hipdnn_data_sdk</compoundname>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1data__objects">hipdnn_data_sdk::data_objects</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1json">hipdnn_data_sdk::json</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1logging">hipdnn_data_sdk::logging</innernamespace>
+    <innernamespace refid="namespacehipdnn__data__sdk_1_1utilities">hipdnn_data_sdk::utilities</innernamespace>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp" line="11" column="1"/>
+  </compounddef>
+</doxygen>

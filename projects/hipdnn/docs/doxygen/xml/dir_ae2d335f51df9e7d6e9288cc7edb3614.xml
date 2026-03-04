@@ -1,0 +1,32 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="dir_ae2d335f51df9e7d6e9288cc7edb3614" kind="dir">
+    <compoundname>/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities</compoundname>
+    <innerdir refid="dir_c7afdb40b184231b94874c692d8eca8d">/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/json</innerdir>
+    <innerfile refid="Allocators_8hpp">Allocators.hpp</innerfile>
+    <innerfile refid="Constants_8hpp">Constants.hpp</innerfile>
+    <innerfile refid="FlatbufferUtils_8hpp">FlatbufferUtils.hpp</innerfile>
+    <innerfile refid="MigratableMemory_8hpp">MigratableMemory.hpp</innerfile>
+    <innerfile refid="PlatformUtils_8hpp">PlatformUtils.hpp</innerfile>
+    <innerfile refid="PlatformUtils_8linux_8hpp">PlatformUtils.linux.hpp</innerfile>
+    <innerfile refid="PlatformUtils_8windows_8hpp">PlatformUtils.windows.hpp</innerfile>
+    <innerfile refid="PointwiseValidation_8hpp">PointwiseValidation.hpp</innerfile>
+    <innerfile refid="ScopedResource_8hpp">ScopedResource.hpp</innerfile>
+    <innerfile refid="ShallowHostOnlyMigratableMemory_8hpp">ShallowHostOnlyMigratableMemory.hpp</innerfile>
+    <innerfile refid="ShallowTensor_8hpp">ShallowTensor.hpp</innerfile>
+    <innerfile refid="ShapeUtilities_8hpp">ShapeUtilities.hpp</innerfile>
+    <innerfile refid="StaticCast_8hpp">StaticCast.hpp</innerfile>
+    <innerfile refid="StringUtil_8hpp">StringUtil.hpp</innerfile>
+    <innerfile refid="Tensor_8hpp">Tensor.hpp</innerfile>
+    <innerfile refid="TensorView_8hpp">TensorView.hpp</innerfile>
+    <innerfile refid="UtilsBfp16_8hpp">UtilsBfp16.hpp</innerfile>
+    <innerfile refid="UtilsFp16_8hpp">UtilsFp16.hpp</innerfile>
+    <innerfile refid="Visitor_8hpp">Visitor.hpp</innerfile>
+    <innerfile refid="Workspace_8hpp">Workspace.hpp</innerfile>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/"/>
+  </compounddef>
+</doxygen>

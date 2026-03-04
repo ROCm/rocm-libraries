@@ -1,0 +1,853 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="HipdnnBackendAttributeName_8h" kind="file" language="C++">
+    <compoundname>HipdnnBackendAttributeName.h</compoundname>
+    <includedby refid="hipdnn__backend_8h" local="yes">/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h</includedby>
+    <invincdepgraph>
+      <node id="1">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendAttributeName.h</label>
+        <link refid="HipdnnBackendAttributeName_8h"/>
+        <childnode refid="2" relation="include">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/hipdnn_backend.h</label>
+        <link refid="hipdnn__backend_8h"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="16" relation="include">
+        </childnode>
+        <childnode refid="30" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="4">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
+        <link refid="hipdnn__frontend_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
+        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="17">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp</label>
+        <link refid="Handle_8hpp"/>
+        <childnode refid="4" relation="include">
+        </childnode>
+      </node>
+      <node id="16">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp</label>
+        <link refid="Utilities_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
+        </childnode>
+        <childnode refid="20" relation="include">
+        </childnode>
+        <childnode refid="21" relation="include">
+        </childnode>
+        <childnode refid="22" relation="include">
+        </childnode>
+        <childnode refid="23" relation="include">
+        </childnode>
+        <childnode refid="24" relation="include">
+        </childnode>
+        <childnode refid="25" relation="include">
+        </childnode>
+        <childnode refid="26" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="29" relation="include">
+        </childnode>
+      </node>
+      <node id="31">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendWrapper.hpp</label>
+        <link refid="BackendWrapper_8hpp"/>
+        <childnode refid="18" relation="include">
+        </childnode>
+      </node>
+      <node id="30">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/HipdnnBackendInterface.hpp</label>
+        <link refid="HipdnnBackendInterface_8hpp"/>
+        <childnode refid="31" relation="include">
+        </childnode>
+      </node>
+      <node id="18">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
+        <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+      <node id="19">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>
+        <link refid="Knob_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="20">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/KnobConstraint.hpp</label>
+        <link refid="KnobConstraint_8hpp"/>
+        <childnode refid="19" relation="include">
+        </childnode>
+      </node>
+      <node id="21">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
+        <link refid="BatchnormBackwardNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="22">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNode.hpp</label>
+        <link refid="BatchnormInferenceNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="23">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp</label>
+        <link refid="BatchnormInferenceNodeVarianceExt_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="24">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormNode.hpp</label>
+        <link refid="BatchnormNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="25">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
+        <link refid="ConvolutionDgradNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="26">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionFpropNode.hpp</label>
+        <link refid="ConvolutionFpropNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="27">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionWgradNode.hpp</label>
+        <link refid="ConvolutionWgradNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="28">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/PointwiseNode.hpp</label>
+        <link refid="PointwiseNode_8hpp"/>
+        <childnode refid="3" relation="include">
+        </childnode>
+      </node>
+      <node id="29">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp</label>
+        <link refid="TopologicalSortingUtils_8hpp"/>
+      </node>
+      <node id="5">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
+        <link refid="BnBackward_8cpp"/>
+      </node>
+      <node id="6">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
+        <link refid="BnInference_8cpp"/>
+      </node>
+      <node id="7">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
+        <link refid="BnTraining_8cpp"/>
+      </node>
+      <node id="8">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
+        <link refid="FusedBnInfDReluBnBwd_8cpp"/>
+      </node>
+      <node id="9">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
+        <link refid="FusedBnTrainingActiv_8cpp"/>
+      </node>
+      <node id="10">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
+        <link refid="ConvDgrad_8cpp"/>
+      </node>
+      <node id="11">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
+        <link refid="ConvFprop_8cpp"/>
+      </node>
+      <node id="12">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
+        <link refid="ConvWgrad_8cpp"/>
+      </node>
+      <node id="13">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
+        <link refid="FusedConvFpropActiv_8cpp"/>
+      </node>
+      <node id="14">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
+        <link refid="FusedConvFpropBiasActiv_8cpp"/>
+      </node>
+      <node id="15">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
+        <link refid="Helpers_8hpp"/>
+        <childnode refid="5" relation="include">
+        </childnode>
+        <childnode refid="6" relation="include">
+        </childnode>
+        <childnode refid="7" relation="include">
+        </childnode>
+        <childnode refid="8" relation="include">
+        </childnode>
+        <childnode refid="9" relation="include">
+        </childnode>
+        <childnode refid="10" relation="include">
+        </childnode>
+        <childnode refid="11" relation="include">
+        </childnode>
+        <childnode refid="12" relation="include">
+        </childnode>
+        <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+    </invincdepgraph>
+    <sectiondef kind="enum">
+      <memberdef kind="enum" id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" prot="public" static="no" strong="no">
+        <type></type>
+        <name>hipdnnBackendAttributeName_t</name>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a715d2ddb1270d81b2dc9ea6a372f56b6" prot="public">
+          <name>HIPDNN_ATTR_ENGINEHEUR_MODE</name>
+          <initializer>= 100</initializer>
+          <briefdescription>
+<para>Heuristic search mode (hipdnnBackendHeuristicMode_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ab7ffe3f24e3094d78898365058a7683c" prot="public">
+          <name>HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH</name>
+          <initializer>= 101</initializer>
+          <briefdescription>
+<para>Operation graph to find engines for (backend descriptor) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a09caf42bbce8af01deb0b01ec2287c4d" prot="public">
+          <name>HIPDNN_ATTR_ENGINEHEUR_RESULTS</name>
+          <initializer>= 102</initializer>
+          <briefdescription>
+<para>Results from heuristic search (array of engine configs) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a1258f9d4e9abf5d1e9bb3bdcb9a7ec96" prot="public">
+          <name>HIPDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET</name>
+          <initializer>= 103</initializer>
+          <briefdescription>
+<para>Target SM count for heuristic evaluation. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a604a64ea9040ef2ad2114afc1ca9de9d" prot="public">
+          <name>HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP</name>
+          <initializer>= 104</initializer>
+          <briefdescription>
+<para>Device properties for heuristic evaluation. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a96843e942b2535a22aadc099ff84ec9f" prot="public">
+          <name>HIPDNN_ATTR_ENGINECFG_ENGINE</name>
+          <initializer>= 200</initializer>
+          <briefdescription>
+<para>The engine this configuration is for (backend descriptor) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a6abc2d3beced2e868254b4ebdc905c9f" prot="public">
+          <name>HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO</name>
+          <initializer>= 201</initializer>
+          <briefdescription>
+<para>Intermediate tensor information. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a2712a7d97ee46e5980fde27868373fa7" prot="public">
+          <name>HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES</name>
+          <initializer>= 202</initializer>
+          <briefdescription>
+<para>Knob choices for this configuration. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a449800268e55a5455cf5b9faeafae650" prot="public">
+          <name>HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE</name>
+          <initializer>= 203</initializer>
+          <briefdescription>
+<para>Required workspace size in bytes. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ae94c7c28b132e5d654a8f0ef07040ce6" prot="public">
+          <name>HIPDNN_ATTR_EXECUTION_PLAN_HANDLE</name>
+          <initializer>= 300</initializer>
+          <briefdescription>
+<para>Associated handle (deprecated, do not use) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aed682ed08bfb1026d614ef4c9f880f5b" prot="public">
+          <name>HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG</name>
+          <initializer>= 301</initializer>
+          <briefdescription>
+<para>Engine configuration for this plan (backend descriptor) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a849a1e5967706c4e531f8469775b095f" prot="public">
+          <name>HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE</name>
+          <initializer>= 302</initializer>
+          <briefdescription>
+<para>Required workspace size in bytes (int64_t) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a913c2748ddfef9f208e4df71002f6e2f" prot="public">
+          <name>HIPDNN_ATTR_EXECUTION_PLAN_COMPUTED_INTERMEDIATE_UIDS</name>
+          <initializer>= 303</initializer>
+          <briefdescription>
+<para>UIDs of computed intermediate tensors. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5cb9aa0b9c8d8d067d5a4beeb212a91a" prot="public">
+          <name>HIPDNN_ATTR_EXECUTION_PLAN_RUN_ONLY_INTERMEDIATE_UIDS</name>
+          <initializer>= 304</initializer>
+          <briefdescription>
+<para>UIDs of run-only intermediate tensors. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6af0bf0dbe6f785c612f5bb599504ab53d" prot="public">
+          <name>HIPDNN_ATTR_EXECUTION_PLAN_JSON_REPRESENTATION</name>
+          <initializer>= 305</initializer>
+          <briefdescription>
+<para>JSON representation of the execution plan. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a115a5f90189e1816417ced1def1f290f" prot="public">
+          <name>HIPDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE</name>
+          <initializer>= 306</initializer>
+          <briefdescription>
+<para>Kernel cache for this plan. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a18dfcb84c4acc066388bc8d849f1ca6d" prot="public">
+          <name>HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP</name>
+          <initializer>= 307</initializer>
+          <briefdescription>
+<para>Device properties for this plan. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a1a0e73ddee383d1e56c2b3897ed372a0" prot="public">
+          <name>HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID</name>
+          <initializer>= 400</initializer>
+          <briefdescription>
+<para>Unique ID of the intermediate tensor. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa116e771b5178eb1642c07ecabf5e68e" prot="public">
+          <name>HIPDNN_ATTR_INTERMEDIATE_INFO_SIZE</name>
+          <initializer>= 401</initializer>
+          <briefdescription>
+<para>Size of the intermediate tensor in bytes. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a693171fbac03b8c5dc4f508af892ec78" prot="public">
+          <name>HIPDNN_ATTR_INTERMEDIATE_INFO_DEPENDENT_DATA_UIDS</name>
+          <initializer>= 402</initializer>
+          <briefdescription>
+<para>UIDs of dependent input data. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6adccced094d59b5cf7e72ae22cebbad83" prot="public">
+          <name>HIPDNN_ATTR_INTERMEDIATE_INFO_DEPENDENT_ATTRIBUTES</name>
+          <initializer>= 403</initializer>
+          <briefdescription>
+<para>Dependent attribute identifiers. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7c4e1000ff9fb112d905eee263b737d9" prot="public">
+          <name>HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE</name>
+          <initializer>= 500</initializer>
+          <briefdescription>
+<para>Type of the knob. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a6ada5000c6588e6be998aedcb98dc04a" prot="public">
+          <name>HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE</name>
+          <initializer>= 501</initializer>
+          <briefdescription>
+<para>Selected value for the knob. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a040b159676d10563e6ffa640fea03002" prot="public">
+          <name>HIPDNN_ATTR_OPERATIONGRAPH_HANDLE</name>
+          <initializer>= 600</initializer>
+          <briefdescription>
+<para>hipDNN handle for this graph </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ab40bf1269f3a71b65377571b474c4482" prot="public">
+          <name>HIPDNN_ATTR_OPERATIONGRAPH_OPS</name>
+          <initializer>= 601</initializer>
+          <briefdescription>
+<para>Array of operations in the graph. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7baeb6c3e24a525e7c88a92481cbae52" prot="public">
+          <name>HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT</name>
+          <initializer>= 602</initializer>
+          <briefdescription>
+<para>Total number of engines available globally. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aba8b5fbc5085fb18ec29d0bcbdbb8abd" prot="public">
+          <name>HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED</name>
+          <initializer>= 603</initializer>
+          <briefdescription>
+<para>Whether dynamic shapes are enabled for this graph. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8f543bb2d599bf13a26dcb34bf883d02" prot="public">
+          <name>HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS</name>
+          <initializer>= 700</initializer>
+          <briefdescription>
+<para>Tensor unique IDs for data pointer mapping. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8cc32b38f95667878720ac61f748cde7" prot="public">
+          <name>HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS</name>
+          <initializer>= 701</initializer>
+          <briefdescription>
+<para>Device pointers to tensor data. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a95ee37770ce957aa0b9148f692099ddd" prot="public">
+          <name>HIPDNN_ATTR_VARIANT_PACK_INTERMEDIATES</name>
+          <initializer>= 702</initializer>
+          <briefdescription>
+<para>Intermediate tensor data pointers. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aab7579b8f756f2a146789923b3f8ae08" prot="public">
+          <name>HIPDNN_ATTR_VARIANT_PACK_WORKSPACE</name>
+          <initializer>= 703</initializer>
+          <briefdescription>
+<para>Workspace pointer for execution. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a69789d958ffde2cd0377cb565f7f53f1" prot="public">
+          <name>HIPDNN_ATTR_LAYOUT_INFO_TENSOR_UID</name>
+          <initializer>= 800</initializer>
+          <briefdescription>
+<para>Tensor UID for layout query. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a4217d75baa4b599bc5c8448ddf213267" prot="public">
+          <name>HIPDNN_ATTR_LAYOUT_INFO_TYPES</name>
+          <initializer>= 801</initializer>
+          <briefdescription>
+<para>Supported layout types. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7f87f91ac46d573145eb21eb75106045" prot="public">
+          <name>HIPDNN_ATTR_KNOB_INFO_TYPE</name>
+          <initializer>= 900</initializer>
+          <briefdescription>
+<para>Type identifier of the knob. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7a1030e91b71a7eea18ab9a0113833fd" prot="public">
+          <name>HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE</name>
+          <initializer>= 901</initializer>
+          <briefdescription>
+<para>Maximum allowed value for the knob. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a40afab277c1e37e243c88a66d550c577" prot="public">
+          <name>HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE</name>
+          <initializer>= 902</initializer>
+          <briefdescription>
+<para>Minimum allowed value for the knob. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ae15532a5da07185900fc1fea60d2277c" prot="public">
+          <name>HIPDNN_ATTR_KNOB_INFO_STRIDE</name>
+          <initializer>= 903</initializer>
+          <briefdescription>
+<para>Step size for valid knob values. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ad6b50ef12949192e9831ac41d3a6dd6e" prot="public">
+          <name>HIPDNN_ATTR_ENGINE_OPERATION_GRAPH</name>
+          <initializer>= 1000</initializer>
+          <briefdescription>
+<para>Operation graph this engine supports. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8b0f0a3e90c9d07a5b9a89126c4752ae" prot="public">
+          <name>HIPDNN_ATTR_ENGINE_GLOBAL_INDEX</name>
+          <initializer>= 1001</initializer>
+          <briefdescription>
+<para>Global index of this engine. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6abc87f8f566a48ee12f7471c22ff5e6c9" prot="public">
+          <name>HIPDNN_ATTR_ENGINE_KNOB_INFO</name>
+          <initializer>= 1002</initializer>
+          <briefdescription>
+<para>Available knob information for this engine. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5c589f6c56626ed1e1db83c301fc0526" prot="public">
+          <name>HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE</name>
+          <initializer>= 1003</initializer>
+          <briefdescription>
+<para>Numerical behavior notes (precision guarantees) </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6af9e1f5e6fef8166fdf3308957db77b00" prot="public">
+          <name>HIPDNN_ATTR_ENGINE_LAYOUT_INFO</name>
+          <initializer>= 1004</initializer>
+          <briefdescription>
+<para>Layout information for this engine. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ad09a1ce0d4401e8afa385b2ebc894820" prot="public">
+          <name>HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE</name>
+          <initializer>= 1005</initializer>
+          <briefdescription>
+<para>Behavioral notes for this engine. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ac73d4b8497a391fe65750cc7e15925a9" prot="public">
+          <name>HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET</name>
+          <initializer>= 1006</initializer>
+          <briefdescription>
+<para>Target SM count for this engine. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a85a0930fceca58274d78c6784db6f1d5" prot="public">
+          <name>HIPDNN_ATTR_ENGINE_DEVICEPROP</name>
+          <initializer>= 1007</initializer>
+          <briefdescription>
+<para>Device properties for this engine. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5f1750ccaa9253c6599d2d1ced18ef45" prot="public">
+          <name>HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED</name>
+          <initializer>= 1100</initializer>
+          <briefdescription>
+<para>Whether engine config kernel is cached. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa390444e885fcfe4b8844f88acfc2b4e" prot="public">
+          <name>HIPDNN_ATTR_DEVICEPROP_DEVICE_ID</name>
+          <initializer>= 1200</initializer>
+          <briefdescription>
+<para>HIP device ID. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6abbbe29a4feadc5d71a191a58a552adbb" prot="public">
+          <name>HIPDNN_ATTR_DEVICEPROP_HANDLE</name>
+          <initializer>= 1201</initializer>
+          <briefdescription>
+<para>hipDNN handle associated with device </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a10f725b36163ca5c7d620dabf4c86abd" prot="public">
+          <name>HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION</name>
+          <initializer>= 1202</initializer>
+          <briefdescription>
+<para>JSON representation of device properties. </para>
+          </briefdescription>
+          <detaileddescription>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6afc7e72aad4b12649f3aa2aeb18776f2a" prot="public">
+          <name>HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT</name>
+          <initializer>= 60000</initializer>
+          <briefdescription>
+<para>Serialized knob info as FlatBuffer (extension) </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Used to retrieve knob information in serialized FlatBuffer format. Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT </para>
+          </detaileddescription>
+        </enumvalue>
+        <enumvalue id="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa4e06ffe4e37545d65e39935726ca3a6" prot="public">
+          <name>HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT</name>
+          <initializer>= 60100</initializer>
+          <briefdescription>
+<para>Serialized knob choice as FlatBuffer (extension) </para>
+          </briefdescription>
+          <detaileddescription>
+<para>Used to set knob values in serialized FlatBuffer format. Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT </para>
+          </detaileddescription>
+        </enumvalue>
+        <briefdescription>
+<para>Identifiers for backend descriptor attributes. </para>
+        </briefdescription>
+        <detaileddescription>
+<para>These constants are used with <ref refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" kindref="member">hipdnnBackendSetAttribute()</ref> and <ref refid="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" kindref="member">hipdnnBackendGetAttribute()</ref> to specify which attribute to access.</para>
+<para>Attribute ranges by descriptor type:<itemizedlist>
+<listitem><para>100-199: Engine heuristic attributes</para>
+</listitem><listitem><para>200-299: Engine configuration attributes</para>
+</listitem><listitem><para>300-399: Execution plan attributes</para>
+</listitem><listitem><para>400-499: Intermediate info attributes</para>
+</listitem><listitem><para>500-599: Knob choice attributes</para>
+</listitem><listitem><para>600-699: Operation graph attributes</para>
+</listitem><listitem><para>700-799: Variant pack attributes</para>
+</listitem><listitem><para>800-899: Layout info attributes</para>
+</listitem><listitem><para>900-999: Knob info attributes</para>
+</listitem><listitem><para>1000-1099: Engine attributes</para>
+</listitem><listitem><para>1100-1199: Kernel cache attributes</para>
+</listitem><listitem><para>1200-1299: Device properties attributes</para>
+</listitem><listitem><para>60000+: Extension attributes </para>
+</listitem></itemizedlist>
+</para>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendAttributeName.h" line="39" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendAttributeName.h" bodystart="40" bodyend="308"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+<para>Attribute identifiers for hipDNN backend descriptors. </para>
+    </briefdescription>
+    <detaileddescription>
+<para>This file defines the attribute names used with <ref refid="hipdnn__backend_8h_1a38e606a4c5bdb7a266dd99b39aa628c9" kindref="member">hipdnnBackendSetAttribute()</ref> and <ref refid="hipdnn__backend_8h_1af1752b666dc920a9a99edae168376a7f" kindref="member">hipdnnBackendGetAttribute()</ref> to configure and query backend descriptors.</para>
+<para>Attributes are organized by descriptor type, with each group having a distinct numeric range for identification. </para>
+    </detaileddescription>
+    <programlisting>
+<codeline lineno="1"><highlight class="comment">//<sp/>Copyright<sp/>©<sp/>Advanced<sp/>Micro<sp/>Devices,<sp/>Inc.,<sp/>or<sp/>its<sp/>affiliates.</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="2"><highlight class="normal"></highlight><highlight class="comment">//<sp/>SPDX-License-Identifier:<sp/>MIT</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="3"><highlight class="normal"></highlight></codeline>
+<codeline lineno="15"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="16"><highlight class="normal"></highlight></codeline>
+<codeline lineno="39" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" refkind="member"><highlight class="normal"></highlight><highlight class="keyword">typedef</highlight><highlight class="normal"><sp/></highlight><highlight class="keyword">enum</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="40"><highlight class="normal">{</highlight></codeline>
+<codeline lineno="48" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a715d2ddb1270d81b2dc9ea6a372f56b6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a715d2ddb1270d81b2dc9ea6a372f56b6" kindref="member">HIPDNN_ATTR_ENGINEHEUR_MODE</ref><sp/>=<sp/>100,</highlight></codeline>
+<codeline lineno="49"><highlight class="normal"></highlight></codeline>
+<codeline lineno="51" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ab7ffe3f24e3094d78898365058a7683c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ab7ffe3f24e3094d78898365058a7683c" kindref="member">HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH</ref><sp/>=<sp/>101,</highlight></codeline>
+<codeline lineno="52"><highlight class="normal"></highlight></codeline>
+<codeline lineno="54" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a09caf42bbce8af01deb0b01ec2287c4d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a09caf42bbce8af01deb0b01ec2287c4d" kindref="member">HIPDNN_ATTR_ENGINEHEUR_RESULTS</ref><sp/>=<sp/>102,</highlight></codeline>
+<codeline lineno="55"><highlight class="normal"></highlight></codeline>
+<codeline lineno="57" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a1258f9d4e9abf5d1e9bb3bdcb9a7ec96" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a1258f9d4e9abf5d1e9bb3bdcb9a7ec96" kindref="member">HIPDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET</ref><sp/>=<sp/>103,</highlight></codeline>
+<codeline lineno="58"><highlight class="normal"></highlight></codeline>
+<codeline lineno="60" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a604a64ea9040ef2ad2114afc1ca9de9d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a604a64ea9040ef2ad2114afc1ca9de9d" kindref="member">HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP</ref><sp/>=<sp/>104,</highlight></codeline>
+<codeline lineno="61"><highlight class="normal"></highlight></codeline>
+<codeline lineno="71" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a96843e942b2535a22aadc099ff84ec9f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a96843e942b2535a22aadc099ff84ec9f" kindref="member">HIPDNN_ATTR_ENGINECFG_ENGINE</ref><sp/>=<sp/>200,</highlight></codeline>
+<codeline lineno="72"><highlight class="normal"></highlight></codeline>
+<codeline lineno="74" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a6abc2d3beced2e868254b4ebdc905c9f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a6abc2d3beced2e868254b4ebdc905c9f" kindref="member">HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO</ref><sp/>=<sp/>201,</highlight></codeline>
+<codeline lineno="75"><highlight class="normal"></highlight></codeline>
+<codeline lineno="77" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a2712a7d97ee46e5980fde27868373fa7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a2712a7d97ee46e5980fde27868373fa7" kindref="member">HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES</ref><sp/>=<sp/>202,</highlight></codeline>
+<codeline lineno="78"><highlight class="normal"></highlight></codeline>
+<codeline lineno="80" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a449800268e55a5455cf5b9faeafae650" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a449800268e55a5455cf5b9faeafae650" kindref="member">HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE</ref><sp/>=<sp/>203,</highlight></codeline>
+<codeline lineno="81"><highlight class="normal"></highlight></codeline>
+<codeline lineno="91" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ae94c7c28b132e5d654a8f0ef07040ce6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ae94c7c28b132e5d654a8f0ef07040ce6" kindref="member">HIPDNN_ATTR_EXECUTION_PLAN_HANDLE</ref><sp/>=<sp/>300,</highlight></codeline>
+<codeline lineno="92"><highlight class="normal"></highlight></codeline>
+<codeline lineno="94" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aed682ed08bfb1026d614ef4c9f880f5b" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aed682ed08bfb1026d614ef4c9f880f5b" kindref="member">HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG</ref><sp/>=<sp/>301,</highlight></codeline>
+<codeline lineno="95"><highlight class="normal"></highlight></codeline>
+<codeline lineno="97" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a849a1e5967706c4e531f8469775b095f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a849a1e5967706c4e531f8469775b095f" kindref="member">HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE</ref><sp/>=<sp/>302,</highlight></codeline>
+<codeline lineno="98"><highlight class="normal"></highlight></codeline>
+<codeline lineno="100" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a913c2748ddfef9f208e4df71002f6e2f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a913c2748ddfef9f208e4df71002f6e2f" kindref="member">HIPDNN_ATTR_EXECUTION_PLAN_COMPUTED_INTERMEDIATE_UIDS</ref><sp/>=<sp/>303,</highlight></codeline>
+<codeline lineno="101"><highlight class="normal"></highlight></codeline>
+<codeline lineno="103" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5cb9aa0b9c8d8d067d5a4beeb212a91a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5cb9aa0b9c8d8d067d5a4beeb212a91a" kindref="member">HIPDNN_ATTR_EXECUTION_PLAN_RUN_ONLY_INTERMEDIATE_UIDS</ref><sp/>=<sp/>304,</highlight></codeline>
+<codeline lineno="104"><highlight class="normal"></highlight></codeline>
+<codeline lineno="106" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6af0bf0dbe6f785c612f5bb599504ab53d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6af0bf0dbe6f785c612f5bb599504ab53d" kindref="member">HIPDNN_ATTR_EXECUTION_PLAN_JSON_REPRESENTATION</ref><sp/>=<sp/>305,</highlight></codeline>
+<codeline lineno="107"><highlight class="normal"></highlight></codeline>
+<codeline lineno="109" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a115a5f90189e1816417ced1def1f290f" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a115a5f90189e1816417ced1def1f290f" kindref="member">HIPDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE</ref><sp/>=<sp/>306,</highlight></codeline>
+<codeline lineno="110"><highlight class="normal"></highlight></codeline>
+<codeline lineno="112" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a18dfcb84c4acc066388bc8d849f1ca6d" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a18dfcb84c4acc066388bc8d849f1ca6d" kindref="member">HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP</ref><sp/>=<sp/>307,</highlight></codeline>
+<codeline lineno="113"><highlight class="normal"></highlight></codeline>
+<codeline lineno="123" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a1a0e73ddee383d1e56c2b3897ed372a0" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a1a0e73ddee383d1e56c2b3897ed372a0" kindref="member">HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID</ref><sp/>=<sp/>400,</highlight></codeline>
+<codeline lineno="124"><highlight class="normal"></highlight></codeline>
+<codeline lineno="126" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa116e771b5178eb1642c07ecabf5e68e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa116e771b5178eb1642c07ecabf5e68e" kindref="member">HIPDNN_ATTR_INTERMEDIATE_INFO_SIZE</ref><sp/>=<sp/>401,</highlight></codeline>
+<codeline lineno="127"><highlight class="normal"></highlight></codeline>
+<codeline lineno="129" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a693171fbac03b8c5dc4f508af892ec78" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a693171fbac03b8c5dc4f508af892ec78" kindref="member">HIPDNN_ATTR_INTERMEDIATE_INFO_DEPENDENT_DATA_UIDS</ref><sp/>=<sp/>402,</highlight></codeline>
+<codeline lineno="130"><highlight class="normal"></highlight></codeline>
+<codeline lineno="132" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6adccced094d59b5cf7e72ae22cebbad83" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6adccced094d59b5cf7e72ae22cebbad83" kindref="member">HIPDNN_ATTR_INTERMEDIATE_INFO_DEPENDENT_ATTRIBUTES</ref><sp/>=<sp/>403,</highlight></codeline>
+<codeline lineno="133"><highlight class="normal"></highlight></codeline>
+<codeline lineno="143" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7c4e1000ff9fb112d905eee263b737d9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7c4e1000ff9fb112d905eee263b737d9" kindref="member">HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE</ref><sp/>=<sp/>500,</highlight></codeline>
+<codeline lineno="144"><highlight class="normal"></highlight></codeline>
+<codeline lineno="146" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a6ada5000c6588e6be998aedcb98dc04a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a6ada5000c6588e6be998aedcb98dc04a" kindref="member">HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE</ref><sp/>=<sp/>501,</highlight></codeline>
+<codeline lineno="147"><highlight class="normal"></highlight></codeline>
+<codeline lineno="157" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a040b159676d10563e6ffa640fea03002" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a040b159676d10563e6ffa640fea03002" kindref="member">HIPDNN_ATTR_OPERATIONGRAPH_HANDLE</ref><sp/>=<sp/>600,</highlight></codeline>
+<codeline lineno="158"><highlight class="normal"></highlight></codeline>
+<codeline lineno="160" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ab40bf1269f3a71b65377571b474c4482" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ab40bf1269f3a71b65377571b474c4482" kindref="member">HIPDNN_ATTR_OPERATIONGRAPH_OPS</ref><sp/>=<sp/>601,</highlight></codeline>
+<codeline lineno="161"><highlight class="normal"></highlight></codeline>
+<codeline lineno="163" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7baeb6c3e24a525e7c88a92481cbae52" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7baeb6c3e24a525e7c88a92481cbae52" kindref="member">HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT</ref><sp/>=<sp/>602,</highlight></codeline>
+<codeline lineno="164"><highlight class="normal"></highlight></codeline>
+<codeline lineno="166" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aba8b5fbc5085fb18ec29d0bcbdbb8abd" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aba8b5fbc5085fb18ec29d0bcbdbb8abd" kindref="member">HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED</ref><sp/>=<sp/>603,</highlight></codeline>
+<codeline lineno="167"><highlight class="normal"></highlight></codeline>
+<codeline lineno="177" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8f543bb2d599bf13a26dcb34bf883d02" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8f543bb2d599bf13a26dcb34bf883d02" kindref="member">HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS</ref><sp/>=<sp/>700,</highlight></codeline>
+<codeline lineno="178"><highlight class="normal"></highlight></codeline>
+<codeline lineno="180" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8cc32b38f95667878720ac61f748cde7" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8cc32b38f95667878720ac61f748cde7" kindref="member">HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS</ref><sp/>=<sp/>701,</highlight></codeline>
+<codeline lineno="181"><highlight class="normal"></highlight></codeline>
+<codeline lineno="183" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a95ee37770ce957aa0b9148f692099ddd" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a95ee37770ce957aa0b9148f692099ddd" kindref="member">HIPDNN_ATTR_VARIANT_PACK_INTERMEDIATES</ref><sp/>=<sp/>702,</highlight></codeline>
+<codeline lineno="184"><highlight class="normal"></highlight></codeline>
+<codeline lineno="186" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aab7579b8f756f2a146789923b3f8ae08" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aab7579b8f756f2a146789923b3f8ae08" kindref="member">HIPDNN_ATTR_VARIANT_PACK_WORKSPACE</ref><sp/>=<sp/>703,</highlight></codeline>
+<codeline lineno="187"><highlight class="normal"></highlight></codeline>
+<codeline lineno="197" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a69789d958ffde2cd0377cb565f7f53f1" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a69789d958ffde2cd0377cb565f7f53f1" kindref="member">HIPDNN_ATTR_LAYOUT_INFO_TENSOR_UID</ref><sp/>=<sp/>800,</highlight></codeline>
+<codeline lineno="198"><highlight class="normal"></highlight></codeline>
+<codeline lineno="200" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a4217d75baa4b599bc5c8448ddf213267" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a4217d75baa4b599bc5c8448ddf213267" kindref="member">HIPDNN_ATTR_LAYOUT_INFO_TYPES</ref><sp/>=<sp/>801,</highlight></codeline>
+<codeline lineno="201"><highlight class="normal"></highlight></codeline>
+<codeline lineno="211" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7f87f91ac46d573145eb21eb75106045" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7f87f91ac46d573145eb21eb75106045" kindref="member">HIPDNN_ATTR_KNOB_INFO_TYPE</ref><sp/>=<sp/>900,</highlight></codeline>
+<codeline lineno="212"><highlight class="normal"></highlight></codeline>
+<codeline lineno="214" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7a1030e91b71a7eea18ab9a0113833fd" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a7a1030e91b71a7eea18ab9a0113833fd" kindref="member">HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE</ref><sp/>=<sp/>901,</highlight></codeline>
+<codeline lineno="215"><highlight class="normal"></highlight></codeline>
+<codeline lineno="217" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a40afab277c1e37e243c88a66d550c577" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a40afab277c1e37e243c88a66d550c577" kindref="member">HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE</ref><sp/>=<sp/>902,</highlight></codeline>
+<codeline lineno="218"><highlight class="normal"></highlight></codeline>
+<codeline lineno="220" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ae15532a5da07185900fc1fea60d2277c" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ae15532a5da07185900fc1fea60d2277c" kindref="member">HIPDNN_ATTR_KNOB_INFO_STRIDE</ref><sp/>=<sp/>903,</highlight></codeline>
+<codeline lineno="221"><highlight class="normal"></highlight></codeline>
+<codeline lineno="231" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ad6b50ef12949192e9831ac41d3a6dd6e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ad6b50ef12949192e9831ac41d3a6dd6e" kindref="member">HIPDNN_ATTR_ENGINE_OPERATION_GRAPH</ref><sp/>=<sp/>1000,</highlight></codeline>
+<codeline lineno="232"><highlight class="normal"></highlight></codeline>
+<codeline lineno="234" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8b0f0a3e90c9d07a5b9a89126c4752ae" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a8b0f0a3e90c9d07a5b9a89126c4752ae" kindref="member">HIPDNN_ATTR_ENGINE_GLOBAL_INDEX</ref><sp/>=<sp/>1001,</highlight></codeline>
+<codeline lineno="235"><highlight class="normal"></highlight></codeline>
+<codeline lineno="237" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6abc87f8f566a48ee12f7471c22ff5e6c9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6abc87f8f566a48ee12f7471c22ff5e6c9" kindref="member">HIPDNN_ATTR_ENGINE_KNOB_INFO</ref><sp/>=<sp/>1002,</highlight></codeline>
+<codeline lineno="238"><highlight class="normal"></highlight></codeline>
+<codeline lineno="240" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5c589f6c56626ed1e1db83c301fc0526" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5c589f6c56626ed1e1db83c301fc0526" kindref="member">HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE</ref><sp/>=<sp/>1003,</highlight></codeline>
+<codeline lineno="241"><highlight class="normal"></highlight></codeline>
+<codeline lineno="243" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6af9e1f5e6fef8166fdf3308957db77b00" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6af9e1f5e6fef8166fdf3308957db77b00" kindref="member">HIPDNN_ATTR_ENGINE_LAYOUT_INFO</ref><sp/>=<sp/>1004,</highlight></codeline>
+<codeline lineno="244"><highlight class="normal"></highlight></codeline>
+<codeline lineno="246" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ad09a1ce0d4401e8afa385b2ebc894820" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ad09a1ce0d4401e8afa385b2ebc894820" kindref="member">HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE</ref><sp/>=<sp/>1005,</highlight></codeline>
+<codeline lineno="247"><highlight class="normal"></highlight></codeline>
+<codeline lineno="249" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ac73d4b8497a391fe65750cc7e15925a9" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6ac73d4b8497a391fe65750cc7e15925a9" kindref="member">HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET</ref><sp/>=<sp/>1006,</highlight></codeline>
+<codeline lineno="250"><highlight class="normal"></highlight></codeline>
+<codeline lineno="252" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a85a0930fceca58274d78c6784db6f1d5" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a85a0930fceca58274d78c6784db6f1d5" kindref="member">HIPDNN_ATTR_ENGINE_DEVICEPROP</ref><sp/>=<sp/>1007,</highlight></codeline>
+<codeline lineno="253"><highlight class="normal"></highlight></codeline>
+<codeline lineno="263" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5f1750ccaa9253c6599d2d1ced18ef45" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a5f1750ccaa9253c6599d2d1ced18ef45" kindref="member">HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED</ref><sp/>=<sp/>1100,</highlight></codeline>
+<codeline lineno="264"><highlight class="normal"></highlight></codeline>
+<codeline lineno="274" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa390444e885fcfe4b8844f88acfc2b4e" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa390444e885fcfe4b8844f88acfc2b4e" kindref="member">HIPDNN_ATTR_DEVICEPROP_DEVICE_ID</ref><sp/>=<sp/>1200,</highlight></codeline>
+<codeline lineno="275"><highlight class="normal"></highlight></codeline>
+<codeline lineno="277" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6abbbe29a4feadc5d71a191a58a552adbb" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6abbbe29a4feadc5d71a191a58a552adbb" kindref="member">HIPDNN_ATTR_DEVICEPROP_HANDLE</ref><sp/>=<sp/>1201,</highlight></codeline>
+<codeline lineno="278"><highlight class="normal"></highlight></codeline>
+<codeline lineno="280" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a10f725b36163ca5c7d620dabf4c86abd" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6a10f725b36163ca5c7d620dabf4c86abd" kindref="member">HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION</ref><sp/>=<sp/>1202,</highlight></codeline>
+<codeline lineno="281"><highlight class="normal"></highlight></codeline>
+<codeline lineno="296" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6afc7e72aad4b12649f3aa2aeb18776f2a" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6afc7e72aad4b12649f3aa2aeb18776f2a" kindref="member">HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT</ref><sp/>=<sp/>60000,</highlight></codeline>
+<codeline lineno="297"><highlight class="normal"></highlight></codeline>
+<codeline lineno="304" refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa4e06ffe4e37545d65e39935726ca3a6" refkind="member"><highlight class="normal"><sp/><sp/><sp/><sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6aa4e06ffe4e37545d65e39935726ca3a6" kindref="member">HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT</ref><sp/>=<sp/>60100,</highlight></codeline>
+<codeline lineno="305"><highlight class="normal"></highlight></codeline>
+<codeline lineno="308"><highlight class="normal">}<sp/><ref refid="HipdnnBackendAttributeName_8h_1afd57cf59a5e1d7aa904c6ebc617393f6" kindref="member">hipdnnBackendAttributeName_t</ref>;</highlight></codeline>
+    </programlisting>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/backend/include/HipdnnBackendAttributeName.h"/>
+  </compounddef>
+</doxygen>

@@ -1,0 +1,177 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_frontend::graph::ConvolutionDgradNode</compoundname>
+    <basecompoundref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public" virt="non-virtual">hipdnn_frontend::graph::BaseNode&lt; ConvolutionDgradNode &gt;</basecompoundref>
+    <includes refid="ConvolutionDgradNode_8hpp" local="no">ConvolutionDgradNode.hpp</includes>
+    <sectiondef kind="public-attrib">
+      <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a500528c5e72372c640afdec482a673db" prot="public" static="no" mutable="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref></type>
+        <definition>ConvDgradAttributes hipdnn_frontend::graph::ConvolutionDgradNode::attributes</definition>
+        <argsstring></argsstring>
+        <name>attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvolutionDgradNode::attributes</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" line="20" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" bodystart="20" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a4dfeb2fbf3f3eb695f9bbb7f1055d8ec" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_frontend::graph::ConvolutionDgradNode::ConvolutionDgradNode</definition>
+        <argsstring>(ConvDgradAttributes &amp;&amp;convAttrs, const GraphAttributes &amp;graphAttrs)</argsstring>
+        <name>ConvolutionDgradNode</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvolutionDgradNode::ConvolutionDgradNode</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref> &amp;&amp;</type>
+          <declname>convAttrs</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref> &amp;</type>
+          <declname>graphAttrs</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" line="22" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" bodystart="22" bodyend="26"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a1464b8005eef4e7b9891bc7a9f3844a7" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::ConvolutionDgradNode::pre_validate_node</definition>
+        <argsstring>() const override</argsstring>
+        <name>pre_validate_node</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvolutionDgradNode::pre_validate_node</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1graph_1_1INode_1aa2b999b5be1babae092b12a616e47142">pre_validate_node</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" line="28" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" bodystart="28" bodyend="215"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a8ee2f85ba3a60dc0f79a1e0227a7758c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
+        <definition>Error hipdnn_frontend::graph::ConvolutionDgradNode::infer_properties_node</definition>
+        <argsstring>() override</argsstring>
+        <name>infer_properties_node</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvolutionDgradNode::infer_properties_node</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1graph_1_1INode_1a8b28f89f18758ed3a1dfc5b9b2ad63a0">infer_properties_node</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" line="217" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" bodystart="217" bodyend="343"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a911bf5ef4a7a5db16416dd491f4ad093" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::Node &gt;</type>
+        <definition>flatbuffers::Offset&lt; hipdnn_data_sdk::data_objects::Node &gt; hipdnn_frontend::graph::ConvolutionDgradNode::pack_node</definition>
+        <argsstring>(flatbuffers::FlatBufferBuilder &amp;builder) const override</argsstring>
+        <name>pack_node</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvolutionDgradNode::pack_node</qualifiedname>
+        <reimplements refid="classhipdnn__frontend_1_1graph_1_1INode_1a4561977ed6bd0bf33b9c8840f8cf1164">pack_node</reimplements>
+        <param>
+          <type>flatbuffers::FlatBufferBuilder &amp;</type>
+          <declname>builder</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" line="346" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" bodystart="346" bodyend="354"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="2">
+        <label>hipdnn_frontend::graph::BaseNode&lt; ConvolutionDgradNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="3" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::ConvolutionDgradNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="3">
+        <label>hipdnn_frontend::graph::INode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1INode"/>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="6">
+        <label>hipdnn_frontend::graph::Attributes&lt; ConvDgradAttributes &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1Attributes"/>
+      </node>
+      <node id="2">
+        <label>hipdnn_frontend::graph::BaseNode&lt; ConvolutionDgradNode &gt;</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1BaseNode"/>
+        <childnode refid="3" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="5">
+        <label>hipdnn_frontend::graph::ConvDgradAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes"/>
+        <childnode refid="6" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="1">
+        <label>hipdnn_frontend::graph::ConvolutionDgradNode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+        <childnode refid="5" relation="usage">
+          <edgelabel>attributes</edgelabel>
+        </childnode>
+      </node>
+      <node id="4">
+        <label>hipdnn_frontend::graph::GraphAttributes</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes"/>
+      </node>
+      <node id="3">
+        <label>hipdnn_frontend::graph::INode</label>
+        <link refid="classhipdnn__frontend_1_1graph_1_1INode"/>
+        <childnode refid="4" relation="usage">
+          <edgelabel>graph_attributes</edgelabel>
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" line="17" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" bodystart="18" bodyend="355"/>
+    <listofallmembers>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a0d40adb0a0b71eeae9cd946495b7705e" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>_sub_nodes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a500528c5e72372c640afdec482a673db" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a4dfeb2fbf3f3eb695f9bbb7f1055d8ec" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>ConvolutionDgradNode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a0a413c1d52e8c308226f87ebf5a72ec1" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>gather_hipdnn_tensors</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a1f9eb34676b9472a82f5f121c4763492" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>gatherHipdnnTensorsSubtree</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a54461ee7d26b84df9b8a4e0a40999e66" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>getNodeInputTensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a944ed94a63ac4fb59c83558d18250691" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>getNodeOutputTensorAttributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1aacfcb1f1ec9b376ac7a7afb6b4f7389a" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>graph_attributes</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a8ee2f85ba3a60dc0f79a1e0227a7758c" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>infer_properties_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1a5487d58d8e51312358e341ff75157f2b" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>INode</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a911bf5ef4a7a5db16416dd491f4ad093" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>pack_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1BaseNode_1afb34b74d31247e461143644e132d6e47" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>post_validate_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode_1a1464b8005eef4e7b9891bc7a9f3844a7" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>pre_validate_node</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a20295372f663ad76910d185982baabe3" prot="protected" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>validateSubtree</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a88228ffa2f038c274dfcaf8316f55227" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>visit</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a84993f3eb21c56cd0f00c35655d828bd" prot="public" virt="non-virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>visit</name></member>
+      <member refid="classhipdnn__frontend_1_1graph_1_1INode_1a504092d3f0e9ffffbd874e562a5251aa" prot="public" virt="virtual"><scope>hipdnn_frontend::graph::ConvolutionDgradNode</scope><name>~INode</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>

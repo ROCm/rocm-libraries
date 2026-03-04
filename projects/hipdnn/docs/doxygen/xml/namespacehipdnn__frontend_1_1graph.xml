@@ -1,0 +1,402 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="namespacehipdnn__frontend_1_1graph" kind="namespace" language="C++">
+    <compoundname>hipdnn_frontend::graph</compoundname>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1Attributes" prot="public">hipdnn_frontend::graph::Attributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BaseNode" prot="public">hipdnn_frontend::graph::BaseNode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" prot="public">hipdnn_frontend::graph::BatchnormAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" prot="public">hipdnn_frontend::graph::BatchnormBackwardAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode" prot="public">hipdnn_frontend::graph::BatchnormBackwardNode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceAttributes" prot="public">hipdnn_frontend::graph::BatchnormInferenceAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceAttributesVarianceExt" prot="public">hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNode" prot="public">hipdnn_frontend::graph::BatchnormInferenceNode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceNodeVarianceExt" prot="public">hipdnn_frontend::graph::BatchnormInferenceNodeVarianceExt</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1BatchnormNode" prot="public">hipdnn_frontend::graph::BatchnormNode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" prot="public">hipdnn_frontend::graph::ConvDgradAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1ConvFpropAttributes" prot="public">hipdnn_frontend::graph::ConvFpropAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode" prot="public">hipdnn_frontend::graph::ConvolutionDgradNode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1ConvolutionFpropNode" prot="public">hipdnn_frontend::graph::ConvolutionFpropNode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1ConvolutionWgradNode" prot="public">hipdnn_frontend::graph::ConvolutionWgradNode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" prot="public">hipdnn_frontend::graph::ConvWgradAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1Graph" prot="public">hipdnn_frontend::graph::Graph</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" prot="public">hipdnn_frontend::graph::GraphAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1INode" prot="public">hipdnn_frontend::graph::INode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" prot="public">hipdnn_frontend::graph::MatmulAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" prot="public">hipdnn_frontend::graph::PointwiseAttributes</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1PointwiseNode" prot="public">hipdnn_frontend::graph::PointwiseNode</innerclass>
+    <innerclass refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" prot="public">hipdnn_frontend::graph::TensorAttributes</innerclass>
+    <sectiondef kind="typedef">
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a88e0cd993c08fa1b82927f04fce489bc" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormAttributes" kindref="compound">BatchnormAttributes</ref></type>
+        <definition>typedef BatchnormAttributes hipdnn_frontend::graph::Batchnorm_attributes</definition>
+        <argsstring></argsstring>
+        <name>Batchnorm_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Batchnorm_attributes</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" line="412" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormAttributes.hpp" bodystart="412" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a30060ab01d8ebf146db7e195e912a01f" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardAttributes" kindref="compound">BatchnormBackwardAttributes</ref></type>
+        <definition>typedef BatchnormBackwardAttributes hipdnn_frontend::graph::Batchnorm_backward_attributes</definition>
+        <argsstring></argsstring>
+        <name>Batchnorm_backward_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Batchnorm_backward_attributes</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp" line="297" column="37" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp" bodystart="297" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a8adc0bfdd040dfe2621c74952196c03d" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceAttributes" kindref="compound">BatchnormInferenceAttributes</ref></type>
+        <definition>typedef BatchnormInferenceAttributes hipdnn_frontend::graph::Batchnorm_inference_attributes</definition>
+        <argsstring></argsstring>
+        <name>Batchnorm_inference_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Batchnorm_inference_attributes</qualifiedname>
+        <briefdescription>
+<para>cuDNN compatibility alias </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp" line="195" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp" bodystart="195" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a9dea13fa2647d15f62d0c96ceb2ce66d" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormInferenceAttributesVarianceExt" kindref="compound">BatchnormInferenceAttributesVarianceExt</ref></type>
+        <definition>typedef BatchnormInferenceAttributesVarianceExt hipdnn_frontend::graph::Batchnorm_inference_attributes_variance_ext</definition>
+        <argsstring></argsstring>
+        <name>Batchnorm_inference_attributes_variance_ext</name>
+        <qualifiedname>hipdnn_frontend::graph::Batchnorm_inference_attributes_variance_ext</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp" line="226" column="49" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp" bodystart="226" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a1dbd4604ba5f5ac4e986e5ee215f3163" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvDgradAttributes" kindref="compound">ConvDgradAttributes</ref></type>
+        <definition>typedef ConvDgradAttributes hipdnn_frontend::graph::Conv_dgrad_attributes</definition>
+        <argsstring></argsstring>
+        <name>Conv_dgrad_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Conv_dgrad_attributes</qualifiedname>
+        <briefdescription>
+<para>cuDNN compatibility alias </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp" line="287" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp" bodystart="287" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a21998c74e4ca720ec6d7243172645a53" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvFpropAttributes" kindref="compound">ConvFpropAttributes</ref></type>
+        <definition>typedef ConvFpropAttributes hipdnn_frontend::graph::Conv_fprop_attributes</definition>
+        <argsstring></argsstring>
+        <name>Conv_fprop_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Conv_fprop_attributes</qualifiedname>
+        <briefdescription>
+<para>cuDNN compatibility alias </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp" line="297" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp" bodystart="297" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a2684b4797baa3bf06d638123257ecb1a" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvWgradAttributes" kindref="compound">ConvWgradAttributes</ref></type>
+        <definition>typedef ConvWgradAttributes hipdnn_frontend::graph::Conv_wgrad_attributes</definition>
+        <argsstring></argsstring>
+        <name>Conv_wgrad_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Conv_wgrad_attributes</qualifiedname>
+        <briefdescription>
+<para>cuDNN compatibility alias </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" line="287" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp" bodystart="287" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a0e86cba6c92763a702e9c867c32eaf25" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref></type>
+        <definition>typedef GraphAttributes hipdnn_frontend::graph::Context</definition>
+        <argsstring></argsstring>
+        <name>Context</name>
+        <qualifiedname>hipdnn_frontend::graph::Context</qualifiedname>
+        <briefdescription>
+<para>Type alias for <ref refid="classhipdnn__frontend_1_1graph_1_1GraphAttributes" kindref="compound">GraphAttributes</ref>. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" line="172" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp" bodystart="172" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1aec1593a6e859c22a759bb6e739207c26" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1MatmulAttributes" kindref="compound">MatmulAttributes</ref></type>
+        <definition>typedef MatmulAttributes hipdnn_frontend::graph::Matmul_attributes</definition>
+        <argsstring></argsstring>
+        <name>Matmul_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Matmul_attributes</qualifiedname>
+        <briefdescription>
+<para>cuDNN compatibility alias </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/MatmulAttributes.hpp" line="130" column="26" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/MatmulAttributes.hpp" bodystart="130" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1ac36389fd40715a5d322628d266a3cb06" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1PointwiseAttributes" kindref="compound">PointwiseAttributes</ref></type>
+        <definition>typedef PointwiseAttributes hipdnn_frontend::graph::Pointwise_attributes</definition>
+        <argsstring></argsstring>
+        <name>Pointwise_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Pointwise_attributes</qualifiedname>
+        <briefdescription>
+<para>cuDNN compatibility alias </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/PointwiseAttributes.hpp" line="329" column="29" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/PointwiseAttributes.hpp" bodystart="329" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1abf5c442ecbf0096989ffad74dbb1ab60" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref></type>
+        <definition>typedef TensorAttributes hipdnn_frontend::graph::Tensor_attributes</definition>
+        <argsstring></argsstring>
+        <name>Tensor_attributes</name>
+        <qualifiedname>hipdnn_frontend::graph::Tensor_attributes</qualifiedname>
+        <briefdescription>
+<para>Type alias for cuDNN compatibility. </para>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" line="506" column="26" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp" bodystart="506" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a537baa2f9bf53a8a56baa6d4ec0bf099" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormBackwardNode" kindref="compound">BatchnormBackwardNode</ref></type>
+        <definition>typedef BatchnormBackwardNode hipdnn_frontend::graph::DBNNode</definition>
+        <argsstring></argsstring>
+        <name>DBNNode</name>
+        <qualifiedname>hipdnn_frontend::graph::DBNNode</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" line="244" column="31" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp" bodystart="244" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a87cdb2fd9a2b31859d600c0f9be2a8c1" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BatchnormNode" kindref="compound">BatchnormNode</ref></type>
+        <definition>typedef BatchnormNode hipdnn_frontend::graph::BatchNormNode</definition>
+        <argsstring></argsstring>
+        <name>BatchNormNode</name>
+        <qualifiedname>hipdnn_frontend::graph::BatchNormNode</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormNode.hpp" line="261" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormNode.hpp" bodystart="261" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a88eeb6d34e98e374c844e5032256b791" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvolutionDgradNode" kindref="compound">ConvolutionDgradNode</ref></type>
+        <definition>typedef ConvolutionDgradNode hipdnn_frontend::graph::DgradNode</definition>
+        <argsstring></argsstring>
+        <name>DgradNode</name>
+        <qualifiedname>hipdnn_frontend::graph::DgradNode</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" line="357" column="30" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp" bodystart="357" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a602bdf746f7ef617b134956dd997d8f2" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvolutionFpropNode" kindref="compound">ConvolutionFpropNode</ref></type>
+        <definition>typedef ConvolutionFpropNode hipdnn_frontend::graph::ConvolutionNode</definition>
+        <argsstring></argsstring>
+        <name>ConvolutionNode</name>
+        <qualifiedname>hipdnn_frontend::graph::ConvolutionNode</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionFpropNode.hpp" line="371" column="30" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionFpropNode.hpp" bodystart="371" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1a912ae30c57085e5bb53924d7b62bddf6" prot="public" static="no">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1ConvolutionWgradNode" kindref="compound">ConvolutionWgradNode</ref></type>
+        <definition>typedef ConvolutionWgradNode hipdnn_frontend::graph::WgradNode</definition>
+        <argsstring></argsstring>
+        <name>WgradNode</name>
+        <qualifiedname>hipdnn_frontend::graph::WgradNode</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionWgradNode.hpp" line="364" column="30" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionWgradNode.hpp" bodystart="364" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="typedef" id="namespacehipdnn__frontend_1_1graph_1aeefd15fc4678309d6fd6e8f1267e92cb" prot="public" static="no">
+        <templateparamlist>
+          <param>
+            <type>typename DerivedT</type>
+          </param>
+        </templateparamlist>
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1BaseNode" kindref="compound">BaseNode</ref>&lt; DerivedT &gt;</type>
+        <definition>using hipdnn_frontend::graph::NodeCRTP = typedef BaseNode&lt;DerivedT&gt;</definition>
+        <argsstring></argsstring>
+        <name>NodeCRTP</name>
+        <qualifiedname>hipdnn_frontend::graph::NodeCRTP</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" line="209" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/Node.hpp" bodystart="209" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="func">
+      <memberdef kind="function" id="namespacehipdnn__frontend_1_1graph_1a15e03a363f19372b3d7d50f949761d54" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <templateparamlist>
+          <param>
+            <type>class T</type>
+          </param>
+          <param>
+            <type>class HostAlloc</type>
+            <defval><ref refid="classhipdnn__data__sdk_1_1utilities_1_1HostAllocator" kindref="compound">hipdnn_data_sdk::utilities::HostAllocator</ref>&lt;T&gt;</defval>
+          </param>
+          <param>
+            <type>class DeviceAlloc</type>
+            <defval><ref refid="classhipdnn__data__sdk_1_1utilities_1_1DeviceAllocator" kindref="compound">hipdnn_data_sdk::utilities::DeviceAllocator</ref>&lt;T&gt;</defval>
+          </param>
+        </templateparamlist>
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref></type>
+        <definition>TensorAttributes hipdnn_frontend::graph::makeTensorAttributes</definition>
+        <argsstring>(const std::string &amp;name, DataType dataType, const hipdnn_data_sdk::utilities::Tensor&lt; T, HostAlloc, DeviceAlloc &gt; &amp;tensor)</argsstring>
+        <name>makeTensorAttributes</name>
+        <qualifiedname>hipdnn_frontend::graph::makeTensorAttributes</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>name</declname>
+        </param>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>dataType</declname>
+        </param>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1Tensor" kindref="compound">hipdnn_data_sdk::utilities::Tensor</ref>&lt; T, HostAlloc, DeviceAlloc &gt; &amp;</type>
+          <declname>tensor</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp" line="40" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp" bodystart="40" bodyend="50"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1_1graph_1a86687e8f776d3f542b6a2939476a6960" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref></type>
+        <definition>TensorAttributes hipdnn_frontend::graph::makeTensorAttributes</definition>
+        <argsstring>(const std::string &amp;name, DataType dataType, const std::vector&lt; int64_t &gt; &amp;dims, const std::vector&lt; int64_t &gt; &amp;strides)</argsstring>
+        <name>makeTensorAttributes</name>
+        <qualifiedname>hipdnn_frontend::graph::makeTensorAttributes</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>name</declname>
+        </param>
+        <param>
+          <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
+          <declname>dataType</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>strides</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp" line="52" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp" bodystart="52" bodyend="59"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1_1graph_1a292f314f47156e6acb55d212d2201e4d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type><ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref></type>
+        <definition>TensorAttributes hipdnn_frontend::graph::makeTensorAttributes</definition>
+        <argsstring>(const std::string &amp;name, const std::vector&lt; int64_t &gt; &amp;dims, const std::vector&lt; int64_t &gt; &amp;strides)</argsstring>
+        <name>makeTensorAttributes</name>
+        <qualifiedname>hipdnn_frontend::graph::makeTensorAttributes</qualifiedname>
+        <param>
+          <type>const std::string &amp;</type>
+          <declname>name</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>strides</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp" line="61" column="25" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp" bodystart="61" bodyend="66"/>
+      </memberdef>
+      <memberdef kind="function" id="namespacehipdnn__frontend_1_1graph_1ad63fd9c4d4d6e0aee4441390c843d234" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>std::unique_ptr&lt; <ref refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor" kindref="compound">hipdnn_data_sdk::utilities::ITensor</ref> &gt;</type>
+        <definition>std::unique_ptr&lt; hipdnn_data_sdk::utilities::ITensor &gt; hipdnn_frontend::graph::createTensorFromAttribute</definition>
+        <argsstring>(const TensorAttributes &amp;attribute)</argsstring>
+        <name>createTensorFromAttribute</name>
+        <qualifiedname>hipdnn_frontend::graph::createTensorFromAttribute</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &amp;</type>
+          <declname>attribute</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp" line="69" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp" bodystart="69" bodyend="73"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/Attributes.hpp" line="24" column="1"/>
+  </compounddef>
+</doxygen>

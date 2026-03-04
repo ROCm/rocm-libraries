@@ -1,0 +1,464 @@
+<?xml version='1.0' encoding='UTF-8' standalone='no'?>
+<doxygen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="compound.xsd" version="1.9.8" xml:lang="en-US">
+  <compounddef id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor" kind="class" language="C++" prot="public">
+    <compoundname>hipdnn_data_sdk::utilities::ShallowTensor</compoundname>
+    <basecompoundref refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase" prot="public" virt="non-virtual">hipdnn_data_sdk::utilities::TensorBase&lt; T &gt;</basecompoundref>
+    <includes refid="ShallowTensor_8hpp" local="no">ShallowTensor.hpp</includes>
+    <templateparamlist>
+      <param>
+        <type>class T</type>
+      </param>
+    </templateparamlist>
+    <sectiondef kind="private-attrib">
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1acd637b7461a5ce65729ddc1fdeadfd84" prot="private" static="no" mutable="no">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowHostOnlyMigratableMemory" kindref="compound">ShallowHostOnlyMigratableMemory</ref>&lt; T &gt;</type>
+        <definition>ShallowHostOnlyMigratableMemory&lt;T&gt; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::_memory</definition>
+        <argsstring></argsstring>
+        <name>_memory</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::_memory</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="101" column="37" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="101" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a906752de1b598dff85cde985e62b0bbe" prot="private" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::_dims</definition>
+        <argsstring></argsstring>
+        <name>_dims</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::_dims</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="102" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="102" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a35e673ae5b92d51859974b923f8e5615" prot="private" static="no" mutable="no">
+        <type>std::vector&lt; int64_t &gt;</type>
+        <definition>std::vector&lt;int64_t&gt; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::_strides</definition>
+        <argsstring></argsstring>
+        <name>_strides</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::_strides</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="103" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="103" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a79e429d8f2fc86858c85f793b323695a" prot="private" static="no" mutable="no">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::_elementCount</definition>
+        <argsstring></argsstring>
+        <name>_elementCount</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::_elementCount</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="104" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="104" bodyend="-1"/>
+      </memberdef>
+      <memberdef kind="variable" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a2b1f2c71d23423306625f5b3c6dabd8b" prot="private" static="no" mutable="no">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::_packed</definition>
+        <argsstring></argsstring>
+        <name>_packed</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::_packed</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="105" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="105" bodyend="-1"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="public-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a9a4acece1ce1804f6bbfee291e0e544d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::ShallowTensor</definition>
+        <argsstring>(void *memory, const std::vector&lt; int64_t &gt; &amp;dims, const std::vector&lt; int64_t &gt; &amp;strides)</argsstring>
+        <name>ShallowTensor</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::ShallowTensor</qualifiedname>
+        <param>
+          <type>void *</type>
+          <declname>memory</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>dims</declname>
+        </param>
+        <param>
+          <type>const std::vector&lt; int64_t &gt; &amp;</type>
+          <declname>strides</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="22" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="22" bodyend="32"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a95e37a69edf8ca029c55bac6a2be2032" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::ShallowTensor</definition>
+        <argsstring>(const ShallowTensor &amp;)=delete</argsstring>
+        <name>ShallowTensor</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::ShallowTensor</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor" kindref="compound">ShallowTensor</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="34" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ab05bb655fe0e3e64e2b945216a153e1e" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor" kindref="compound">ShallowTensor</ref> &amp;</type>
+        <definition>ShallowTensor &amp; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::operator=</definition>
+        <argsstring>(const ShallowTensor &amp;)=delete</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::operator=</qualifiedname>
+        <param>
+          <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor" kindref="compound">ShallowTensor</ref> &amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="35" column="19"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a3d845ad1a5fad2f2e7b9f1619979270a" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type></type>
+        <definition>hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::ShallowTensor</definition>
+        <argsstring>(ShallowTensor &amp;&amp;)=default</argsstring>
+        <name>ShallowTensor</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::ShallowTensor</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor" kindref="compound">ShallowTensor</ref> &amp;&amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="37" column="5"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ae125c7e5fdccf125ddd1a2d758b10776" prot="public" static="no" const="no" explicit="no" inline="no" virt="non-virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor" kindref="compound">ShallowTensor</ref> &amp;</type>
+        <definition>ShallowTensor &amp; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::operator=</definition>
+        <argsstring>(ShallowTensor &amp;&amp;)=default</argsstring>
+        <name>operator=</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::operator=</qualifiedname>
+        <param>
+          <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor" kindref="compound">ShallowTensor</ref> &amp;&amp;</type>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="38" column="19"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a0e3508fac7b80907e6c60ba6fecf92d1" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>const std::vector&lt; int64_t &gt; &amp; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::dims</definition>
+        <argsstring>() const override</argsstring>
+        <name>dims</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::dims</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a4c6dffc30f9d4a892206f57d1ba528be">dims</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="40" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="40" bodyend="43"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1abb58204a7e06f482f21aa2e9d3450d18" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>const std::vector&lt; int64_t &gt; &amp;</type>
+        <definition>const std::vector&lt; int64_t &gt; &amp; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::strides</definition>
+        <argsstring>() const override</argsstring>
+        <name>strides</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::strides</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a703f550417012e31a406c8692ad0628d">strides</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="45" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="45" bodyend="48"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a1617f06d47e08f3b3434b1db313e1244" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>bool</type>
+        <definition>bool hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::isPacked</definition>
+        <argsstring>() const override</argsstring>
+        <name>isPacked</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::isPacked</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1af63aec40d10fbe798f0177d0299fbec6">isPacked</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="50" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="50" bodyend="53"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a677f4d5e07f57199113585a7110353e7" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::elementCount</definition>
+        <argsstring>() const override</argsstring>
+        <name>elementCount</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::elementCount</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1abb5a2f2701b7f24ac57daa87a29b4514">elementCount</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="55" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="55" bodyend="58"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ab74f60ed9ceda5f5ecb1970b19fe98b8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::elementSpace</definition>
+        <argsstring>() const override</argsstring>
+        <name>elementSpace</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::elementSpace</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a314df9a1d1c2996581dc88edc9656af8">elementSpace</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="60" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="60" bodyend="63"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ac7704c109a571701bc4d2f1a61e0098d" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="virtual">
+        <type>const <ref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase" kindref="compound">MigratableMemoryBase</ref>&lt; T &gt; &amp;</type>
+        <definition>const MigratableMemoryBase&lt; T &gt; &amp; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::memory</definition>
+        <argsstring>() const override</argsstring>
+        <name>memory</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::memory</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1ae275313634b1f4fe84a4a9695545f640">memory</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="65" column="32" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="65" bodyend="68"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a4bcf6de6a872a20d0c66c5c5c8d12eef" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type><ref refid="classhipdnn__data__sdk_1_1utilities_1_1MigratableMemoryBase" kindref="compound">MigratableMemoryBase</ref>&lt; T &gt; &amp;</type>
+        <definition>MigratableMemoryBase&lt; T &gt; &amp; hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::memory</definition>
+        <argsstring>() override</argsstring>
+        <name>memory</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::memory</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a0dfa321c66191359dbff9cb2ab3c87fe">memory</reimplements>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="70" column="26" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="70" bodyend="73"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1aa8d9aa10457e77263c4388ca0f6e1335" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::fillWithValue</definition>
+        <argsstring>(T value) override</argsstring>
+        <name>fillWithValue</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::fillWithValue</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a8d477245e0985b5a4ad85f22e53e6a47">fillWithValue</reimplements>
+        <param>
+          <type>T</type>
+          <declname>value</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="75" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="75" bodyend="78"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1afa174e784044cdd9833f8891f682c723" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>void</type>
+        <definition>void hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::fillWithRandomValues</definition>
+        <argsstring>(T min, T max, unsigned int seed=std::random_device{}()) override</argsstring>
+        <name>fillWithRandomValues</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::fillWithRandomValues</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a7a8f9dfde3f0b21d50d313a436ae9f64">fillWithRandomValues</reimplements>
+        <param>
+          <type>T</type>
+          <declname>min</declname>
+        </param>
+        <param>
+          <type>T</type>
+          <declname>max</declname>
+        </param>
+        <param>
+          <type>unsigned int</type>
+          <declname>seed</declname>
+          <defval>std::random_device{}()</defval>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="80" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="80" bodyend="85"/>
+      </memberdef>
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ad34e5f3ed3bc268744487ae3d3f15c23" prot="public" static="no" const="no" explicit="no" inline="yes" virt="virtual">
+        <type>size_t</type>
+        <definition>size_t hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::fillWithData</definition>
+        <argsstring>(const void *data, size_t maxBytesCopied) override</argsstring>
+        <name>fillWithData</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::fillWithData</qualifiedname>
+        <reimplements refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a507698c63b1ec2f6ef46cad6b92c059c">fillWithData</reimplements>
+        <param>
+          <type>const void *</type>
+          <declname>data</declname>
+        </param>
+        <param>
+          <type>size_t</type>
+          <declname>maxBytesCopied</declname>
+        </param>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="87" column="12" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="87" bodyend="92"/>
+      </memberdef>
+    </sectiondef>
+    <sectiondef kind="private-static-func">
+      <memberdef kind="function" id="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ac313fe7ab741b107d8f672958f0cc26f" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
+        <type>void</type>
+        <definition>static void hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;::throwNotSupported</definition>
+        <argsstring>()</argsstring>
+        <name>throwNotSupported</name>
+        <qualifiedname>hipdnn_data_sdk::utilities::ShallowTensor::throwNotSupported</qualifiedname>
+        <briefdescription>
+        </briefdescription>
+        <detaileddescription>
+        </detaileddescription>
+        <inbodydescription>
+        </inbodydescription>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="95" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="95" bodyend="99"/>
+      </memberdef>
+    </sectiondef>
+    <briefdescription>
+    </briefdescription>
+    <detaileddescription>
+    </detaileddescription>
+    <inheritancegraph>
+      <node id="3">
+        <label>hipdnn_data_sdk::utilities::ITensor</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk::utilities::TensorBase&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase"/>
+        <childnode refid="3" relation="public-inheritance">
+        </childnode>
+      </node>
+    </inheritancegraph>
+    <collaborationgraph>
+      <node id="3">
+        <label>hipdnn_data_sdk::utilities::ITensor</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor"/>
+      </node>
+      <node id="1">
+        <label>hipdnn_data_sdk::utilities::ShallowTensor&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor"/>
+        <childnode refid="2" relation="public-inheritance">
+        </childnode>
+      </node>
+      <node id="2">
+        <label>hipdnn_data_sdk::utilities::TensorBase&lt; T &gt;</label>
+        <link refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase"/>
+        <childnode refid="3" relation="public-inheritance">
+        </childnode>
+      </node>
+    </collaborationgraph>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" line="19" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/data_sdk/include/hipdnn_data_sdk/utilities/ShallowTensor.hpp" bodystart="20" bodyend="106"/>
+    <listofallmembers>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a906752de1b598dff85cde985e62b0bbe" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>_dims</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a79e429d8f2fc86858c85f793b323695a" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>_elementCount</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1acd637b7461a5ce65729ddc1fdeadfd84" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>_memory</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a2b1f2c71d23423306625f5b3c6dabd8b" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>_packed</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a35e673ae5b92d51859974b923f8e5615" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>_strides</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a0a9483819eb79559465cac2111bf380d" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>begin</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a57105173d618b3325deb6567c5bae07f" prot="protected" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>calculateElementSpace</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1aa499f33f2950d50900205ac58c1e74c2" prot="protected" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>calculateItemCount</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1af817c1e7da516b597d2aaff6d674cd66" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>cbegin</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a3e978a09a1c96ed8edec5e0da22c4a50" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>cend</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a7296ecb3b2bcd7bb9a5da9376164e23a" prot="protected" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>computeIsPacked</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a0e3508fac7b80907e6c60ba6fecf92d1" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>dims</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a677f4d5e07f57199113585a7110353e7" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>elementCount</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a236f65ac44632d83a8e7fdbe3e1b993f" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>elementSize</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ab74f60ed9ceda5f5ecb1970b19fe98b8" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>elementSpace</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a37624faca7d9fbc9d2d0b47ae25b04c4" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>end</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1aee701a30a1e573dc28f87336c7ce91f8" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>fillTensorWithRandomValues</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a88aa3d70156623b4f0173d6334aa3e9e" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>fillTensorWithValue</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ad34e5f3ed3bc268744487ae3d3f15c23" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>fillWithData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1afa174e784044cdd9833f8891f682c723" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>fillWithRandomValues</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1aa8d9aa10457e77263c4388ca0f6e1335" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>fillWithValue</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a4d1b54a8b951f181dd6bedf0e932f04a" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>getHostValue</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a945c97742b2b151d547cb5e680714553" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>getHostValue</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a79f58fb00491b2c963fb2d26e9cdbd22" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>getIndex</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a89e3ea2bcc4253905d331896cfe32101" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>getIndex</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a5e8d8ff947a73b22c880ac5ac409c68d" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>hostDataOffsetFromIndex</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a9b16afdd90b384b85d5a2645b8de118b" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>hostDataOffsetFromIndex</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a1617f06d47e08f3b3434b1db313e1244" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>isPacked</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a6bcaf7fe4c4018bc8c47c538ca5798cd" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>markDeviceModified</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1ad9bb6a066f12e00e4c71cb12927cc011" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>markHostModified</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ac7704c109a571701bc4d2f1a61e0098d" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>memory</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a4bcf6de6a872a20d0c66c5c5c8d12eef" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>memory</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a2e44a224538beda76fa89751d8ffac53" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>operator()</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a1c8afadb2d983a0a537e920428963f51" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>operator()</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1ab4377cacdec72e9eef1666ba526847a9" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>operator()</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1ae9a0a168ec0cd76e2ae3b3da3afeca56" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>operator()</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ab05bb655fe0e3e64e2b945216a153e1e" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>operator=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ae125c7e5fdccf125ddd1a2d758b10776" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>operator=</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a075c315be84beb2c04a95e4225a728fd" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>rawDeviceData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a11862f5ed66cc8ce4b7f48f454977ae0" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>rawHostData</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1a3e2dbdc049f71c704f3fa1d521a77e84" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>setHostValue</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1TensorBase_1ac5922ea0bf6144b6943b43e28d9cf6ba" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>setHostValue</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a9a4acece1ce1804f6bbfee291e0e544d" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>ShallowTensor</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a95e37a69edf8ca029c55bac6a2be2032" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>ShallowTensor</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1a3d845ad1a5fad2f2e7b9f1619979270a" prot="public" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>ShallowTensor</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1abb58204a7e06f482f21aa2e9d3450d18" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>strides</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1abdb14633cd0b5a6b16b7c6ac202afb72" prot="protected" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>throwIfOutOfBounds</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ShallowTensor_1ac313fe7ab741b107d8f672958f0cc26f" prot="private" virt="non-virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>throwNotSupported</name></member>
+      <member refid="classhipdnn__data__sdk_1_1utilities_1_1ITensor_1a6530022ab7a914b5da930fa2e22ccf64" prot="public" virt="virtual"><scope>hipdnn_data_sdk::utilities::ShallowTensor</scope><name>~ITensor</name></member>
+    </listofallmembers>
+  </compounddef>
+</doxygen>
