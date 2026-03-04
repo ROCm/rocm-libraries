@@ -356,9 +356,10 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
     float total_time = 0.0f;
     for(ck_tile::index_t head_start = 0; head_start < nhead; head_start += group_sz)
     {
-        const ck_tile::index_t q_heads      = std::min(group_sz, nhead - head_start);
-        const ck_tile::index_t k_head_start = (gqa_ratio >= 1 ? head_start / gqa_ratio : head_start);
-        const ck_tile::index_t k_heads      = (gqa_ratio >= 1 ? q_heads / gqa_ratio : q_heads);
+        const ck_tile::index_t q_heads = std::min(group_sz, nhead - head_start);
+        const ck_tile::index_t k_head_start =
+            (gqa_ratio >= 1 ? head_start / gqa_ratio : head_start);
+        const ck_tile::index_t k_heads = (gqa_ratio >= 1 ? q_heads / gqa_ratio : q_heads);
 
         auto args       = base_args;
         args.nhead_q    = q_heads;
