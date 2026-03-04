@@ -945,38 +945,55 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
                 gr.needed_by = LR_target.issued_at
 
 @applies_only_once
-def set_gr_must_start_after_from_lr0s(timeline: Timeline, swap_global_read_order: bool) -> None:
+def set_gr_must_start_after_from_lr0s(timeline: Timeline, swap_global_read_order: bool, dtl_plus_lds_buf: bool = False) -> None:
     """
-    Set the must_start_after field of the first GlobalRead based on the last LR0 of the same loop.
+    Set the must_start_after field of GlobalReads based on the last LR0 that shares their LDS block.
 
-    GRs in iteration N write (DDR->LDS) to the LDS that LR0s of iteration N read from (LDS->VGPR).
-    The first GRA must start after the last LRA0 of the same iteration is guaranteed done
-    (and vice versa for B). If SwapGlobalReadOrder is True, GRA loads B so the first GRA must
-    start after the last LRB0, and the first GRB must start after the last LRA0.
+    Standard case (dtl_plus_lds_buf=False):
+        GRs in iteration N write (DDR->LDS) to the same LDS block that LR0s of iteration N read from.
+        Each GR must start after the last same-iteration LR0 is guaranteed done.
+
+    DtlPlusLdsBuf case (dtl_plus_lds_buf=True):
+        GRs in iteration N write to a different LDS block than same-iteration LR0s read from,
+        so there is no same-iteration dependency. However, GRs in iteration N write to the LDS
+        block that LR0s from iteration N-1 were reading from, creating a cross-iteration dependency.
+        Each GR must start after the last previous-iteration LR0 is guaranteed done.
+
+    If SwapGlobalReadOrder is True, GRA loads B so the first GRA must start after the last LRB0,
+    and the first GRB must start after the last LRA0.
 
     The LR0's done_idx() is its guaranteed_by (set by apply_swaits), which is the SWaitCnt index.
 
     Args:
         timeline: The Timeline object containing the instructions.
         swap_global_read_order: Whether global read order is swapped.
+        dtl_plus_lds_buf: Whether DtlPlusLdsBuf is enabled (cross-iteration dependency).
     """
     target_names = {"GRA": "LRA0", "GRB": "LRB0"}
 
     if swap_global_read_order:
         target_names["GRA"], target_names["GRB"] = target_names["GRB"], target_names["GRA"]
 
-    for _, loop in enumerate(timeline.loops):
+    for i_loop, loop in enumerate(timeline.loops):
         for gr_name, lr0_name in target_names.items():
             grs = timeline.get_instructions(gr_name, loop)
             if not grs:
                 continue
 
-            lr0s = timeline.get_instructions(lr0_name, loop)
+            if dtl_plus_lds_buf:
+                # GRs write to a different LDS block than same-iteration LR0s.
+                # The dependency is against the previous iteration's LR0s instead.
+                if i_loop == 0:
+                    continue  # No previous iteration available (ML-1)
+                lr0s = timeline.get_instructions(lr0_name, timeline.loops[i_loop - 1])
+            else:
+                lr0s = timeline.get_instructions(lr0_name, loop)
+
             if not lr0s:
                 continue
 
-            # The last LR0 of the corresponding type in this loop.
-            _, last_lr0 = lr0s[-1]
+            # Pick the LR0 that finishes last (highest guaranteed_by)
+            last_lr0 = max((lr0 for _, lr0 in lr0s), key=lambda lr0: lr0.guaranteed_by)
             for _, gr in grs:
                 gr.must_start_after = last_lr0
 
@@ -2076,17 +2093,27 @@ def add_gr_not_too_early_constraints(timeline: Timeline, ctx: ValidatorPassConte
     """
     Ensure that GlobalReads are not issued before the corresponding LR0s are guaranteed complete.
 
-    Required ordering per operand:
-        last LR0 -> SWaitCnt (ensures LR0 done for wave) -> SBarrier (ensures LR0 done for workgroup) -> first GR
+    Standard case (DtlPlusLdsBuf=False):
+        Same-iteration dependency. GRs write to the same LDS block that LR0s read from.
+        Required ordering per operand:
+            last LR0 -> SWaitCnt -> SBarrier -> first GR (within same iteration)
+
+    DtlPlusLdsBuf case (DtlPlusLdsBuf=True):
+        Cross-iteration dependency. GRs write to a different LDS block than same-iteration LR0s,
+        but to the same block that previous-iteration LR0s were reading from.
+        Required ordering per operand:
+            last LR0 (iter N-1) -> SWaitCnt -> SBarrier -> first GR (iter N)
 
     GRA writes (DDR->LDS) to the LDS that LRA0 reads from (LDS->VGPR).
     We conservatively assume GRA always writes everywhere that a thread in the workgroup is reading from in LRA0.
     Thus we must ensure that every thread in every wave in the workgroup has finished all of its LRA0 instructions
     before GRA is issued. Same logic applies for B. No cross-operand constraints (LRA0 vs GRB are independent).
     """
+    dtl_plus_lds_buf = ctx.kernel.get("DtlPlusLdsBuf", False)
+
     # apply_swaits must run first so that LR0.guaranteed_by (done_idx) is set before must_start_after hookup.
     apply_swaits(timeline)
-    set_gr_must_start_after_from_lr0s(timeline, ctx.swap_global_read_order)
+    set_gr_must_start_after_from_lr0s(timeline, ctx.swap_global_read_order, dtl_plus_lds_buf)
     apply_must_start_after_barriers(timeline)
 
 
