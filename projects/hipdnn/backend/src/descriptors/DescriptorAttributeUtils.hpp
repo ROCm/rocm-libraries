@@ -124,4 +124,18 @@ void getTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
                          void* arrayOfElements,
                          const char* errorPrefix);
 
+void setTensorDescriptorArray(std::vector<std::shared_ptr<TensorDescriptor>>& descTarget,
+                              std::vector<int64_t>& uidTarget,
+                              hipdnnBackendAttributeType_t attributeType,
+                              int64_t elementCount,
+                              const void* arrayOfElements,
+                              const char* errorPrefix);
+
+void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor>>& descSource,
+                              hipdnnBackendAttributeType_t attributeType,
+                              int64_t requestedElementCount,
+                              int64_t* elementCount,
+                              void* arrayOfElements,
+                              const char* errorPrefix);
+
 } // namespace hipdnn_backend

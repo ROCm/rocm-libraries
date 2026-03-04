@@ -401,6 +401,51 @@ typedef enum
     /** @} */
 
     /**
+     * @name Batchnorm Backward Ext Operation Attributes (2000-2099)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_EXT_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Gradient input tensor (dy) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DY = 2000,
+
+    /** @brief Input tensor (x) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_X = 2001,
+
+    /** @brief Scale tensor for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_SCALE = 2002,
+
+    /** @brief Gradient output tensor (dx) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DX = 2003,
+
+    /** @brief Scale gradient tensor (dscale) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DSCALE = 2004,
+
+    /** @brief Bias gradient tensor (dbias) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DBIAS = 2005,
+
+    /** @brief Saved mean tensor from forward pass */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_MEAN = 2006,
+
+    /** @brief Saved inverse variance tensor from forward pass */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_INV_VARIANCE = 2007,
+
+    /** @} */
+
+    /**
+     * @name Shared Batchnorm Backward Ext Attributes (2100-2199)
+     * @{
+     */
+
+    /** @brief Compute data type for batchnorm backward */
+    HIPDNN_ATTR_BATCHNORM_BWD_EXT_COMP_TYPE = 2100,
+
+    /** @brief Peer statistics tensor array for multi-GPU batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BWD_EXT_PEER_STATS = 2101,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{

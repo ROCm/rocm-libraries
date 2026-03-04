@@ -27,6 +27,7 @@ add_library(
     descriptors/ConvolutionFwdOperationDescriptor.cpp
     descriptors/ConvolutionWrwOperationDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
+    descriptors/BatchnormBackwardOperationDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
     descriptors/DescriptorAttributeUtils.cpp
     descriptors/DataTypeConversion.cpp
