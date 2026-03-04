@@ -81,4 +81,4 @@ For example, to build rocThrust with no device acceleration, using only the g++ 
 
     `ROCM_PATH=/opt/rocm CXX=g++ cmake -B build -DBUILD_BENCHMARK=OFF -DBUILD_TEST=OFF -DTHRUST_HOST_SYSTEM=CPP -DTHRUST_DEVICE_SYSTEM=CPP -DLINK_HIP_DEVICE_LIBS=OFF`
  
-See :doc:`building rocThrust with CMake <../install/rocThrust-install-with-cmake>` and :doc:`building rocThrust with rmake <../install/rocThrust-rmake-install>` for information on setting build options.
+For information about setting build options, see :doc:`building rocThrust with CMake <../install/rocThrust-install-with-cmake>` and :doc:`building rocThrust with rmake <../install/rocThrust-rmake-install>`.
