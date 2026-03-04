@@ -10,6 +10,7 @@
 #include "ck_tile/core/arch/mma/mma_selector.hpp"
 #include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -17,54 +18,6 @@
 namespace {
 
 using namespace ck_tile;
-
-/**
- * @struct RegisterIdxPair
- * @brief Small helper struct to hold a pair of lane and vector index values
- */
-struct RegisterIdxPair
-{
-    uint32_t lane;
-    uint32_t vecIdx;
-};
-
-/**
- * @class TileDistrEncodingMap
- * @brief Unified, static methods for register mapping
- *
- * Uses tile_distribution_encoding to compute the mapping
- * from matrix coordinates (m, k) or (m, n) to (lane, vecIdx) pairs.
- *
- * @tparam TileDistrEnc tile_distribution_encoding type
- * @tparam NumLanes Number of lanes in the wave
- * @tparam NumVecItems Number of vector items per lane
- */
-template <typename TileDistrEnc, index_t NumLanes, index_t NumVecItems>
-struct TileDistrEncodingMap
-{
-    static constexpr auto distr               = make_static_tile_distribution(TileDistrEnc{});
-    static constexpr auto ps_ys_to_xs_adaptor = distr.get_ps_ys_to_xs_adaptor();
-
-    /**
-     * @brief Convert (lane, vecIdx) to matrix coordinates
-     */
-    CK_TILE_HOST_DEVICE static auto calc_matrix_indices_from_lane_vector(index_t lane_idx,
-                                                                         index_t vector_idx)
-    {
-        // Unmerge the Y dimension index into its hidden indices
-        array<index_t, TileDistrEnc::NDimY> y_hidden_idx;
-        index_t vec_tmp = vector_idx;
-        for(index_t i = TileDistrEnc::NDimY - 1; i >= 0; --i)
-        {
-            y_hidden_idx[i] = vec_tmp % TileDistrEnc::detail::ys_lengths_[i];
-            vec_tmp /= TileDistrEnc::detail::ys_lengths_[i];
-        }
-
-        const auto ps_ys_idx = container_concat(array<index_t, 1>{lane_idx}, y_hidden_idx);
-        const auto coord     = make_tensor_adaptor_coordinate(ps_ys_to_xs_adaptor, ps_ys_idx);
-        return coord.get_bottom_index();
-    }
-};
 
 /**
  * @class RegisterMapTraits
@@ -87,15 +40,9 @@ struct RegisterMap
 {
     using Traits = RegisterMapTraits<MmaOp>;
 
-    using AMap = TileDistrEncodingMap<typename Traits::AWarpDstrEncoding,
-                                      Traits::WaveSize,
-                                      Traits::AVecSize>;
-    using BMap = TileDistrEncodingMap<typename Traits::BWarpDstrEncoding,
-                                      Traits::WaveSize,
-                                      Traits::BVecSize>;
-    using CMap = TileDistrEncodingMap<typename Traits::CWarpDstrEncoding,
-                                      Traits::WaveSize,
-                                      Traits::CVecSize>;
+    using AMap = core::arch::mma::TileDistrEncRegMap<typename Traits::AWarpDstrEncoding>;
+    using BMap = core::arch::mma::TileDistrEncRegMap<typename Traits::BWarpDstrEncoding>;
+    using CMap = core::arch::mma::TileDistrEncRegMap<typename Traits::CWarpDstrEncoding>;
 
     CK_TILE_HOST_DEVICE static auto Register2AMap(const uint32_t lane, const uint32_t vecIdx)
     {
