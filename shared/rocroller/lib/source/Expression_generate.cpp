@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "rocRoller/Utilities/Error.hpp"
 #include <algorithm>
 #include <numeric>
 #include <queue>
@@ -110,7 +111,8 @@ namespace rocRoller
             using RegisterValue = std::variant<Register::ValuePtr>;
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true)
+                                                 bool              allowSpecial = true,
+                                                 float             packingRatio = 1.f)
             {
                 auto regType = resType.regType;
                 if(IsWriteableSpecial(regType))
@@ -123,7 +125,7 @@ namespace rocRoller
                 return Register::Value::Placeholder(m_context,
                                                     regType,
                                                     resType.varType,
-                                                    resType.valueCount,
+                                                    resType.valueCount * packingRatio,
                                                     Register::AllocationOptions::FullyContiguous());
             }
 
@@ -364,7 +366,7 @@ namespace rocRoller
 
                 if(dest == nullptr)
                 {
-                    dest = resultPlaceholder(resType, true);
+                    dest = resultPlaceholder(resType, true, 1.f / destInfo.packing);
                 }
                 else
                 {
@@ -762,11 +764,11 @@ namespace rocRoller
                     if(isUnpacking)
                     {
                         // unpacking args into (multiple registers) dest
-                        dest = resultPlaceholder(destType, true);
+                        dest = resultPlaceholder(destType, true, packingRatio);
                     }
                     else
                     {
-                        dest = resultPlaceholder(destType, true);
+                        dest = resultPlaceholder(destType, true, 1.f / packingRatio);
                     }
                 }
 

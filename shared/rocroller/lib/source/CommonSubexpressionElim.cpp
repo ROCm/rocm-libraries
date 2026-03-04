@@ -716,18 +716,21 @@ namespace rocRoller
             }
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true) const
+                                                 bool              allowSpecial = true,
+                                                 float             packingRatio = 1.f) const
             {
                 if(Register::IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
                     if(allowSpecial)
                         return m_context->getSCC();
                     else
-                        return Register::Value::Placeholder(
-                            m_context, Register::Type::Scalar, resType.varType, resType.valueCount);
+                        return Register::Value::Placeholder(m_context,
+                                                            Register::Type::Scalar,
+                                                            resType.varType,
+                                                            resType.valueCount * packingRatio);
                 }
                 return Register::Value::Placeholder(
-                    m_context, resType.regType, resType.varType, resType.valueCount);
+                    m_context, resType.regType, resType.varType, resType.valueCount * packingRatio);
             }
 
             /**

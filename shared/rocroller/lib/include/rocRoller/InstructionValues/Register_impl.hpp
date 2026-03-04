@@ -189,69 +189,6 @@ namespace rocRoller
             Throw<FatalError>("Invalid Register::Type combo: ", ShowValue(lhs), ShowValue(rhs));
         }
 
-        constexpr inline size_t broadcastValueCount(size_t lhsValueCount, size_t rhsValueCount)
-        {
-
-            if(lhsValueCount == rhsValueCount || rhsValueCount == 1)
-            {
-                return lhsValueCount;
-            }
-            else if(lhsValueCount == 1)
-            {
-                return rhsValueCount;
-            }
-            else
-            {
-                Throw<FatalError>("Each operand's value count in an expression must either "
-                                  "be 1 or equal to all other non-1 value counts\n",
-                                  ShowValue(lhsValueCount),
-                                  ShowValue(rhsValueCount));
-            }
-        }
-
-        inline size_t broadcastValueCount(std::vector<size_t> operandValueCounts)
-        {
-            size_t valueCount = 1;
-            for(auto operandValueCount : operandValueCounts)
-            {
-                if(operandValueCount != 1)
-                {
-                    if(valueCount == 1)
-                        valueCount = operandValueCount;
-                    else
-                        AssertFatal(valueCount == operandValueCount,
-                                    "Each operand's value count in an expression must either "
-                                    "be 1 or equal to all other non-1 value counts\n",
-                                    ShowValue(valueCount),
-                                    ShowValue(operandValueCount));
-                }
-            }
-
-            return valueCount;
-        }
-
-        inline size_t broadcastValueCount(std::vector<ValuePtr> operands)
-        {
-            size_t valueCount = 1;
-            for(auto operand : operands)
-            {
-                size_t operandValueCount = operand->valueCount();
-                if(operandValueCount != 1)
-                {
-                    if(valueCount == 1)
-                        valueCount = operandValueCount;
-                    else
-                        AssertFatal(valueCount == operandValueCount,
-                                    "Each operand's value count in an expression must either "
-                                    "be 1 or equal to all other non-1 value counts\n",
-                                    ShowValue(valueCount),
-                                    ShowValue(operandValueCount));
-                }
-            }
-
-            return valueCount;
-        }
-
         constexpr inline Type MapSPRTypeToGPRType(Type t)
         {
             switch(t)

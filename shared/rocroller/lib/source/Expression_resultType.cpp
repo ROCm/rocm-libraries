@@ -26,6 +26,32 @@ namespace rocRoller
 {
     namespace Expression
     {
+        inline size_t broadcastValueCount(std::vector<ResultType> operands)
+        {
+            size_t valueCount = 1;
+            for(auto operand : operands)
+            {
+                size_t operandPacking    = operand.varType.dataType == DataType::None
+                                               ? 1
+                                               : DataTypeInfo::Get(operand.varType).packing;
+                size_t operandValueCount = operand.valueCount * operandPacking;
+                if(operandValueCount != 1)
+                {
+                    if(valueCount == 1)
+                        valueCount = operandValueCount;
+                    else
+                        AssertFatal(valueCount == operandValueCount,
+                                    "Each operand's value count in an expression must either "
+                                    "be 1 or equal to all other non-1 value counts\n",
+                                    ShowValue(valueCount),
+                                    ShowValue(operandValueCount),
+                                    ShowValue(operandPacking));
+                }
+            }
+
+            return valueCount;
+        }
+
         /*
          * result type
          */
@@ -65,8 +91,7 @@ namespace rocRoller
                     varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
                 }
 
-                auto valueCount
-                    = Register::broadcastValueCount(lhsVal.valueCount, rhsVal.valueCount);
+                auto valueCount = broadcastValueCount({lhsVal, rhsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -84,8 +109,7 @@ namespace rocRoller
                 auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
                 varType      = VariableType::Promote(varType, r2hsVal.varType);
 
-                size_t valueCount = Register::broadcastValueCount(
-                    {lhsVal.valueCount, r1hsVal.valueCount, r2hsVal.valueCount});
+                size_t valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -95,10 +119,9 @@ namespace rocRoller
                 auto lhsVal  = call(expr.lhs);
                 auto r1hsVal = call(expr.r1hs);
 
-                auto regType = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
-                auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
-                auto valueCount
-                    = Register::broadcastValueCount(lhsVal.valueCount, r1hsVal.valueCount);
+                auto regType    = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
+                auto varType    = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
+                auto valueCount = broadcastValueCount({lhsVal, r1hsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -108,10 +131,9 @@ namespace rocRoller
                 auto lhsVal  = call(expr.lhs);
                 auto r2hsVal = call(expr.r2hs);
 
-                auto regType = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
-                auto varType = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
-                auto valueCount
-                    = Register::broadcastValueCount(lhsVal.valueCount, r2hsVal.valueCount);
+                auto regType    = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
+                auto varType    = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
+                auto valueCount = broadcastValueCount({lhsVal, r2hsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -128,8 +150,7 @@ namespace rocRoller
                 auto varType = VariableType::Promote(matAVal.varType, matBVal.varType);
                 varType      = VariableType::Promote(varType, matCVal.varType);
 
-                size_t valueCount = Register::broadcastValueCount(
-                    {matAVal.valueCount, matBVal.valueCount, matCVal.valueCount});
+                size_t valueCount = broadcastValueCount({matAVal, matBVal, matCVal});
 
                 return {regType, varType, valueCount};
             }
@@ -183,8 +204,7 @@ namespace rocRoller
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
 
-                size_t valueCount
-                    = Register::broadcastValueCount(lhsVal.valueCount, rhsVal.valueCount);
+                size_t valueCount = broadcastValueCount({lhsVal, rhsVal});
 
                 // Can't compare between two different types on the GPU.
                 AssertFatal(lhsVal.regType == Register::Type::Literal
@@ -242,8 +262,7 @@ namespace rocRoller
 
             ResultType logical(ResultType lhsVal, ResultType rhsVal)
             {
-                size_t valueCount
-                    = Register::broadcastValueCount(lhsVal.valueCount, rhsVal.valueCount);
+                size_t valueCount = broadcastValueCount({lhsVal, rhsVal});
 
                 if(lhsVal.varType == DataType::Bool
                    && (rhsVal.varType == DataType::Bool32 || rhsVal.varType == DataType::Bool64))
@@ -317,13 +336,12 @@ namespace rocRoller
                 auto r1hsVal = call(expr.r1hs);
                 auto r2hsVal = call(expr.r2hs);
 
-                size_t valueCount = Register::broadcastValueCount(
-                    {lhsVal.valueCount, r1hsVal.valueCount, r2hsVal.valueCount});
-
                 AssertFatal(r2hsVal.varType == r1hsVal.varType,
                             ShowValue(r1hsVal.varType),
                             ShowValue(r2hsVal.varType));
                 auto varType = r2hsVal.varType;
+
+                size_t valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
 
                 if(lhsVal.varType == DataType::Bool32 || lhsVal.varType == DataType::Bool64
                    || lhsVal.regType == Register::Type::Vector
@@ -365,6 +383,7 @@ namespace rocRoller
                     actualNumRegister
                         = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
 
+                    operandValueCount *= DataTypeInfo::Get(operandVariableType).packing;
                     if(operandValueCount != 1)
                     {
                         // Each value count of an operand in an expression
