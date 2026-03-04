@@ -75,6 +75,17 @@ def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
     return h.hexdigest()
 
 
+def _checkCache(cacheDir, cacheKey):
+    """Check if a valid cache entry exists. Returns list of .hsaco Paths or None."""
+    entryDir = Path(cacheDir) / cacheKey
+    if not entryDir.is_dir():
+        return None
+    hsacoFiles = list(entryDir.glob("*.hsaco"))
+    if not hsacoFiles or any(f.stat().st_size == 0 for f in hsacoFiles):
+        return None
+    return hsacoFiles
+
+
 def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Path, str], arch: str) -> Union[Path, None]:
     """Generates a code object file path using the target, base, and build path.
 

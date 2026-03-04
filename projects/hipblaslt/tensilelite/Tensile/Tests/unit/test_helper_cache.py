@@ -119,3 +119,41 @@ class TestComputeCacheKey:
         (tmp_path / "TensileTypes.h").write_text("// modified")
         k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
         assert k1 != k2
+
+
+class TestCheckCache:
+    def test_returns_none_when_dir_missing(self, tmp_path):
+        from Tensile.Toolchain.Source import _checkCache
+        assert _checkCache(tmp_path, "nonexistent_hash") is None
+
+    def test_returns_none_when_dir_empty(self, tmp_path):
+        from Tensile.Toolchain.Source import _checkCache
+        (tmp_path / "some_hash").mkdir()
+        assert _checkCache(tmp_path, "some_hash") is None
+
+    def test_returns_none_when_file_zero_size(self, tmp_path):
+        from Tensile.Toolchain.Source import _checkCache
+        entry = tmp_path / "some_hash"
+        entry.mkdir()
+        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"")
+        assert _checkCache(tmp_path, "some_hash") is None
+
+    def test_returns_files_on_valid_entry(self, tmp_path):
+        from Tensile.Toolchain.Source import _checkCache
+        entry = tmp_path / "some_hash"
+        entry.mkdir()
+        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+        (entry / "Kernels.so-000-gfx942-xnack+.hsaco").write_bytes(b"\x7fELF")
+        result = _checkCache(tmp_path, "some_hash")
+        assert result is not None
+        assert len(result) == 2
+        assert all(f.suffix == ".hsaco" for f in result)
+
+    def test_ignores_non_hsaco_files(self, tmp_path):
+        from Tensile.Toolchain.Source import _checkCache
+        entry = tmp_path / "some_hash"
+        entry.mkdir()
+        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+        (entry / "metadata.json").write_text("{}")
+        result = _checkCache(tmp_path, "some_hash")
+        assert len(result) == 1
