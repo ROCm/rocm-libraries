@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import hashlib
+import os
 import re
 import shutil
 
@@ -43,6 +45,34 @@ def makeSourceToolchain(compiler_path, bundler_path, asan_build=False, build_id_
    compiler = Compiler(compiler_path, build_id_kind, asan_build, save_temps)
    bundler = Bundler(bundler_path)
    return SourceToolchain(compiler, bundler)
+
+
+_HELPER_CACHE_DIR_DEFAULT = Path.home() / ".tensile" / "helper_cache"
+
+_STATIC_HEADER_FILES = [
+    "KernelHeader.h",
+    "TensileTypes.h",
+    "tensile_bfloat16.h",
+    "tensile_float8_bfloat8.h",
+    "ReductionTemplate.h",
+    "memory_gfx.h",
+]
+
+
+def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
+    """Compute SHA256 cache key from source contents + build metadata."""
+    h = hashlib.sha256()
+    h.update(Path(kernelPath).read_bytes())
+    h.update(Path(includeDir, "Kernels.h").read_bytes())
+    for name in _STATIC_HEADER_FILES:
+        h.update(Path(includeDir, name).read_bytes())
+    h.update(",".join(sorted(cmdlineArchs)).encode())
+    v = compiler.version
+    h.update(f"{v.major}.{v.minor}.{v.patch}".encode())
+    rv = compiler.rocm_version
+    h.update(f"{rv.major}.{rv.minor}.{rv.patch}".encode())
+    h.update(b"asan" if "-fsanitize=address" in compiler.default_args else b"no-asan")
+    return h.hexdigest()
 
 
 def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Path, str], arch: str) -> Union[Path, None]:
