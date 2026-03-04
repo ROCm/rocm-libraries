@@ -303,7 +303,6 @@ void print_bwd_data_instances(ConvDataType data_type,
 
 int profile_grouped_conv_bwd_data(int argc, char* argv[])
 {
-<<<<<<< vpietila/ck/add-ck-tile-bwd-instances
     if(argc == 6 && std::string(argv[5]) == "--instances")
     {
         const auto data_type              = static_cast<ConvDataType>(std::stoi(argv[2]));
@@ -313,7 +312,6 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
         print_bwd_data_instances(data_type, layout, num_dim_spatial);
         return 0;
     }
-=======
     // Parse optional named arguments first
     ck::index_t instance_index = -1;
     bool list_instances        = false;
@@ -322,7 +320,6 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
 
     // Adjust argc for positional argument checking
     const int positional_argc = argc - named_arg_count;
->>>>>>> develop
 
     // 8 for control, 1 for num_dim_spatial
     if(positional_argc < 9)
