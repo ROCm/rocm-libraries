@@ -16990,7 +16990,7 @@
     _DepthUB: 32
     _DepthUMetadata: 32
     _GlobalAccumulation: PartialsBuffer
-    _UseSgprForGRO: 0
+    _UseSgprForGRO: 1
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
@@ -64888,16 +64888,15 @@
     SourceSwap: 1
     SpaceFillingAlgo: []
     StaggerU: 16
-    StaggerUMapping: 0
-    StaggerUStride: 128
-    StorePriorityOpt: 0
+    StaggerUMapping: 1
+    StaggerUStride: 256
+    StorePriorityOpt: 1
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
-    StoreSyncOpt: 0
-    StoreVectorWidth: 8
+    StoreSyncOpt: 1
+    StoreVectorWidth: 2
     StreamK: 3
     StreamKAtomic: 0
-    StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
@@ -64905,34 +64904,29 @@
     SubGroupB: 32
     SuppressNoLoadLoop: false
     SwapGlobalReadOrder: false
-    TailloopInNll: false
     ThreadTile: [1, 1]
-    ThreadTile0: 32
-    ThreadTile1: 10
-    ThreadTileA: 32
-    ThreadTileB: 10
+    ThreadTile0: 40
+    ThreadTile1: 6
+    ThreadTileA: 40
+    ThreadTileB: 6
     TransposeLDS: 2
-    TransposeLDSMetadata: -1
+    TransposeLDSMetadata: true
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: 1
     UnrollMajorLDSB: 1
+    UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
     UseCustomMainLoopSchedule: 0
-    UseDirect32XEmulation: false
-    UseDot2F32XEmulation: false
+    UseDot2F32XEmulation: true
     UseDotInstruction: false
     UseF32XEmulation: false
-    UseGeneralizedNLCOneA: true
-    UseGeneralizedNLCOneB: true
-    UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
-    UseMFMAF32XEmulation: false
     UsePLRPack: false
     UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
-    VectorWidthA: 8
+    VectorWidthA: 2
     VectorWidthB: 2
     WaveSeparateGlobalReadA: 0
     WaveSeparateGlobalReadB: 0
@@ -64945,10 +64939,10 @@
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
-    _DepthU: 32
-    _DepthUA: 32
-    _DepthUB: 32
-    _DepthUMetadata: 32
+    _DepthU: 64
+    _DepthUA: 64
+    _DepthUB: 64
+    _DepthUMetadata: 64
     _GlobalAccumulation: PartialsBuffer
     _UseSgprForGRO: 0
     _VectorStore: 1
@@ -64959,7 +64953,6 @@
     enableGLTrB: false
     enableLDSTrA: false
     enableLDSTrB: false
-    numSubTiles: 2
     reorderGRInstForDTVA: false
     reorderGRInstForDTVB: false
     tailLoopOptA: false
