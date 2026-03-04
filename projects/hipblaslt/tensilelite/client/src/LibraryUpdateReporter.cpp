@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <LibraryUpdateReporter.hpp>
+#include "TimingInstrumentation.hpp"
 
 #include <cstddef>
 
@@ -168,6 +169,7 @@ namespace TensileLite
 
         void LibraryUpdateReporter::postSolution()
         {
+            ScopedTimer timer("post_solution_lib_update");
             // cascade from BenchmarkTimer, SpeedGFlops second
             if(m_curSolutionPassed && m_curSolutionSpeed > m_fastestSolutionSpeed)
             {
