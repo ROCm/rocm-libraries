@@ -1179,8 +1179,7 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     OLOG_DEBUG("SpatialReuse: " << spatial_reuse);
     OLOG_DEBUG("L2Warmup: " << l2_warmup);
     OLOG_DEBUG("PollutionRate: " << pollution_rate);
-    OLOG_DEBUG("L2Residency: " << l2_residency);
-    OLOG_DEBUG("NTBoost: " << nt_boost);
+    OLOG_DEBUG("L2Residency: " << l2_residency);    
     OLOG_DEBUG("L2HitRate: " << l2_rate);
   }
 
