@@ -8,9 +8,9 @@ Building rocThrust for different backends
 
 API calls can run either on the device (GPU) system or on the host (CPU) system. The system on which computations are run depends on the execution policy used in the code, as well as the options that were set when rocThrust was :doc:`built and installed <../install/rocThrust-install-overview>`. 
 
-The ``THRUST_DEVICE_SYSTEM`` build option links rocThrust to device libraries, and the ``THRUST_HOST_SYSTEM`` build option links rocThrust to host libraries. Either or both of these options can be set when building rocThrust.
+Two build options are used to set the backend when the different execution policies are used. ``THRUST_DEVICE_SYSTEM`` sets the backend for the ``thrust::device`` execution policy and  ``THRUST_HOST_SYSTEM`` sets the backend for the ``thrust::host`` policy.
 
-When the ``thrust::device`` execution policy is used in the code, API calls are run using the backend specified by the ``THRUST_DEVICE_SYSTEM`` build option:
+The options for ``THRUST_DEVICE_SYSTEM`` are:
 
 .. list-table:: 
     :widths: 20 80
@@ -35,7 +35,7 @@ When the ``thrust::device`` execution policy is used in the code, API calls are 
         | Requires a compiler that supports OpenMP.
 
     * - ``CPP``
-      - | Uses the g++ compiler and the standard C++ library. 
+      - | Uses the g++ or clang++ compiler, and the standard C++ library. 
         | Forces sequential computation on the host with no device acceleration.
 
 
@@ -43,7 +43,7 @@ When the ``thrust::device`` execution policy is used in the code, API calls are 
 
     rocThrust examples and benchmarks require device acceleration. rocThrust must be built with ``THRUST_DEVICE_SYSTEM=HIP`` to use its examples and benchmarks.
 
-When the ``thrust::host`` execution policy is used in the code, API calls are run using the backend specified by the ``THRUST_HOST_SYSTEM`` build option:
+The options for ``THRUST_HOST_SYSTEM`` are:
 
 .. list-table:: 
     :widths: 20 80
@@ -54,7 +54,7 @@ When the ``thrust::host`` execution policy is used in the code, API calls are ru
 
     * - ``CPP``
       - | The standard C++ library. 
-        | Uses the g++ compiler for sequential computations on the host with no device acceleration. 
+        | Uses the g++ or clang++ compiler for sequential computations on the host with no device acceleration. 
         | Default setting.
 
     * - ``OMP`` 
