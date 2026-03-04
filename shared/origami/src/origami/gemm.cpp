@@ -9,7 +9,6 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
-#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -275,6 +274,12 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   if (out_wgmxcc == 0 || grid_m == 1 || grid_n == 1)
     return {0, out_wgmxcc, 1};
 
+  // If the grid is large, use the square root of the number of CUs as the WGM.
+  // Solution is not very sensitive to the WGM value in this case.
+  const size_t grid_threshold = std::sqrt(N_CU);
+  if (grid_m > grid_threshold && grid_n > grid_threshold)
+    return {0, out_wgmxcc, static_cast<int32_t>(std::ceil(std::sqrt(N_CU / NUM_XCD)))};
+
   size_t numWGsPerXCD = std::min(math::safe_ceil_div(numMTs, NUM_XCD), cus_per_xcd);
   // If there is enough work per L2 and the grid_n is small, use the grid_n as the WGM.
   if (numWGsPerXCD >= cus_per_xcd / 2 && grid_n <= 8)
@@ -282,19 +287,20 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
 
   // Build candidate list
   size_t wgm_cap = std::min(grid_n, numWGsPerXCD / 2);
-  std::vector<size_t> candidates;
-  std::set<size_t> cset;
+  if (wgm_cap == 0)
+    return {0, out_wgmxcc, 1};
+
+  // Bitmask of candidates: bit i set means i is a WGM candidate.
+  // Drawback: cannot handle values more than 64.
+  uint64_t cmask = 0;
   for (size_t v : {1, 4, 6})
-    if (v <= wgm_cap) cset.insert(v);
+    if (v <= wgm_cap) cmask |= (1ULL << v);
   for (size_t i = 1; i * i <= wgm_cap; ++i) {
     if (wgm_cap % i == 0) {
-      cset.insert(i);
-      cset.insert(wgm_cap / i);
+      cmask |= (1ULL << i);
+      cmask |= (1ULL << (wgm_cap / i));
     }
   }
-  candidates.assign(cset.begin(), cset.end());
-  if (candidates.empty())
-    return {0, out_wgmxcc, 1};
 
   // Evaluate L2 cost for last XCD in the first timestep
   const size_t total = numMTs;
@@ -309,7 +315,8 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
 
   size_t best_wgm = 1;
   double best_cost = std::numeric_limits<double>::max();
-  for (size_t wgm_candidate : candidates) {
+  for (uint64_t m = cmask; m; m &= m - 1) {
+    size_t wgm_candidate = static_cast<size_t>(__builtin_ctzll(m));
     size_t slab_tiles = grid_m * wgm_candidate;
     size_t first_slab = start / slab_tiles;
     size_t last_slab  = (start + count - 1) / slab_tiles;
