@@ -1246,9 +1246,9 @@ class KernelWriterAssembly(KernelWriter):
 
     if ((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                              \
         (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) or                                              \
-        (not kernel["UnrollMajorLDSMetadata"] and (kernel["MIInputPerThreadMetadata"] == 4)))                \
+        (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and (kernel["MIInputPerThreadMetadata"] == 4))) \
         and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()) or \
-        (self.states.asmCaps["HasSWMMAC_gfx1250"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
+        (self.states.asmCaps["HasSWMMAC_gfx1250"] and kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
       moduleVgprMacro.add(RegSet("v", "vgprPackTemp", "vgprBase", self.states.a.startVgprValuPackTemp - self.states.startVgpr))
 
     if self.states.globalReadIncsUseVgpr:
@@ -5660,9 +5660,9 @@ class KernelWriterAssembly(KernelWriter):
     numVgprPackTemp = 0
     if ((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"])                                   \
         or (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])                                \
-        or (not kernel["UnrollMajorLDSMetadata"] and (kernel["MIInputPerThreadMetadata"] == 4)))             \
+        or (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and (kernel["MIInputPerThreadMetadata"] == 4))) \
         and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()) or \
-        (self.states.asmCaps["HasSWMMAC_gfx1250"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
+        (self.states.asmCaps["HasSWMMAC_gfx1250"] and kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
       numVgprPackTemp = 1
     numVgprCvtTemp = 0
     if self.states.a.startVgprValuCvtTemp != -1 or self.states.b.startVgprValuCvtTemp != -1:
