@@ -45,7 +45,7 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dAsymmetricTestCases()
     // Match ctest: Dataset 1 only uses miopenIndexUint32
     std::vector<miopenIndexType_t> dataset1_index_types = {miopenIndexUint32};
     std::vector<miopenPoolingMode_t> modes              = {
-        miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
+                     miopenPoolingMax, miopenPoolingAverage, miopenPoolingAverageInclusive};
     std::vector<int> wsidx_values = {0, 1};
 
     // Generate cartesian product for dataset 1
