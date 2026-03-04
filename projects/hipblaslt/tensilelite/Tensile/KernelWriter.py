@@ -4126,9 +4126,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if (not kernel["UseDotInstruction"]) and (kernel["AssertSummationElementMultiple"] % KinInnerUnroll == 0):
         tailLoopInnerUnroll = kernel["InnerUnroll"]
 
-      shiftK = Module()
       self.states.SubTileIdx = 0 # reset SubTileIdx before TailLoop local read
       for mValue in range(mEnd):
+        shiftK = Module()
         if mEnd > 1:
           # print tail loop counter if mEnd>1 (means do tail loop unroll)
           module.addComment1("tail loop unroll iter %u"%(mValue))
