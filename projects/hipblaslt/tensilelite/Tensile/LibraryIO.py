@@ -73,7 +73,9 @@ except ImportError:
 
 try:
     import msgpack
+    _msgpack_available = True
 except ImportError:
+    _msgpack_available = False
     print("Message pack python library not detected. Must use YAML backend instead.")
 
 
@@ -118,7 +120,8 @@ def writeMsgPack(filename, data):
 
 def _solutionsCachePath(yamlFilename):
     """Return path to the msgpack cache file for a solutions YAML."""
-    return yamlFilename + ".solcache.dat"
+    base, _ = os.path.splitext(yamlFilename)
+    return base + ".solcache.dat"
 
 def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
     """Writes solution YAML file."""
@@ -128,13 +131,16 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
 
     if cache:
         cachePath = _solutionsCachePath(filename)
-        if os.path.exists(cachePath):
-            try:
-                with open(cachePath, "rb") as cf:
-                    solutionStates = msgpack.unpack(cf, raw=False)
-            except Exception:
-                solutionStates = []
-        if not solutionStates:
+        loaded = False
+        if _msgpack_available and os.path.exists(cachePath):
+            if os.path.getmtime(cachePath) >= os.path.getmtime(filename):
+                try:
+                    with open(cachePath, "rb") as cf:
+                        solutionStates = msgpack.unpack(cf, raw=False)
+                    loaded = True
+                except Exception:
+                    pass  # Corrupt cache; fall back to YAML
+        if not loaded:
             solYaml = read(filename)
             if biasTypeArgs and activationArgs:
                 solutionStates = solYaml[4:]
@@ -150,10 +156,11 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
             isa = solutionState["ISA"]
             solutionState["ISA"] = [isa[0], isa[1], isa[2]]
             solutionStates.append(solutionState)
-        try:
-            writeMsgPack(_solutionsCachePath(filename), solutionStates)
-        except Exception:
-            pass  # Non-fatal: will fall back to full reload from YAML on next cached run
+        if _msgpack_available:
+            try:
+                writeMsgPack(_solutionsCachePath(filename), solutionStates)
+            except Exception as e:
+                printWarning("Failed to write solution cache: {}".format(e))
     # write dictionaries
     with open(filename, "w") as f:
         f.write("- MinimumRequiredVersion: {}\n".format(__version__))
