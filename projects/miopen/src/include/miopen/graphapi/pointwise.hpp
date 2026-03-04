@@ -96,7 +96,7 @@ private:
     friend class PointwiseBuilder;
 };
 
-class MIOPEN_INTERNALS_EXPORT PointwiseBuilder
+class PointwiseBuilder
 {
 private:
     Pointwise mPointwise;
@@ -157,7 +157,7 @@ public:
         return *this;
     }
 
-    Pointwise build();
+    MIOPEN_INTERNALS_EXPORT Pointwise build();
 };
 
 class MIOPEN_INTERNALS_EXPORT BackendPointwiseDescriptor : public BackendDescriptor
@@ -274,7 +274,7 @@ public:
     OperationPointwise build();
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationPointwiseDescriptor : public BackendDescriptor
+class BackendOperationPointwiseDescriptor : public BackendDescriptor
 {
 private:
     OperationPointwiseBuilder mBuilder;

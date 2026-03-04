@@ -367,6 +367,40 @@ typedef enum
     /** @} */
 
     /**
+     * @name Convolution Backward Filter Operation Attributes (1600-1699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X = 1600,
+
+    /** @brief Output gradient tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY = 1601,
+
+    /** @brief Weight gradient tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW = 1602,
+
+    /** @} */
+
+    /**
+     * @name Convolution Backward Operation Attributes (1700-1799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY = 1700,
+
+    /** @brief Weight tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W = 1701,
+
+    /** @brief Input gradient tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX = 1702,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
