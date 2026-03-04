@@ -7,6 +7,10 @@ from ..Common import printWarning, roundUp, print2, DebugConfig, DataDirection, 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, Label
 from rocisa.label import LabelManager
 
+from rocisa.container import vgpr, sgpr, accvgpr, mgpr
+from rocisa.enum import InstType, SelectBit, CacheScope
+from rocisa.instruction import MFMAInstruction
+
 import math
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -38,7 +42,7 @@ class ScheduleInfo:
 
   usedVgprATiles = field(init=False)
   usedVgprBTiles = field(init=False)
-  
+
   def __init__(self, aTileInfo, bTileInfo):
     # TODOBS: check that vgpr tiles are init first before calling these
     self.availableVgprATiles = deque(list(range(len(aTileInfo.vgprTiles))))
@@ -46,8 +50,8 @@ class ScheduleInfo:
 
     self.usedVgprATiles = dict()
     self.usedVgprBTiles = dict()
-    
-    
+
+
 # Tile info
 class TileInfo:
 
@@ -417,6 +421,19 @@ def localReadResetOffsetsSubtile(writer, kernel):
 
   return module
 
+
+##################################################
+# Subroutine to generate GR offset calculation code
+#
+def graInitPointer(writer, kernel):
+  module = Module()
+  module.addComment0("REMOVE WHEN IMPLEMNTED: Placeholder for GR base pointer init")
+  for i in range(8):
+    module.addComment("")
+
+  return module
+
+
 ##################################################
 # Compute GR offset for a single matrix (A or B)
 #
@@ -591,6 +608,58 @@ def localReadDoSubtile(tc, writer, kernel):
 
   return module
 
+##################################################
+# Subroutine to generate DTL M0 LDS buffer swap
+#
+def globalReadLDSBufferSwap(tc, writer, kernel):
+  module = Module()
+  module.addComment0("Emit code to swap %s GR vgpr offsets"%tc)
+  return module
+  
+##################################################
+# Subroutine to generate DTL M0 LDS buffer swap
+#
+def localReadLDSBufferSwap(tc, writer, kernel):
+  module = Module()
+  module.addComment0("Emit code to swap %s LR vgpr offsets"%tc)
+  return module
+
+##################################################
+# Subroutine to update ptrs
+#
+def globalReadPtrUpdates(tc, writer, kernel):
+  module = Module()
+  module.addComment0("Emit code to update %s pointers"%tc)
+  return module
+
+
+##################################################
+# Subroutine to generate MMA Instruction
+# Given RegisterTileInfo inputs for A,B,C,D operands
+# emit corresponding mfma instruction
+#
+def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTileD, comment = ""):
+  module = Module()
+
+  vgprAStart = vgprTileA.regList.regValues[0]
+  vgprBStart = vgprTileB.regList.regValues[0]
+  vgprCStart = vgprTileC.regList.regValues[0]
+  vgprDStart = vgprTileD.regList.regValues[0]
+
+  opASize = len(vgprTileA.regList.regValues)
+  opBSize = len(vgprTileB.regList.regValues)
+  opCSize = len(vgprTileC.regList.regValues)
+  opDSize = len(vgprTileD.regList.regValues)
+
+  accvgprAlias = vgpr if kernel["MIArchVgpr"] else accvgpr
+  module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[16,16,32,1], mfma1k=False, \
+                             acc=accvgprAlias(vgprDStart,opDSize), \
+                             a=vgpr(vgprAStart,opBSize), \
+                             b=vgpr(vgprBStart,opBSize), \
+                             acc2=accvgprAlias(vgprCStart,opCSize), \
+                             comment=comment))
+  return module
+
 
 ##################################################
 # Subroutine to generate MMA code
@@ -606,10 +675,10 @@ def emitMfmaCode(writer, kernel):
   for mmak in range(atileInfo.localMMATileGrid[1]):
     for mma1 in range(btileInfo.localMMATileGrid[0]):
       for mma0 in range(atileInfo.localMMATileGrid[0]):
-        atiles = atileInfo.vgprTiles
-        btiles = btileInfo.vgprTiles
-        dtiles = dtileInfo.vgprTiles
-        module.addComment("Emit MMFA code for MMA tiles C[%u, %u] += A[%u, %u] * B[%u, %u]"%(mma0, mma1, mma0, mmak, mmak, mma1))
+        atiles = atileInfo.vgprTiles[mma0 + mmak * atileInfo.localMMATileGrid[0]]
+        btiles = btileInfo.vgprTiles[mma1 + mmak * btileInfo.localMMATileGrid[0]]
+        dtiles = dtileInfo.vgprTiles[mma0 + mma1 * dtileInfo.localMMATileGrid[0]]
+        module.add(emitMfmaInstruction(writer, kernel, atiles, btiles, dtiles, dtiles, "Emit MMFA code for MMA tiles C[%u, %u] += A[%u, %u] * B[%u, %u]"%(mma0, mma1, mma0, mmak, mmak, mma1)))
 
   return module
 
@@ -632,6 +701,16 @@ def mainLoopImpl(writer, kernel, isNLL = False):
   module.add(localReadDoSubtile('A', writer, kernel))
   module.add(localReadDoSubtile('B', writer, kernel))
 
+  module.add(globalReadLDSBufferSwap('A', writer, kernel))
+  module.add(globalReadLDSBufferSwap('B', writer, kernel))
+
+  module.add(localReadLDSBufferSwap('A', writer, kernel))
+  module.add(localReadLDSBufferSwap('B', writer, kernel))
+
+  module.add(globalReadPtrUpdates('A', writer, kernel))
+  module.add(globalReadPtrUpdates('B', writer, kernel))
+
+  
   return module
 
 

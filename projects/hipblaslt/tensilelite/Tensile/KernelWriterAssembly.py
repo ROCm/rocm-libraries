@@ -1389,7 +1389,8 @@ class KernelWriterAssembly(KernelWriter):
     for (tc, indices, justOffset32, tP, isSwizzled) in GOList:
 
       # BufferStore does not use this macro so don't generate it:
-      if tc == "C" and kernel["BufferStore"]:
+      # Subtile impl does not use these macros either
+      if (tc == "C" and kernel["BufferStore"]) or kernel["UseSubtileImpl"]:
         continue
 
       # function name and comment
@@ -11510,6 +11511,9 @@ class KernelWriterAssembly(KernelWriter):
     component = Component.ComputeStoreVgprs.find(self)
     if component:
       if kernel["EnableMatrixInstruction"]:
+        #ret = component(self, kernel)
+        #print(ret)
+        #exit(1)
         module.add(component(self, kernel))
       else:
         module.add(component(self, kernel, divisor, tid0Scale, tid1Scale))
@@ -12686,6 +12690,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
 
     gsuLimitRange = range(0, gsuLimit) # generate GSU1 and GSUM label
+    print("gsuLimitRange", gsuLimitRange)
     for gsuLimitIdx in gsuLimitRange:
       if gsuLimit > 1:
         betas = betasBackup
@@ -13475,8 +13480,11 @@ class KernelWriterAssembly(KernelWriter):
 
     maxVgprs, occupancy = self.setOccupancy(kernel)
 
+    #print(gwvw, edge, beta, atomic, element, vectorDataTypes, factorDim)
+    #exit(1)
     ss = StoreState(self, kernel, gwvw, edge, beta, atomic, element, vectorDataTypes, dim=factorDim)
 
+    
     actPCMaxTempSgpr_ = None
     if activationLabelList and isInsertActFunctionCallAddrCalc:
       assert activationSetPCStruct, activationEnumStrList and activationLabelList and toActModuleList

@@ -583,6 +583,7 @@ class GlobalWriteBatchWriter:
     # AccVgpr read
     if self.codeAccVgprRead is not None and (self.kernel["LocalSplitU"] == 1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
       regsPerScalar = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr # register per scalar
+      #TODOBS: Need to change this, for LSU>1 + subtile impl case
       if self.kernel["MIArchVgpr"] and self.kernel["LocalSplitU"] > 1:
         tmpStartVgprValuC = self.parentWriter.states.c.startVgprValu
         self.parentWriter.states.c.startVgprValu = 0

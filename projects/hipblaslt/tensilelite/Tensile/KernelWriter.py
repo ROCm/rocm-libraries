@@ -24,7 +24,7 @@
 
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countDSStoreB256, getMFMAs, countType
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
+from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
@@ -3992,12 +3992,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.a.tileInfo.deallocVgprTileRegisters(self, kernel)
     self.states.b.tileInfo.deallocVgprTileRegisters(self, kernel)
 
-    # For post loop code, we can either implement separate version and copy parts from global write batch
-    # Or modify global write batch directy.
-    module.addComment0("Placeholder for Post loop code..")
+    # Start of post-loop code
+    if 1:
+      module.addComment0(" =============================================================== ")
+      module.addComment0(" =================== Start of post-loop code =================== ")
+      module.addComment0(" =============================================================== ")
+      
+      self.states.c.startVgprValu = self.vgprPool.checkOutAligned(1, 4)
 
+      module.addComment0("ValuC range: [%u-%u), %s"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu, \
+                             "serializedStore enabled" if self.states.serializedStore else ""))
+      module.add(RegSet("v", "vgprValuC", self.states.c.startVgprValu))
+      self.states.serializedStore = True
+      
 
-    if 0:
+      module.add(self.endSummation(kernel, tensorParametersA, tensorParametersB))
+      if not self.states.doShadowInit:
+        module.add(self.globalWriteWorkGroupInit(kernel))
+
       ####################################
       # NOT LocalSplitU
       ####################################
@@ -4007,9 +4019,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
 
       # global write
-      module.addComment1("not-LocalSplitU: global write")
-      #module.add(self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB))
-    
+      #module.addComment1("not-LocalSplitU: global write")
+      module.add(self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB))
+
+      self.vgprPool.checkIn(self.states.c.startVgprValu)
+
     # Deallocate registers used for C/D tiles after store code instructions are emitted
     self.states.d.tileInfo.deallocVgprTileRegisters(self, kernel)
 
@@ -6824,8 +6838,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
     def vgprAllocationImplSubtile():
-      self.states.startVgprSerial = 0
-      self.states.totalVgprs = 1
+      self.states.maxLimitAgprs   = self.states.regCaps["PhysicalMaxVgpr"] - self.states.regCaps["MaxVgpr"]
+      if kernel["EnableMatrixInstruction"]:
+        #jgolds bpeCinternal because we are allocating accumulation registers here
+        self.states.c.numVgprValu = (kernel["ThreadTile0"]*kernel["ThreadTile1"]*self.states.bpeCinternal)//self.states.bpr
+
+      vgprIdx = 0
+      self.states.startVgprSerial = vgprIdx;
+      vgprIdx += 1
+      #self.states.c.startVgprValu = vgprIdx;
+
+      #vgprIdx += self.states.c.numVgprValu
+      self.states.totalVgprs = vgprIdx
+
+
 
       #self.states.totalVgprs += self.states.a.tileInfo.numGRPerSubtile
       #self.states.totalVgprs += self.states.b.tileInfo.numGRPerSubtile
@@ -6983,7 +7009,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("DebugKernelItems", 1)
 
     # the sgprs overlap with wg ids
-    if self.states.doShadowInit and kernel["BufferStore"]:
+    #if self.states.doShadowInit and kernel["BufferStore"]:
+    if (self.states.doShadowInit or kernel["UseSubtileImpl"]) and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)
 

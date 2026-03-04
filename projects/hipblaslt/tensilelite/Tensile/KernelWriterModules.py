@@ -198,6 +198,8 @@ def accToArchMapper(kernel):
                   dst = vw0 + VectorWidth0 * (tIdx + OutputsPerMFMA1B * (bIdx0 + matrixInstBM * (wgIdx0 + outerTT0 * (vw1 + VectorWidth1 * (bIdx1 + matrixInstBN * (wgIdx1))))))
                 acc2arch[src] = dst
                 arch2acc[dst] = src
+  #print(acc2arch, arch2acc)
+  #exit(1)
   return acc2arch, arch2acc
 
 def accVgprImagNumOffset(kernel):
