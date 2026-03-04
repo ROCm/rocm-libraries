@@ -77,12 +77,12 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
 #endif
     FLOAT accum[VERT_OUT_PIX][HORIZ_OUT_PIX]; // accumulator
 
-    const int top_y = fma(lcl_id1, VERT_OUT_PIX, y);
-    const int top_x = fma(lcl_id0, HORIZ_OUT_PIX, x);
+    const int top_y = __mul24(lcl_id1, VERT_OUT_PIX) + y;
+    const int top_x = __mul24(lcl_id0, HORIZ_OUT_PIX) + x;
 
     const int lcl_y   = __mul24(lcl_id1, VERT_OUT_PIX);
-    const int lcl_x   = fma(lcl_id0, HORIZ_OUT_PIX, left_pad0 - PRE_PAD0);
-    const int lcl_off = fma(lcl_y, data_width, lcl_x);
+    const int lcl_x   = __mul24(lcl_id0, HORIZ_OUT_PIX) + (left_pad0 - PRE_PAD0);
+    const int lcl_off = __mul24(lcl_y, data_width) + lcl_x;
 
     for(int j = 0; j < VERT_OUT_PIX; ++j)
     {
@@ -262,29 +262,52 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
         b * SCALE_BATCH_STRIDE + o * SCALE_CHANNEL_STRIDE + top_y * SCALE_STRIDE + top_x;
 #endif
 
+    /*
+       The HIP compiler doesn doesn't automatically unroll this nested loop so we need to
+       use pragma unroll to encourage that for better performance. Additionaly, when access is not
+       aligned in the horizontal or vertical access we lift the if condition out of the loop
+       termination if the height/width is a multiple of the vert/horiz pixels, enabling SIMD
+       vectorizatiom of the loop body.
+       These optimizations were being done automically by the OpenCL compiler prior to porting to
+       HIP.
+    */
+    constexpr bool is_vert_aligned        = (VERT_ALIGNED == 1);
+    constexpr bool is_horiz_aligned       = (HORIZ_ALIGNED == 1);
+    constexpr bool sink_vert_align_check  = !is_vert_aligned && ((TOP_HEIGHT % VERT_OUT_PIX) != 0);
+    constexpr bool sink_horiz_align_check = !is_horiz_aligned && ((TOP_WIDTH % HORIZ_OUT_PIX) != 0);
+    constexpr bool lift_vert_align_check  = !is_vert_aligned && ((TOP_HEIGHT % VERT_OUT_PIX) == 0);
+    constexpr bool lift_horiz_align_check = !is_horiz_aligned && ((TOP_WIDTH % HORIZ_OUT_PIX) == 0);
+
     // final output
-    for(int k = 0; k < VERT_OUT_PIX
-#if VERT_ALIGNED == 0
-                   && (top_y + k < TOP_HEIGHT)
-#endif
-            ;
-        k++)
+    if(!lift_vert_align_check || (lift_vert_align_check && (top_y < TOP_HEIGHT)))
     {
-        for(int l = 0; l < HORIZ_OUT_PIX
-#if HORIZ_ALIGNED == 0
-                       && (top_x + l < TOP_WIDTH)
-#endif
-                ;
-            l++)
+#pragma unroll VERT_OUT_PIX
+        for(int k = 0; k < VERT_OUT_PIX; k++)
         {
-            const FLOAT s =
-                miopen::detail::exp(FLOAT(-beta) * miopen::detail::log(prv_scale[k][l]));
-            int offset    = fma((k + PRE_PAD1), data_width, (l + PRE_PAD0));
-            FLOAT bot_val = bot_data[lcl_off + offset];
+            if(sink_vert_align_check && !(top_y + k < TOP_HEIGHT))
+            {
+                break;
+            }
+
+            if(!lift_horiz_align_check || (lift_horiz_align_check && (top_x < TOP_WIDTH)))
+            {
+#pragma unroll HORIZ_OUT_PIX
+                for(int l = 0; l < HORIZ_OUT_PIX; l++)
+                {
+                    if(sink_horiz_align_check && !(top_x + l < TOP_WIDTH))
+                    {
+                        break;
+                    }
+                    const FLOAT s =
+                        miopen::detail::exp(FLOAT(-beta) * miopen::detail::log(prv_scale[k][l]));
+                    int offset    = __mul24((k + PRE_PAD1), data_width) + (l + PRE_PAD0);
+                    FLOAT bot_val = bot_data[lcl_off + offset];
 #if DO_SCALE
-            scale[scale_off + k * SCALE_STRIDE + l] = prv_scale[k][l];
+                    scale[scale_off + k * SCALE_STRIDE + l] = prv_scale[k][l];
 #endif
-            top[top_off + k * TOP_STRIDE + l] = bot_val * s;
+                    top[top_off + k * TOP_STRIDE + l] = bot_val * s;
+                }
+            }
         }
     }
 }
