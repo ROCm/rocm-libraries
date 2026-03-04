@@ -42,6 +42,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 6, 2, 2, 2]
+          - [16, 16, 32, 1, 1, 2, 6, 2, 2]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2]
           - [16, 16, 32, 1, 1, 4,16, 4, 1]
           - [16, 16, 32, 1, 1,16, 4, 1, 4]
@@ -252,6 +254,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [32, 32, 16, 1, 1, 3, 1, 2, 2]
+          - [16, 16, 32, 1, 1, 6, 2, 2, 2]
           - [16, 16, 32, 1, 1, 1, 1, 4, 1]
         - DepthU: [ 32 ]
         - PrefetchGlobalRead: [1]
@@ -262,6 +266,7 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
+        - DirectToLds: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

@@ -35,6 +35,8 @@ add_executable(
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
+    descriptors/TestConvolutionBwdOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
