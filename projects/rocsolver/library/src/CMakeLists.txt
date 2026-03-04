@@ -239,6 +239,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_larfb.cpp
   # norm and condition number
   auxiliary/rocauxiliary_lange.cpp
+  auxiliary/rocauxiliary_gecon.cpp
   # plane rotations
   auxiliary/rocauxiliary_lasr.cpp
   # orthonormal/unitary matrices

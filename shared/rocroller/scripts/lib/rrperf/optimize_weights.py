@@ -299,9 +299,10 @@ def bench(
         if process_result.returncode == 0:
             with result_path.open() as f:
                 result_data = yaml.safe_load(f)
-            if result_data["correct"]:
-                result.time = float(np.median(result_data["kernelExecute"]))
-            result.rnorm = result_data["rnorm"]
+            benchmark_data = result_data.get("benchmark", {})
+            if benchmark_data.get("correct", False):
+                result.time = float(np.median(benchmark_data["kernelExecute"]))
+            result.rnorm = float(benchmark_data.get("rnorm", math.inf))
 
         print(result.summary)
 
