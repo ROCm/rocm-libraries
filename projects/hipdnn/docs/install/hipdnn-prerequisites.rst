@@ -13,7 +13,7 @@ Ensure your system has these requirements before installing hipDNN.
 System requirements
 ===================
 
-- An AMD GPU with ROCm support
+- An AMD GPU with ROCm support.
 - Operating System:
 
   - **Linux**: Any distribution supported by `TheRock <https://github.com/ROCm/TheRock>`_ (such as Ubuntu 24).

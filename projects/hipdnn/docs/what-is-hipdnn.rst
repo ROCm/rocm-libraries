@@ -11,7 +11,7 @@ What is hipDNN?
 hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs. 
 It uses operation graphs as an intermediate representation to describe computations, allowing different backend engines to optimize and execute these graphs efficiently.
 
-hipDNN allows developers to run deep learning workloads on AMD GPUS by providing an interface modeled after NVIDIA's cuDNN frontend API.
+hipDNN allows developers to run deep learning workloads on AMD GPUs by providing an interface modeled after the cuDNN frontend API.
 
 hipDNN has a plugin-based architecture which allows advanced users to extend hipDNN without modifying the core library.
 

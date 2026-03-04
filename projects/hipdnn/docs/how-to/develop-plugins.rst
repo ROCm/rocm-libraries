@@ -144,12 +144,12 @@ Create a kernel engine plugin
 This section focuses on developing kernel engine plugins.
 
 Prerequisites
-=============
+-------------
 
 Before creating a plugin, ensure you've built and installed hipDNN. Plugins depend on the hipDNN Data SDK and Plugin SDK headers. 
 
 Steps
-=====
+-----
 
 1. Create plugin structure.
    
@@ -171,7 +171,7 @@ Steps
    - Install to the appropriate plugin directory where hipDNN can discover it at runtime.
 
 Implementation details
-======================
+----------------------
 
 The **Engine Manager** is responsible for:
 
@@ -206,7 +206,7 @@ In general, the best practices consist of:
 - Including unit tests and integration tests.
 
 Key files reference
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 - `Plugin API Interface <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h>`_
 - `Example Plugin Implementation <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/MiopenLegacyPlugin.cpp>`_
@@ -214,10 +214,10 @@ Key files reference
 - `Example Engine Implementation <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/engines/MiopenEngine.cpp>`_
 
 Plugin architecture
-===================
+-------------------
 
 Directory structure for kernel engine plugins
----------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Your plugin should be structured as an independent project:
 
@@ -236,7 +236,7 @@ Your plugin should be structured as an independent project:
 
 
 Build configuration
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 Your plugin's ``CMakeLists.txt`` should:
 
@@ -246,7 +246,7 @@ Your plugin's ``CMakeLists.txt`` should:
 - Link to required compute libraries (that is, HIP).
 
 Use hipDNN SDKs in external plugins
------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When building an external plugin, the hipDNN Data SDK provides CMake variables to help you install your plugin in the correct location:
 
@@ -274,7 +274,7 @@ When building an external plugin, the hipDNN Data SDK provides CMake variables t
 This ensures your plugin will be installed to the same directory structure that hipDNN expects for plugin discovery.
 
 Build and install directory structure
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The hipDNN build system maintains consistent directory structures for plugins:
 

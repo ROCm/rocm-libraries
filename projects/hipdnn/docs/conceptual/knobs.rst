@@ -12,7 +12,7 @@ Engine configuration knobs provide a flexible mechanism for controlling runtime 
 
 Knobs are runtime-configurable parameters that affect engine behavior. Each knob has a:
 
-- **Unique identifier**: A string-based ID (e.g., ``"global.benchmarking"``).
+- **Unique identifier**: A string-based ID (for example, ``"global.benchmarking"``).
 - **Type**: Integer (int64), Float (double), or String.
 - **Default value**: The value used when not explicitly set.
 - **Constraints**: Valid ranges or allowed values.
@@ -20,10 +20,10 @@ Knobs are runtime-configurable parameters that affect engine behavior. Each knob
 
 Knobs enable you to:
 
-- Enable or disable features (e.g., benchmarking mode).
-- Tune performance parameters (e.g., tile sizes, workspace limits).
-- Select algorithmic variants (e.g., solver selection).
-- Control memory usage (e.g., workspace size limits).
+- Enable or disable features (for example, benchmarking mode).
+- Tune performance parameters (for example, tile sizes, workspace limits).
+- Select algorithmic variants (for example, solver selection).
+- Control memory usage (for example, workspace size limits).
 
 Knob types
 ==========

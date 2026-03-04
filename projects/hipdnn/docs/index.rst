@@ -8,7 +8,7 @@ hipDNN documentation
 
 hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs.
 Each plugin implements specific operations with support for different datatypes, layouts, and features.
-hipDNN allows developers to run deep learning workloads on AMD GPUS by providing an interface modeled after NVIDIA's cuDNN frontend API.
+hipDNN allows developers to run deep learning workloads on AMD GPUs by providing an interface modeled after the cuDNN frontend API.
 
 The component public repository is located at `https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn>`_.
 
@@ -24,19 +24,19 @@ The component public repository is located at `https://github.com/ROCm/rocm-libr
   .. grid-item-card:: Conceptual
 
     * :doc:`High-level architecture <conceptual/architecture>`
-    * :doc:`MIOpen Provider plugin architecture <conceptual/miopen-plugin>`
+    * :doc:`Engine configuration knobs <conceptual/knobs>`
     * :doc:`Backend architecture <conceptual/backend-architecture>`
   
   .. grid-item-card:: How to
 
-    * :doc:`Migrate a cudNN project to hipDNN <how-to/migrate-cudnn>`
     * :doc:`Build and execute operation graphs <how-to/build-execute-hipdnn>`
-    * :doc:`Extend hipDNN functionality <how-to/extend-hipdnn>`
-    * :doc:`Develop plugins <how-to/develop-plugins>`
+    * :doc:`Migrate a cudNN project to hipDNN <how-to/migrate-cudnn>`
     * :doc:`Get/set engine knob configurations <how-to/get-set-engine-knob>`
+    * :doc:`Develop plugins <how-to/develop-plugins>`
 
   .. grid-item-card:: Reference
 
+    * :doc:`Plugin-specific operation support <reference/plugins>`
     * :doc:`Environment variables <reference/environment-variables>`
     * :doc:`Coding style and naming guidelines <reference/naming-guidelines>`
     * :doc:`Glossary <reference/glossary>`

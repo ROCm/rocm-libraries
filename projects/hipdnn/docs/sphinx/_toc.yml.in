@@ -14,7 +14,7 @@ subtrees:
     subtrees:
     - entries:
       - file: install/quickstart.rst
-        title: hipDNN quick start
+        title: Quick start
   - file: install/plugin-developers.rst
     title: For plugin developers
     subtrees:
@@ -66,10 +66,14 @@ subtrees:
         title: hipBLASLt Provider plugin
   - file: reference/environment-variables.rst
     title: Environment variables
-  - file: reference/frontend-api/frontend-api.rst
-    title: Frontend C API 
-  - file: reference/backend-api/backend-api.rst
-    title: Backend C API
+  - file: reference/api-reference.rst
+    title: API reference
+    subtrees:
+    - entries:
+      - file: reference/frontend-api/frontend-api.rst
+        title: Frontend C++ API 
+      - file: reference/backend-api/backend-api.rst
+        title: Backend C++ API
   - file: reference/naming-guidelines.rst
     title: Coding style and naming guidelines
   - file: reference/glossary.rst
