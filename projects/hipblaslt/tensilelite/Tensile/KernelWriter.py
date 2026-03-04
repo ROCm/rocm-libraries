@@ -45,6 +45,7 @@ from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
 from .SolutionStructs import Solution, isPackedIndex
+from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -715,8 +716,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # previous iter 2nd half (not final)
             dstPackItems += carryOverPackItems.pop(0)
             if prefetch and mfma:
-              # add s_nop 0
-              dstPackItems.append(SNop(waitState=0, comment="nop for x32f emulation"))
+              # add s_nop 1
+              dstPackItems.append(SNop(waitState=1, comment="nop for x32f emulation"))
           else:
             # carry over current item to the next iteration
             carryOverPackItems.append(tmpPackItems)
@@ -5202,8 +5203,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif kernel["ProblemType"]["TLU%s"%tc] == 1 and kernel["enableLDSTr%s"%tc]:
           usePerpPerm = (ntpl & (ntpl-1)) == 0
         else:
-          # TLU=0 Case, not needed
-          usePerpPerm = False
+          # Currently only VW=1,2 is supported due to how the local read offset
+          # is currently computed. Supporting VW=1,2 only required small modifications
+          # to the offset calc.
+          # TODO: Add support for VW=4,8, this will require more changes in LR offset
+          # calculations
+          usePerpPerm = False if kernel["VectorWidth%s"%tc] > 2 or kernel["ProblemType"]["DataType"].numBytes() == 2 else True
 
         permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
           else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
@@ -6115,16 +6120,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["EnableMatrixInstruction"]:
       from rocisa.instruction import getMFMAIssueLatency, getSMFMAIssueLatency
-      datatype = kernel["ProblemType"]["DataType"]
-      if kernel["UseF32XEmulation"]:
-        datatype = DataType(DataTypeEnum.BFloat16)
-      self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(datatype.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"]) if kernel["ProblemType"]["Sparse"] else \
-                                              getMFMAIssueLatency(datatype.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
+      miInputType = getMiInputType(kernel)
+
+      if kernel["ProblemType"]["Sparse"]:
+        self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(
+            miInputType.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
+      else:
+        self.states.miLatency, miIssueLatency = getMFMAIssueLatency(
+            miInputType.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
       # TODO: Avoid the logic which does not make sense.
       # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
       # Changed the value based on this and also to mitigate some instruction scheduling issues.
       # Invalidate this adjustment if ExtraMiLatencyLeft is >= 0
-      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and datatype.numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
+      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and miInputType.numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
         self.states.miLatency = kernel["MatrixInstM"] // 2
         miIssueLatency = 2
 

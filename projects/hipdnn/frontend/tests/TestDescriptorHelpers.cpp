@@ -25,7 +25,6 @@ namespace
 
 constexpr int64_t K_DEFAULT_TENSOR_UID = 42;
 constexpr int64_t K_MISSING_TENSOR_UID = 999;
-constexpr int64_t K_TEST_SCALAR_VALUE = 42;
 
 constexpr std::array<int64_t, 4> K_DEFAULT_TENSOR_DIMS = {1, 3, 4, 4};
 constexpr std::array<int64_t, 4> K_DEFAULT_TENSOR_STRIDES = {48, 16, 4, 1};
@@ -215,15 +214,19 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrScalarSucceeds)
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
                                     HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                    HIPDNN_TYPE_INT64,
+                                    HIPDNN_TYPE_CONVOLUTION_MODE,
                                     1,
-                                    pointsToScalar<int64_t>(K_TEST_SCALAR_VALUE)))
+                                    pointsToScalar<hipdnnConvolutionMode_t>(
+                                        HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION)))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    int64_t value = K_TEST_SCALAR_VALUE;
+    hipdnnConvolutionMode_t value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrScalar(
-        desc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, value, "test scalar");
+    auto err = setDescriptorAttrScalar(desc,
+                                       HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                                       HIPDNN_TYPE_CONVOLUTION_MODE,
+                                       value,
+                                       "test scalar");
     EXPECT_TRUE(err.is_good());
 }
 
@@ -282,10 +285,13 @@ TEST_F(TestDescriptorHelpers, SetDescriptorAttrScalarReturnsErrorOnFailure)
     EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
-    int64_t value = K_TEST_SCALAR_VALUE;
+    hipdnnConvolutionMode_t value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
     hipdnnBackendDescriptor_t desc = nullptr;
-    auto err = setDescriptorAttrScalar(
-        desc, HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, value, "test scalar");
+    auto err = setDescriptorAttrScalar(desc,
+                                       HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                                       HIPDNN_TYPE_CONVOLUTION_MODE,
+                                       value,
+                                       "test scalar");
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
 }

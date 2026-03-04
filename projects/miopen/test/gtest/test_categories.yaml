@@ -55,7 +55,6 @@ positive_patterns: &positive_patterns
   - "*/GPU_TunaNetTest_*"
   - "*/GPU_UnitTestActivationDescriptor_*"
   - "*/GPU_FinInterfaceTest*"
-  - "*/GPU_VecAddTest_*"
   - "*/GPU_KernelTuningNetTest*"
   - "*/GPU_Bwd_Mha_*"
   - "*/GPU_Fwd_Mha_*"

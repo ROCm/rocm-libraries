@@ -12,9 +12,7 @@
 #include <rocRoller/TensorDescriptor.hpp>
 
 #include "CustomMatchers.hpp"
-#include "CustomSections.hpp"
 #include "TestContext.hpp"
-#include "TestKernels.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -273,7 +271,8 @@ namespace RandomNumberGenerationTest
 
             CommandKernel commandKernel(command, context->kernel()->kernelName());
             commandKernel.setContext(context.get());
-            commandKernel.generateKernel();
+            REQUIRE_NOTHROW(commandKernel.generateKernel());
+            REQUIRE_NOTHROW(commandKernel.assembleKernel());
 
             CommandArguments commandArgs = command->createArguments();
 
