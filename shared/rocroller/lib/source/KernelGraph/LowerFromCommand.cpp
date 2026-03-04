@@ -318,68 +318,6 @@ namespace rocRoller
                     // to make this intuitive.  Ideally the unit tests
                     // and client would not have to muck around with
                     // strides.
-
-                    // Update pre-existing dims
-                    // AssertFatal(dims.size() == 4);
-
-                    // auto sdim0 = m_graph.coordinates.get<SubDimension>(dims[0]).value();
-                    // auto sdim1 = m_graph.coordinates.get<SubDimension>(dims[1]).value();
-
-                    // if(subTile->isTranspose())
-                    // {
-                    //     auto T_M = Expression::literal(sizes[0], strideDataType);
-                    //     auto T_K = Expression::literal(sizes[1], strideDataType);
-                    //     sdim0.size   = sdim0.size / T_M;
-                    //     sdim1.size   = sdim1.size / T_K;
-                    //     sdim0.stride = (sdim1.size / T_K) * T_M * T_K;
-                    //     sdim1.stride = T_M * T_K;
-                    // }
-                    // else
-                    // {
-                    //     auto T_K = Expression::literal(sizes[0], strideDataType);
-                    //     auto T_N = Expression::literal(sizes[1], strideDataType);
-                    //     sdim0.size   = sdim0.size / T_K;
-                    //     sdim1.size   = sdim1.size / T_N;
-                    //     sdim0.stride = T_N * T_K;
-                    //     sdim1.stride = (sdim0.size / T_N) * T_N * T_K;
-                    // }
-
-                    // auto isDynamicStride = [&](size_t i) {
-                    //     auto rv = not(literalStrides.size() > i && literalStrides[i] > 0);
-                    //     Log::debug("isDynamicStride({}): {} {}",
-                    //                i,
-                    //                rv,
-                    //                literalStrides.size() > i ? ShowValue(literalStrides[i])
-                    //                                          : "N/A");
-                    //     //return rv;
-                    //     return false;
-                    // };
-
-                    //
-                    // TODO: The tensors for scaling data are created
-                    // with literal strides.  We don't want to update
-                    // them (currently).  This should be cleaned up.
-                    //
-                    // Ideally we want:
-                    //
-                    //   m_graph.coordinates.setElement(dims[0], sdim0);
-                    //   m_graph.coordinates.setElement(dims[1], sdim1);
-                    //
-                    // instead of guarding these updates with `isDynamicStride`.
-                    //
-                    // if(isDynamicStride(0))
-                    //     m_graph.coordinates.setElement(dims[0], sdim0);
-                    // if(isDynamicStride(1))
-                    //     m_graph.coordinates.setElement(dims[1], sdim1);
-
-                    // for(int i = 0; i < 4; ++i)
-                    // {
-                    //     auto sdim = m_graph.coordinates.get<SubDimension>(dims[i]).value();
-                    //     Log::debug("SubDimension {}: size={}, stride={}",
-                    //                i,
-                    //                toString(sdim.size),
-                    //                toString(sdim.stride));
-                    // }
                 }
 
                 auto tiled = m_graph.coordinates.addElement(MacroTile(tload.getTag(), dims.size()));
