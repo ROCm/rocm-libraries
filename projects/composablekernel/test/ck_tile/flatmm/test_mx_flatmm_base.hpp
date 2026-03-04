@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include <cstring>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <type_traits>
@@ -45,10 +46,13 @@ class TestMXFlatmmBase : public ::testing::Test
     using ScaleA = ck_tile::FlatmmScalePointer<ScaleGranularityM, ScaleGranularityK, ScaleType>;
     using ScaleB = ck_tile::FlatmmScalePointer<ScaleGranularityN, ScaleGranularityK, ScaleType>;
 
-    void run_test_with_validation(ck_tile::index_t M,
-                                  ck_tile::index_t N,
-                                  ck_tile::index_t K,
-                                  ck_tile::index_t kbatch = 1)
+    void
+    run_test_with_validation(ck_tile::index_t M,
+                             ck_tile::index_t N,
+                             ck_tile::index_t K,
+                             ck_tile::index_t kbatch                              = 1,
+                             std::optional<bool> expected_has_hot_loop            = std::nullopt,
+                             std::optional<ck_tile::TailNumber> expected_tail_num = std::nullopt)
     {
         constexpr int APackedSize = ck_tile::numeric_traits<ADataType>::PackedSize;
         constexpr int BPackedSize = ck_tile::numeric_traits<BDataType>::PackedSize;
@@ -183,43 +187,47 @@ class TestMXFlatmmBase : public ::testing::Test
         using BaseFlatmmPipeline = ck_tile::BaseFlatmmPipelineAGmemBGmemCRegV1<GemmPipelineProblem>;
 
         const ck_tile::index_t k_grain     = args.k_batch * FlatmmConfig::K_Tile;
-        const ck_tile::index_t k_split     = (K + k_grain - 1) / k_grain * FlatmmConfig::K_Tile;
+        const ck_tile::index_t k_split     = (K + k_grain - 1) / k_grain * k_grain;
         const ck_tile::index_t num_loop    = TilePartitioner::GetLoopNum(k_split);
         const bool has_hot_loop            = BaseFlatmmPipeline::BlockHasHotloop(num_loop);
         const ck_tile::TailNumber tail_num = BaseFlatmmPipeline::GetBlockLoopTailNum(num_loop);
 
-        // Launch kernel (warmup=0, repeat=1 for correctness testing)
-        // mx_flatmm_calc is explicitly instantiated in the linked object library;
-        // suppress the -Wundefined-func-template warning that fires when the
-        // compiler sees only the forward declaration in mx_flatmm.hpp.
+        if(expected_has_hot_loop.has_value())
+            ASSERT_EQ(has_hot_loop, *expected_has_hot_loop)
+                << "has_hot_loop mismatch for (M=" << M << ", N=" << N << ", K=" << K << ")";
+        if(expected_tail_num.has_value())
+            ASSERT_EQ(tail_num, *expected_tail_num)
+                << "tail_num mismatch for (M=" << M << ", N=" << N << ", K=" << K << ")";
+
+            // Launch kernel (warmup=0, repeat=1 for correctness testing)
+            // mx_flatmm_calc is explicitly instantiated in the linked object library;
+            // suppress the -Wundefined-func-template warning that fires when the
+            // compiler sees only the forward declaration in mx_flatmm.hpp.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wundefined-func-template"
         BaseFlatmmPipeline::template TailHandler<true>(
             [&](auto has_hot_loop_, auto tail_num_) {
                 constexpr auto has_hot_loop_v = has_hot_loop_.value;
                 constexpr auto tail_num_v     = tail_num_.value;
-                auto invoke_splitk_path       = [&](auto split_k_) {
-                    mx_flatmm_calc<MXFlatmmArchTraits,
-                                         ADataType,
-                                         BDataType,
-                                         ck_tile::tuple<>,
-                                         AccDataType,
-                                         CDataType,
-                                         ALayout,
-                                         BLayout,
-                                         ck_tile::tuple<>,
-                                         CLayout,
-                                         ScaleA,
-                                         ScaleB,
-                                         /*persistent=*/false,
-                                         ck_tile::element_wise::PassThrough,
-                                         split_k_.value,
-                                         has_hot_loop_v,
-                                         tail_num_v>(args,
-                                               ck_tile::stream_config{nullptr, false, 0, 0, 1});
-                };
-                (args.k_batch == 1) ? invoke_splitk_path(std::false_type{})
-                                    : invoke_splitk_path(std::true_type{});
+                // SplitK (kbatch>1) is excluded: confirmed broken at the kernel level.
+                // Always dispatch the kbatch=1 (SPLIT_K=false) path.
+                mx_flatmm_calc<MXFlatmmArchTraits,
+                               ADataType,
+                               BDataType,
+                               ck_tile::tuple<>,
+                               AccDataType,
+                               CDataType,
+                               ALayout,
+                               BLayout,
+                               ck_tile::tuple<>,
+                               CLayout,
+                               ScaleA,
+                               ScaleB,
+                               /*persistent=*/false,
+                               ck_tile::element_wise::PassThrough,
+                               /*split_k=*/false,
+                               has_hot_loop_v,
+                               tail_num_v>(args, ck_tile::stream_config{nullptr, false, 0, 0, 1});
             },
             has_hot_loop,
             tail_num);

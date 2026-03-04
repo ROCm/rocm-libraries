@@ -16,12 +16,26 @@ using FP4FP4Types = ::testing::Types<
 
 TYPED_TEST_SUITE(TestMXFlatmm, FP4FP4Types);
 
-TYPED_TEST(TestMXFlatmm, SmallMNK) { this->run_test_with_validation(128, 512, 256); }
+// K=256 -> num_loop=1: has_hot_loop=false, tail=Odd
+TYPED_TEST(TestMXFlatmm, SmallMNK)
+{
+    this->run_test_with_validation(128, 512, 256, 1, false, ck_tile::TailNumber::Odd);
+}
 
-TYPED_TEST(TestMXFlatmm, MediumMNK) { this->run_test_with_validation(256, 1024, 512); }
+// K=512 -> num_loop=2: has_hot_loop=false, tail=Even
+TYPED_TEST(TestMXFlatmm, MediumMNK)
+{
+    this->run_test_with_validation(256, 1024, 512, 1, false, ck_tile::TailNumber::Even);
+}
 
-// K=768 -> num_loop=3: has_hot_loop=true, tail=ODD
-TYPED_TEST(TestMXFlatmm, LargeK_HotLoopOdd) { this->run_test_with_validation(128, 512, 768); }
+// K=768 -> num_loop=3: has_hot_loop=true, tail=Odd
+TYPED_TEST(TestMXFlatmm, LargeK_HotLoopOdd)
+{
+    this->run_test_with_validation(128, 512, 768, 1, true, ck_tile::TailNumber::Odd);
+}
 
-// K=1024 -> num_loop=4: has_hot_loop=true, tail=EVEN
-TYPED_TEST(TestMXFlatmm, LargeK_HotLoopEven) { this->run_test_with_validation(128, 512, 1024); }
+// K=1024 -> num_loop=4: has_hot_loop=true, tail=Even
+TYPED_TEST(TestMXFlatmm, LargeK_HotLoopEven)
+{
+    this->run_test_with_validation(128, 512, 1024, 1, true, ck_tile::TailNumber::Even);
+}
