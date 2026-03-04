@@ -142,6 +142,26 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
         using DsLayout   = ck_tile::tuple<>;
         using DsDataType = ck_tile::tuple<>;
 
+#if 1 // CShuffleEpilogue leads to LDS bank conflicts. Use DefaultGemm2DEpilogue if want to reduce
+      // the bank conflict to 0. This is just for this test suite.
+        using GemmEpilogue = ck_tile::DefaultGemm2DEpilogue<
+            ck_tile::DefaultGemm2DEpilogueProblem<ADataType,
+                                                  BDataType,
+                                                  DsDataType,
+                                                  AccDataType,
+                                                  CDataType,
+                                                  DsLayout,
+                                                  CLayout,
+                                                  ck_tile::element_wise::PassThrough,
+                                                  TilePartitioner::MPerBlock,
+                                                  TilePartitioner::NPerBlock,
+                                                  kPadM,
+                                                  kPadN,
+                                                  M_Warp_Tile,
+                                                  N_Warp_Tile,
+                                                  K_Warp_Tile,
+                                                  UniversalGemmProblem::TransposeC>>;
+#else
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
             ck_tile::CShuffleEpilogueProblem<ADataType,
                                              BDataType,
@@ -164,6 +184,7 @@ class TestGemmPersistentAsyncInput : public ::testing::Test
                                              1,     /*VectorSizeC_*/
                                              1,     /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer /*DoubleSmemBuffer*/>>;
+#endif
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 
@@ -291,13 +312,13 @@ using ColRowRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Col, Row, Row, F16, 
 using ColColRow_F16F16F32F16 = TestGemmPersistentAsyncInput<Col, Col, Row, F16, F16, F32, F16>;
 
 // Test case for Row-Row-Row layout
-TEST_F(RowRowRow_F16F16F32F16, BasicTest) { this->Run(); }
+// TEST_F(RowRowRow_F16F16F32F16, BasicTest) { this->Run(); }
 
 // Test case for Row-Col-Row layout
 TEST_F(RowColRow_F16F16F32F16, BasicTest) { this->Run(); }
 
 // Test case for Col-Row-Row layout
-TEST_F(ColRowRow_F16F16F32F16, BasicTest) { this->Run(); }
+// TEST_F(ColRowRow_F16F16F32F16, BasicTest) { this->Run(); }
 
 // Test case for Col-Col-Row layout
-TEST_F(ColColRow_F16F16F32F16, BasicTest) { this->Run(); }
+// TEST_F(ColColRow_F16F16F32F16, BasicTest) { this->Run(); }

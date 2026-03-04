@@ -290,32 +290,74 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                           "B block window has incorrect lengths for defined BLayout!");
 
             ////////////// global window & register /////////////////
-            // A DRAM tile window(s) for load
+            // A DRAM tile window(s) for async byte-based load
             auto a_tile_windows = generate_tuple(
                 [&](auto idx) {
-                    return make_tile_window(
-                        a_dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(),
-                        make_tuple(number<MPerBlock>{}, number<KPerBlock>{}),
-                        a_dram_block_window_tmp[number<idx>{}].get_window_origin(),
-                        Policy::template MakeADramTileDistribution<Problem>());
+                    return Policy::template MakeAAsyncLoadBytesDramWindow<Problem>(
+                        a_dram_block_window_tmp[number<idx>{}]);
                 },
                 number<AsLayout::size()>{});
-            // B DRAM window(s) for load
+            // B DRAM tile window(s) for async byte-based load
             auto b_tile_windows = generate_tuple(
                 [&](auto idx) {
-                    return make_tile_window(
-                        b_dram_block_window_tmp[number<idx>{}].get_bottom_tensor_view(),
-                        make_tuple(number<NPerBlock>{}, number<KPerBlock>{}),
-                        b_dram_block_window_tmp[number<idx>{}].get_window_origin(),
-                        Policy::template MakeBDramTileDistribution<Problem>());
+                    return Policy::template MakeBAsyncLoadBytesDramWindow<Problem>(
+                        b_dram_block_window_tmp[number<idx>{}]);
                 },
                 number<BsLayout::size()>{});
 
             // this pipeline has a pair of LDS buffers per logical tile
-            constexpr index_t smem_size         = Policy::template GetSmemSize<Problem>();
-            auto&& [a_lds_block0, b_lds_block0] = Base::GetABLdsTensorViews(p_smem);
-            auto&& [a_lds_block1, b_lds_block1] =
-                Base::GetABLdsTensorViews(static_cast<char*>(p_smem) + smem_size);
+            constexpr index_t smem_size        = Policy::template GetSmemSize<Problem>();
+            auto get_AB_lds_store_tensor_views = [](void* smem) {
+                // A tile in LDS
+                ADataType* __restrict__ p_a_lds = static_cast<ADataType*>(smem);
+                constexpr auto a_lds_block_desc =
+                    Policy::template MakeALdsStoreBlockDescriptor<Problem, ADataType>();
+                auto a_lds_block =
+                    make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
+
+                // TODO: LDS alignment should come from Policy!
+                constexpr index_t a_lds_block_space_size_aligned = integer_least_multiple(
+                    sizeof(ADataType) * a_lds_block_desc.get_element_space_size(), 16);
+
+                // B tile in LDS
+                BDataType* __restrict__ p_b_lds = static_cast<BDataType*>(
+                    static_cast<void*>(static_cast<char*>(smem) + a_lds_block_space_size_aligned));
+                constexpr auto b_lds_block_desc =
+                    Policy::template MakeBLdsStoreBlockDescriptor<Problem>();
+                auto b_lds_block =
+                    make_tensor_view<address_space_enum::lds>(p_b_lds, b_lds_block_desc);
+
+                return make_tuple(std::move(a_lds_block), std::move(b_lds_block));
+            };
+            auto&& [a_lds_store_block0, b_lds_store_block0] = get_AB_lds_store_tensor_views(p_smem);
+            auto&& [a_lds_store_block1, b_lds_store_block1] =
+                get_AB_lds_store_tensor_views(static_cast<char*>(p_smem) + smem_size);
+
+            auto get_AB_lds_load_tensor_views = [](void* smem) {
+                // A tile in LDS
+                ADataType* __restrict__ p_a_lds = static_cast<ADataType*>(smem);
+                constexpr auto a_lds_block_desc =
+                    Policy::template MakeALdsLoadBlockDescriptor<Problem, ADataType>();
+                auto a_lds_block =
+                    make_tensor_view<address_space_enum::lds>(p_a_lds, a_lds_block_desc);
+
+                // TODO: LDS alignment should come from Policy!
+                constexpr index_t a_lds_block_space_size_aligned = integer_least_multiple(
+                    sizeof(ADataType) * a_lds_block_desc.get_element_space_size(), 16);
+
+                // B tile in LDS
+                BDataType* __restrict__ p_b_lds = static_cast<BDataType*>(
+                    static_cast<void*>(static_cast<char*>(smem) + a_lds_block_space_size_aligned));
+                constexpr auto b_lds_block_desc =
+                    Policy::template MakeBLdsLoadBlockDescriptor<Problem>();
+                auto b_lds_block =
+                    make_tensor_view<address_space_enum::lds>(p_b_lds, b_lds_block_desc);
+
+                return make_tuple(std::move(a_lds_block), std::move(b_lds_block));
+            };
+            auto&& [a_lds_load_block0, b_lds_load_block0] = get_AB_lds_load_tensor_views(p_smem);
+            auto&& [a_lds_load_block1, b_lds_load_block1] =
+                get_AB_lds_load_tensor_views(static_cast<char*>(p_smem) + smem_size);
 
             // set up LDS tile shapes
             constexpr auto a_lds_shape = []() {
@@ -333,29 +375,32 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             }();
 
             // LDS tile windows for storing, one per LDS buffer
-            auto a_copy_lds_window0 = make_tile_window(a_lds_block0, a_lds_shape, {0, 0});
+            auto a_copy_lds_window0 = make_tile_window(a_lds_store_block0, a_lds_shape, {0, 0});
 
-            auto a_copy_lds_window1 = make_tile_window(a_lds_block1, a_lds_shape, {0, 0});
+            auto a_copy_lds_window1 = make_tile_window(a_lds_store_block1, a_lds_shape, {0, 0});
 
-            auto b_copy_lds_window0 = make_tile_window(b_lds_block0, b_lds_shape, {0, 0});
+            auto b_copy_lds_window0 = make_tile_window(b_lds_store_block0, b_lds_shape, {0, 0});
 
-            auto b_copy_lds_window1 = make_tile_window(b_lds_block1, b_lds_shape, {0, 0});
+            auto b_copy_lds_window1 = make_tile_window(b_lds_store_block1, b_lds_shape, {0, 0});
 
-            // initialize DRAM window steps, used to advance the DRAM windows
-            using ADramTileWindowStep = typename ADramBlockWindowTmp::BottomTensorIndex;
-            using BDramTileWindowStep = typename BDramBlockWindowTmp::BottomTensorIndex;
+            // initialize DRAM window steps for byte-based windows
+            // Note: byte-based windows already account for data type packing
+            const auto a_dram_tile_window_step =
+                array<index_t, 2>{number<0>{}, number<KPerBlock / APackedSize>{}};
+            const auto b_dram_tile_window_step =
+                array<index_t, 2>{number<0>{}, number<KPerBlock / BPackedSize>{}};
 
-            constexpr ADramTileWindowStep a_dram_tile_window_step =
-                is_a_col_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
-            constexpr BDramTileWindowStep b_dram_tile_window_step =
-                is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
+            // Define async load tile lambda
+            auto async_load_tile_ = [](auto lds, auto dram) {
+                async_load_tile(lds, dram, number<-1>{}, true_type{}, true_type{});
+            };
 
             // read A(0), B(0) from DRAM to LDS window(0)
             // and advance the DRAM windows
-            Base::GlobalPrefetchAsync(
-                a_copy_lds_window0, a_tile_windows[number<0>{}], a_dram_tile_window_step);
-            Base::GlobalPrefetchAsync(
-                b_copy_lds_window0, b_tile_windows[number<0>{}], b_dram_tile_window_step);
+            async_load_tile_(a_copy_lds_window0, a_tile_windows[number<0>{}]);
+            move_tile_window(a_tile_windows[number<0>{}], a_dram_tile_window_step);
+            async_load_tile_(b_copy_lds_window0, b_tile_windows[number<0>{}]);
+            move_tile_window(b_tile_windows[number<0>{}], b_dram_tile_window_step);
 
             // initialize block gemm
             auto block_gemm = BlockGemm();
@@ -366,10 +411,10 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
 
             // read A(1), B(1) from DRAM to LDS window(1)
             // and advance the DRAM windows
-            Base::GlobalPrefetchAsync(
-                a_copy_lds_window1, a_tile_windows[number<0>{}], a_dram_tile_window_step);
-            Base::GlobalPrefetchAsync(
-                b_copy_lds_window1, b_tile_windows[number<0>{}], b_dram_tile_window_step);
+            async_load_tile_(a_copy_lds_window1, a_tile_windows[number<0>{}]);
+            move_tile_window(a_tile_windows[number<0>{}], a_dram_tile_window_step);
+            async_load_tile_(b_copy_lds_window1, b_tile_windows[number<0>{}]);
+            move_tile_window(b_tile_windows[number<0>{}], b_dram_tile_window_step);
 
             // tile distribution for the register tiles
             constexpr auto ALdsTileDistr =
@@ -407,13 +452,13 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             // they share the data pointer with the LDS windows for storing
             // but also associate with a distribution to produce a register tile when reading
             auto a_lds_ld_window0 =
-                make_tile_window(a_lds_block0, a_lds_shape, {0, 0}, a_lds_input_tile_distr);
+                make_tile_window(a_lds_load_block0, a_lds_shape, {0, 0}, a_lds_input_tile_distr);
             auto a_lds_ld_window1 =
-                make_tile_window(a_lds_block1, a_lds_shape, {0, 0}, a_lds_input_tile_distr);
+                make_tile_window(a_lds_load_block1, a_lds_shape, {0, 0}, a_lds_input_tile_distr);
             auto b_lds_ld_window0 =
-                make_tile_window(b_lds_block0, b_lds_shape, {0, 0}, b_lds_input_tile_distr);
+                make_tile_window(b_lds_load_block0, b_lds_shape, {0, 0}, b_lds_input_tile_distr);
             auto b_lds_ld_window1 =
-                make_tile_window(b_lds_block1, b_lds_shape, {0, 0}, b_lds_input_tile_distr);
+                make_tile_window(b_lds_load_block1, b_lds_shape, {0, 0}, b_lds_input_tile_distr);
 
             static_assert(!(is_tile_window_linear_v<decltype(a_lds_ld_window0)>) &&
                               !(is_tile_window_linear_v<decltype(a_lds_ld_window1)>) &&
@@ -432,10 +477,10 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             // and advance the DRAM windows
             if constexpr((!HasHotLoop && (TailNum == TailNumber::Three)) || HasHotLoop)
             {
-                Base::GlobalPrefetchAsync(
-                    a_copy_lds_window0, a_tile_windows[number<0>{}], a_dram_tile_window_step);
-                Base::GlobalPrefetchAsync(
-                    b_copy_lds_window0, b_tile_windows[number<0>{}], b_dram_tile_window_step);
+            async_load_tile_(a_copy_lds_window0, a_tile_windows[number<0>{}]);
+            move_tile_window(a_tile_windows[number<0>{}], a_dram_tile_window_step);
+            async_load_tile_(b_copy_lds_window0, b_tile_windows[number<0>{}]);
+            move_tile_window(b_tile_windows[number<0>{}], b_dram_tile_window_step);
             }
 
             if constexpr(HasHotLoop)
@@ -455,12 +500,10 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                         block_sync_lds();
                         // read A(i), B(i) from DRAM to LDS window(1)
                         // and advance the DRAM windows
-                        Base::GlobalPrefetchAsync(a_copy_lds_window1,
-                                                  a_tile_windows[number<0>{}],
-                                                  a_dram_tile_window_step);
-                        Base::GlobalPrefetchAsync(b_copy_lds_window1,
-                                                  b_tile_windows[number<0>{}],
-                                                  b_dram_tile_window_step);
+                        async_load_tile_(a_copy_lds_window1, a_tile_windows[number<0>{}]);
+                        move_tile_window(a_tile_windows[number<0>{}], a_dram_tile_window_step);
+                        async_load_tile_(b_copy_lds_window1, b_tile_windows[number<0>{}]);
+                        move_tile_window(b_tile_windows[number<0>{}], b_dram_tile_window_step);
                         // C(i-3) = A(i-3) @ B(i-3)
                         block_gemm(c_block_tile, a_block_tile0, b_block_tile0);
                         HotLoopScheduler();
@@ -476,12 +519,10 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                         block_sync_lds();
                         // read A(i+1), B(i+1) from DRAM to LDS window(0)
                         // and advance the DRAM windows
-                        Base::GlobalPrefetchAsync(a_copy_lds_window0,
-                                                  a_tile_windows[number<0>{}],
-                                                  a_dram_tile_window_step);
-                        Base::GlobalPrefetchAsync(b_copy_lds_window0,
-                                                  b_tile_windows[number<0>{}],
-                                                  b_dram_tile_window_step);
+                        async_load_tile_(a_copy_lds_window0, a_tile_windows[number<0>{}]);
+                        move_tile_window(a_tile_windows[number<0>{}], a_dram_tile_window_step);
+                        async_load_tile_(b_copy_lds_window0, b_tile_windows[number<0>{}]);
+                        move_tile_window(b_tile_windows[number<0>{}], b_dram_tile_window_step);
                         // C(i-2) = A(i-2) @ B(i-2)
                         block_gemm(c_block_tile, a_block_tile1, b_block_tile1);
                         HotLoopScheduler();
