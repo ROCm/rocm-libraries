@@ -2658,7 +2658,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if needNextBufLR:
             localReads.add(localReadCodeA)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop:
+          if doNext and self.states.doPackPreSchedulingNextLoop or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packPreA)
           else:
@@ -2687,7 +2687,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if needNextBufLR:
             localReads.add(localReadCodeB)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop:
+          if doNext and self.states.doPackPreSchedulingNextLoop or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packPreB)
           else:
@@ -2793,10 +2793,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
             packBItems = packB.flatitems()
             # Gather A, B conversion code based on scheduling order
             self._interleavePackAB(kernel, packAItems, packBItems, packItems, prefetch=True, searchStrings=["__TF32_1", "__TF32_2"])
-            # put packPre back to pack[packIdx]
-            pack[packIdx] = Module()
-            pack[packIdx].add(packAPre)
-            pack[packIdx].add(packBPre)
+          # put packPre back to pack[packIdx]
+          pack[packIdx] = Module()
+          pack[packIdx].add(packAPre)
+          pack[packIdx].add(packBPre)
           for item in packItems:
             postShiftK.add(item)
         macIterCode.add(self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollIdx = u, tail = useTailloopInNll, postShiftK = postShiftK))
@@ -3191,7 +3191,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           localReads.add(localReadCodeA)
           localReadsA.add(localReadCodeA)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop:
+          if doNext and self.states.doPackPreSchedulingNextLoop or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packPreA)
           else:
@@ -3225,7 +3225,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           localReads.add(localReadCodeB)
           localReadsB.add(localReadCodeB)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop:
+          if doNext and self.states.doPackPreSchedulingNextLoop or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packPreB)
           else:
