@@ -118,37 +118,38 @@ def writeMsgPack(filename, data):
     with open(filename, "wb") as f:
         msgpack.pack(data, f)
 
-def _solutionsCachePath(yamlFilename):
+def _solutionsCacheFilename(yamlFilename):
     """Return path to the msgpack cache file for a solutions YAML."""
     base, _ = os.path.splitext(yamlFilename)
     return base + ".solcache.dat"
 
 def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
     """Writes solution YAML file."""
-
-    # convert objects to nested dictionaries
-    solutionStates = []
-
-    if cache:
-        cachePath = _solutionsCachePath(filename)
-        loaded = False
+    def load_solution_states_from_cache(filename) -> list[dict]:
+        """Try loading from msgpack cache, falling back to YAML."""
+        cachePath = _solutionsCacheFilename(filename)
+        # Try msgpack cache if available and the cache file exists
         if _msgpack_available and os.path.exists(cachePath):
+            # If the YAML is newer than the cache, don't use the cache; assume it's stale
             if os.path.getmtime(cachePath) >= os.path.getmtime(filename):
                 try:
                     with open(cachePath, "rb") as cf:
-                        solutionStates = msgpack.unpack(cf, raw=False)
-                    loaded = True
-                except Exception:
-                    pass  # Corrupt cache; fall back to YAML
-        if not loaded:
-            solYaml = read(filename)
-            if biasTypeArgs and activationArgs:
-                solutionStates = solYaml[4:]
-            elif biasTypeArgs or activationArgs:
-                solutionStates = solYaml[3:]
-            else:
-                solutionStates = solYaml[2:]
+                        return msgpack.unpack(cf, raw=False)
+                except Exception as e:
+                    printWarning("Failed to load solution cache: {}".format(e))
+        # Fall back to YAML
+        solYaml = read(filename)
+        if biasTypeArgs and activationArgs:
+            return solYaml[4:]
+        elif biasTypeArgs or activationArgs:
+            return solYaml[3:]
+        else:
+            return solYaml[2:]
+
+    if cache:
+        solutionStates = load_solution_states_from_cache(filename)
     else:
+        solutionStates: list[dict] = []
         for solution in solutions:
             solutionState = solution.getAttributes()
             solutionState["ProblemType"] = solutionState["ProblemType"].state
@@ -158,7 +159,7 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
             solutionStates.append(solutionState)
         if _msgpack_available:
             try:
-                writeMsgPack(_solutionsCachePath(filename), solutionStates)
+                writeMsgPack(_solutionsCacheFilename(filename), solutionStates)
             except Exception as e:
                 printWarning("Failed to write solution cache: {}".format(e))
     # write dictionaries
