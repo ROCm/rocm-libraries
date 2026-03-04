@@ -3373,8 +3373,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 1
-    WorkGroupMappingXCC: 4
+    WorkGroupMapping: 6
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -4084,7 +4084,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 1
+    WorkGroupMapping: 6
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -7899,7 +7899,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 1
+    WorkGroupMapping: 3
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -8389,7 +8389,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 32
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -9614,8 +9614,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 48
-    WorkGroupMappingXCC: 16
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -10104,8 +10104,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [128, 2, 1]
-    WorkGroupMapping: 32
-    WorkGroupMappingXCC: 16
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -10349,7 +10349,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 24
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -10594,7 +10594,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 32
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -17699,7 +17699,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 48
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -21864,7 +21864,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 32
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -22109,7 +22109,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 48
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -22354,7 +22354,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 48
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -22599,7 +22599,7 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 48
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -32155,7 +32155,7 @@
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 4
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
@@ -51755,7 +51755,7 @@
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
     WorkGroupMapping: 1
-    WorkGroupMappingXCC: 4
+    WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
