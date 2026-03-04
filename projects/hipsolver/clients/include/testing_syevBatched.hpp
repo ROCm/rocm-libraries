@@ -302,16 +302,16 @@ void syevBatched_getError(const hipsolverHandle_t   handle,
     constexpr bool COMPLEX = is_complex<T>;
     using S                = decltype(std::real(T{}));
 
-    int lrwork, ltwork;
+    I lrwork, ltwork;
     if(!COMPLEX)
     {
-        lrwork = std::max(1, 3 * n - 1);
+        lrwork = std::max(I(1), 3 * n - 1);
         ltwork = 0;
     }
     else
     {
-        lrwork = std::max(1, 3 * n - 2);
-        ltwork = std::max(1, 2 * n - 1);
+        lrwork = std::max(I(1), 3 * n - 2);
+        ltwork = std::max(I(1), 2 * n - 1);
     }
 
     std::vector<T> work(ltwork);
@@ -445,16 +445,16 @@ void syevBatched_getPerfData(const hipsolverHandle_t   handle,
     constexpr bool COMPLEX = is_complex<T>;
     using S                = decltype(std::real(T{}));
 
-    int lrwork, ltwork;
+    I lrwork, ltwork;
     if(!COMPLEX)
     {
-        lrwork = std::max(1, 3 * n - 1);
+        lrwork = std::max(I(1), 3 * n - 1);
         ltwork = 0;
     }
     else
     {
-        lrwork = std::max(1, 3 * n - 2);
-        ltwork = std::max(1, 2 * n - 1);
+        lrwork = std::max(I(1), 3 * n - 2);
+        ltwork = std::max(I(1), 2 * n - 1);
     }
 
     std::vector<T> work(ltwork);
