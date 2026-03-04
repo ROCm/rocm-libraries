@@ -3303,46 +3303,9 @@ public:
         ensure_specializations_exist();
         sort_specializations();
 
-        size_t specialization_count = specializations.size();
+        std::string algorithm = get_common_algorithm();
 
-        if(specialization_count == 0)
-        {
-            std::cerr << "Error: At least one benchmark must be queued\n";
-            if(!m_settings.filter.empty())
-            {
-                std::cerr << "Hint: The currently used --filter '" << m_settings.filter
-                          << "' is likely incorrect\n";
-            }
-            exit(EXIT_FAILURE);
-        }
-
-        std::string algorithm;
-        try
-        {
-            algorithm = specializations.front()->meta().get<std::string>("algo");
-
-            // Validate that benchmarks have identical algo names.
-            for(const auto& bp : specializations)
-            {
-                auto bp_algo = bp->meta().get<std::string>("algo");
-
-                if(bp_algo != algorithm)
-                {
-                    std::cerr
-                        << "Error: All specializations must have identical `algo` names, but '"
-                        << bp_algo << "' and '" << algorithm << "' are different\n";
-                    exit(EXIT_FAILURE);
-                }
-            }
-        }
-        catch(const std::out_of_range& e)
-        {
-            std::cerr
-                << "Error: All benchmarks must return an \"algo\" key from their meta() method\n";
-            exit(EXIT_FAILURE);
-        }
-
-        get_logger().init(algorithm, specialization_count, m_settings, m_flags, get_monitor());
+        get_logger().init(algorithm, specializations.size(), m_settings, m_flags, get_monitor());
 
         // Determine max specialization width, and validate that every name is unique.
         m_spec_col_width = 0;
@@ -3364,21 +3327,21 @@ public:
         }
 
         m_family_col_width
-            = std::string("Index/").size() + std::to_string(specialization_count).size();
+            = std::string("Index/").size() + std::to_string(specializations.size()).size();
 
         if(m_settings.dry)
         {
             detail::progress::print_dry_header(algorithm,
                                                m_spec_col_width,
                                                m_family_col_width,
-                                               specialization_count);
+                                               specializations.size());
         }
         else
         {
             detail::progress::print_header(algorithm,
                                            m_spec_col_width,
                                            m_family_col_width,
-                                           specialization_count,
+                                           specializations.size(),
                                            m_settings.noise_timeout_secs);
         }
 
@@ -3614,6 +3577,51 @@ private:
                   specializations.end(),
                   [](const auto& l, const auto& r)
                   { return l->meta().serialize_name() < r->meta().serialize_name(); });
+    }
+
+    /// Returns the algorithm name shared by all specializations.
+    ///
+    /// Validates that every specialization in `specializations` has
+    /// the same `"algo"` value in its meta data. Exits with an error
+    /// message if the `"algo"` key is missing or if values differ.
+    std::string get_common_algorithm()
+    {
+        if(specializations.size() == 0)
+        {
+            std::cerr << "Error: At least one benchmark must be queued\n";
+            if(!m_settings.filter.empty())
+            {
+                std::cerr << "Hint: The currently used --filter '" << m_settings.filter
+                          << "' is likely incorrect\n";
+            }
+            exit(EXIT_FAILURE);
+        }
+
+        std::string algorithm;
+        try
+        {
+            algorithm = specializations.front()->meta().get<std::string>("algo");
+
+            for(const auto& bp : specializations)
+            {
+                auto bp_algo = bp->meta().get<std::string>("algo");
+                if(bp_algo != algorithm)
+                {
+                    std::cerr
+                        << "Error: All specializations must have identical `algo` names, but '"
+                        << bp_algo << "' and '" << algorithm << "' are different\n";
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
+        catch(const std::out_of_range& e)
+        {
+            std::cerr
+                << "Error: All benchmarks must return an \"algo\" key from their meta() method\n";
+            exit(EXIT_FAILURE);
+        }
+
+        return algorithm;
     }
 
     /**
