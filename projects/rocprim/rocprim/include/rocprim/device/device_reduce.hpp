@@ -233,15 +233,15 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 
         auto block_reduce_kernel = [=](auto target_config) mutable
         {
-            static constexpr reduce_config_params params = decltype(target_config)::params;
+            constexpr unsigned int config_items_per_thread
+                = decltype(target_config)::params.kernel_config.items_per_thread;
 
             if(too_small > 1)
             {
                 // Increase IPT for better utilisation
                 if(too_small <= 2)
                 {
-                    constexpr unsigned int items_per_thread
-                        = params.kernel_config.items_per_thread * 2;
+                    constexpr unsigned int items_per_thread = config_items_per_thread * 2;
                     block_reduce_kernel_impl<decltype(target_config),
                                              WithInitialValue,
                                              result_type,
@@ -253,8 +253,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                 }
                 else if(too_small <= 4)
                 {
-                    constexpr unsigned int items_per_thread
-                        = params.kernel_config.items_per_thread * 4;
+                    constexpr unsigned int items_per_thread = config_items_per_thread * 4;
                     block_reduce_kernel_impl<decltype(target_config),
                                              WithInitialValue,
                                              result_type,
@@ -266,8 +265,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                 }
                 else if(too_small <= 8)
                 {
-                    constexpr unsigned int items_per_thread
-                        = params.kernel_config.items_per_thread * 8;
+                    constexpr unsigned int items_per_thread = config_items_per_thread * 8;
                     block_reduce_kernel_impl<decltype(target_config),
                                              WithInitialValue,
                                              result_type,
@@ -279,8 +277,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                 }
                 else if(too_small <= 16)
                 {
-                    constexpr unsigned int items_per_thread
-                        = params.kernel_config.items_per_thread * 16;
+                    constexpr unsigned int items_per_thread = config_items_per_thread * 16;
                     block_reduce_kernel_impl<decltype(target_config),
                                              WithInitialValue,
                                              result_type,
@@ -294,24 +291,10 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             else
             {
                 // Decrease IPT to prevent kernel launch
-                if(too_large >= 16)
+                if(config_items_per_thread >= 16u && too_large >= 16u)
                 {
                     constexpr unsigned int items_per_thread
-                        = ceiling_div(params.kernel_config.items_per_thread, 16u);
-                    block_reduce_kernel_impl<decltype(target_config),
-                                             WithInitialValue,
-                                             result_type,
-                                             items_per_thread>(input,
-                                                               size,
-                                                               output,
-                                                               initial_value,
-                                                               reduce_op);
-
-                }
-                else if(too_large >= 8)
-                {
-                    constexpr unsigned int items_per_thread
-                        = ceiling_div(params.kernel_config.items_per_thread, 8u);
+                        = ceiling_div(config_items_per_thread, 16u);
                     block_reduce_kernel_impl<decltype(target_config),
                                              WithInitialValue,
                                              result_type,
@@ -321,10 +304,10 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                                                                initial_value,
                                                                reduce_op);
                 }
-                else if(too_large >= 4)
+                else if(config_items_per_thread >= 8u && too_large >= 8)
                 {
                     constexpr unsigned int items_per_thread
-                        = ceiling_div(params.kernel_config.items_per_thread, 4u);
+                        = ceiling_div(config_items_per_thread, 8u);
                     block_reduce_kernel_impl<decltype(target_config),
                                              WithInitialValue,
                                              result_type,
@@ -334,10 +317,23 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                                                                initial_value,
                                                                reduce_op);
                 }
-                else if(too_large >= 2)
+                else if(config_items_per_thread >= 4u && too_large >= 4)
                 {
                     constexpr unsigned int items_per_thread
-                        = ceiling_div(params.kernel_config.items_per_thread, 2u);
+                        = ceiling_div(config_items_per_thread, 4u);
+                    block_reduce_kernel_impl<decltype(target_config),
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
+                }
+                else if(config_items_per_thread >= 2u && too_large >= 2)
+                {
+                    constexpr unsigned int items_per_thread
+                        = ceiling_div(config_items_per_thread, 2u);
                     block_reduce_kernel_impl<decltype(target_config),
                                              WithInitialValue,
                                              result_type,
@@ -349,7 +345,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                 }
                 else
                 {
-                    constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
+                    constexpr unsigned int items_per_thread = config_items_per_thread;
                     block_reduce_kernel_impl<decltype(target_config),
                                              WithInitialValue,
                                              result_type,
