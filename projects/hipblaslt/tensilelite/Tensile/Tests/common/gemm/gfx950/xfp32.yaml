@@ -272,6 +272,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [4]
         - DirectToLds: [0,1]
         - TailloopInNll: [0,1]
+        - ClusterLocalRead: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
