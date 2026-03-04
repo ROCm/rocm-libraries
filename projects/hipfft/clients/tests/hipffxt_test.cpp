@@ -204,6 +204,11 @@ TEST_P(hipfftxtunitdesc, desccreation)
     const int Nx    = 32;
     const int Ny    = 32;
 
+
+    // TODO: 3D, other sizes, etc.
+    std::vector<size_t> batchlengths = {1, Nx, Ny};
+    
+    
     const int direction = std::get<0>(GetParam());
     const bool realcomplex = std::get<1>(GetParam());
     const hipfftXtSubFormat format = std::get<2>(GetParam());
@@ -245,15 +250,59 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                          << hipfft_rt
                                          << " (" << hipfftResult_string(hipfft_rt) << ")";
 
-    // Fine, let's do a copy test and see what happens.
+    const bool isreal = realcomplex ? ( format == HIPFFT_XT_FORMAT_INPLACE  ) : false;
+    const bool isherm = realcomplex ? ( format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED  ) : false;
 
-    // host-to-device copies:
+    auto hostdatalengths = [](const bool isreal,
+                              const bool isherm,
+                              const std::vector<size_t> &batchlengths) -> std::vector<size_t>
+    {
+        std::vector<size_t> newbatchlengths = batchlengths;
+        const size_t lastdim = batchlengths.size() - 1;
+        if(isreal)
+            newbatchlengths[lastdim] = 2 * (newbatchlengths[lastdim] / 2 + 1);
+        if(isherm)
+            newbatchlengths[lastdim] = newbatchlengths[lastdim] / 2 + 1;
+        return newbatchlengths;
+    };
+    
+    auto fillhostbuf = [](std::vector<char> &hostbuf,
+                          const bool isreal,
+                          std::vector<size_t> batchlengths) -> void  {
+        using lint = decltype(batchlengths)::value_type;
+        const size_t nelem = std::accumulate(batchlengths.begin(),
+                                             batchlengths.end(),
+                                             static_cast<lint>(1),
+                                             std::multiplies<lint>());
+        if(isreal) {
+            auto hostdat = reinterpret_cast<double*>(hostbuf.data());
+            for(size_t idx = 0; idx < nelem; ++idx)
+                hostdat[0] = idx;    
+        }
+        else
+        {
+            auto hostdat = reinterpret_cast<std::complex<double>*>(hostbuf.data());
+            for(size_t idx = 0; idx < nelem; ++idx)
+                hostdat[0] = idx;    
+        }
+    };
+    
+    // Fine, let's do a copy test and see what happens.
+   
     for(const bool h2d : {true /*, false*/}) // FIXME: enable d2h
     {
         const auto copydir = h2d ? HIPFFT_COPY_HOST_TO_DEVICE : HIPFFT_COPY_DEVICE_TO_HOST;
         
         // Transforms are double-precision, something. FIXME: actually figure this out.
-        std::vector<std::complex<double>> hostbuf(2*Nx * Ny, 0.0);
+
+        const auto hostbatchlength = hostdatalengths(isreal, isherm, batchlengths);
+        const size_t nelem = std::accumulate(hostbatchlength.begin(),
+                                             hostbatchlength.end(),
+                                             static_cast<size_t>(1),
+                                             std::multiplies<size_t>());
+        const size_t valsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
+        std::vector<char> hostbuf(valsize * nelem);
+        fillhostbuf(hostbuf, isreal, hostbatchlength);
         if(h2d)
         {
             hipfft_rt = hipfftXtMemcpy(plan,
@@ -301,6 +350,9 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                                  << " (" << hipfftResult_string(hipfft_rt) << "): "
                                                  << vstrings.str();
         }
+
+        
+        
     }
     
     hipfft_rt = hipfftXtFree(mydesc);
