@@ -212,10 +212,9 @@ namespace Direct2LDSTileCopyTest
 
         std::vector<T> expected(MN * K);
 
-        if(context->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds)
-           && sizeof(T) < 4)
+        if(context->targetArchitecture().target().isCDNA4GPU() && sizeof(T) < 4)
         {
-            // With HasWiderDirectToLds, direct-to-LDS writes at M0 + TID*4 (always dword-aligned).
+            // Direct2LDS writes at M0 + TID*4 (always dword-aligned).
             // For sub-dword types this leaves zero gaps in LDS:
             //   uint8:  [0,0,0,0, 1,0,0,0, 2,0,0,0, ...]  (stride 4)
             //   uint16: [0,0, 1,0, 2,0, 3,0, ...]          (stride 2)
