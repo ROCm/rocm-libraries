@@ -31,8 +31,8 @@
 #include <cstddef>
 #include <string>
 
-#ifndef ENABLE_ROCPROFSDK
-#define ENABLE_ROCPROFSDK 0
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
 #endif
 
 namespace TensileLite
@@ -134,7 +134,7 @@ namespace TensileLite
             const std::string HardwareSampleCount = "hardware-samples";
             const std::string GfxFrequency        = "gfx-frequency(maximum)"; // GPU freq in Mhz
 
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
             // rocprof
             const std::string RocProfCounter      = "rocprof-counters";
 #endif

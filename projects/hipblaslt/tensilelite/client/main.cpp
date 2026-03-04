@@ -53,10 +53,10 @@
 
 #include "Utility.hpp"
 
-#ifndef ENABLE_ROCPROFSDK
-#define ENABLE_ROCPROFSDK 0
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
 #endif
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
 #endif
 
@@ -372,7 +372,7 @@ namespace TensileLite
                 ("rotating-buffer-mode",      po::value<int32_t>()->default_value(0), "Rotating mode.")
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
                 ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
                 ("rocprof-counter",           vector_default_empty<std::string>(), "Rocprof counters.")
 #endif
                 ;
@@ -734,7 +734,7 @@ int main(int argc, const char* argv[])
             benchmarkTimer = std::make_shared<BenchmarkTimer>(args, *hardware, flushTimeMs * 1000);
             listeners.addListener(benchmarkTimer);
             listeners.addListener(std::make_shared<HardwareMonitorListener>(args));
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
             if (!args["rocprof-counter"].as<std::vector<std::string>>().empty())
                 listeners.addListener(Profiler::Default(args));
 #endif
@@ -894,7 +894,7 @@ int main(int argc, const char* argv[])
                                     listeners.postWarmup(warmupStartEvents, warmupStopEvents, stream);
                                 }
 
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
                                 TimingEvents ProfilerStartEvents(1, 1);
                                 TimingEvents ProfilerStopEvents(1, 1);
                                 listeners.preProfiler();

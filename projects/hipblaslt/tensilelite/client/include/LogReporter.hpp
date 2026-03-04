@@ -29,8 +29,8 @@
 #include "CSVStackFile.hpp"
 #include "ResultReporter.hpp"
 
-#ifndef ENABLE_ROCPROFSDK
-#define ENABLE_ROCPROFSDK 0
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
 #endif
 
 #include <cstddef>
@@ -115,7 +115,7 @@ namespace TensileLite
                 return std::shared_ptr<LogReporter>(new LogReporter(level,
                                                                     {BenchmarkRunNumber,
                                                                      ProblemProgress,
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
                                                                      RocProfCounter,
 #endif
                                                                      SolutionProgress,

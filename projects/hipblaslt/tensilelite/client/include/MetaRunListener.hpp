@@ -34,8 +34,8 @@
 
 #include <cstddef>
 
-#ifndef ENABLE_ROCPROFSDK
-#define ENABLE_ROCPROFSDK 0
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
 #endif
 
 namespace TensileLite
@@ -70,7 +70,7 @@ namespace TensileLite
                                            TimingEvents const&            startEvents,
                                            TimingEvents const&            stopEvents) override;
 
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
             virtual void preProfiler() override;
             virtual void postProfiler() override;
 #endif

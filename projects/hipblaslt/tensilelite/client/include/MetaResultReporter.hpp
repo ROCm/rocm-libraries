@@ -30,8 +30,8 @@
 
 #include <cstddef>
 
-#ifndef ENABLE_ROCPROFSDK
-#define ENABLE_ROCPROFSDK 0
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
 #endif
 
 namespace TensileLite
@@ -199,7 +199,7 @@ namespace TensileLite
                     (*iter)->validateWarmups(inputs, startEvents, stopEvents);
             }
 
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
             virtual void preProfiler() override
             {
                 for(auto iter = m_reporters.begin(); iter != m_reporters.end(); iter++)

@@ -25,7 +25,7 @@ set(COMMON_CLIENT_SOURCES
 target_sources(tensilelite-client PRIVATE ${COMMON_CLIENT_SOURCES})
 target_sources(cpu-gemm-driver PRIVATE ${COMMON_CLIENT_SOURCES})
 
-if (ENABLE_ROCPROFSDK)
+if (TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
 
 target_sources(tensilelite-client
     PRIVATE

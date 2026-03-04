@@ -34,8 +34,8 @@
 
 #include <cstddef>
 
-#ifndef ENABLE_ROCPROFSDK
-#define ENABLE_ROCPROFSDK 0
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
 #endif
 
 namespace TensileLite
@@ -91,7 +91,7 @@ namespace TensileLite
             /// Note that it's not guaranteed that each listener gets this call.
             virtual bool needMoreRunsInSolution() const = 0;
 
-#if ENABLE_ROCPROFSDK
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
             /***********
    * Profiler
    ***********/

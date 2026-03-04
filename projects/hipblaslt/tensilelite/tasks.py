@@ -63,7 +63,7 @@ def build_client(c, clean=False, configure=True, build=True, build_dir="build_tm
             "-B", build_dir,
             f"-DCMAKE_BUILD_TYPE={build_type}",
             f"-DGPU_TARGETS={gpu_targets}",
-            f"-DENABLE_ROCPROFSDK={enable_rocprof}",
+            f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={enable_rocprof}",
         ]
 
         c.run(" ".join(cmake_cmd))
