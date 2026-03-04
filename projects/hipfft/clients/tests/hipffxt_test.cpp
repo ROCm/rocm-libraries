@@ -301,6 +301,24 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                                  << " (" << hipfftResult_string(hipfft_rt) << "): "
                                                  << vstrings.str();
         }
+
+        for(const auto igpu : gpus)
+        {
+            std::cout << igpu << std::endl;
+            
+            const auto device = mydesc->descriptor->GPUs[igpu];
+            const auto bufsize = mydesc->descriptor->size[igpu];
+            std::cout << "device: " << device << "\n";
+            std::cout << "buffer size: " << bufsize << "\n";
+            std::vector<char> hostbufpart(bufsize);
+            auto devbuf = mydesc->descriptor->data[igpu];
+            auto hipret = hipMemcpy(hostbufpart.data(), devbuf, bufsize, hipMemcpyDeviceToHost);
+            EXPECT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
+
+            
+            
+        }
+        
     }
     
     hipfft_rt = hipfftXtFree(mydesc);
