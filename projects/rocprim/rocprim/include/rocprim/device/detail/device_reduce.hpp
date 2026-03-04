@@ -65,9 +65,9 @@ auto reduce_with_initial(T output, T initial_value, BinaryFunction reduce_op) ->
 template<
     class TargetConfig,
     bool WithInitialValue,
+    class ResultType,
     bool         FitLarger,
     unsigned int FitItems,
-    class ResultType,
     class InputIterator,
     class OutputIterator,
     class InitValueType,

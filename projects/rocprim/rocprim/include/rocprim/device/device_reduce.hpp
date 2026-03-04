@@ -60,12 +60,6 @@ namespace detail
 #define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                               \
     do                                                                                            \
     {                                                                                             \
-        detail::target_arch target_arch;                                                          \
-        hipError_t          result = detail::host_target_arch(stream, target_arch);               \
-        if(result != hipSuccess)                                                                  \
-        {                                                                                         \
-            return result;                                                                        \
-        }                                                                                         \
         if(debug_synchronous)                                                                     \
         {                                                                                         \
             start = std::chrono::steady_clock::now();                                             \
@@ -188,7 +182,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             }
             auto block_reduce_kernel = [=](auto target_config)
             {
-                block_reduce_kernel_impl<decltype(target_config), false, true, 1, result_type>(
+                block_reduce_kernel_impl<decltype(target_config), false, result_type, true, 1>(
                     input + offset,
                     current_size,
                     block_prefixes + i * number_of_blocks_limit,
@@ -232,50 +226,138 @@ inline hipError_t reduce_impl(void*               temporary_storage,
         const unsigned int too_large = size > 0 ? items_per_block / size : 0;
         const unsigned int too_small = number_of_blocks;
 
-        if(too_small > 1)
+        if(debug_synchronous)
         {
-            // Decrease IPT for better utilisation
-            if(too_small <= 2)
-            {
-                SINGLE_REDUCE_KERNEL(true, 2);
-            }
-            else if(too_small <= 4)
-            {
-                SINGLE_REDUCE_KERNEL(true, 4);
-            }
-            else if(too_small <= 8)
-            {
-                SINGLE_REDUCE_KERNEL(true, 8);
-            }
-            else if(too_small <= 16)
-            {
-                SINGLE_REDUCE_KERNEL(true, 16);
-            }
+            start = std::chrono::steady_clock::now();
         }
-        else
+
+        auto block_reduce_kernel = [=](auto target_config) mutable
         {
-            // Increase IPT to prevent kernel launch
-            if(too_large >= 16)
+            if(too_small > 1)
             {
-                SINGLE_REDUCE_KERNEL(false, 16);
-            }
-            else if(too_large >= 8)
-            {
-                SINGLE_REDUCE_KERNEL(false, 8);
-            }
-            else if(too_large >= 4)
-            {
-                SINGLE_REDUCE_KERNEL(false, 4);
-            }
-            else if(too_large >= 2)
-            {
-                SINGLE_REDUCE_KERNEL(false, 2);
+                // Decrease IPT for better utilisation
+                if(too_small <= 2)
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              true,
+                                              2>(input,
+                                                 size,
+                                                 output,
+                                                 initial_value,
+                                                 reduce_op);
+                }
+                else if(too_small <= 4)
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              true,
+                                              4>(input,
+                                                 size,
+                                                 output,
+                                                 initial_value,
+                                                 reduce_op);
+                }
+                else if(too_small <= 8)
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              true,
+                                              8>(input,
+                                                 size,
+                                                 output,
+                                                 initial_value,
+                                                 reduce_op);
+                }
+                else if(too_small <= 16)
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              true,
+                                              16>(input,
+                                                  size,
+                                                  output,
+                                                  initial_value,
+                                                  reduce_op);
+                }
             }
             else
             {
-                SINGLE_REDUCE_KERNEL(false, 1);
+                // Increase IPT to prevent kernel launch
+                if(too_large >= 16)
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              false,
+                                              16>(input,
+                                                  size,
+                                                  output,
+                                                  initial_value,
+                                                  reduce_op);
+                }
+                else if(too_large >= 8)
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              false,
+                                              8>(input,
+                                                 size,
+                                                 output,
+                                                 initial_value,
+                                                 reduce_op);
+                }
+                else if(too_large >= 4)
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              false,
+                                              4>(input,
+                                                 size,
+                                                 output,
+                                                 initial_value,
+                                                 reduce_op);
+                }
+                else if(too_large >= 2)
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              false,
+                                              2>(input,
+                                                 size,
+                                                 output,
+                                                 initial_value,
+                                                 reduce_op);
+                }
+                else
+                {
+                    block_reduce_kernel_impl<decltype(target_config),
+                                              WithInitialValue,
+                                              result_type,
+                                              false,
+                                              1>(input,
+                                                 size,
+                                                 output,
+                                                 initial_value,
+                                                 reduce_op);
+                }
             }
-        }
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      block_reduce_kernel,
+                                                                      dim3(1),
+                                                                      dim3(block_size),
+                                                                      0,
+                                                                      stream));
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);
     }
 
     return hipSuccess;
