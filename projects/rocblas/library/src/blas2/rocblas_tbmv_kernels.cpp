@@ -22,10 +22,10 @@
 
 #include "../blas1/rocblas_copy.hpp"
 #include "../blas1/rocblas_copy_kernels.hpp"
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "handle.hpp"
 #include "rocblas_tbmv.hpp"
-#include "asan_helpers.hpp"
 
 /**
   *  Helper for the non-transpose case. Iterates through each diagonal

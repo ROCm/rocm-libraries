@@ -20,11 +20,11 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas_hbmv.hpp"
-#include "asan_helpers.hpp"
 
 /**
   *  Helper for the non-transpose case. Iterates through each diagonal

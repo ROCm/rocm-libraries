@@ -22,11 +22,11 @@
 
 #include "../blas1/rocblas_copy.hpp"
 #include "../blas1/rocblas_reduction.hpp"
+#include "asan_helpers.hpp"
 #include "device_macros.hpp"
 #include "rocblas.h"
 #include "rocblas_trmv.hpp"
 #include <cstddef>
-#include "asan_helpers.hpp"
 
 template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T>
 ROCBLAS_KERNEL_ILF void rocblas_trmvn_kernel_calc(

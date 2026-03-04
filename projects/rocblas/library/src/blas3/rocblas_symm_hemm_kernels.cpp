@@ -30,6 +30,7 @@
 #define CSYMM_BATCHED_MIN_NB 32
 #define ZSYMM_BATCHED_MIN_NB 32
 
+#include "asan_helpers.hpp"
 #include "definitions.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -37,7 +38,6 @@
 #include "rocblas_symm_hemm.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp"
 #include <type_traits>
-#include "asan_helpers.hpp"
 
 template <typename T>
 static const T beta_1 = T(1);

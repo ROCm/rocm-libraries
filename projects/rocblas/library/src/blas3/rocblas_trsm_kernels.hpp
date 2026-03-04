@@ -23,6 +23,7 @@
 #pragma once
 
 #include "../blas2/rocblas_trsv.hpp"
+#include "asan_helpers.hpp"
 #include "definitions.hpp"
 #include "device_macros.hpp"
 #ifdef BUILD_WITH_TENSILE
@@ -34,7 +35,6 @@
 #include "rocblas_trsm.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp"
 #include "trtri_trsm.hpp"
-#include "asan_helpers.hpp"
 
 /** Constants for block size of trsm **/
 // clang-format off

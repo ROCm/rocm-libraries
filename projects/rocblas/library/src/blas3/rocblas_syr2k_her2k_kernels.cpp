@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "definitions.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -30,7 +31,6 @@
 #include "rocblas_syr2k_her2k.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp" // int64 API called
 #include "utility.hpp"
-#include "asan_helpers.hpp"
 
 template <typename T>
 static const T beta_1 = T(1);
@@ -57,24 +57,25 @@ rocblas_status rocblas_syrkx_syr2k_dispatch(rocblas_handle    handle,
     if(TWOK)
     {
         return rocblas_syr2k_her2k_dispatch<API_INT,
-                                             TWOK,
-                                             HERK,
-                                             rocblas::conditional_v<rocblas_enable_asan, 16, 32>>(handle,
-                                                                     uplo,
-                                                                     trans,
-                                                                     n,
-                                                                     k,
-                                                                     alpha,
-                                                                     dA,
-                                                                     lda,
-                                                                     stride_a,
-                                                                     dB,
-                                                                     ldb,
-                                                                     stride_b,
-                                                                     dC,
-                                                                     ldc,
-                                                                     stride_c,
-                                                                     batch_count);
+                                            TWOK,
+                                            HERK,
+                                            rocblas::conditional_v<rocblas_enable_asan, 16, 32>>(
+            handle,
+            uplo,
+            trans,
+            n,
+            k,
+            alpha,
+            dA,
+            lda,
+            stride_a,
+            dB,
+            ldb,
+            stride_b,
+            dC,
+            ldc,
+            stride_c,
+            batch_count);
     }
     else
     {

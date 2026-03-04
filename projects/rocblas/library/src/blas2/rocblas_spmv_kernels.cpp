@@ -20,12 +20,12 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas.h"
 #include "rocblas_spmv.hpp"
-#include "asan_helpers.hpp"
 
 /**
   *  Computes y := alpha*A*x + beta*y where A is a symmetric matrix.

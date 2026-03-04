@@ -20,9 +20,9 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "device_macros.hpp"
 #include "rocblas_syr2.hpp"
-#include "asan_helpers.hpp"
 
 template <int DIM_X, int DIM_Y, int N_TX, typename T>
 __device__ void rocblas_syr2_kernel_calc(bool     is_upper,

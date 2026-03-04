@@ -20,15 +20,14 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
-#include "asan_helpers.hpp"
 #include "gemv_device.hpp"
 #include "handle.hpp"
 #include "int64_helpers.hpp"
 #include "rocblas_gemv.hpp"
 #include "rocblas_level2_threshold.hpp"
-
 
 // The warpSize * 2 corresponds to the number of x-dimension threads per block optimized for better performance in the double_buffered_kernels.
 constexpr int rocblas_gemv_bx()
@@ -346,7 +345,8 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                 // The following kernel does the `y += A * x` computation
                 static constexpr int thread_x = rocblas_gemv_bx();
                 static constexpr int block_y  = 8;
-                static constexpr int thread_y            = rocblas::conditional_v<rocblas_enable_asan, 2, is_float ? 8 : 4>;
+                static constexpr int thread_y = rocblas::conditional_v < rocblas_enable_asan, 2,
+                                     is_float ? 8 : 4 > ;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
                 const int block_x = m / thread_x;
@@ -702,7 +702,8 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                 // The following kernel does the `y += A * x` computation
                 static constexpr int thread_x = rocblas_gemv_bx();
                 static constexpr int block_y  = is_float ? 8 : 16;
-                static constexpr int thread_y            = rocblas::conditional_v<rocblas_enable_asan, 2, is_float ? 8 : 4>;
+                static constexpr int thread_y = rocblas::conditional_v < rocblas_enable_asan, 2,
+                                     is_float ? 8 : 4 > ;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
                 const int block_x = n / thread_x;
@@ -1070,7 +1071,8 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                 // The following kernel does the `y += A * x` computation
                 static constexpr int thread_x = rocblas_gemv_bx();
                 static constexpr int block_y  = is_float ? 8 : 16;
-                static constexpr int thread_y            = rocblas::conditional_v<rocblas_enable_asan, 2, is_float ? 8 : 4>;
+                static constexpr int thread_y = rocblas::conditional_v < rocblas_enable_asan, 2,
+                                     is_float ? 8 : 4 > ;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
                 const int block_x = n / thread_x;

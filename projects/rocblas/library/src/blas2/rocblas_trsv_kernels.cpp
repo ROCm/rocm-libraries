@@ -20,9 +20,9 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
-#include "asan_helpers.hpp"
 #include "device_macros.hpp"
 #include "rocblas_trsv.hpp"
 

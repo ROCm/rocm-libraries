@@ -10,10 +10,11 @@ inline constexpr bool rocblas_enable_asan = true;
 inline constexpr bool rocblas_enable_asan = false;
 #endif
 
-namespace rocblas {
+namespace rocblas
+{
 
-template <bool B, auto IfTrue, auto IfFalse>
-inline constexpr auto conditional_v = B ? IfTrue : IfFalse;
+    template <bool B, auto IfTrue, auto IfFalse>
+    inline constexpr auto conditional_v = B ? IfTrue : IfFalse;
 
 } // namespace rocblas
 

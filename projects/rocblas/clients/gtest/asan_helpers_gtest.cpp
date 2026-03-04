@@ -39,6 +39,5 @@ TEST(AsanHelpers, ConditionalV)
     // Runtime mirror of the static_asserts above — verifies ODR and linkage
     EXPECT_EQ((conditional_v<true, 1, 2>), 1);
     EXPECT_EQ((conditional_v<false, 1, 2>), 2);
-    EXPECT_EQ((conditional_v<rocblas_enable_asan, 256, 1024>),
-              rocblas_enable_asan ? 256 : 1024);
+    EXPECT_EQ((conditional_v<rocblas_enable_asan, 256, 1024>), rocblas_enable_asan ? 256 : 1024);
 }

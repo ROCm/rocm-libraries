@@ -20,11 +20,11 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas_hpr.hpp"
-#include "asan_helpers.hpp"
 
 template <int DIM_X, int DIM_Y, int N_TX, typename T, typename U>
 __forceinline__ __device__ void
