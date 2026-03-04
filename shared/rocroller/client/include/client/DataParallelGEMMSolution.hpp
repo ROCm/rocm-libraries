@@ -655,7 +655,7 @@ namespace rocRoller
                        && problemParams.types.pretileB.size() == 2)
                     {
                         AssertFatal(problemParams.types.transB == TransposeType::N,
-                                    "Pre-tiling scale B only supported for TransposeType::N");
+                                    "Pre-tiling B only supported for TransposeType::N");
 
                         auto const K     = problemParams.k;
                         auto const N     = problemParams.n;
