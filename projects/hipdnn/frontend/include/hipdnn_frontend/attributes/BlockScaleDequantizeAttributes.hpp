@@ -51,7 +51,7 @@ namespace hipdnn_frontend::graph
  *     .set_block_size({32})
  *     .set_is_negative_scale(false);
  *
- * auto y = graph.block_scale_dequantize(attr);
+ * auto y = graph.block_scale_dequantize(x, scale, attr);
  * @endcode
  */
 class BlockScaleDequantizeAttributes : public Attributes<BlockScaleDequantizeAttributes>
@@ -148,10 +148,7 @@ public:
         {
             return *this;
         }
-        if(static_cast<int32_t>(block_size.size()) < len)
-        {
-            block_size.resize(static_cast<size_t>(len));
-        }
+        block_size.resize(static_cast<size_t>(len));
         std::copy(values, values + len, block_size.begin());
         return *this;
     }

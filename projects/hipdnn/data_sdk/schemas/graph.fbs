@@ -19,7 +19,7 @@ include "sdpa_attributes.fbs";
 
 namespace hipdnn_data_sdk.data_objects;
 
-union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt, MatmulAttributes, RMSNormAttributes, LayernormAttributes, BlockScaleDequantizeAttributes, SdpaAttributes}
+union NodeAttributes {BatchnormInferenceAttributes, PointwiseAttributes, BatchnormBackwardAttributes, BatchnormAttributes, ConvolutionFwdAttributes, ConvolutionBwdAttributes, ConvolutionWrwAttributes, BatchnormInferenceAttributesVarianceExt, MatmulAttributes, RMSNormAttributes, LayernormAttributes, SdpaAttributes, BlockScaleDequantizeAttributes}
 
 table Node {
 	name: string;

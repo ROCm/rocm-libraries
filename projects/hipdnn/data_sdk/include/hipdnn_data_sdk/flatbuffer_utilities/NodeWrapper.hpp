@@ -97,6 +97,8 @@ public:
             return typeid(hipdnn_data_sdk::data_objects::LayernormAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
             return typeid(hipdnn_data_sdk::data_objects::RMSNormAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::SdpaAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
             return typeid(hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes);
         default:
