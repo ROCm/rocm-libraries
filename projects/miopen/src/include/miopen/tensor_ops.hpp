@@ -17,7 +17,7 @@ namespace miopen {
 
 struct Handle;
 
-MIOPEN_INTERNALS_EXPORT TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc);
+TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc);
 
 template <typename... TDescriptors>
 std::tuple<TDescriptors...>

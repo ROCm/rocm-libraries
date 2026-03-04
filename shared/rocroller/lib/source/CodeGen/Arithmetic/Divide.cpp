@@ -198,7 +198,7 @@ namespace rocRoller
 
         auto VCC = m_context->getVCC();
 
-        // Generated using the assembly_to_instructions.py script with the following HIP code:
+        // Adapted from the following HIP code:
         //  extern "C"
         //  __global__ void hello_world(long int * ptr, long int value1, long int value2)
         //  {
@@ -530,7 +530,7 @@ namespace rocRoller
         auto VCC  = m_context->getVCC();
         auto EXEC = m_context->getExec();
 
-        // Generated using the assembly_to_instructions.py script with the following HIP code:
+        // Adapted from the following HIP code:
         //  extern "C"
         //  __global__ void hello_world(long int * ptr, long int *value1, long int *value2)
         //  {
