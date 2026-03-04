@@ -108,11 +108,11 @@ struct data_layout_t
      */
     size_t get_full_rank() const;
     /**
-     * @return The spans of the logical index range along all its axes (length and batch).
+     * @return The spans of the logical index range along all its axes (length followed by batch axes).
      */
     std::vector<size_t> lengths_and_batches() const;
     /**
-     * @return The in-buffer strides associated with all (length and batch) axes.
+     * @return The in-buffer strides associated with all axes (length followed by batch axes).
      */
     std::vector<size_t> strides_and_distances() const;
     /**
@@ -330,8 +330,8 @@ private:
     axis_t&       operator[](size_t axis_idx);
 
     /**
-     * @return Flattened index of the layout's axis of largest stride
-     * (and non-trivial logical range)
+     * @return Flattened index of the layout's axis of largest in-buffer
+     * stride (and non-trivial logical range)
      */
     size_t slowest_varying_axis() const;
 
@@ -362,7 +362,8 @@ private:
      * the innermost length axis) are set.
      * @param[in] batches spans of the logical index range along all batch axes.
      * @param[in] distances in-buffer strides associated with all batch axes.
-     * If empty, default in-buffer strides are set.
+     * If empty, default in-buffer strides deduced from the last length axis are
+     * set.
      * @param[in] real_case_with_padding flag setting the in-buffer stride of the
      * layout's first non-contiguous axis to the value that is required in real
      * domain for real, in-place Discrete Fourier Transforms, if a default value
