@@ -39,9 +39,16 @@ private:
                        int64_t elementCount,
                        const void* arrayOfElements);
 
+    void setKnobSettingDescriptor(hipdnnBackendAttributeType_t attributeType,
+                                  int64_t elementCount,
+                                  const void* arrayOfElements);
+
 public:
     EngineConfigDescriptor();
     static constexpr int64_t INVALID_WORKSPACE_SIZE = -1;
+
+    /// Maximum number of knob choices that can be set on a single engine config.
+    static constexpr int64_t MAX_KNOB_CHOICES = 1024;
 
     void finalize() override;
 
