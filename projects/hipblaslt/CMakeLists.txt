@@ -15,6 +15,7 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
@@ -74,9 +75,8 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_TSAN "Build hipBLASLt with thread sanitizer enabled." OFF)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
-    option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
+    option(HIPBLASLT_ENABLE_YAML "Use YAML for parsing configuration files." OFF)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -154,7 +154,7 @@ if(HIPBLASLT_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED)
 endif()
 
-if(HIPBLASLT_ENABLE_LLVM)
+if(HIPBLASLT_ENABLE_YAML)
     find_package(LLVM REQUIRED)
 endif()
 
@@ -223,7 +223,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_MSGPACK)
+if(NOT HIPBLASLT_ENABLE_YAML)
     # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
     # Prefer 6.x (msgpack-cxx)
     find_package(msgpack-cxx CONFIG)
@@ -265,7 +265,7 @@ if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
-    if(HIPBLASLT_ENABLE_MSGPACK)
+    if(NOT HIPBLASLT_ENABLE_YAML)
         target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})
     endif()
     rocm_set_soversion(hipblaslt "${hipblaslt_SOVERSION}")
@@ -436,7 +436,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
             hipblaslt-bench-extop-amax
         COMPONENT benchmarks
     )
-    if(HIPBLASLT_ENABLE_LLVM)
+    if(HIPBLASLT_ENABLE_YAML)
         rocm_install(
             TARGETS
                 hipblaslt-sequence
