@@ -308,34 +308,6 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
         with timing_context("python_wsol_dump"):
             fast_yaml_dump(solutionStates, f)
 
-    # Validate custom writer against original yaml.dump
-    refFilename = filename + ".ref"
-    with open(refFilename, "w") as f:
-        f.write("- MinimumRequiredVersion: {}\n".format(__version__))
-        f.write("- ProblemSizes:\n")
-        if problemSizes:
-            for sizeRange in problemSizes.ranges:
-                f.write("  - Range: {}\n".format(sizeRange))
-            for problemExact in problemSizes.exacts:
-                f.write("  - Exact: {}\n".format(problemExact))
-        if biasTypeArgs:
-            f.write("- BiasTypeArgs: [{}]\n".format([btype.value for btype in biasTypeArgs.biasTypes]))
-        if activationArgs:
-            f.write("- ActivationArgs:\n")
-            for setting in activationArgs.settingList:
-                f.write("  - [Enum: %s]\n"%(setting.activationEnum))
-        yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
-
-    fastData = readYAML(filename)
-    refData = readYAML(refFilename)
-
-    if fastData != refData:
-        print("ERROR: Custom YAML writer output differs from yaml.dump for file: {}".format(filename))
-        print("Reference file kept at: {}".format(refFilename))
-        sys.exit(1)
-    else:
-        os.remove(refFilename)
-
 
 ###############################
 # Reading and parsing functions
