@@ -3,6 +3,7 @@
 
 #include "DescriptorFactory.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
 #include "EngineConfigDescriptor.hpp"
@@ -60,6 +61,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
         privateDesc = std::make_shared<KnobSettingDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR:
+        privateDesc = std::make_shared<ConvolutionBwdOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

@@ -28,6 +28,7 @@ add_executable(
     utilities/TestFlatbufferTensorAttributesUtils.cpp
     utilities/TestLoadGraphAndTensors.cpp
     utilities/TestLoggingUtils.cpp
+    utilities/TestLogRecorder.cpp
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
     utilities/TestSeeds.cpp
