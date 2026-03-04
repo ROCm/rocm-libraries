@@ -150,10 +150,10 @@ def start_shard(
                 str(shard_index),
                 "--rng-seed",
                 str(shard_seed),
-                "-r",
-                "junit",
-                "-o",
-                f"test_report/catch2_shard_{shard_index}.xml",
+                "--reporter",
+                f"junit::out=test_report/catch2_shard_{shard_index}.xml",
+                "--reporter",
+                "console::out=-::colour-mode=ansi",
             ]
         )
     elif test_type == "ctest":
