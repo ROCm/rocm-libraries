@@ -662,6 +662,17 @@ namespace rocRoller
                         auto const tileK = problemParams.types.pretileB[0];
                         auto const tileN = problemParams.types.pretileB[1];
 
+                        AssertFatal(
+                            K % tileK == 0,
+                            "B matrix dimension K must be divisible by pretileB tile size in K.",
+                            ShowValue(K),
+                            ShowValue(tileK));
+                        AssertFatal(
+                            N % tileN == 0,
+                            "B matrix dimension N must be divisible by pretileB tile size in N.",
+                            ShowValue(N),
+                            ShowValue(tileN));
+
                         descB
                             = TensorDescriptor(fromString<DataType>(problemParams.types.typeB),
                                                {K, N},

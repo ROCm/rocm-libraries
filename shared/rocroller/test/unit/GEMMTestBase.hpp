@@ -267,6 +267,14 @@ namespace GEMMTests
                 auto const packing = TypeInfo<PackedTypeB>::ElementBits / TypeInfo<TB>::ElementBits;
                 std::vector<size_t> sizes       = descB.sizes();
                 std::vector<size_t> preTileSize = gemm.pretileB;
+                AssertFatal(K % preTileSize[0] == 0,
+                            "B matrix dimension K must be divisible by pretileB tile size in K.",
+                            ShowValue(K),
+                            ShowValue(preTileSize[0]));
+                AssertFatal(N % preTileSize[1] == 0,
+                            "B matrix dimension N must be divisible by pretileB tile size in N.",
+                            ShowValue(N),
+                            ShowValue(preTileSize[1]));
                 if(packing > 1)
                 {
                     AssertFatal(sizes[0] % packing == 0,
