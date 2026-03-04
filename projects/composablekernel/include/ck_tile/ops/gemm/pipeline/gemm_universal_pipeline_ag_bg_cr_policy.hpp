@@ -865,7 +865,8 @@ struct UniversalGemmBasePolicy
         constexpr auto APackedSize      = numeric_traits<ADataType>::PackedSize;
         constexpr auto a_lds_block_desc = Derived::template MakeALdsBlockDescriptor<Problem>();
         constexpr index_t smem_size_a   = integer_least_multiple(
-            a_lds_block_desc.get_element_space_size() * sizeof(ADataType) / APackedSize, 16);
+            a_lds_block_desc.get_element_space_size() * lds_padded_sizeof<ADataType>() / APackedSize,
+            16);
         return smem_size_a;
     }
 
@@ -879,7 +880,8 @@ struct UniversalGemmBasePolicy
         constexpr auto BPackedSize                 = numeric_traits<BDataType>::PackedSize;
         constexpr auto b_lds_block_desc = Derived::template MakeBLdsBlockDescriptor<Problem>();
         constexpr index_t smem_size_b   = integer_least_multiple(
-            b_lds_block_desc.get_element_space_size() * sizeof(BDataType) / BPackedSize, 16);
+            b_lds_block_desc.get_element_space_size() * lds_padded_sizeof<BDataType>() / BPackedSize,
+            16);
         return smem_size_b;
     }
 
