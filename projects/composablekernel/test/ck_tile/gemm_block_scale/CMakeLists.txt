@@ -76,6 +76,21 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     )
     target_compile_options(test_tile_gemm_quant_abquant_preshuffle PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
+    add_gtest_executable(test_tile_gemm_quant_abquant_preshuffle_preshuffleQuant
+        test_gemm_quant_abquant_preshuffle_preshuffleQuant.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_abquant_preshuffle_preshuffleQuant PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    # ABQuant split-K tests
+    add_gtest_executable(test_tile_gemm_quant_abquant_splitk_decode
+        test_gemm_quant_abquant_splitk_decode.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_abquant_splitk_decode PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_abquant_splitk_prefill
+        test_gemm_quant_abquant_splitk_prefill.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_abquant_splitk_prefill PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
     add_gtest_executable(test_tile_gemm_quant_abquant_a4w4_base
         test_gemm_quant_abquant_a4w4_base.cpp
@@ -186,6 +201,47 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     )
     target_compile_options(test_tile_gemm_quant_bquant_preshuffleQuant_prefill_2d PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
+    # BQuant microscale tests
+    add_gtest_executable(test_tile_gemm_quant_bquant_microscale_rcr_1d_64 
+        test_gemm_quant_bquant_microscale_rcr_1d_64.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_microscale_rcr_1d_64 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_bquant_microscale_crr_1d_64 
+        test_gemm_quant_bquant_microscale_crr_1d_64.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_microscale_crr_1d_64 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_bquant_microscale_rrr_1d_64 
+        test_gemm_quant_bquant_microscale_rrr_1d_64.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_microscale_rrr_1d_64 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_bquant_microscale_ccr_1d_64 
+        test_gemm_quant_bquant_microscale_ccr_1d_64.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_microscale_ccr_1d_64 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_bquant_microscale_rcr_1d_128 
+        test_gemm_quant_bquant_microscale_rcr_1d_128.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_microscale_rcr_1d_128 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_bquant_microscale_crr_1d_128 
+        test_gemm_quant_bquant_microscale_crr_1d_128.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_microscale_crr_1d_128 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_bquant_microscale_rrr_1d_128 
+        test_gemm_quant_bquant_microscale_rrr_1d_128.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_microscale_rrr_1d_128 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
+    add_gtest_executable(test_tile_gemm_quant_bquant_microscale_ccr_1d_128 
+        test_gemm_quant_bquant_microscale_ccr_1d_128.cpp
+    )
+    target_compile_options(test_tile_gemm_quant_bquant_microscale_ccr_1d_128 PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+
     # RowColQuant tests
     add_gtest_executable(test_tile_gemm_quant_rowcol 
         test_gemm_quant_rowcol.cpp
@@ -223,7 +279,14 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         test_tile_gemm_quant_abquant_base
         test_tile_gemm_quant_abquant_padding
         test_tile_gemm_quant_abquant_preshuffle
+        test_tile_gemm_quant_abquant_preshuffle_preshuffleQuant
         test_tile_gemm_quant_abquant_preshuffleQuant
+        test_tile_gemm_quant_abquant_a4w4_base
+        test_tile_gemm_quant_abquant_a4w4_padding
+        test_tile_gemm_quant_abquant_a4w4_preshuffle
+        # ABQuant split-K tests
+        test_tile_gemm_quant_abquant_splitk_decode
+        test_tile_gemm_quant_abquant_splitk_prefill
         # BQuant tests
         test_tile_gemm_quant_bquant_1d_128
         test_tile_gemm_quant_bquant_1d_64
@@ -231,6 +294,9 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
         test_tile_gemm_quant_bquant_2d_medium_n
         test_tile_gemm_quant_bquant_2d_large_n
         test_tile_gemm_quant_bquant_transpose
+        # BQuant split-K tests
+        test_tile_gemm_quant_bquant_splitk_decode
+        test_tile_gemm_quant_bquant_splitk_prefill
         # BQuant preshuffle tests
         test_tile_gemm_quant_bquant_preshuffle_decode_1d
         test_tile_gemm_quant_bquant_preshuffle_prefill_1d

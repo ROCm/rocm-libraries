@@ -55,7 +55,13 @@ public:
     || defined(__SPIRV__)
         bool constexpr bndCtrl = false;
 #else
+    // Temporary fix: issue with dpp bound_ctrl for debug build. Compiler will not define macros
+    // like __GFX10__ and so on.
+    #if defined(NDEBUG) || !defined(_DEBUG)
         bool constexpr bndCtrl = true;
+    #else
+        bool constexpr bndCtrl = false;
+    #endif
 #endif
 
         if(VirtualWaveSize > 1)

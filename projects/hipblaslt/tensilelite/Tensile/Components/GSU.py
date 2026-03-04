@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -127,7 +127,7 @@ class GSU(Component):
         return module
 
     @abc.abstractmethod
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         pass
 
     @abc.abstractmethod
@@ -240,7 +240,7 @@ class GSUOff(GSU):
         module = Module("GSU Off computeStoreSrdStart")
         return module
 
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         module = Module("GSU Off noLoadLoop")
         return module
 
@@ -345,7 +345,7 @@ class GSUOn(GSU):
 
         tc = tP["tensorChar"]
         depthU = kernel["DepthU"]
-        _DepthU = kernel["_DepthU%s" % tc]
+        _DepthU = kernel["_DepthU%s"%tc] if tc in ["MXSA", "MXSB"] else kernel["_DepthU"]
         # swizzle
         if (tP["isSwizzled"] and tc == 'A'):
             _DepthU = (_DepthU * 16)
@@ -361,7 +361,7 @@ class GSUOn(GSU):
             elif tP["isM"]:
                 divider = 8
             if divider != 1:
-                depthUDiv = depthU // divider
+                _DepthU = depthU // divider
                 gsuOffsetStr = "gsuOffset = DepthU/%s*bpeGR*GSUSumIdx"%(divider)
         gsucLabelStr = "GSUC_%s"%( "A" if tP["isA"] else "B" if tP["isB"] else "M" )
         gsucLabel    = Label(label=writer.labels.getNameInc(gsucLabelStr), comment="")
@@ -435,7 +435,8 @@ class GSUOn(GSU):
                 elif tc == "B" and kernel["ProblemType"]["SwizzleTensorB"]:
                     mult_MI_Dim = mult_MI_Dim * 16 # MI_N = 16
 
-                duBpe = int(kernel["_DepthU%s" % tc] * tP["bpeGR"] * mult_MI_Dim)
+                _DepthU = kernel["_DepthU%s"%tc] if tc in ["MXSA", "MXSB"] else kernel["_DepthU"]
+                duBpe = int(_DepthU * tP["bpeGR"] * mult_MI_Dim)
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
                 module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=duBpe, comment="GSU*DepthU*BpeGR*MI_M"))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
@@ -452,6 +453,12 @@ class GSUOn(GSU):
                 else:
                     module.add(SCMovB32(dst=m, src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
                     module.add(SMulI32(dst=incr, src0=m, src1=stride, comment="incr%s unrollIdx)"%(tc) ))
+
+                if kernel["ProblemType"]["Sparse"]:
+                    if tP["is_sparse"]:
+                        module.add(SLShiftRightB32(dst=incr, shiftHex=hex(log2(2)), src=incr))
+                    elif tP["isM"]:
+                        module.add(SLShiftRightB32(dst=incr, shiftHex=hex(log2(8)), src=incr))
 
         return module
 
@@ -531,7 +538,7 @@ class GSUOn(GSU):
         module.add(self.computeStoreSrdStartCommon(writer, kernel))
         return module
 
-    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack):
+    def noLoadLoop(self, writer, kernel, tensorParametersA, tensorParametersB, pack, packPre):
         module = Module("GSU On noLoadLoop")
 
         isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
@@ -568,10 +575,12 @@ class GSUOn(GSU):
                 # last NLL or  pack DTV case, no deep copy for pack
                 # pack code for local prefetch is generated in noLoadLoopBody and used for DTV even
                 deepCopyPack = pack
+                deepCopyPackPre = packPre
               else:
                 # deepCopy packCode for OptNLL noLoadLoop
                 deepCopyPack = deepcopy(pack)
-              noLoadLoopModules.add(writer.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=True, isNGLL=False, pack=deepCopyPack, NLLindex=NLLindex, NLLnum=NLLnum))
+                deepCopyPackPre = deepcopy(packPre)
+              noLoadLoopModules.add(writer.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=True, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
               writer.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
 
             acclen = countInstruction(noLoadLoopModules)

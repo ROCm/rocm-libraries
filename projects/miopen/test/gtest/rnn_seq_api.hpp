@@ -229,8 +229,7 @@ struct verify_rnn_api_base
         std::stringstream ss{};
         ss << "./bin/MIOpenDriver rnn_seq ";
 
-        ss << " -F 0 "
-           << " -m ";
+        ss << " -F 0 " << " -m ";
 
         switch(rnnDesc.rnnMode)
         {

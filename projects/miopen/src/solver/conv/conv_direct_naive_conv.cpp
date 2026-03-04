@@ -336,6 +336,61 @@ void conv_internal::DebugPrintTensorStrides(const TensorDescriptor& inDesc,
     printOneStrideVec("outDesc = ", outDesc.GetStrides());
 }
 
+// Maximum grid size to avoid uint32_t overflow in hipExtModuleLaunchKernel.
+// The HIP API uses uint32_t for grid dimensions, so we must ensure:
+// grid_size * block_size < 2^32
+// max_grid_size = 2^32 / block_size = 4,294,967,296 / 256 = 16,777,216
+constexpr size_t MAX_GRID_SIZE = static_cast<size_t>(16) * 1024 * 1024; // 16M work groups max
+
+// Helper function to calculate batch chunk size to prevent grid size overflow.
+// Keeps the original if/else structure for layout handling.
+// Parameters are passed by reference for speed.
+inline void
+CalculateBatchChunkSize(size_t grid_size_per_batch, int n, int& batch_chunk_size, size_t& grid_size)
+{
+    batch_chunk_size = static_cast<int>(MAX_GRID_SIZE / grid_size_per_batch);
+    if(batch_chunk_size < 1)
+        batch_chunk_size = 1;
+    if(batch_chunk_size > n)
+        batch_chunk_size = n;
+
+    grid_size = grid_size_per_batch * batch_chunk_size;
+}
+
+// Helper function to prepare batch iteration for chunked kernel execution.
+// Calculates offsets, pointers, grid size and updates kernel configuration.
+// Parameters are passed by reference for speed.
+inline void PrepareBatchedKernelRun(int batch_start,
+                                    int batch_chunk_size,
+                                    int n,
+                                    size_t in_batch_stride,
+                                    size_t out_batch_stride,
+                                    size_t in_type_size,
+                                    size_t out_type_size,
+                                    size_t grid_size_per_batch,
+                                    size_t block_size,
+                                    const void* in_base,
+                                    void* out_base,
+                                    Kernel& kern_copy,
+                                    const void*& in_ptr,
+                                    void*& out_ptr,
+                                    int& current_batch_size)
+{
+    current_batch_size = std::min(batch_chunk_size, n - batch_start);
+
+    // Calculate byte offsets for input and output tensors
+    size_t in_offset_bytes  = static_cast<size_t>(batch_start) * in_batch_stride * in_type_size;
+    size_t out_offset_bytes = static_cast<size_t>(batch_start) * out_batch_stride * out_type_size;
+
+    // Cast to char* for byte-level pointer arithmetic
+    in_ptr  = static_cast<const char*>(in_base) + in_offset_bytes;
+    out_ptr = static_cast<char*>(out_base) + out_offset_bytes;
+
+    // Calculate and set grid size for this chunk
+    size_t current_grid_size = grid_size_per_batch * current_batch_size;
+    kern_copy.gdims[0]       = current_grid_size * block_size;
+}
+
 namespace conv_internal {
 ::miopen::solver::ConvSolution
 GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemDescription& problem)
@@ -361,18 +416,26 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t block_size = 256;
-    size_t grid_size  = 1;
-    if(problem.IsLayoutDefault())
+    size_t block_size          = 256;
+    int batch_chunk_size       = 1;
+    size_t grid_size_per_batch = 1;
+    size_t grid_size           = 1;
+    bool is_layout_default     = problem.IsLayoutDefault();
+
+    if(is_layout_default)
     {
-        grid_size = static_cast<size_t>(n) * k;
+        grid_size_per_batch = static_cast<size_t>(k);
+        CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else if(problem.IsLayoutNHWC())
     {
-        grid_size = static_cast<size_t>(n) * ho;
+        grid_size_per_batch = static_cast<size_t>(ho);
+        CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else
+    {
         MIOPEN_THROW("Unsupported layout");
+    }
 
     KernelInfo kernel;
 
@@ -394,6 +457,10 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
 
     int G_stride_idx = GetGroupStrideIndex(problem);
 
+    // Capture tensor element sizes for offset calculation
+    const auto in_type_size  = GetTypeSize(problem.GetInDataType());
+    const auto out_type_size = GetTypeSize(problem.GetOutDataType());
+
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
@@ -408,65 +475,128 @@ GetConv2DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
                 MakeStrideArray<5>(SplitWeiStrideKtoGK(k_per_group, tensors.wDesc.GetStrides()));
             auto out_strides = MakeStrideArray<5>(
                 SplitStrideCtoGC(group, tensors.outDesc.GetStrides(), G_stride_idx));
+
+            // Get batch strides for offset calculation
+            const auto& orig_in_strides  = tensors.inDesc.GetStrides();
+            const auto& orig_out_strides = tensors.outDesc.GetStrides();
+            size_t in_batch_stride       = orig_in_strides[0];
+            size_t out_batch_stride      = orig_out_strides[0];
+
             if(is_f8)
             {
-                handle.Run(kern)(tensors.in,
-                                 tensors.w,
-                                 tensors.out,
-                                 in_strides,
-                                 wei_strides,
-                                 out_strides,
-                                 hi,
-                                 wi,
-                                 n,
-                                 k_per_group,
-                                 c_per_group,
-                                 ho,
-                                 wo,
-                                 sy,
-                                 sx,
-                                 dy,
-                                 dx,
-                                 py,
-                                 px,
-                                 fy,
-                                 fx,
-                                 group,
-                                 problem.GetConv().attribute.fp8rounding_mode.Get() ==
-                                     miopenF8RoundingModeStochastic,
-                                 problem.GetConv().attribute.fp8rounding_mode.GetSeed());
+                // FP8 path: process batches in chunks
+                for(int batch_start = 0; batch_start < n; batch_start += batch_chunk_size)
+                {
+                    const void* in_ptr = nullptr;
+                    void* out_ptr      = nullptr;
+                    int current_batch_size;
+                    auto kern_copy = kern;
+
+                    PrepareBatchedKernelRun(batch_start,
+                                            batch_chunk_size,
+                                            n,
+                                            in_batch_stride,
+                                            out_batch_stride,
+                                            in_type_size,
+                                            out_type_size,
+                                            grid_size_per_batch,
+                                            block_size,
+                                            tensors.in,
+                                            tensors.out,
+                                            kern_copy,
+                                            in_ptr,
+                                            out_ptr,
+                                            current_batch_size);
+
+                    handle.Run(kern_copy)(in_ptr,
+                                          tensors.w,
+                                          out_ptr,
+                                          in_strides,
+                                          wei_strides,
+                                          out_strides,
+                                          hi,
+                                          wi,
+                                          current_batch_size,
+                                          k_per_group,
+                                          c_per_group,
+                                          ho,
+                                          wo,
+                                          sy,
+                                          sx,
+                                          dy,
+                                          dx,
+                                          py,
+                                          px,
+                                          fy,
+                                          fx,
+                                          group,
+                                          problem.GetConv().attribute.fp8rounding_mode.Get() ==
+                                              miopenF8RoundingModeStochastic,
+                                          problem.GetConv().attribute.fp8rounding_mode.GetSeed());
+
+                    if(handle.IsProfilingEnabled())
+                        elapsed += handle.GetKernelTime();
+                }
             }
             else
             {
                 double alpha_val = data_ctx.alpha.GetAsDouble();
                 double beta_val  = data_ctx.beta.GetAsDouble();
-                handle.Run(kern)(tensors.in,
-                                 tensors.w,
-                                 alpha_val,
-                                 beta_val,
-                                 tensors.out,
-                                 in_strides,
-                                 wei_strides,
-                                 out_strides,
-                                 hi,
-                                 wi,
-                                 n,
-                                 k_per_group,
-                                 c_per_group,
-                                 ho,
-                                 wo,
-                                 sy,
-                                 sx,
-                                 dy,
-                                 dx,
-                                 py,
-                                 px,
-                                 fy,
-                                 fx,
-                                 group);
+
+                // Process batches in chunks to avoid exceeding GPU grid limits
+                for(int batch_start = 0; batch_start < n; batch_start += batch_chunk_size)
+                {
+                    const void* in_ptr = nullptr;
+                    void* out_ptr      = nullptr;
+                    int current_batch_size;
+                    auto kern_copy = kern;
+
+                    PrepareBatchedKernelRun(batch_start,
+                                            batch_chunk_size,
+                                            n,
+                                            in_batch_stride,
+                                            out_batch_stride,
+                                            in_type_size,
+                                            out_type_size,
+                                            grid_size_per_batch,
+                                            block_size,
+                                            tensors.in,
+                                            tensors.out,
+                                            kern_copy,
+                                            in_ptr,
+                                            out_ptr,
+                                            current_batch_size);
+
+                    handle.Run(kern_copy)(in_ptr,
+                                          tensors.w,
+                                          alpha_val,
+                                          beta_val,
+                                          out_ptr,
+                                          in_strides,
+                                          wei_strides,
+                                          out_strides,
+                                          hi,
+                                          wi,
+                                          current_batch_size,
+                                          k_per_group,
+                                          c_per_group,
+                                          ho,
+                                          wo,
+                                          sy,
+                                          sx,
+                                          dy,
+                                          dx,
+                                          py,
+                                          px,
+                                          fy,
+                                          fx,
+                                          group);
+
+                    if(handle.IsProfilingEnabled())
+                        elapsed += handle.GetKernelTime();
+                }
             }
-            if(handle.IsProfilingEnabled())
-                elapsed += handle.GetKernelTime();
+
             if(handle.IsProfilingEnabled())
             {
                 handle.ResetKernelTime();
@@ -509,18 +639,26 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
     int c_per_group = c / group;
     int k_per_group = k / group;
 
-    size_t block_size = 256;
-    size_t grid_size  = 1;
-    if(problem.IsLayoutDefault())
+    size_t block_size          = 256;
+    int batch_chunk_size       = 1;
+    size_t grid_size_per_batch = 1;
+    size_t grid_size           = 1;
+    bool is_layout_default     = problem.IsLayoutDefault();
+
+    if(is_layout_default)
     {
-        grid_size = static_cast<size_t>(n) * k;
+        grid_size_per_batch = static_cast<size_t>(k);
+        CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else if(problem.IsLayoutNHWC())
     {
-        grid_size = static_cast<size_t>(group) * n * do_;
+        grid_size_per_batch = static_cast<size_t>(group) * do_;
+        CalculateBatchChunkSize(grid_size_per_batch, n, batch_chunk_size, grid_size);
     }
     else
+    {
         MIOPEN_THROW("Unsupported layout");
+    }
 
     KernelInfo kernel;
 
@@ -540,6 +678,10 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
 
     int G_stride_idx = GetGroupStrideIndex(problem);
 
+    // Capture tensor element sizes for offset calculation
+    const auto in_type_size  = GetTypeSize(problem.GetInDataType());
+    const auto out_type_size = GetTypeSize(problem.GetOutDataType());
+
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         const auto kern = kernels[0];
         return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
@@ -557,39 +699,72 @@ GetConv3DFWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
 
             double alpha_val = data_ctx.alpha.GetAsDouble();
             double beta_val  = data_ctx.beta.GetAsDouble();
-            handle.Run(kern)(tensors.in,
-                             tensors.w,
-                             alpha_val,
-                             beta_val,
-                             tensors.out,
-                             in_strides,
-                             wei_strides,
-                             out_strides,
-                             di,
-                             hi,
-                             wi,
-                             n,
-                             k_per_group,
-                             c_per_group,
-                             do_,
-                             ho,
-                             wo,
-                             sz,
-                             sy,
-                             sx,
-                             dz,
-                             dy,
-                             dx,
-                             pz,
-                             py,
-                             px,
-                             fz,
-                             fy,
-                             fx,
-                             group);
 
-            if(handle.IsProfilingEnabled())
-                elapsed += handle.GetKernelTime();
+            // Get batch strides for offset calculation
+            const auto& orig_in_strides  = tensors.inDesc.GetStrides();
+            const auto& orig_out_strides = tensors.outDesc.GetStrides();
+            size_t in_batch_stride       = orig_in_strides[0];
+            size_t out_batch_stride      = orig_out_strides[0];
+
+            // Process batches in chunks to avoid exceeding GPU grid limits
+            for(int batch_start = 0; batch_start < n; batch_start += batch_chunk_size)
+            {
+                const void* in_ptr = nullptr;
+                void* out_ptr      = nullptr;
+                int current_batch_size;
+                auto kern_copy = kern;
+
+                PrepareBatchedKernelRun(batch_start,
+                                        batch_chunk_size,
+                                        n,
+                                        in_batch_stride,
+                                        out_batch_stride,
+                                        in_type_size,
+                                        out_type_size,
+                                        grid_size_per_batch,
+                                        block_size,
+                                        tensors.in,
+                                        tensors.out,
+                                        kern_copy,
+                                        in_ptr,
+                                        out_ptr,
+                                        current_batch_size);
+
+                handle.Run(kern_copy)(in_ptr,
+                                      tensors.w,
+                                      alpha_val,
+                                      beta_val,
+                                      out_ptr,
+                                      in_strides,
+                                      wei_strides,
+                                      out_strides,
+                                      di,
+                                      hi,
+                                      wi,
+                                      current_batch_size,
+                                      k_per_group,
+                                      c_per_group,
+                                      do_,
+                                      ho,
+                                      wo,
+                                      sz,
+                                      sy,
+                                      sx,
+                                      dz,
+                                      dy,
+                                      dx,
+                                      pz,
+                                      py,
+                                      px,
+                                      fz,
+                                      fy,
+                                      fx,
+                                      group);
+
+                if(handle.IsProfilingEnabled())
+                    elapsed += handle.GetKernelTime();
+            }
+
             if(handle.IsProfilingEnabled())
             {
                 handle.ResetKernelTime();

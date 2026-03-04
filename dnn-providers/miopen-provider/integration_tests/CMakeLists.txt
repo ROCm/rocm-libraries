@@ -3,10 +3,8 @@
 
 find_package(Threads REQUIRED)
 
-if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    find_package(hipdnn_test_sdk CONFIG REQUIRED)
-    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
-endif()
+find_package(hipdnn_test_sdk CONFIG REQUIRED)
+find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 
 add_executable(
     miopen_plugin_integration_tests
@@ -23,9 +21,11 @@ add_executable(
     IntegrationGpuConvFwdBiasActiv.cpp
     IntegrationGpuConvBackwardData.cpp
     IntegrationGpuConvBackwardWeights.cpp
+    IntegrationGpuBenchmarkingKnob.cpp
+    IntegrationGpuDeterministic.cpp
 )
 
-target_compile_options(miopen_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(miopen_plugin_integration_tests PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
 
 # To use the build tree plugin, we use the path relative to the test binary instead of the installed
 # libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
@@ -42,8 +42,6 @@ target_link_libraries(
 # Ensure that the miopen_plugin is built before the integration tests
 add_dependencies(miopen_plugin_integration_tests miopen_plugin)
 
-if(BUILD_PLUGIN_AS_DEPENDENCY)
-    clang_tidy_check(miopen_plugin_integration_tests)
-endif()
+clang_tidy_check(miopen_plugin_integration_tests)
 
 add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
