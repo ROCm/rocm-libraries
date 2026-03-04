@@ -346,8 +346,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                 // The following kernel does the `y += A * x` computation
                 static constexpr int thread_x = rocblas_gemv_bx();
                 static constexpr int block_y  = 8;
-                // ASAN: cap at 256 threads (128*2) — ASAN inflates VGPRs beyond 256,
-                // limiting gfx942 to 1 wave/SIMD = max 256 threads per workgroup
                 static constexpr int thread_y            = rocblas::conditional_v<rocblas_enable_asan, 2, is_float ? 8 : 4>;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
@@ -397,8 +395,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                     && n <= dgemvn_gfx906_upper_threshold))))))
         {
             static constexpr int GEMVN_DIM_X = 32;
-            // ASAN: cap at 256 threads (32*8) — double-precision kernels hit 268 VGPRs
-            // which only allows 1 wave/SIMD × 4 SIMDs = 256 threads max on gfx942
             static constexpr int GEMVN_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 8, 16>;
             rocblas_int          blocks      = (m - 1) / (GEMVN_DIM_X * 4) + 1;
             if(std::is_same_v<Tex, rocblas_double_complex>)
@@ -434,8 +430,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         {
             // GEMVN_DIM_Y must be at least 4, 8 * 8 is very slow only 40Gflop/s
             static constexpr int GEMVN_DIM_X = 64;
-            // ASAN: cap at 256 threads (64*4) — ASAN inflates VGPRs beyond 256,
-            // limiting gfx942 to 1 wave/SIMD = max 256 threads per workgroup
             static constexpr int GEMVN_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
             rocblas_int          blocks      = (m - 1) / (GEMVN_DIM_X * 4) + 1;
             if(std::is_same_v<Tex, rocblas_double_complex>)
@@ -546,8 +540,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             if constexpr(is_float)
             {
                 const int TILE_DIM_X = 16;
-                // ASAN: cap at 256 threads (16*16) — ASAN inflates VGPRs beyond 256,
-                // limiting gfx942 to 1 wave/SIMD = max 256 threads per workgroup
                 const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 64>;
                 dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
                 dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
@@ -563,7 +555,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             else if constexpr(is_double || is_complex_float)
             {
                 const int TILE_DIM_X = 16;
-                const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 32>; // ASAN: 16*16=256 (was 32)
+                const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 32>;
                 dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
                 dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
                 if(handle->pointer_mode == rocblas_pointer_mode_device)
@@ -710,8 +702,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                 // The following kernel does the `y += A * x` computation
                 static constexpr int thread_x = rocblas_gemv_bx();
                 static constexpr int block_y  = is_float ? 8 : 16;
-                // ASAN: cap at 256 threads — ASAN inflates VGPRs beyond 256,
-                // limiting gfx942 to 1 wave/SIMD = max 256 threads per workgroup
                 static constexpr int thread_y            = rocblas::conditional_v<rocblas_enable_asan, 2, is_float ? 8 : 4>;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
@@ -815,8 +805,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else
         {
             //Number of threads per block
-            // ASAN: cap at 256 threads — ASAN inflates VGPRs beyond 256,
-            // limiting gfx942 to 1 wave/SIMD = max 256 threads per workgroup
             static constexpr int NB = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
             dim3                 gemvt_grid(n, 1, batches);
             dim3                 gemvt_threads(NB);
@@ -923,8 +911,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             if constexpr(is_float)
             {
                 const int TILE_DIM_X = 16;
-                // ASAN: cap at 256 threads (16*16) — ASAN inflates VGPRs beyond 256,
-                // limiting gfx942 to 1 wave/SIMD = max 256 threads per workgroup
                 const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 64>;
                 dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
                 dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
@@ -940,7 +926,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             else if constexpr(is_double || is_complex_float)
             {
                 const int TILE_DIM_X = 16;
-                const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 32>; // ASAN: 16*16=256 (was 32)
+                const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 32>;
                 dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
                 dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
                 if(handle->pointer_mode == rocblas_pointer_mode_device)
@@ -1084,8 +1070,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                 // The following kernel does the `y += A * x` computation
                 static constexpr int thread_x = rocblas_gemv_bx();
                 static constexpr int block_y  = is_float ? 8 : 16;
-                // ASAN: cap at 256 threads — ASAN inflates VGPRs beyond 256,
-                // limiting gfx942 to 1 wave/SIMD = max 256 threads per workgroup
                 static constexpr int thread_y            = rocblas::conditional_v<rocblas_enable_asan, 2, is_float ? 8 : 4>;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
@@ -1150,8 +1134,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else
         {
             //Number of threads per block
-            // ASAN: cap at 256 threads — ASAN inflates VGPRs beyond 256,
-            // limiting gfx942 to 1 wave/SIMD = max 256 threads per workgroup
             static constexpr int NB = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
             dim3                 gemvt_grid(n, 1, batches);
             dim3                 gemvt_threads(NB);

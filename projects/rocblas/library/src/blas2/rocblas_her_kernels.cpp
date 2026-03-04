@@ -158,7 +158,6 @@ rocblas_status rocblas_her_launcher(rocblas_handle handle,
     her_grid, her_threads, 0, rocblas_stream, uplo == rocblas_fill_upper, n, alpha_, x, shift_x, \
         incx, stride_x, A, lda, offset_A, stride_A, batch_count
 
-    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
     static constexpr int HER_DIM_X = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
 
     dim3 her_grid(n, 1, batches);

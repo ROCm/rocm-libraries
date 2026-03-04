@@ -31,8 +31,6 @@
 
 #include "asan_helpers.hpp"
 
-// ASAN: cap total threads per block at 256 where kernels are register-limited on gfx942.
-
 // L1 NB
 #define ROCBLAS_ASUM_NB 512
 #define ROCBLAS_AXPY_NB 256
@@ -80,7 +78,6 @@
 #define ROCBLAS_CHER2K_NB 32
 #define ROCBLAS_ZHER2K_NB 16
 
-// ASAN: 16x16=256 threads (in-place TRMM launches dim3(NB,NB)).
 #define ROCBLAS_SDTRMM_NB rocblas::conditional_v<rocblas_enable_asan, 16, 32>
 #define ROCBLAS_CZTRMM_NB 16
 #define ROCBLAS_TRMM_OUTOFPLACE_NB 512

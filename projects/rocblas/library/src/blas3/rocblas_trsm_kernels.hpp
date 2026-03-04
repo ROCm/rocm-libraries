@@ -195,7 +195,6 @@ rocblas_status rocblas_copy_block_unit(rocblas_handle handle,
                                        rocblas_stride offset_dst = 0)
 {
     static constexpr int COPY_DIM_X = 128;
-    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
     static constexpr int COPY_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
 
     int batches = handle->getBatchGridDim((int)batch_count);
@@ -273,7 +272,6 @@ rocblas_status set_block_unit(rocblas_handle handle,
                               rocblas_stride offset_src)
 {
     static constexpr int DIM_X = 128;
-    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
     static constexpr int DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
 
     int         batches = handle->getBatchGridDim((int)batch_count);

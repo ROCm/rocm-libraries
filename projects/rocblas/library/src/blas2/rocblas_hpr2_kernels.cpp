@@ -132,7 +132,6 @@ rocblas_status rocblas_internal_hpr2_launcher(rocblas_handle handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     static constexpr int HPR2_DIM_X = 64;
-    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
     static constexpr int HPR2_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
     static constexpr int N_TX       = 2; // x items per x thread
 

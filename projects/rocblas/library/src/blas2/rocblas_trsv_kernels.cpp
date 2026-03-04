@@ -879,7 +879,6 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
-    // ASAN: cap at 256 threads (64*4) — ASAN inflates VGPRs, limiting gfx942 to 1 wave/SIMD
     constexpr rocblas_int DIM_Y  = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
     rocblas_int           blocks = (n + DIM_X - 1) / DIM_X;
     dim3                  threads(DIM_X, DIM_Y, 1);

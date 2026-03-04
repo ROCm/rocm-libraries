@@ -350,7 +350,6 @@ rocblas_status rocblas_internal_tbmv_launcher(rocblas_handle    handle,
 
     // (gemv) TBMVX_DIM_Y must be at least 4, 8 * 8 is very slow only 40Gflop/s
     static constexpr int TBMVX_DIM_X = 64;
-    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
     static constexpr int TBMVX_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
     rocblas_int          blocks      = (n - 1) / (TBMVX_DIM_X) + 1;
     dim3                 tbmvx_grid(blocks, 1, batches);

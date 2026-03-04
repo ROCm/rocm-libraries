@@ -236,7 +236,6 @@ rocblas_status rocblas_internal_trmv_launcher(rocblas_handle    handle,
 
     static constexpr rocblas_int NB          = ROCBLAS_TRMV_NB;
     constexpr int                TRMVN_DIM_X = 64;
-    // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
     constexpr int                TRMVN_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
 
     dim3 trmvn_grid((n - 1) / TRMVN_DIM_X + 1, 1, batches);
