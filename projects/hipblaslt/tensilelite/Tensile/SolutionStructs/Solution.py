@@ -2391,7 +2391,7 @@ class Solution(collections.abc.Mapping):
           maxLRVWA = 32
         if state["LocalReadVectorWidthA"] == -1:
           autoLRVWA = True
-          if state["TransposeLDS"] and (not state["DirectToLds"]):
+          if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeA"].numBytes() > Solution.MAX_NUM_DS_LOAD_BYTES):
             state["LocalReadVectorWidthA"] = maxLRVWA
           else:
             state["LocalReadVectorWidthA"] = min(state["MIInputPerThread"], maxLRVWA)
@@ -2428,7 +2428,7 @@ class Solution(collections.abc.Mapping):
           maxLRVWB = 32
         if state["LocalReadVectorWidthB"] == -1:
           autoLRVWB = True
-          if state["TransposeLDS"] and (not state["DirectToLds"]):
+          if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["MacDataTypeB"].numBytes() > Solution.MAX_NUM_DS_LOAD_BYTES):
             state["LocalReadVectorWidthB"] = maxLRVWB
           else:
             state["LocalReadVectorWidthB"] = min(state["MIInputPerThread"], maxLRVWB)
