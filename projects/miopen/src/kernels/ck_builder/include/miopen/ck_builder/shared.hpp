@@ -14,6 +14,8 @@ namespace conv {
 namespace ck_builder {
 namespace instance {
 
+namespace ckb = ck_tile::builder;
+
 template <typename Builder>
 concept is_valid_builder =
     // Verify that Builder is a class type
@@ -23,6 +25,10 @@ concept is_valid_builder =
     std::is_class_v<typename Builder::Instance> &&
 
     ck_tile::reflect::HasInstanceTraits<typename Builder::Instance>;
+
+template <auto KernelDescriptor>
+concept is_valid_kernel_instance =
+    is_valid_builder<ckb::ConvBuilder<KernelDescriptor.signature, KernelDescriptor.algorithm>>;
 } // namespace instance
 } // namespace ck_builder
 } // namespace conv

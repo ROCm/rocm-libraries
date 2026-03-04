@@ -20,14 +20,14 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from Tensile.Components.CMSValidator import verify_grs_not_too_early
+from Tensile.Components.CMSValidator import add_gr_not_too_early_constraints
 from rocisa.instruction import SBarrier, SWaitCnt
 from cms_validation_base import CMSValidationTestBase
 
 class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
     """
     Tests for the Timeline-based verify_grs_not_too_early validation.
-    
+
     num_vmfma = 8 for the default kernel (MIWaveTileA=2, MIWaveTileB=2, DepthU=64, MI[2]=32).
     Valid vmfma indices are [-1, 7].
 
@@ -35,8 +35,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
     paired entries: even indices are m0-pointer-updates (ignored), odd indices are actual
     buffer_loads. For example, GRA: [[3, 5]] means m0-update at 3, load at 5.
     """
-    def validation_function(self, sched, kernel_dict, codePathIdx):
-        return verify_grs_not_too_early(sched, kernel_dict, codePathIdx)
+    validator_passes = [add_gr_not_too_early_constraints]
 
     def setUp(self):
         super().setUp()
@@ -716,5 +715,5 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         self.validate(
             optSchedule, syncCode, 1, None, None, 0,
             "GRB @ idx=3 is issued too early. "
-            "Must be issued after idx=7, which is when LRB0 is guaranteed done."
+            "Must be issued after idx=-1 (of next iteration), which is when LRB0 is guaranteed done."
         )
