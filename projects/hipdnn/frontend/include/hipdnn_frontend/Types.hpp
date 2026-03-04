@@ -21,6 +21,7 @@
 #include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
 
@@ -135,6 +136,21 @@ enum class DataType
     FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
+
+enum class DiagonalAlignment
+{
+    TOP_LEFT = 0,
+    BOTTOM_RIGHT = 1,
+};
+typedef DiagonalAlignment DiagonalAlignment_t; // NOLINT(readability-identifier-naming)
+
+enum class AttentionImplementation
+{
+    AUTO = 0,
+    COMPOSITE = 1,
+    UNIFIED = 2,
+};
+typedef AttentionImplementation AttentionImplementation_t; // NOLINT(readability-identifier-naming)
 
 /**
  * @enum HeuristicMode
@@ -348,6 +364,65 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP8_E5M2;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
+    }
+}
+
+inline hipdnn_data_sdk::data_objects::DiagonalAlignment toSdkType(const DiagonalAlignment& type)
+{
+    switch(type)
+    {
+    case DiagonalAlignment::TOP_LEFT:
+        return hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+    case DiagonalAlignment::BOTTOM_RIGHT:
+        return hipdnn_data_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    default:
+        return hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+    }
+}
+
+inline hipdnn_frontend::DiagonalAlignment
+    fromSdkType(const hipdnn_data_sdk::data_objects::DiagonalAlignment& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT:
+        return hipdnn_frontend::DiagonalAlignment::TOP_LEFT;
+    case hipdnn_data_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT:
+        return hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT;
+    default:
+        return hipdnn_frontend::DiagonalAlignment::TOP_LEFT;
+    }
+}
+
+inline hipdnn_data_sdk::data_objects::AttentionImplementation
+    toSdkType(const AttentionImplementation& type)
+{
+    switch(type)
+    {
+    case AttentionImplementation::AUTO:
+        return hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO;
+    case AttentionImplementation::COMPOSITE:
+        return hipdnn_data_sdk::data_objects::AttentionImplementation::COMPOSITE;
+    case AttentionImplementation::UNIFIED:
+        return hipdnn_data_sdk::data_objects::AttentionImplementation::UNIFIED;
+    default:
+        return hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO;
+    }
+}
+
+inline hipdnn_frontend::AttentionImplementation
+    fromSdkType(const hipdnn_data_sdk::data_objects::AttentionImplementation& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO:
+        return hipdnn_frontend::AttentionImplementation::AUTO;
+    case hipdnn_data_sdk::data_objects::AttentionImplementation::COMPOSITE:
+        return hipdnn_frontend::AttentionImplementation::COMPOSITE;
+    case hipdnn_data_sdk::data_objects::AttentionImplementation::UNIFIED:
+        return hipdnn_frontend::AttentionImplementation::UNIFIED;
+    default:
+        return hipdnn_frontend::AttentionImplementation::AUTO;
     }
 }
 
@@ -595,6 +670,32 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
     default:
         return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
     }
+}
+
+/**
+ * @brief Convert ConvolutionMode to a human-readable string
+ * @param mode The convolution mode to convert
+ * @return A C-string representation of the convolution mode
+ */
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const ConvolutionMode& mode)
+{
+    switch(mode)
+    {
+    case ConvolutionMode::NOT_SET:
+        return "not_set";
+    case ConvolutionMode::CROSS_CORRELATION:
+        return "cross_correlation";
+    case ConvolutionMode::CONVOLUTION:
+        return "convolution";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const ConvolutionMode& mode)
+{
+    return os << to_string(mode);
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
