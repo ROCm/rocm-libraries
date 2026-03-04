@@ -8,7 +8,7 @@ import subprocess
 
 from rocm_docs import ROCmDocs
 
-name = "hipDNN"
+name = "hipDNN (Beta)"
 version_number = "1.0.0"
 
 # for PDF output on Read the Docs

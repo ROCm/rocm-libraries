@@ -12,6 +12,10 @@ hipDNN allows developers to run deep learning workloads on AMD GPUs by providing
 
 The component public repository is located at `https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn>`_.
 
+.. note::
+
+  hipDNN is in beta. Running production workloads is not recommended.
+
 .. grid:: 2
   :gutter: 3
 
