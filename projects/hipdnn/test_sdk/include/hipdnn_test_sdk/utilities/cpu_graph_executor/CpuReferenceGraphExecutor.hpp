@@ -17,6 +17,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::utilities
 {
@@ -119,6 +120,8 @@ private:
             return detail::LayernormFpropSignatureKey(node, tensorMap);
         case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
             return detail::MatmulSignatureKey(node, tensorMap, computeType);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
+            return detail::RMSNormFwdSignatureKey(node, tensorMap);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }
