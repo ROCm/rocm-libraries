@@ -771,7 +771,7 @@ namespace TensileLite
                                                    size_t                  validationStride,
                                                    double                  threshold)
         {
-            FastPointwiseComparison<ValidType> compareValid(threshold);
+            FastPointwiseComparison<ValidType> compareValid(m_printMax > 0, threshold);
             InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
 
             size_t elementsToCopy       = tensor.totalAllocatedElements();
@@ -867,12 +867,12 @@ namespace TensileLite
                 std::cout << "Performed bounds check on " << boundsCheckElements << " elements ("
                           << elementsBeforeData << " before data)" << std::endl;
 
-            if(compareValid.errorCount() > 0 && m_printMax > 0)
+            if((compareValid.errorCount() > 0 || m_printValids) && m_printMax > 0)
             {
                 ScopedTimer timer("validate_mismatch_printing");
 
                 PointwiseComparison<ValidType> comparePrint(
-                    false, m_printMax, false, threshold);
+                    m_printValids, m_printMax, false, threshold);
 
                 forEachElement(tensor, reference, resultData, validationStride, comparePrint);
             }

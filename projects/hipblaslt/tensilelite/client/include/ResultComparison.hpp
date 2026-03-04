@@ -174,8 +174,9 @@ namespace TensileLite
         class FastPointwiseComparison
         {
         public:
-            FastPointwiseComparison(double threshold = -1.0)
-                : m_threshold(threshold)
+            FastPointwiseComparison(bool printReport, double threshold = -1.0)
+                : m_printReport(printReport)
+                , m_threshold(threshold)
             {
             }
 
@@ -187,7 +188,7 @@ namespace TensileLite
 
             void report()
             {
-                if(m_errors)
+                if(m_errors && m_printReport)
                 {
                     std::cout << "Found " << m_errors << " incorrect values in " << m_values
                               << " total values compared." << std::endl;
@@ -205,10 +206,11 @@ namespace TensileLite
             }
 
         private:
-            size_t m_errors    = 0;
-            size_t m_values    = 0;
-            bool   m_failed    = false;
-            double m_threshold = -1.0;
+            size_t m_errors      = 0;
+            size_t m_values      = 0;
+            bool   m_failed      = false;
+            bool   m_printReport = false;
+            double m_threshold   = -1.0;
         };
 
         template <typename T>
