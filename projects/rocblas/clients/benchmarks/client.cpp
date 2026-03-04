@@ -22,7 +22,6 @@
 #define ROCBLAS_BETA_FEATURES_API
 #include "program_options.hpp"
 
-#include "asan_helpers.hpp"
 #include "client_omp.hpp"
 #include "client_utility.hpp"
 #include "rocblas.hpp"
@@ -1217,7 +1216,7 @@ try
 {
     client_omp_manager::limit_by_processor_count();
     rocblas_client_init();
-    rocblas::print_asan_kernel_warning("rocblas-bench");
+    print_asan_kernel_warning("rocblas-bench");
 
     fix_batch(argc, argv);
     Arguments   arg;

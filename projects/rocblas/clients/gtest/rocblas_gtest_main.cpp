@@ -22,7 +22,6 @@
 
 #include <string>
 
-#include "asan_helpers.hpp"
 #include "rocblas_data.hpp"
 #include "rocblas_parse_data.hpp"
 #include "rocblas_test.hpp"
@@ -314,7 +313,7 @@ int main(int argc, char** argv)
     }
 
     print_rocblas_version_string();
-    rocblas::print_asan_kernel_warning("rocblas-test");
+    print_asan_kernel_warning("rocblas-test");
 
     // Set test device
     rocblas_set_test_device();
