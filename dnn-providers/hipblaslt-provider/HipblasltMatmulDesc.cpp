@@ -23,10 +23,6 @@ HipblasltMatmulDesc::HipblasltMatmulDesc(hipblasOperation_t transA,
         _desc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)));
     THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
         _desc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)));
-
-    hipblasLtEpilogue_t epilogue = HIPBLASLT_EPILOGUE_DEFAULT;
-    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulDescSetAttribute(
-        _desc, HIPBLASLT_MATMUL_DESC_EPILOGUE, &epilogue, sizeof(epilogue)));
 }
 
 HipblasltMatmulDesc::HipblasltMatmulDesc(HipblasltMatmulDesc&& other) noexcept

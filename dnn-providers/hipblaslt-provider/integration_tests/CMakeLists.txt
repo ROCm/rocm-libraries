@@ -2,13 +2,23 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(Threads REQUIRED)
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
-find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+
+# SDK dependencies - use targets directly in superbuild, find_package otherwise
+if(NOT TARGET hipdnn_test_sdk)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
+
+if(NOT TARGET hipdnn_plugin_sdk)
+    find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+endif()
 
 add_executable(
     hipblaslt_plugin_integration_tests
     main.cpp
     IntegrationGpuMatmul.cpp
+    IntegrationGpuMatmulActiv.cpp
+    IntegrationGpuMatmulBias.cpp
+    IntegrationGpuMatmulBiasActiv.cpp
 )
 
 target_compile_options(hipblaslt_plugin_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

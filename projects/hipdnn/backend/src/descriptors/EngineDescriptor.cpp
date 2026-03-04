@@ -58,8 +58,9 @@ void EngineDescriptor::finalize()
             for(const auto& knobWrapper : knobWrappers)
             {
                 flatbuffers::FlatBufferBuilder builder;
-                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(
-                    builder, knobWrapper->getKnob().UnPack());
+                hipdnn_data_sdk::data_objects::KnobT knobNative;
+                knobWrapper->getKnob().UnPackTo(&knobNative);
+                auto knobOffset = hipdnn_data_sdk::data_objects::Knob::Pack(builder, &knobNative);
                 builder.Finish(knobOffset);
                 _knobSerializedBuffers.push_back(builder.Release());
             }
