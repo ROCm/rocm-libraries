@@ -54,11 +54,12 @@ namespace Direct2LDSTileCopyTest
         }
     }
 
-    TEMPLATE_TEST_CASE("Direct2LDS tile copy", "[direct2lds][gpu]", uint8_t, uint16_t, uint32_t)
-    {
-        using T = TestType;
-        auto dt = TypeInfo<T>::Var.dataType;
+    using DFFunc = std::function<Expression::ExpressionPtr(int)>;
+    using AssignExprFactory
+        = std::function<Expression::ExpressionPtr(int mactile0, DFFunc const& DF)>;
 
+    ContextPtr buildDirect2LDSKernel(int MN, DataType dt, AssignExprFactory const& makeAssignExpr)
+    {
         auto testContext = TestContext::ForTestDevice();
         auto context     = testContext.get();
 
@@ -68,17 +69,12 @@ namespace Direct2LDSTileCopyTest
                  + " does not support DirectToLDS");
         }
 
-        // Use 64 workitems (1 wave) so the M0+TID*4 stride pattern
-        // is deterministic without multi-wave overlap in LDS.
-        const int MN = 64;
-        const int K  = 1;
+        const int K = 1;
 
         auto expr1u = Expression::literal(1u);
         auto exprMN = Expression::literal(MN);
         auto exprK  = Expression::literal(K);
 
-        int macMN     = MN;
-        int macK      = K;
         int subtileMN = 1;
         int subtileK  = 1;
 
@@ -89,10 +85,10 @@ namespace Direct2LDSTileCopyTest
         auto idim0    = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
         auto idim1    = kgraph.coordinates.addElement(SubDimension(1, exprK, expr1u));
         auto mactile0 = kgraph.coordinates.addElement(
-            MacroTile({macMN, macK}, MemoryType::LDS, {subtileMN, subtileK}));
+            MacroTile({MN, K}, MemoryType::LDS, {subtileMN, subtileK}));
 
         auto mactile1 = kgraph.coordinates.addElement(
-            MacroTile({macMN, macK}, MemoryType::VGPR, {subtileMN, subtileK}));
+            MacroTile({MN, K}, MemoryType::VGPR, {subtileMN, subtileK}));
 
         auto odim0 = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
         auto odim1 = kgraph.coordinates.addElement(SubDimension(1, exprK, expr1u));
@@ -107,26 +103,27 @@ namespace Direct2LDSTileCopyTest
         kgraph.coordinates.addElement(DataFlow(), {user0}, {mactile0});
         kgraph.coordinates.addElement(DataFlow(), {mactile1}, {user1});
 
-        auto DF = [dt](int tag) {
+        auto DF = [dt](int tag) -> Expression::ExpressionPtr {
             return std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{tag, Register::Type::Vector, dt});
         };
 
-        auto kernel     = kgraph.control.addElement(Kernel());
-        auto load       = kgraph.control.addElement(LoadTiled(dt));
-        auto assignCopy = kgraph.control.addElement(Assign{Register::Type::Vector, DF(mactile0)});
-        auto store      = kgraph.control.addElement(StoreTiled(dt));
+        auto kernel   = kgraph.control.addElement(Kernel());
+        auto load     = kgraph.control.addElement(LoadTiled(dt));
+        auto assignOp = kgraph.control.addElement(
+            Assign{Register::Type::Vector, makeAssignExpr(mactile0, DF)});
+        auto store = kgraph.control.addElement(StoreTiled(dt));
 
         kgraph.control.addElement(Body(), {kernel}, {load});
-        kgraph.control.addElement(Sequence(), {load}, {assignCopy});
-        kgraph.control.addElement(Sequence(), {load}, {assignCopy});
-        kgraph.control.addElement(Sequence(), {assignCopy}, {store});
+        kgraph.control.addElement(Sequence(), {load}, {assignOp});
+        kgraph.control.addElement(Sequence(), {load}, {assignOp});
+        kgraph.control.addElement(Sequence(), {assignOp}, {store});
 
         kgraph.mapper.connect<User>(load, user0);
         kgraph.mapper.connect<MacroTile>(load, mactile0);
         kgraph.mapper.connect<MacroTile>(store, mactile1);
         kgraph.mapper.connect<User>(store, user1);
-        kgraph.mapper.connect(assignCopy, mactile1, NaryArgument::DEST);
+        kgraph.mapper.connect(assignOp, mactile1, NaryArgument::DEST);
 
         auto k = context->kernel();
 
@@ -142,20 +139,13 @@ namespace Direct2LDSTileCopyTest
 
         using namespace rocRoller::KernelGraph;
 
-        auto xformAddLDS = std::make_shared<AddLDS>(params, context);
-        kgraph           = kgraph.transform(xformAddLDS);
-
-        auto xformAddPrefetch = std::make_shared<AddPrefetch>(params, context);
-        kgraph                = kgraph.transform(xformAddPrefetch);
-
-        auto xformLowerTile = std::make_shared<LowerTile>(params, context);
-        kgraph              = kgraph.transform(xformLowerTile);
+        kgraph = kgraph.transform(std::make_shared<AddLDS>(params, context));
+        kgraph = kgraph.transform(std::make_shared<AddPrefetch>(params, context));
+        kgraph = kgraph.transform(std::make_shared<LowerTile>(params, context));
 
         addDirect2LDS(kgraph, dt);
 
-        auto xformUpdateWavefront = std::make_shared<UpdateWavefrontParameters>(params);
-        kgraph                    = kgraph.transform(xformUpdateWavefront);
-
+        kgraph = kgraph.transform(std::make_shared<UpdateWavefrontParameters>(params));
         kgraph = kgraph.transform(std::make_shared<AddLDSBarriers>());
 
         auto command = std::make_shared<rocRoller::Command>();
@@ -169,8 +159,7 @@ namespace Direct2LDSTileCopyTest
                                   ArgumentType::Value,
                                   DataDirection::ReadOnly,
                                   "a");
-        auto assignIndexExprs = std::make_shared<AssignIndexExpressions>(context, command);
-        kgraph                = kgraph.transform(assignIndexExprs);
+        kgraph = kgraph.transform(std::make_shared<AssignIndexExpressions>(context, command));
 
         if(context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
@@ -183,6 +172,20 @@ namespace Direct2LDSTileCopyTest
         context->schedule(k->postamble());
         context->schedule(k->amdgpu_metadata());
 
+        return context;
+    }
+
+    TEMPLATE_TEST_CASE("Direct2LDS tile copy", "[direct2lds][gpu]", uint8_t, uint16_t, uint32_t)
+    {
+        using T = TestType;
+        auto dt = TypeInfo<T>::Var.dataType;
+
+        const int MN = 64;
+
+        auto copyExpr = [](int mactile0, DFFunc const& DF) { return DF(mactile0); };
+
+        auto context = buildDirect2LDSKernel(MN, dt, copyExpr);
+
         auto code = context->instructions()->toString();
 
         std::string expectedInstr = (sizeof(T) == 1)   ? "buffer_load_ubyte"
@@ -193,24 +196,23 @@ namespace Direct2LDSTileCopyTest
         std::vector<char> assembledKernel = context->instructions()->assemble();
         REQUIRE(assembledKernel.size() > 0);
 
-        std::vector<T> a(MN * K);
+        std::vector<T> a(MN);
         for(size_t i = 0; i < a.size(); ++i)
             a[i] = static_cast<T>(i);
 
         auto dA      = make_shared_device(a);
-        auto dResult = make_shared_device<T>(MN * K);
+        auto dResult = make_shared_device<T>(MN);
 
         KernelArguments kargs;
         kargs.append("a", dA.get());
         kargs.append("result", dResult.get());
 
         KernelInvocation kinv;
-        kinv.workitemCount    = {static_cast<unsigned int>(MN), 1, 1};
-        kinv.workgroupSize    = {static_cast<unsigned int>(MN), 1, 1};
-        auto executableKernel = context->instructions()->getExecutableKernel();
-        executableKernel->executeKernel(kargs, kinv);
+        kinv.workitemCount = {static_cast<unsigned int>(MN), 1, 1};
+        kinv.workgroupSize = {static_cast<unsigned int>(MN), 1, 1};
+        context->instructions()->getExecutableKernel()->executeKernel(kargs, kinv);
 
-        std::vector<T> expected(MN * K);
+        std::vector<T> expected(MN);
 
         if(sizeof(T) < 4)
         {
@@ -219,14 +221,48 @@ namespace Direct2LDSTileCopyTest
             //   uint8:  [0,0,0,0, 1,0,0,0, 2,0,0,0, ...]  (stride 4)
             //   uint16: [0,0, 1,0, 2,0, 3,0, ...]          (stride 2)
             constexpr int stride = 4 / sizeof(T);
-            for(int i = 0; i < MN * K; ++i)
+            for(int i = 0; i < MN; ++i)
                 expected[i] = (i % stride == 0) ? static_cast<T>(i / stride) : T(0);
         }
         else
         {
-            for(int i = 0; i < MN * K; ++i)
+            for(int i = 0; i < MN; ++i)
                 expected[i] = static_cast<T>(i);
         }
+
+        REQUIRE_THAT(dResult, HasDeviceVectorEqualTo(expected));
+    }
+
+    TEST_CASE("Direct2LDS tile copy with add", "[direct2lds][gpu]")
+    {
+        const int MN = 256;
+
+        auto addExpr = [](int mactile0, DFFunc const& DF) { return DF(mactile0) + DF(mactile0); };
+
+        auto context = buildDirect2LDSKernel(MN, DataType::UInt32, addExpr);
+
+        std::vector<char> assembledKernel = context->instructions()->assemble();
+        REQUIRE(assembledKernel.size() > 0);
+
+        std::vector<uint32_t> a(MN);
+        for(int i = 0; i < MN; i++)
+            a[i] = i;
+
+        auto dA      = make_shared_device(a);
+        auto dResult = make_shared_device<uint32_t>(MN);
+
+        KernelArguments kargs;
+        kargs.append("a", dA.get());
+        kargs.append("result", dResult.get());
+
+        KernelInvocation kinv;
+        kinv.workitemCount = {static_cast<unsigned int>(MN), 1, 1};
+        kinv.workgroupSize = {static_cast<unsigned int>(MN), 1, 1};
+        context->instructions()->getExecutableKernel()->executeKernel(kargs, kinv);
+
+        std::vector<uint32_t> expected(MN);
+        for(int i = 0; i < MN; i++)
+            expected[i] = a[i] + a[i];
 
         REQUIRE_THAT(dResult, HasDeviceVectorEqualTo(expected));
     }
