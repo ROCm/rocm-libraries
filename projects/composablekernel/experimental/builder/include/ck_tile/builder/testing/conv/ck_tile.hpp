@@ -9,6 +9,7 @@
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/grouped_convolution.hpp"
+#include "ck_tile/host.hpp"
 #include <type_traits>
 #include <array>
 
@@ -60,6 +61,10 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
                                                      1,
                                                      std::multiplies<std::size_t>());
     auto preprocess                = [&]() {
+        if(s_conf.flush_cache_)
+        {
+            ck_tile::flush_icache();
+        }
         if constexpr(ConvDirectionIsBackwardWeight<SIGNATURE>)
         {
             if(args.k_batch > 1)

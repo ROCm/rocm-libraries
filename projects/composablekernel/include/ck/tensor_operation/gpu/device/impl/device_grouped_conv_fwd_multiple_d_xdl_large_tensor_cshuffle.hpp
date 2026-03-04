@@ -23,6 +23,7 @@
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_utils.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
+#include "ck/host_utility/flush_cache.hpp"
 #include "ck/host_utility/io.hpp"
 #ifdef CK_EXPERIMENTAL_BUILDER
 #include "ck_tile/builder/reflect/conv_describe.hpp"
@@ -737,6 +738,13 @@ struct DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor
                 arg.Print();
             }
 
+            auto preprocess = [&]() {
+                if(stream_config.flush_cache)
+                {
+                    ck::utility::flush_icache();
+                }
+            };
+
             const index_t num_workgroups_per_Conv_N =
                 arg.a_g_n_c_wis_lengths_[I1] / arg.conv_N_per_block_;
 
@@ -760,18 +768,19 @@ struct DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor
                     ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>,
                     has_main_loop>;
 
-                return launch_and_time_kernel(stream_config,
-                                              kernel,
-                                              dim3(gdx, gdy, gdz),
-                                              dim3(BlockSize),
-                                              0,
-                                              arg.gemm_desc_kernel_args_,
-                                              arg.gemms_count_,
-                                              arg.a_element_op_,
-                                              arg.b_element_op_,
-                                              arg.cde_element_op_,
-                                              arg.compute_ptr_offset_of_groups_,
-                                              arg.compute_ptr_offset_of_n_);
+                return launch_and_time_kernel_with_preprocess(stream_config,
+                                                              preprocess,
+                                                              kernel,
+                                                              dim3(gdx, gdy, gdz),
+                                                              dim3(BlockSize),
+                                                              0,
+                                                              arg.gemm_desc_kernel_args_,
+                                                              arg.gemms_count_,
+                                                              arg.a_element_op_,
+                                                              arg.b_element_op_,
+                                                              arg.cde_element_op_,
+                                                              arg.compute_ptr_offset_of_groups_,
+                                                              arg.compute_ptr_offset_of_n_);
             };
 
             if(GridwiseGemm::CalculateHasMainKBlockLoop(K))

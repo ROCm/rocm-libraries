@@ -1049,19 +1049,9 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
             const auto Run = [&](const auto& kernel) {
                 if(stream_config.flush_cache)
                 {
-                    typename GridwiseGemm::Argument gemm_arg_ = gemm_arg;
-                    ck::utility::RotatingMemWrapper<typename GridwiseGemm::Argument> rotating_mem(
-                        gemm_arg_,
-                        stream_config.rotating_count,
-                        gemm_arg_.M * gemm_arg_.K * sizeof(ADataType),
-                        gemm_arg_.K * gemm_arg_.N * sizeof(BDataType));
-                    rotating_mem.Print();
-
                     auto run_flush_cache = [&]() {
                         // flush icache
                         ck::utility::flush_icache();
-                        // rotating mem
-                        rotating_mem.Next();
                     };
 
                     ave_time += ck::utility::launch_and_time_kernel_with_preprocess<false>(
@@ -1071,7 +1061,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
                         dim3(gdx, gdy, gdz),
                         dim3(BlockSize),
                         0,
-                        gemm_arg_,
+                        gemm_arg,
                         arg.a_grid_desc_ak0_m_ak1_,
                         arg.b_grid_desc_bk0_n_bk1_,
                         arg.ds_grid_desc_m_n_,

@@ -138,12 +138,6 @@ CK_TILE_HOST double timing_loop_impl(TimerType timer,
         }
         callables_func();
     }
-    // Only profile preprocess if it's provided
-    auto preprocess_time = 0.0;
-    if constexpr(!std::is_same_v<PreprocessFunc, std::nullptr_t>)
-    {
-        preprocess_time = preprocess_profiling_impl(gpu_timer{}, s, preprocess);
-    }
 
     int i = 0;
     timer.start(s.stream_id_);
@@ -161,7 +155,7 @@ CK_TILE_HOST double timing_loop_impl(TimerType timer,
 
     if(!i)
         return 0.;
-    return (timer.duration() / s.nrepeat_) - preprocess_time;
+    return timer.duration() / s.nrepeat_;
 }
 
 // clang-format off
