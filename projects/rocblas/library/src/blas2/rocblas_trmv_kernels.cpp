@@ -26,6 +26,7 @@
 #include "rocblas.h"
 #include "rocblas_trmv.hpp"
 #include <cstddef>
+#include "asan_build_utils.hpp"
 
 template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T>
 ROCBLAS_KERNEL_ILF void rocblas_trmvn_kernel_calc(
@@ -236,11 +237,7 @@ rocblas_status rocblas_internal_trmv_launcher(rocblas_handle    handle,
     static constexpr rocblas_int NB          = ROCBLAS_TRMV_NB;
     constexpr int                TRMVN_DIM_X = 64;
     // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    constexpr int                TRMVN_DIM_Y = 4;
-#else
-    constexpr int                TRMVN_DIM_Y = 16;
-#endif
+    constexpr int                TRMVN_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
 
     dim3 trmvn_grid((n - 1) / TRMVN_DIM_X + 1, 1, batches);
     dim3 trmvn_threads(TRMVN_DIM_X, TRMVN_DIM_Y);

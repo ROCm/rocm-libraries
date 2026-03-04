@@ -22,6 +22,7 @@
 
 #include "device_macros.hpp"
 #include "rocblas_syr2.hpp"
+#include "asan_build_utils.hpp"
 
 template <int DIM_X, int DIM_Y, int N_TX, typename T>
 __device__ void rocblas_syr2_kernel_calc(bool     is_upper,
@@ -129,11 +130,7 @@ rocblas_status rocblas_internal_syr2_launcher(rocblas_handle handle,
 
     static constexpr int SYR2_DIM_X = 128;
     // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    static constexpr int SYR2_DIM_Y = 2;
-#else
-    static constexpr int SYR2_DIM_Y = 8;
-#endif
+    static constexpr int SYR2_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
     static constexpr int N_TX       = is_float ? 2 : 1; // x items per x thread
     rocblas_int          blocksX    = (n - 1) / (SYR2_DIM_X * N_TX) + 1;
     rocblas_int          blocksY    = (n - 1) / SYR2_DIM_Y + 1;

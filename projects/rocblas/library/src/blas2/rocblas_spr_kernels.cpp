@@ -22,6 +22,7 @@
 
 #include "device_macros.hpp"
 #include "rocblas_spr.hpp"
+#include "asan_build_utils.hpp"
 
 //TODO :-Add rocblas_check_numerics_sp_matrix_template for checking Matrix `A` which is a Symmetric Packed Matrix
 template <typename T, typename U>
@@ -138,11 +139,7 @@ rocblas_status rocblas_internal_spr_launcher(rocblas_handle handle,
 
     static constexpr int SPR_DIM_X = 64;
     // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    static constexpr int SPR_DIM_Y = 4;
-#else
-    static constexpr int SPR_DIM_Y = 16;
-#endif
+    static constexpr int SPR_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
 
     bool                            host_mode = handle->pointer_mode == rocblas_pointer_mode_host;
     rocblas_internal_val_ptr<TScal> alpha_device_host(host_mode, alpha);

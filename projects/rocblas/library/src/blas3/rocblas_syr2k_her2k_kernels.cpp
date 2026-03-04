@@ -30,6 +30,7 @@
 #include "rocblas_syr2k_her2k.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp" // int64 API called
 #include "utility.hpp"
+#include "asan_build_utils.hpp"
 
 template <typename T>
 static const T beta_1 = T(1);
@@ -56,11 +57,10 @@ rocblas_status rocblas_syrkx_syr2k_dispatch(rocblas_handle    handle,
     if(TWOK)
     {
         // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-        return rocblas_syr2k_her2k_dispatch<API_INT, TWOK, HERK, 16>(handle,
-#else
-        return rocblas_syr2k_her2k_dispatch<API_INT, TWOK, HERK, 32>(handle,
-#endif
+        return rocblas_syr2k_her2k_dispatch<API_INT,
+                                             TWOK,
+                                             HERK,
+                                             rocblas::conditional_v<rocblas_enable_asan, 16, 32>>(handle,
                                                                      uplo,
                                                                      trans,
                                                                      n,
@@ -167,11 +167,7 @@ rocblas_status rocblas_internal_syr2k_syrkx_block_recursive_template(rocblas_han
         // for syr2k/her2k we first scale C so we c an use directly for output without work buffer
         static constexpr int syr2k_SCALE_DIM_X = 128;
         // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-        static constexpr int syr2k_SCALE_DIM_Y = 2;
-#else
-        static constexpr int syr2k_SCALE_DIM_Y = 8;
-#endif
+        static constexpr int syr2k_SCALE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
         rocblas_int          gx                = (n - 1) / (syr2k_SCALE_DIM_X) + 1;
         rocblas_int          gy                = (n - 1) / (syr2k_SCALE_DIM_Y) + 1;
         dim3                 syr2k_scale_grid(gx, gy, batches);
@@ -369,11 +365,7 @@ rocblas_status rocblas_internal_syr2k_her2k_non_recursive_template(rocblas_handl
     int batches = handle->getBatchGridDim((int)batch_count);
 
     // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    static constexpr int syr2k_DIM_XY = 16;
-#else
-    static constexpr int syr2k_DIM_XY = 32;
-#endif
+    static constexpr int syr2k_DIM_XY = rocblas::conditional_v<rocblas_enable_asan, 16, 32>;
     rocblas_int          bx           = (n - 1) / (syr2k_DIM_XY) + 1;
     rocblas_int          by           = (n - 1) / (syr2k_DIM_XY) + 1;
     dim3                 syr2k_grid(bx, by, batches);
@@ -618,11 +610,7 @@ rocblas_status rocblas_internal_syr2k_her2k_template(rocblas_handle    handle,
 
     static constexpr int syr2k_SCALE_DIM_X = 128;
     // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    static constexpr int syr2k_SCALE_DIM_Y = 2;
-#else
-    static constexpr int syr2k_SCALE_DIM_Y = 8;
-#endif
+    static constexpr int syr2k_SCALE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
     rocblas_int          gx                = (n - 1) / (syr2k_SCALE_DIM_X) + 1;
     rocblas_int          gy                = (n - 1) / (syr2k_SCALE_DIM_Y) + 1;
     dim3                 syr2k_scale_grid(gx, gy, batches);

@@ -20,7 +20,8 @@
 *
 * ************************************************************************ */
 
-/*!\file
+/*!
+* \file
 * \brief rocblas_block_sizes.h includes the definition of various block sizes used in rocBLAS instantiations.
 *        This file is for internal use only.
 */
@@ -28,20 +29,16 @@
 #ifndef ROCBLAS_BLOCK_SIZES_H
 #define ROCBLAS_BLOCK_SIZES_H
 
+#include "asan_build_utils.hpp"
+
+// ASAN: cap total threads per block at 256 where kernels are register-limited on gfx942.
+
 // L1 NB
 #define ROCBLAS_ASUM_NB 512
 #define ROCBLAS_AXPY_NB 256
 #define ROCBLAS_COPY_NB 256
 #define ROCBLAS_DOT_NB 512
-// ASAN instrumentation inflates per-wave VGPR usage. With NB=1024 (16 waves on
-// gfx942 wave64), the iamax part2 kernel needs 104 VGPRs leaving zero headroom
-// in the 512-VGPR budget (floor(512/104)*4 SIMDs = exactly 16 waves). Reducing
-// to 512 keeps correctness while giving the register allocator breathing room.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define ROCBLAS_IAMAX_NB 512
-#else
-#define ROCBLAS_IAMAX_NB 1024
-#endif
+#define ROCBLAS_IAMAX_NB rocblas::conditional_v<rocblas_enable_asan, 256, 1024>
 #define ROCBLAS_NRM2_NB 512
 #define ROCBLAS_ROT_NB 512
 #define ROCBLAS_ROTM_NB 512
@@ -49,16 +46,9 @@
 #define ROCBLAS_SWAP_NB 256
 
 // L2 NB
-// ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-// tpsv and tbsv require NB > 256 (static_assert), so they stay at 512
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define ROCBLAS_TPMV_NB 256
-#define ROCBLAS_TRMV_NB 256
-#else
-#define ROCBLAS_TPMV_NB 512
-#define ROCBLAS_TRMV_NB 512
-#endif
+#define ROCBLAS_TPMV_NB rocblas::conditional_v<rocblas_enable_asan, 256, 512>
 #define ROCBLAS_TBSV_NB 512
+#define ROCBLAS_TRMV_NB rocblas::conditional_v<rocblas_enable_asan, 256, 512>
 #define ROCBLAS_TPSV_NB 512
 #define ROCBLAS_SDCTRSV_NB 64
 #define ROCBLAS_ZTRSV_NB 32
@@ -90,12 +80,8 @@
 #define ROCBLAS_CHER2K_NB 32
 #define ROCBLAS_ZHER2K_NB 16
 
-// ASAN instrumentation inflates per-wave VGPR usage; trmm threads = NB*NB, cap at 256 on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define ROCBLAS_SDTRMM_NB 16
-#else
-#define ROCBLAS_SDTRMM_NB 32
-#endif
+// ASAN: 16x16=256 threads (in-place TRMM launches dim3(NB,NB)).
+#define ROCBLAS_SDTRMM_NB rocblas::conditional_v<rocblas_enable_asan, 16, 32>
 #define ROCBLAS_CZTRMM_NB 16
 #define ROCBLAS_TRMM_OUTOFPLACE_NB 512
 

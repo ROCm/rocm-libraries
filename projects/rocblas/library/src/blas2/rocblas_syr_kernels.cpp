@@ -22,6 +22,7 @@
 
 #include "device_macros.hpp"
 #include "rocblas_syr.hpp"
+#include "asan_build_utils.hpp"
 
 template <bool UPPER, rocblas_int DIM_X, typename T, typename U, typename V, typename W>
 ROCBLAS_KERNEL(DIM_X)
@@ -182,11 +183,7 @@ rocblas_status rocblas_internal_syr_launcher(rocblas_handle handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    static constexpr int SYR_DIM_X = 256;
-#else
-    static constexpr int SYR_DIM_X = 1024;
-#endif
+    static constexpr int SYR_DIM_X = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
 
     size_t nitems = (size_t)n * (n + 1) / 2;
 

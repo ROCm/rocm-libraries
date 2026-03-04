@@ -24,6 +24,7 @@
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas_hpr.hpp"
+#include "asan_build_utils.hpp"
 
 template <int DIM_X, int DIM_Y, int N_TX, typename T, typename U>
 __forceinline__ __device__ void
@@ -113,11 +114,7 @@ rocblas_status rocblas_hpr_launcher(rocblas_handle handle,
 
     static constexpr int HPR_DIM_X = 64;
     // ASAN instrumentation inflates per-wave VGPR usage; cap at 256 threads on gfx942
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    static constexpr int HPR_DIM_Y = 4;
-#else
-    static constexpr int HPR_DIM_Y = 16;
-#endif
+    static constexpr int HPR_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
     static constexpr int N_TX      = 2; // x items per x thread
 
     rocblas_int blocksX = (n - 1) / (HPR_DIM_X * N_TX) + 1;
