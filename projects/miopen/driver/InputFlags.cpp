@@ -28,6 +28,7 @@
 
 #include "tensor_driver.hpp"
 
+#include <miopen/errors.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/stringutils.hpp>
 
@@ -144,8 +145,7 @@ char InputFlags::FindShortName(const std::string& long_name) const
     }
     if(short_name == '\0')
     {
-        std::cout << "Long Name '" << long_name << "' Not Found!" << std::endl;
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Long Name: " + long_name + " Not Found!");
     }
     return short_name;
 }
@@ -183,8 +183,8 @@ void InputFlags::Parse(int argc, char* argv[])
             char short_name = temp[1];
             if(MapInputs.find(short_name) == MapInputs.end())
             {
-                std::cout << "Input Flag: " << short_name << " Not Found !";
-                exit(0); // NOLINT (concurrency-mt-unsafe)
+                MIOPEN_THROW(miopenStatusBadParm,
+                             std::string("Input Flag: ") + short_name + " Not Found!");
             }
             if(short_name == 'h')
                 Print();

@@ -16,51 +16,12 @@ The timing output format is:
     TIMING:<category>:<duration_ms>
     TIMING_CONTEXT:M=...,N=...,K=...,batch=...,typeA=...,typeD=...
 
-Timing category nesting hierarchy:
-
-    The timing categories have a hierarchical nesting structure. Wall clock time
-    should be calculated from the top-level Python phases only to avoid double-counting.
-
-    SEQUENTIAL TOP-LEVEL PHASES (no overlap):
-    ├── python_benchmark_problems
-    │   │
-    │   └── NESTED DETAIL PHASES (siblings, not nested in each other):
-    │       ├── python_solution_generation
-    │       ├── python_kernel_compilation
-    │       └── python_client_execution
-    │           │
-    │           └── ALL C++ CLIENT PHASES (run as subprocess):
-    │               ├── library_loading
-    │               ├── code_object_loading
-    │               ├── lazy_loading_init
-    │               ├── data_init_setup
-    │               ├── listener_setup
-    │               ├── reporter_setup
-    │               ├── pre_problem
-    │               ├── cpu_data_init
-    │               ├── cpu_reference_gemm
-    │               ├── gpu_input_preparation
-    │               ├── rotating_buffer_preparation
-    │               ├── solution_selection
-    │               ├── pre_solution
-    │               ├── kernel_solving
-    │               ├── warmup_runs
-    │               ├── benchmark_runs
-    │               ├── gpu_kernel_execution
-    │               ├── post_solution
-    │               ├── post_problem
-    │               └── finalize_report
-    │
-    ├── python_library_logic (no nested timings)
-    │
-    └── python_client_writer (no nested timings)
-
-    Key nesting relationships:
-    - python_solution_generation, python_kernel_compilation, and python_client_execution
-      are all nested inside python_benchmark_problems
-    - These three detail phases are siblings (sequential, not nested in each other)
-    - All C++ phases are nested inside python_client_execution
-    - The C++ phases themselves are sequential/siblings, not nested within each other
+Timing categories form a hierarchy: parents contain their children's wall-clock
+    time, so only top-level phases should be summed to get the total.  The
+    TIMING_HIERARCHY dict (below) is the single source of truth for the nesting
+    structure.  Display grouping (e.g. grouping C++ phases into "C++ Client
+    Setup", "Data Preparation", etc.) is a rendering concern handled by
+    DISPLAY_GROUPS / CPP_PHASE_GROUPS and applied at print time only.
 """
 
 import argparse
@@ -68,27 +29,103 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 
-# --- Hierarchy definition ---
+# --- Hierarchy definition (single source of truth) ---
+#
+# Each key is a timing category; its value is a dict of child categories.
+# An empty dict {} means the category has no known sub-phases.
+# The tree structure mirrors the docstring hierarchy diagram above.
 
-TOP_LEVEL_PHASES = [
-    "python_benchmark_problems",
-    "python_library_logic",
-    "python_client_writer",
-]
+TIMING_HIERARCHY = {
+    "python_benchmark_problems": {
+        "python_cache_check": {},
+        "python_solution_generation": {
+            "python_solgen_fork_permutations": {},
+            "python_solgen_forked_solutions": {},
+            "python_solgen_custom_kernels": {},
+        },
+        "python_kernel_compilation": {
+            "python_kernel_bench_setup": {},
+            "python_kernel_setup": {},
+            "python_kernel_codegen": {},
+            "python_kernel_validate": {},
+            "python_kernel_write_assemble": {},
+            "python_kernel_write_helpers": {},
+            "python_kernel_build_co": {},
+            "python_kernel_build_src_co": {
+                "python_kernel_build_src_co.setup": {},
+                "python_kernel_build_src_co.compile": {},
+                "python_kernel_build_src_co.unbundle": {},
+                "python_kernel_build_src_co.move": {},
+            },
+            "python_kernel_bench_postprocess": {
+                "python_benchpost_naming": {},
+                "python_benchpost_lib_construction": {},
+                "python_benchpost_library_write": {},
+                "python_benchpost_client_config": {},
+            },
+        },
+        "python_write_cache": {},
+        "python_solution_indexing": {},
+        "python_write_solutions": {},
+        "python_client_execution": {
+            "hip_initialization": {},
+            "library_loading": {},
+            "code_object_loading": {},
+            "lazy_loading_init": {},
+            "data_init_setup": {},
+            "solution_iterator_setup": {},
+            "listener_setup": {},
+            "reporter_setup": {},
+            "pre_problem": {},
+            "cpu_data_init": {},
+            "cpu_reference_gemm": {},
+            "validate_warmups": {
+                "validate_gpu_sync": {},
+                "validate_gpu_readback": {},
+                "validate_element_comparison": {},
+            },
+            "gpu_input_preparation": {},
+            "gpu_input_reset": {},
+            "rotating_buffer_preparation": {},
+            "solution_selection": {},
+            "pre_solution": {},
+            "kernel_solving": {},
+            "warmup_runs": {},
+            "benchmark_runs": {},
+            "gpu_kernel_execution": {},
+            "post_solution": {
+                "post_solution_perf_calc": {},
+                "post_solution_reporting": {},
+                "post_solution_validation": {},
+                "post_solution_log": {},
+                "post_solution_result_file": {},
+                "post_solution_lib_update": {},
+                "post_solution_perf_reset": {},
+                "post_solution_sol_advance": {},
+            },
+            "post_problem": {},
+            "finalize_report": {},
+        },
+    },
+    "python_library_logic": {
+        "python_logic_parse_solutions": {},
+        "python_logic_analyze": {},
+        "python_logic_write": {},
+    },
+    "python_client_writer": {},
+}
 
-DETAIL_PHASES = [
-    "python_solution_generation",
-    "python_kernel_compilation",
-    "python_client_execution",
-]
-DETAIL_PARENT = "python_benchmark_problems"
-
+# Display grouping for C++ phases (rendering concern only).
+# Under python_client_execution, children are grouped into these display
+# categories instead of being shown individually.
 CPP_PHASE_GROUPS = {
     "C++ Client Setup": [
+        "hip_initialization",
         "library_loading",
         "code_object_loading",
         "lazy_loading_init",
         "data_init_setup",
+        "solution_iterator_setup",
         "listener_setup",
         "reporter_setup",
     ],
@@ -96,10 +133,12 @@ CPP_PHASE_GROUPS = {
         "pre_problem",
         "cpu_data_init",
         "gpu_input_preparation",
+        "gpu_input_reset",
         "rotating_buffer_preparation",
     ],
     "Reference Computation": [
         "cpu_reference_gemm",
+        "validate_warmups",
     ],
     "Kernel Execution": [
         "solution_selection",
@@ -113,11 +152,32 @@ CPP_PHASE_GROUPS = {
         "finalize_report",
     ],
 }
-CPP_PARENT = "python_client_execution"
 
-ALL_CPP_PHASES = [c for cats in CPP_PHASE_GROUPS.values() for c in cats]
+# Nodes whose children should be grouped for display
+DISPLAY_GROUPS = {
+    "python_client_execution": CPP_PHASE_GROUPS,
+}
 
-ALL_KNOWN_CATEGORIES = set(TOP_LEVEL_PHASES + DETAIL_PHASES + ALL_CPP_PHASES)
+# --- Derived constants ---
+
+def _walk_hierarchy(d):
+    """Yield all category names from a nested hierarchy dict."""
+    for k, v in d.items():
+        yield k
+        yield from _walk_hierarchy(v)
+
+ALL_KNOWN_CATEGORIES = set(_walk_hierarchy(TIMING_HIERARCHY))
+
+# Named constants for commonly-referenced hierarchy points (used in tests)
+SOLUTION_GENERATION_PARENT = "python_solution_generation"
+BENCH_POSTPROCESS_PARENT = "python_kernel_bench_postprocess"
+SOLUTION_GENERATION_PHASES = list(
+    TIMING_HIERARCHY["python_benchmark_problems"]["python_solution_generation"].keys()
+)
+BENCH_POSTPROCESS_PHASES = list(
+    TIMING_HIERARCHY["python_benchmark_problems"]["python_kernel_compilation"]
+    ["python_kernel_bench_postprocess"].keys()
+)
 
 TABLE_WIDTH = 120
 BAR_CHART_WIDTH = 50
@@ -153,65 +213,76 @@ class PhaseNode:
     children: List['PhaseNode']
 
 
+def _build_node(name: str, children_dict: Dict, timings: Dict[str, List[float]]) -> Optional['PhaseNode']:
+    """Build a PhaseNode recursively from the hierarchy dict.
+
+    Args:
+        name: The timing category name.
+        children_dict: Dict of {child_name: grandchildren_dict} from TIMING_HIERARCHY.
+        timings: Raw timing data from analyze_timing_file.
+    """
+    if name not in timings:
+        return None
+    values = timings[name]
+    count = len(values)
+    total_ms = sum(values)
+    mean_ms = total_ms / count if count > 0 else 0
+
+    children = []
+    if children_dict:
+        child_sum = 0.0
+        for child_name, grandchildren in children_dict.items():
+            child_node = _build_node(child_name, grandchildren, timings)
+            if child_node:
+                children.append(child_node)
+                child_sum += child_node.total_ms
+        untracked = total_ms - child_sum
+        if untracked > 0.01:
+            children.append(PhaseNode("(untracked)", None, untracked, None, []))
+        children.sort(key=lambda n: n.total_ms, reverse=True)
+
+    return PhaseNode(name, count, total_ms, mean_ms, children)
+
+
+def _group_children_for_display(
+    children: List[PhaseNode], parent_total: float,
+    groups: Dict[str, List[str]]
+) -> List[PhaseNode]:
+    """Group PhaseNode children into display categories for rendering."""
+    grouped = []
+    grouped_sum = 0.0
+    cat_to_node = {c.name: c for c in children if c.name != "(untracked)"}
+
+    for group_name, group_cats in groups.items():
+        g_children = [cat_to_node[c] for c in group_cats if c in cat_to_node]
+        if g_children:
+            g_total = sum(c.total_ms for c in g_children)
+            grouped_sum += g_total
+            g_children.sort(key=lambda n: n.total_ms, reverse=True)
+            grouped.append(PhaseNode(group_name, None, g_total, None, g_children))
+
+    untracked = parent_total - grouped_sum
+    if untracked > 0.01:
+        grouped.append(PhaseNode("(untracked C++ overhead)", None, untracked, None, []))
+    grouped.sort(key=lambda n: n.total_ms, reverse=True)
+
+    return grouped
+
+
+def _get_display_children(node: PhaseNode) -> List[PhaseNode]:
+    """Return display-grouped children for a node, if applicable."""
+    if node.name in DISPLAY_GROUPS:
+        return _group_children_for_display(node.children, node.total_ms, DISPLAY_GROUPS[node.name])
+    return node.children
+
+
 def build_hierarchy(timings: Dict[str, List[float]]) -> List[PhaseNode]:
     """Build the phase hierarchy from raw timings, sorted by total time descending."""
     top_nodes = []
-    for phase in TOP_LEVEL_PHASES:
-        if phase not in timings:
-            continue
-        values = timings[phase]
-        count = len(values)
-        total_ms = sum(values)
-        mean_ms = total_ms / count if count > 0 else 0
-        children = []
-
-        if phase != DETAIL_PARENT:
-            top_nodes.append(PhaseNode(phase, count, total_ms, mean_ms, children))
-            continue
-
-        detail_sum = 0.0
-        for detail_phase in DETAIL_PHASES:
-            if detail_phase not in timings:
-                continue
-            d_values = timings[detail_phase]
-            d_count = len(d_values)
-            d_total = sum(d_values)
-            d_mean = d_total / d_count if d_count > 0 else 0
-            detail_sum += d_total
-
-            cpp_children: List[PhaseNode] = []
-            if detail_phase == CPP_PARENT and d_total > 0:
-                cpp_sum = 0.0
-                for group_name, group_cats in CPP_PHASE_GROUPS.items():
-                    g_total = 0.0
-                    g_items: List[PhaseNode] = []
-                    for cat in group_cats:
-                        if cat in timings:
-                            c_values = timings[cat]
-                            c_count = len(c_values)
-                            c_total = sum(c_values)
-                            c_mean = c_total / c_count if c_count > 0 else 0
-                            g_total += c_total
-                            g_items.append(PhaseNode(cat, c_count, c_total, c_mean, []))
-                    if g_items:
-                        cpp_sum += g_total
-                        g_items.sort(key=lambda n: n.total_ms, reverse=True)
-                        cpp_children.append(PhaseNode(group_name, None, g_total, None, g_items))
-
-                cpp_untracked = d_total - cpp_sum
-                if cpp_untracked > 0.01:
-                    cpp_children.append(PhaseNode("(untracked C++ overhead)", None, cpp_untracked, None, []))
-                cpp_children.sort(key=lambda n: n.total_ms, reverse=True)
-
-            children.append(PhaseNode(detail_phase, d_count, d_total, d_mean, cpp_children))
-
-        detail_untracked = total_ms - detail_sum
-        if detail_untracked > 0.01:
-            children.append(PhaseNode("(untracked overhead)", None, detail_untracked, None, []))
-        children.sort(key=lambda n: n.total_ms, reverse=True)
-
-        top_nodes.append(PhaseNode(phase, count, total_ms, mean_ms, children))
-
+    for phase, children_dict in TIMING_HIERARCHY.items():
+        node = _build_node(phase, children_dict, timings)
+        if node:
+            top_nodes.append(node)
     top_nodes.sort(key=lambda n: n.total_ms, reverse=True)
     return top_nodes
 
@@ -301,12 +372,13 @@ def print_visual_breakdown(nodes: List[PhaseNode], wall_clock_ms: float):
         bar = "#" * bar_len
         print(f"{label:<{label_width}} {pct:>6.1f}% {bar}")
 
+    def render_visual(node: PhaseNode, depth: int):
+        bar_line(depth, node.name, node.total_ms)
+        for child in _get_display_children(node):
+            render_visual(child, depth + 1)
+
     for node in nodes:
-        bar_line(0, node.name, node.total_ms)
-        for child in node.children:
-            bar_line(1, child.name, child.total_ms)
-            for group in child.children:
-                bar_line(2, group.name, group.total_ms)
+        render_visual(node, 0)
 
     print()
 
@@ -316,30 +388,31 @@ def print_visual_breakdown(nodes: List[PhaseNode], wall_clock_ms: float):
 # ---------------------------------------------------------------------------
 
 def print_hierarchy_validation(totals: Dict[str, float]):
-    """Check and print hierarchy invariant violations."""
+    """Check and print hierarchy invariant violations.
+
+    Recursively walks TIMING_HIERARCHY and checks that for every parent-child
+    relationship, the sum of child durations does not exceed the parent.
+    """
     warnings = []
 
-    pbp_ms = totals.get(DETAIL_PARENT, 0)
-    if pbp_ms > 0:
-        detail_sum = sum(totals.get(p, 0) for p in DETAIL_PHASES)
-        if detail_sum > pbp_ms:
-            excess = detail_sum - pbp_ms
+    def _check(parent_name: str, children_dict: Dict):
+        parent_ms = totals.get(parent_name, 0)
+        if parent_ms <= 0 or not children_dict:
+            return
+        child_sum = sum(totals.get(c, 0) for c in children_dict)
+        if child_sum > parent_ms:
+            excess = child_sum - parent_ms
             warnings.append(
-                f"Detail phases ({detail_sum:,.2f} ms) exceed "
-                f"{DETAIL_PARENT} ({pbp_ms:,.2f} ms) "
-                f"by {excess:,.2f} ms ({excess / pbp_ms * 100:.1f}%)"
+                f"Child phases of {parent_name} ({child_sum:,.2f} ms) exceed "
+                f"parent ({parent_ms:,.2f} ms) "
+                f"by {excess:,.2f} ms ({excess / parent_ms * 100:.1f}%)"
             )
+        for child_name, grandchildren in children_dict.items():
+            if grandchildren:
+                _check(child_name, grandchildren)
 
-    ce_ms = totals.get(CPP_PARENT, 0)
-    if ce_ms > 0:
-        cpp_sum = sum(totals.get(c, 0) for c in ALL_CPP_PHASES)
-        if cpp_sum > ce_ms:
-            excess = cpp_sum - ce_ms
-            warnings.append(
-                f"C++ phases ({cpp_sum:,.2f} ms) exceed "
-                f"{CPP_PARENT} ({ce_ms:,.2f} ms) "
-                f"by {excess:,.2f} ms ({excess / ce_ms * 100:.1f}%)"
-            )
+    for parent_name, children_dict in TIMING_HIERARCHY.items():
+        _check(parent_name, children_dict)
 
     if warnings:
         print("HIERARCHY VALIDATION WARNINGS")
@@ -370,7 +443,7 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
 
     total_time_by_category = {cat: sum(vals) for cat, vals in timings.items()}
 
-    wall_clock_ms = sum(total_time_by_category.get(c, 0) for c in TOP_LEVEL_PHASES)
+    wall_clock_ms = sum(total_time_by_category.get(c, 0) for c in TIMING_HIERARCHY)
     if wall_clock_ms == 0:
         wall_clock_ms = sum(total_time_by_category.values())
     wall_clock_s = wall_clock_ms / 1000.0
@@ -384,15 +457,15 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     COL_WALL = 11
     COL_PAR = 11
 
-    def fmt_row(indent, name, count, total_ms, mean_ms, pct_wall, pct_parent):
+    def fmt_row(indent, name, count, total_ms, mean_ms, pct_parent, pct_wall):
         prefix = "  " * indent
         cat = f"  {prefix}{name}"
         c = f"{count:>{COL_CNT},}" if count is not None else " " * COL_CNT
         t = f"{total_ms:>{COL_TOT},.2f}" if total_ms is not None else " " * COL_TOT
         m = f"{mean_ms:>{COL_MEAN},.2f}" if mean_ms is not None else " " * COL_MEAN
-        w = f"{pct_wall:>{COL_WALL - 1}.1f}%" if pct_wall is not None else " " * COL_WALL
-        p = f"{pct_parent:>{COL_PAR - 1}.1f}%" if pct_parent is not None else " " * COL_PAR
-        print(f"{cat:<{COL_CAT}} {c} {t} {m} {w}   {p}")
+        par = f"{pct_parent:>{COL_WALL - 1}.1f}%" if pct_parent is not None else " " * COL_WALL
+        wall = f"{pct_wall:>{COL_PAR - 1}.1f}%" if pct_wall is not None else " " * COL_PAR
+        print(f"{cat:<{COL_CAT}} {c} {t} {m} {par}   {wall}")
 
     print("TIMING BY PHASE")
     print("-" * TABLE_WIDTH)
@@ -402,55 +475,54 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         f" {'Count':>{COL_CNT}}"
         f" {'Total (ms)':>{COL_TOT}}"
         f" {'Mean (ms)':>{COL_MEAN}}"
-        f" {'% of Wall':>{COL_WALL}}"
-        f"   {'% of Parent':>{COL_PAR}}"
+        f" {'% of Parent':>{COL_WALL}}"
+        f"   {'% of Wall':>{COL_PAR}}"
     )
     print("-" * TABLE_WIDTH)
 
+    SEPARATORS = {
+        0: lambda: None,  # no separator before top-level (handled specially)
+        1: lambda: print("    " + "-" * (TABLE_WIDTH - 4)),
+        2: lambda: print("      " + "- " * ((TABLE_WIDTH - 6) // 2)),
+        3: lambda: print("        " + ". " * ((TABLE_WIDTH - 8) // 2)),
+    }
+
     def sep_top():
-        indent = "  "  # level 0
-        print(indent + "=" * (TABLE_WIDTH - len(indent)))
+        print("  " + "=" * (TABLE_WIDTH - 2))
 
-    def sep_detail():
-        indent = "    "  # level 1
-        print(indent + "-" * (TABLE_WIDTH - len(indent)))
+    def render_node(node: PhaseNode, depth: int, parent_ms: Optional[float],
+                    wall_clock_ms: float, is_first: bool):
+        """Recursively render a PhaseNode at a given depth."""
+        # Separators between siblings
+        if depth == 0:
+            pass  # handled by caller
+        elif depth == 1:
+            SEPARATORS[1]()
+        elif depth == 2:
+            SEPARATORS[2]()
+        elif depth == 3 and is_first:
+            SEPARATORS[3]()
+        # depth >= 4 or depth == 3 non-first: no separator
 
-    def sep_group():
-        indent = "      "  # level 2
-        w = TABLE_WIDTH - len(indent)
-        print(indent + "- " * (w // 2))
+        pct_parent = as_percentage(node.total_ms, parent_ms) if parent_ms else None
+        pct_wall = as_percentage(node.total_ms, wall_clock_ms)
 
-    def sep_minor():
-        indent = "        "  # level 3
-        w = TABLE_WIDTH - len(indent)
-        print(indent + ". " * (w // 2))
+        fmt_row(depth, node.name, node.count, node.total_ms, node.mean_ms,
+                pct_parent, pct_wall)
+
+        for i, child in enumerate(_get_display_children(node)):
+            render_node(child, depth + 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
 
     nodes = build_hierarchy(timings)
 
     for top_idx, node in enumerate(nodes):
         if top_idx > 0:
             sep_top()
-        fmt_row(0, node.name, node.count, node.total_ms, node.mean_ms,
-                as_percentage(node.total_ms, wall_clock_ms), None)
+        pct_wall = as_percentage(node.total_ms, wall_clock_ms)
+        fmt_row(0, node.name, node.count, node.total_ms, node.mean_ms, None, pct_wall)
 
-        for child in node.children:
-            sep_detail()
-            fmt_row(1, child.name, child.count, child.total_ms, child.mean_ms,
-                    as_percentage(child.total_ms, wall_clock_ms),
-                    as_percentage(child.total_ms, node.total_ms))
-
-            for group in child.children:
-                sep_group()
-                fmt_row(2, group.name, None, group.total_ms, None,
-                        as_percentage(group.total_ms, wall_clock_ms),
-                        as_percentage(group.total_ms, child.total_ms))
-                if not group.children:
-                    continue
-                sep_minor()
-                for leaf in group.children:
-                    fmt_row(3, leaf.name, leaf.count, leaf.total_ms, leaf.mean_ms,
-                            as_percentage(leaf.total_ms, wall_clock_ms),
-                            as_percentage(leaf.total_ms, group.total_ms))
+        for i, child in enumerate(node.children):
+            render_node(child, 1, node.total_ms, wall_clock_ms, is_first=(i == 0))
 
     # Unknown categories
     unknown_cats = set(timings.keys()) - ALL_KNOWN_CATEGORIES
@@ -482,6 +554,11 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
         total_time_by_category.get("python_solution_generation", 0)
         + total_time_by_category.get("python_kernel_compilation", 0)
     )
+    python_io_time = (
+        total_time_by_category.get("python_write_cache", 0)
+        + total_time_by_category.get("python_write_solutions", 0)
+        + total_time_by_category.get("python_cache_check", 0)
+    )
     client_setup_time = sum(
         total_time_by_category.get(c, 0)
         for c in CPP_PHASE_GROUPS.get("C++ Client Setup", [])
@@ -502,6 +579,7 @@ def print_summary(timings: Dict[str, List[float]], problem_timings: List[Problem
     print("KEY INSIGHTS (% of wall clock)")
     print("-" * TABLE_WIDTH)
     print(f"  Python phases (code gen, compilation):  {python_codegen_time / 1000:.2f}s ({as_percentage(python_codegen_time, wall_clock_ms):.1f}%)")
+    print(f"  Python I/O overhead (cache, YAML):      {python_io_time / 1000:.2f}s ({as_percentage(python_io_time, wall_clock_ms):.1f}%)")
     print(f"  C++ client setup (library loading):     {client_setup_time / 1000:.2f}s ({as_percentage(client_setup_time, wall_clock_ms):.1f}%)")
     print(f"  Data preparation (CPU init, GPU prep):  {data_prep_time / 1000:.2f}s ({as_percentage(data_prep_time, wall_clock_ms):.1f}%)")
     print(f"  Reference computation (CPU GEMM):       {ref_time / 1000:.2f}s ({as_percentage(ref_time, wall_clock_ms):.1f}%)")

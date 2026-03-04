@@ -492,11 +492,37 @@ TEST(TestBlockScaleQuantizeNode, PackNodeWithTranspose)
     EXPECT_EQ(packedAttributes->block_size(), 64);
 }
 
-TEST(TestBlockScaleQuantizeNode, PackNodeWithoutOptionals)
+TEST(TestBlockScaleQuantizeNode, PackNodeWithoutBlockSizeThrows)
 {
     BlockScaleQuantizeAttributes attrs;
     attrs.set_name("BlockScaleQuantize");
-    // block_size and axis not set
+    // block_size not set
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1).set_dim({1, 2, 3, 4}).set_stride({4, 3, 2, 1});
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_dim({1, 2, 3, 4}).set_stride({4, 3, 2, 1});
+    attrs.set_y(yTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_uid(3).set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    attrs.set_scale(scaleTensor);
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    flatbuffers::FlatBufferBuilder builder;
+    EXPECT_THROW(node.pack_node(builder), std::bad_optional_access);
+}
+
+TEST(TestBlockScaleQuantizeNode, PackNodeWithoutAxis)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_name("BlockScaleQuantize");
+    attrs.set_block_size(32);
+    // axis not set
 
     auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_uid(1).set_dim({1, 2, 3, 4}).set_stride({4, 3, 2, 1});
@@ -522,7 +548,7 @@ TEST(TestBlockScaleQuantizeNode, PackNodeWithoutOptionals)
     auto packedAttributes = nodeFlatbuffer->attributes_as_BlockScaleQuantizeAttributes();
 
     ASSERT_NE(packedAttributes, nullptr);
-    EXPECT_EQ(packedAttributes->block_size(), 0);
+    EXPECT_EQ(packedAttributes->block_size(), 32);
     EXPECT_FALSE(packedAttributes->axis().has_value());
     EXPECT_EQ(packedAttributes->transpose(), false);
 }
