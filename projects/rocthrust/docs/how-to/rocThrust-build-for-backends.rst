@@ -20,19 +20,19 @@ When the ``thrust::device`` execution policy is used in the code, API calls are 
       - Description
 
     * - ``HIP``
-      - | HIP backend for device acceleration. 
+      - | `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ backend for device acceleration. 
         | Requires a HIP-aware clang compiler such as hipcc. 
         | Default setting.
 
     * - ``TBB``
-      - | Intel Thread Building Blocks (TBB) backend. 
-        | Parallelizes computations on the host with no device acceleration. 
-        | Requires a compiler that supports TBB.
+      - | |oneTBB|_ backend. 
+        | Parallelizes computations on the host using oneTBB with no device acceleration. 
+        | Requires a compiler that supports oneTBB.
 
     * - ``OMP``
-      - | OpenMP (OMP) backend. 
-        | Parallelizes computations on the host with no device acceleration. 
-        | Requires a compiler that supports OMP.
+      - | |OMP|_ backend. 
+        | Parallelizes computations on the host using OpenMP with no device acceleration. 
+        | Requires a compiler that supports OpenMP.
 
     * - ``CPP``
       - | Uses the g++ compiler and the standard C++ library. 
@@ -58,14 +58,14 @@ When the ``thrust::host`` execution policy is used in the code, API calls are ru
         | Default setting.
 
     * - ``OMP`` 
-      - | OpenMP (OMP) backend. 
+      - | OpenMP backend. 
         | Parallelizes host-side operations using OpenMP. 
-        | Requires a compiler that supports OMP.
+        | Requires a compiler that supports OpenMP.
 
     * - ``TBB`` 
-      - | Intel Thread Building Blocks (TBB) backend. 
-        | Parallelizes host-side operations using TBB.
-        | Requires a compiler that supports TBB.
+      - | oneTBB backend. 
+        | Parallelizes host-side operations using oneTBB.
+        | Requires a compiler that supports oneTBB.
 
 .. note::
 
@@ -81,4 +81,15 @@ For example, to build rocThrust with no device acceleration, using only the g++ 
 
     `ROCM_PATH=/opt/rocm CXX=g++ cmake -B build -DBUILD_BENCHMARK=OFF -DBUILD_TEST=OFF -DTHRUST_HOST_SYSTEM=CPP -DTHRUST_DEVICE_SYSTEM=CPP -DLINK_HIP_DEVICE_LIBS=OFF`
  
-For information about setting build options, see :doc:`building rocThrust with CMake <../install/rocThrust-install-with-cmake>` and :doc:`building rocThrust with rmake <../install/rocThrust-rmake-install>`.
+For more information about build options and how to set them, see :doc:`building rocThrust with CMake <../install/rocThrust-install-with-cmake>` and :doc:`building rocThrust with rmake <../install/rocThrust-rmake-install>`.
+
+
+.. |reg| raw:: html
+
+    &reg;
+
+.. |oneTBB| replace:: Intel\ |reg| oneAPI Threading Building Blocks (oneTBB)
+.. _oneTBB: https://www.intel.com/content/www/us/en/developer/tools/oneapi/onetbb.html
+
+.. |OMP| replace:: OpenMP\ |reg| 
+.. _OMP: https://www.openmp.org
