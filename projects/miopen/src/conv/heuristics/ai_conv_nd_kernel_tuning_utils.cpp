@@ -43,7 +43,7 @@ namespace conv {
 using ProblemInterpreter = miopen::solver::ProblemInterpreter;
 using ProblemDescription = miopen::conv::ProblemDescription;
 
-int LayoutStringToCodeND(const std::string& layout, const bool& is3d)
+int LayoutStringToCode(const std::string& layout, const bool& is3d)
 {
     if (is3d)
     {
@@ -128,12 +128,12 @@ GetFeaturesND(const ProblemDescription& problem, int /*max_cu*/, const std::stri
     // 24–26: in_layout, fil_layout, out_layout (as codes)
      if ( is3d ) {
         features["in_layout"] =
-            static_cast<float>(LayoutStringToCodeND(ProblemInterpreter::GetInputLayout(problem),is3d));
+            static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetInputLayout(problem),is3d));
     }
     features["fil_layout"] =
-        static_cast<float>(LayoutStringToCodeND(ProblemInterpreter::GetFilterLayout(problem),is3d));
+        static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetFilterLayout(problem),is3d));
     features["out_layout"] =
-        static_cast<float>(LayoutStringToCodeND(ProblemInterpreter::GetOutputLayout(problem),is3d));
+        static_cast<float>(LayoutStringToCode(ProblemInterpreter::GetOutputLayout(problem),is3d));
 
     // 27: precision
     features["precision"] = static_cast<float>(problem.GetInDataType());
