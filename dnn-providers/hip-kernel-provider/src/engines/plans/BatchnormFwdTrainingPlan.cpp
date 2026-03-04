@@ -270,7 +270,6 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnHipKernelHandle& handle,
 
     // Extract dimensions from x tensor
     const auto* xDims = _trainingParams.x()->dims();
-    const auto* xStrides = _trainingParams.x()->strides();
 
     size_t n, c, h, w;
     // Check if 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
@@ -302,8 +301,8 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnHipKernelHandle& handle,
     unsigned int in_nhw = static_cast<unsigned int>(n * h * w);
     float inhw = static_cast<float>(1.0 / in_nhw);
 
-    // Detect layout: NHWC has C dimension (index 1) with stride 1, NCHW has stride H*W
-    bool isLayoutNHWC = (xStrides->Get(1) == 1);
+    // Detect layout
+    bool isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(_trainingParams.x());
 
     // Kernel launch parameters
     // NOTE: These are generally selected based on heuristics and tuning,
