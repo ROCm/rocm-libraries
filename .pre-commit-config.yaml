@@ -62,7 +62,8 @@ repos:
           (?x)
           ^projects/hipdnn/\.clang-format$|
           ^dnn-providers/miopen-provider/\.clang-format$|
-          ^dnn-providers/hipblaslt-provider/\.clang-format$
+          ^dnn-providers/hipblaslt-provider/\.clang-format$|
+          ^dnn-providers/hip-kernel-provider/\.clang-format$
       - id: check-added-large-files
 
   - repo: https://github.com/psf/black

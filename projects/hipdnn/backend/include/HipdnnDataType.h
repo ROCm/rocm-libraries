@@ -1,0 +1,25 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+/**
+ * @file HipdnnDataType.h
+ * @brief Data type identifiers for tensor element types
+ */
+#pragma once
+
+/**
+ * @enum hipdnnDataType_t
+ * @brief Tensor element data types
+ */
+typedef enum
+{
+    HIPDNN_DATA_FLOAT = 0, ///< 32-bit floating point
+    HIPDNN_DATA_DOUBLE = 1, ///< 64-bit floating point
+    HIPDNN_DATA_HALF = 2, ///< 16-bit floating point (IEEE 754)
+    HIPDNN_DATA_INT8 = 3, ///< 8-bit signed integer
+    HIPDNN_DATA_INT32 = 4, ///< 32-bit signed integer
+    HIPDNN_DATA_UINT8 = 5, ///< 8-bit unsigned integer
+    HIPDNN_DATA_BFLOAT16 = 6, ///< 16-bit brain floating point
+    HIPDNN_DATA_FP8_E4M3 = 7, ///< 8-bit floating point (E4M3)
+    HIPDNN_DATA_FP8_E5M2 = 8, ///< 8-bit floating point (E5M2)
+} hipdnnDataType_t;

@@ -43,14 +43,30 @@ using hipdnn_data_sdk::types::half;
  * - **Virtual tensors**: Intermediate results that don't require explicit memory allocation
  * - **Pass-by-value tensors**: Scalar values embedded directly in the tensor
  *
+ * @note **Dimension Ordering**: The expected dimension ordering depends on the operation.
+ * Convolution and batch normalization tensors use `(N, C, H, W)` or `(N, C, D, H, W)`.
+ * Matmul tensors use `(...batch, M, K)` for A and `(...batch, K, N)` for B.
+ * Pointwise operations accept any shape with broadcasting support.
+ * In all cases, the memory layout is controlled by strides, not by dimension order in the tensor shape vector.
+ * Use `hipdnn_data_sdk::utilities::generateStrides()` to compute strides from a TensorLayout.
+ *
  * @code{.cpp}
- * // Create a 4D tensor (NCHW format)
+ * // Create a 4D convolution input tensor
+ * // For convolution, dimensions follow (N, C, H, W) ordering
  * auto x = Graph::tensor(TensorAttributes()
- *              .set_dim({1, 64, 28, 28})
- *              .set_stride({50176, 784, 28, 1})
+ *              .set_dim({1, 64, 28, 28})   // dims: N=1, C=64, H=28, W=28
+ *              .set_stride({50176, 784, 28, 1})  // NCHW layout strides
  *              .set_data_type(DataType::HALF)
  *              .set_uid(0)
  *              .set_name("input_x"));
+ *
+ * // Same dimensions with NHWC (channel-last) layout
+ * auto x_nhwc = Graph::tensor(TensorAttributes()
+ *              .set_dim({1, 64, 28, 28})   // dims: N=1, C=64, H=28, W=28
+ *              .set_stride({50176, 1, 1792, 64})  // NHWC layout strides
+ *              .set_data_type(DataType::HALF)
+ *              .set_uid(1)
+ *              .set_name("input_x_nhwc"));
  *
  * // Create a scalar tensor
  * TensorAttributes scalar(2.0f);  // Pass-by-value float
@@ -122,6 +138,15 @@ public:
         _dataType = getDataTypeEnumFromType<T>();
         _dim = _stride = {1};
         return *this;
+    }
+
+    /**
+     * @brief Get the raw value variant for type-erased access to the scalar value
+     * @return Const reference to the internal ValueVariant
+     */
+    const ValueVariant& get_value_variant() const // NOLINT(readability-identifier-naming)
+    {
+        return _value;
     }
 
     /**
@@ -263,6 +288,12 @@ public:
      * @brief Set the dimensions for this tensor
      * @param dim Vector of dimension sizes
      * @return Reference to this for method chaining
+     *
+     * @note The expected dimension ordering depends on the operation type:
+     *       convolution and batch normalization use (N, C, H, W) / (N, C, D, H, W),
+     *       matmul uses (...batch, M, K) / (...batch, K, N),
+     *       and pointwise operations accept any shape.
+     *       Memory layout is always controlled by strides and stride order, not by dimension order in the tensor shape vector.
      */
     TensorAttributes&
         set_dim(const std::vector<int64_t>& dim) // NOLINT(readability-identifier-naming)
@@ -503,5 +534,5 @@ private:
     bool _isVirtual = false;
     ValueVariant _value;
 };
-typedef TensorAttributes Tensor_attributes; ///< @brief Type alias for cuDNN compatibility
+typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

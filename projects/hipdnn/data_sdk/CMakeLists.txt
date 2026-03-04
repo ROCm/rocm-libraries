@@ -13,10 +13,14 @@ set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/dat
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 hipdnn_add_dependency(flatbuffers VERSION ${HIPDNN_FLATBUFFERS_VERSION})
-hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 
-# Supported FlatBuffers versions - update this list when adding new version support.
-# Each version must have pre-generated headers in include/generated/v<version_tag>/
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+endif()
+
+# Supported FlatBuffers versions (oldest to newest) - update this list when adding new version support.
+# Each version must have pre-generated headers in include/hipdnn_data_sdk/data_objects/v<version_tag>/
+# 24.12.23 matches PyTorch's FlatBuffers version for compatibility
 set(HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS "24.12.23" "${HIPDNN_FLATBUFFERS_VERSION}")
 
 if(NOT HIPDNN_FLATBUFFERS_VERSION IN_LIST HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS)
@@ -100,9 +104,11 @@ if(TARGET FlatBuffers)
 endif()
 
 # Process nlohmann_json dependency
-_hipdnn_data_sdk_process_dependency(
-    nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
-)
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    _hipdnn_data_sdk_process_dependency(
+        nlohmann_json nlohmann_json::nlohmann_json INCLUDE_DIR ${HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR}
+    )
+endif()
 
 add_library(hipdnn_data_sdk INTERFACE)
 
@@ -111,7 +117,14 @@ hipdnn_generate_version_header(hipdnn_data_sdk)
 
 # Add includes from dependency targets
 hipdnn_add_dependency_includes(hipdnn_data_sdk flatbuffers::flatbuffers)
-hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    hipdnn_add_dependency_includes(hipdnn_data_sdk nlohmann_json::nlohmann_json)
+endif()
+
+target_compile_definitions(
+    hipdnn_data_sdk INTERFACE
+    $<$<BOOL:${HIPDNN_FRONTEND_SKIP_JSON_LIB}>:HIPDNN_DATA_SDK_SKIP_JSON_LIB>
+)
 
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
@@ -141,8 +154,12 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/engine_details.fbs
             schemas/graph.fbs
             schemas/knob_value.fbs
+            schemas/layernorm_attributes.fbs
             schemas/matmul_attributes.fbs
+            schemas/norm_common.fbs
             schemas/pointwise_attributes.fbs
+            schemas/rmsnorm_attributes.fbs
+            schemas/sdpa_attributes.fbs
             schemas/tensor_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}
