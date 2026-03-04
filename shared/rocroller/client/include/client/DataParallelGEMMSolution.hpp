@@ -126,22 +126,22 @@ namespace rocRoller
                             isPreTiled ? std::vector<size_t>{}
                                        : unitStrides(solutionParams.types.transA)));
 
-                        auto loadInputA = m_tagTensorScaleA;
+                        auto loadScaleInputA = m_tagTensorScaleA;
 
                         if(isPreTiled)
                         {
                             AssertFatal(solutionParams.types.transA == TransposeType::T);
                             AssertFatal(solutionParams.types.scalePretileA.size() == 2,
                                         ShowValue(solutionParams.types.scalePretileA));
-                            loadInputA
+                            loadScaleInputA
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    loadInputA.value(),
+                                    loadScaleInputA.value(),
                                     solutionParams.types.scalePretileA,
                                     solutionParams.types.transA == TransposeType::T));
                         }
 
                         m_tagLoadScaleA = command->addOperation(
-                            rocRoller::Operations::T_Load_Tiled(loadInputA.value()));
+                            rocRoller::Operations::T_Load_Tiled(loadScaleInputA.value()));
 
                         auto scaleInputA = m_tagLoadScaleA;
 
@@ -194,22 +194,22 @@ namespace rocRoller
                             isPreTiled ? std::vector<size_t>{}
                                        : unitStrides(solutionParams.types.transB)));
 
-                        auto loadInputB = m_tagTensorScaleB;
+                        auto loadScaleInputB = m_tagTensorScaleB;
 
                         if(isPreTiled)
                         {
                             AssertFatal(solutionParams.types.transB == TransposeType::N);
                             AssertFatal(solutionParams.types.scalePretileB.size() == 2,
                                         ShowValue(solutionParams.types.scalePretileB));
-                            loadInputB
+                            loadScaleInputB
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    loadInputB.value(),
+                                    loadScaleInputB.value(),
                                     solutionParams.types.scalePretileB,
                                     solutionParams.types.transB == TransposeType::T));
                         }
 
                         m_tagLoadScaleB = command->addOperation(
-                            rocRoller::Operations::T_Load_Tiled(loadInputB.value()));
+                            rocRoller::Operations::T_Load_Tiled(loadScaleInputB.value()));
 
                         auto scaleInputB = m_tagLoadScaleB;
 
