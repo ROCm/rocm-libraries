@@ -56,21 +56,9 @@ Using Chocolatey, install any of the missing required dependencies using an Admi
 .. code:: bash
    
    choco install visualstudio2022buildtools -y --params "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
-
-.. code:: bash
-
    choco install git.install -y --params "'/GitAndUnixToolsOnPath'"
-
-.. code:: bash
-
    choco install cmake --version=3.31.0 -y
-
-.. code:: bash
-
    choco install ninja -y
-
-.. code:: bash
-
    choco install python -y
 
 Enable Windows 10 long paths
