@@ -167,10 +167,22 @@ namespace rocRoller
             auto iX = graph.coordinates.addElement(tile.tileIndex(0));
             auto iY = graph.coordinates.addElement(tile.tileIndex(1));
 
-            AssertFatal(tile.sizes[0] % sizePTTileX == 0, "Pre-tile size mismatch.");
-            AssertFatal(tile.sizes[1] % sizePTTileY == 0, "Pre-tile size mismatch.");
-            AssertFatal(tile.sizes[0] / sizePTTileX > 0, "Bad pre-tile size.");
-            AssertFatal(tile.sizes[1] / sizePTTileY > 0, "Bad pre-tile size.");
+            AssertFatal(tile.sizes[0] % sizePTTileX == 0,
+                        "Pre-tile size mismatch: tile.sizes[0] must be divisible by sizePTTileX.",
+                        ShowValue(tile.sizes[0]),
+                        ShowValue(sizePTTileX));
+            AssertFatal(tile.sizes[1] % sizePTTileY == 0,
+                        "Pre-tile size mismatch: tile.sizes[1] must be divisible by sizePTTileY.",
+                        ShowValue(tile.sizes[1]),
+                        ShowValue(sizePTTileY));
+            AssertFatal(tile.sizes[0] / sizePTTileX > 0,
+                        "Bad pre-tile size: tile.sizes[0] must be greater than sizePTTileX.",
+                        ShowValue(tile.sizes[0]),
+                        ShowValue(sizePTTileX));
+            AssertFatal(tile.sizes[1] / sizePTTileY > 0,
+                        "Bad pre-tile size: tile.sizes[1] must be greater than sizePTTileY.",
+                        ShowValue(tile.sizes[1]),
+                        ShowValue(sizePTTileY));
 
             auto numPTTilesPerTileX = tile.sizes[0] / sizePTTileX;
             auto numPTTilesPerTileY = tile.sizes[1] / sizePTTileY;
