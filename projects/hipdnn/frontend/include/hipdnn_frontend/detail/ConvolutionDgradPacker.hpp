@@ -3,87 +3,87 @@
 
 #pragma once
 
-#include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 
 namespace hipdnn_frontend::detail
 {
 
-// Builds a conv fprop operation descriptor from ConvFpropAttributes.
-// Tensor descriptors are created/deduplicated via createOrFindTensorDesc.
-inline Error createConvFpropOperation(
-    const graph::ConvFpropAttributes& attributes,
+// Builds a conv dgrad operation descriptor from ConvDgradAttributes.
+// Tensor descriptors are created/deduplicated via ensureAndSetTensorRef.
+inline Error createConvDgradOperation(
+    const graph::ConvDgradAttributes& attributes,
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
+    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                "Failed to create conv fprop operation descriptor"};
+                "Failed to create conv dgrad operation descriptor"};
     }
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
-                                             attributes.get_x(),
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+                                             attributes.get_dy(),
                                              tensorDescs,
-                                             "conv fprop X"));
+                                             "conv dgrad DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W,
                                              attributes.get_w(),
                                              tensorDescs,
-                                             "conv fprop W"));
+                                             "conv dgrad W"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
-                                             attributes.get_y(),
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
+                                             attributes.get_dx(),
                                              tensorDescs,
-                                             "conv fprop Y"));
+                                             "conv dgrad DX"));
 
-    // Set conv fprop parameters
+    // Set conv dgrad parameters
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_pre_padding(),
-                                            "conv fprop pre_padding"));
+                                            "conv dgrad pre_padding"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_post_padding(),
-                                            "conv fprop post_padding"));
+                                            "conv dgrad post_padding"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_stride(),
-                                            "conv fprop stride"));
+                                            "conv dgrad stride"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_DILATIONS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_dilation(),
-                                            "conv fprop dilation"));
+                                            "conv dgrad dilation"));
 
-    // Set conv fprop mode and compute data type
+    // Set conv dgrad mode and compute data type
     auto convMode = hipdnn_frontend::toBackendConvMode(attributes.get_convolution_mode());
     if(!convMode.has_value())
     {
         return {ErrorCode::INVALID_VALUE,
-                std::string("Unsupported conv fprop mode: ")
+                std::string("Unsupported conv dgrad mode: ")
                     + to_string(attributes.get_convolution_mode())};
     }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
                                                HIPDNN_TYPE_CONVOLUTION_MODE,
                                                *convMode,
-                                               "conv fprop mode"));
+                                               "conv dgrad mode"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
                                                  attributes.compute_data_type,
-                                                 "conv fprop compute data type"));
+                                                 "conv dgrad compute data type"));
 
     // Finalize operation descriptor
-    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "conv fprop operation descriptor"));
+    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "conv dgrad operation descriptor"));
 
     operations.push_back(std::move(opDesc));
     return {};
