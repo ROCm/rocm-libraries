@@ -893,14 +893,19 @@ bool rocblas_internal_tensile_supports_xdl_math_op(rocblas_math_mode mode)
     return (deviceString.find("gfx942") != std::string::npos);
 }
 
+std::string rocblas_internal_get_arch_name(int deviceId)
+{
+    hipDeviceProp_t deviceProperties;
+    PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
+    return ArchName<hipDeviceProp_t>{}(deviceProperties); // strips : and later
+}
+
 // exported. Get architecture name
 std::string rocblas_internal_get_arch_name()
 {
     int deviceId;
     PRINT_IF_HIP_ERROR(hipGetDevice(&deviceId));
-    hipDeviceProp_t deviceProperties;
-    PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
-    return ArchName<hipDeviceProp_t>{}(deviceProperties);
+    return rocblas_internal_get_arch_name(deviceId);
 }
 
 // exported. Get xnack mode
