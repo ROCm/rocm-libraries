@@ -73,7 +73,7 @@ public:
 /* For now we don't support tuning and a builder is not needed,
  * but in future it will be needed.
  */
-class MIOPEN_INTERNALS_EXPORT EngineCfgBuilder
+class EngineCfgBuilder
 {
     EngineCfg mEngineCfg;
     bool mEngineSet = false;
@@ -97,7 +97,7 @@ public:
         return std::move(setEngine(std::move(engine)));
     }
     EngineCfg build() &;
-    EngineCfg build() &&;
+    MIOPEN_INTERNALS_EXPORT EngineCfg build() &&;
 };
 
 class MIOPEN_INTERNALS_EXPORT BackendEngineCfgDescriptor : public BackendDescriptor

@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #ifndef GUARD_MIOPEN_CONV_DRIVER_HPP
 #define GUARD_MIOPEN_CONV_DRIVER_HPP
 
@@ -42,6 +20,7 @@
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/env.hpp>
+#include <miopen/errors.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/find_controls.hpp>
 #include <miopen/logger.hpp>
@@ -54,14 +33,13 @@
 #include <../test/tensor_holder.hpp>
 #include <../test/verify.hpp>
 
-#include <boost/range/adaptors.hpp>
-
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <type_traits>
 #include <vector>
@@ -690,10 +668,9 @@ int ConvDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
 
     if(is_gpualloc && inflags.GetValueInt("verify") == 1)
     {
-        std::cerr << "Error: '--gpualloc 1' should not be used with enabled verification. Add "
-                     "'--verify 0' to options."
-                  << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "'--gpualloc 1' should not be used with enabled verification. "
+                     "Add '--verify 0' to options.");
     }
 
     in.SetGpuallocMode(is_gpualloc);
@@ -726,8 +703,8 @@ void ConvDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string layout_va
 {
     if((ChkLayout_ShortName()))
     {
-        std::cerr << " Invalid Layout Short Name = " << ChkLayout_ShortName() << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid Layout Short Name = " + std::to_string(ChkLayout_ShortName()));
     }
     else
     {
@@ -739,8 +716,7 @@ void ConvDriver<Tgpu, Tref>::ValidateLayoutInputParameters(std::string layout_va
         }
         else
         {
-            std::cerr << "Invalid Layout Parameter Value - " << layout_value << std::endl;
-            exit(EXIT_FAILURE);
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid Layout Parameter Value - " + layout_value);
         }
     }
 }
@@ -755,10 +731,10 @@ void ConvDriver<Tgpu, Tref>::ValidateVectorizedParameters(int vector_dim, int ve
     }
     else
     {
-        std::cerr << "Invalid Tensor Vectorization Parameter Value - "
-                  << "vector_dim:" << vector_dim << ", vector_length:" << vector_length
-                  << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Invalid Tensor Vectorization Parameter Value - vector_dim:" +
+                         std::to_string(vector_dim) +
+                         ", vector_length:" + std::to_string(vector_length));
     }
 }
 
@@ -775,8 +751,7 @@ int ConvDriver<Tgpu, Tref>::ChkLayout_ShortName()
     }
     else
     {
-        std::cerr << "Error:Invalid Short Name!" << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Short Name!");
     }
 }
 
@@ -1044,7 +1019,7 @@ std::vector<int> ConvDriver<Tgpu, Tref>::GetInputTensorLengthsFromCmdLine()
     in_lens[0] = inflags.GetValueInt("batchsize");
     in_lens[1] = inflags.GetValueInt("in_channels");
 
-    auto in_spatial_lens = boost::adaptors::slice(in_lens, 2, 2 + spatial_dim);
+    auto in_spatial_lens = in_lens | std::views::drop(2) | std::views::take(spatial_dim);
 
     if(spatial_dim == 2)
     {
@@ -1073,7 +1048,7 @@ std::vector<int> ConvDriver<Tgpu, Tref>::GetWeightTensorLengthsFromCmdLine()
     int spatial_dim = inflags.GetValueInt("spatial_dim");
     wei_lens.resize(2 + spatial_dim);
 
-    auto wei_spatial_lens = boost::adaptors::slice(wei_lens, 2, 2 + spatial_dim);
+    auto wei_spatial_lens = wei_lens | std::views::drop(2) | std::views::take(spatial_dim);
 
     int group_count = std::max(inflags.GetValueInt("group_count"), 1);
 
@@ -1193,8 +1168,7 @@ int ConvDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
         if(in_c % group_count != 0 || out_c % group_count != 0 || group_count > in_c ||
            group_count > out_c)
         {
-            printf("Invalid group number\n");
-            exit(0); // NOLINT (concurrency-mt-unsafe)
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid group number");
         }
     }
 
@@ -3502,10 +3476,8 @@ std::string ConvDriver<Tgpu, Tref>::GetVerificationCacheFileName(
     miopen::LogRange(ss << "_", trans_output_pads, "x");
     ss << "_" << inflags.GetValueInt("pad_val");
     ss << "_" << inflags.GetValueInt("bias");
-    ss << "_"
-       << "GPU" << get_datatype_string(Tgpu{});
-    ss << "_"
-       << "REF" << get_datatype_string(Tref{});
+    ss << "_" << "GPU" << get_datatype_string(Tgpu{});
+    ss << "_" << "REF" << get_datatype_string(Tref{});
 
     return ss.str();
 }

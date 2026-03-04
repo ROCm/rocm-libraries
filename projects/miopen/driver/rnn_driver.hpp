@@ -38,6 +38,7 @@
 
 #include <../test/verify.hpp>
 
+#include <miopen/errors.hpp>
 #include <miopen/miopen.h>
 #include <miopen/rnn.hpp>
 #include <miopen/tensor.hpp>
@@ -405,8 +406,7 @@ int RNNDriver<Tgpu, Tref>::SetRNNDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect RNN Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect RNN Mode");
     }
 
     miopenRNNBiasMode_t biasMode;
@@ -420,8 +420,7 @@ int RNNDriver<Tgpu, Tref>::SetRNNDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect bias Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect bias Mode");
     }
 
     miopenRNNDirectionMode_t directionMode;
@@ -435,8 +434,7 @@ int RNNDriver<Tgpu, Tref>::SetRNNDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect direction Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect direction Mode");
     }
 
     miopenRNNInputMode_t inMode;
@@ -450,8 +448,7 @@ int RNNDriver<Tgpu, Tref>::SetRNNDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect input Mode\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect input Mode");
     }
 
     miopenRNNAlgo_t algo;
@@ -469,8 +466,7 @@ int RNNDriver<Tgpu, Tref>::SetRNNDescriptorFromCmdLineArgs()
     }
     else
     {
-        printf("Incorrect RNN algorithm\n");
-        exit(0); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect RNN algorithm");
     }
 
     if(inflags.GetValueInt("use_dropout"))

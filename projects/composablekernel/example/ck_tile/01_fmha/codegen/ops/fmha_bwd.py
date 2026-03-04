@@ -457,6 +457,24 @@ class KernelComponentFactoryGfx950(KernelComponentFactoryGfx9):
         return results
 
 
+class KernelComponentFactoryGfx11(KernelComponentFactoryBase):
+    arch = ArchTrait("gfx11")
+
+    @staticmethod
+    def get_dq_dk_dv_tiles(dtype: str, tr_load: str) -> List[FmhaBwdDQDKDVTileSize]:
+        if tr_load == "t":
+            return []
+        if dtype in ["fp16", "bf16"]:
+            return [
+                #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
+                FmhaBwdDQDKDVTileSize( 32,  64,  32,  32,  32,  32,  64,   32,   32,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 16,  16, 16, 16, -1),
+                FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  32,   64,   64,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 16,  16, 16, 16, -1),
+                FmhaBwdDQDKDVTileSize( 16,  64, 128,  16, 128,  16,  32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16, -1),
+                FmhaBwdDQDKDVTileSize( 16,  64, 256,  16, 256,  16,  32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16, -1),
+            ]  # fmt: skip
+        return []
+
+
 class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
     arch = ArchTrait("gfx12")
 
@@ -483,6 +501,8 @@ def get_factory(target: str):
     if target.startswith("gfx9"):
         return KernelComponentFactoryGfx9
 
+    if target.startswith("gfx11"):
+        return KernelComponentFactoryGfx11
     if target.startswith("gfx12"):
         return KernelComponentFactoryGfx12
 
@@ -1175,9 +1195,9 @@ def list_blobs(
     )
     with file_path.open("a") as f:
         for k in kernels_dot_do_o:
-            f.write(str(file_path.parent / GEN_DIR / k.filename) + "\n")
+            f.write((file_path.parent / GEN_DIR / k.filename).as_posix() + "\n")
         for k in kernels_dq_dk_dv:
-            f.write(str(file_path.parent / GEN_DIR / k.filename) + "\n")
+            f.write((file_path.parent / GEN_DIR / k.filename).as_posix() + "\n")
         for k in kernels_convert_dq:
-            f.write(str(file_path.parent / GEN_DIR / k.filename) + "\n")
-        f.write(str(file_path.parent / GEN_DIR / FMHA_BWD_API_FILENAME) + "\n")
+            f.write((file_path.parent / GEN_DIR / k.filename).as_posix() + "\n")
+        f.write((file_path.parent / GEN_DIR / FMHA_BWD_API_FILENAME).as_posix() + "\n")

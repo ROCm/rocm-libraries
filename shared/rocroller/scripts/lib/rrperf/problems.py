@@ -1,30 +1,8 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import pathlib
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import dataclass, field, fields
 from typing import Any, List, Optional
 
 import yaml
@@ -127,7 +105,7 @@ class TypeParameters:
     # If scale_A or scale_B is Separate, scaleBlockSize
     # needs to be set to a valid block size (e.g. 32)
     scaleBlockSize: int = -1
-    scaleSkipPermlane: bool = False
+    scaleSkipPermlane: str = "None"  # None, PreSwizzleScale, PreSwizzleScaleGFX950
 
     def __init__(self, typeParams: Optional[Any] = None, **kwargs):
         if isinstance(typeParams, TypeParameters):
@@ -273,8 +251,12 @@ class GEMM(GEMMProblem, GEMMSolution):
 
     @property
     def run_invariant_token(self):
+        # Build metadata (e.g. git commit tag) should not affect cross-run matching.
+        # Excluding version keeps GEMM comparisons stable across different commits.
+        solution_fields = field_dict(GEMMSolution, self)
+        solution_fields.pop("version", None)
         return repr(GEMMProblem(**field_dict(GEMMProblem, self))) + repr(
-            GEMMSolution(**field_dict(GEMMSolution, self))
+            GEMMSolution(**solution_fields)
         )
 
     @property
@@ -519,44 +501,6 @@ class CodeGenResult(CodeGen, RRPerfResult):
     pass
 
 
-@dataclass(unsafe_hash=True)
-class TensileRun(GEMM):
-    """Tensile run interface."""
-
-    config: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
-    tensile_commit: str = "rocm-6.0.0"
-
-    @property
-    def group(self):
-        return "gemm"
-
-    def set_output(self, path: pathlib.Path):
-        self.output = path
-
-    def command(self, **extra_args) -> List[str]:
-        command = str(repo_dir / "scripts" / "benchmark_tensile")
-
-        arg_dict = asdict(self)
-        for key, value in extra_args.items():
-            arg_dict[key] = value
-
-        for non_gemm_arg in ["config", "output", "tensile_commit"]:
-            arg_dict.pop(non_gemm_arg, None)
-
-        args = list([f"{key}={value}" for key, value in arg_dict.items()])
-
-        retval = [
-            command,
-            str(self.config),
-            f"--yaml={str(self.output)}",
-            f"--tensile_commit={self.tensile_commit}",
-            "--kwargs",
-        ] + args
-
-        return retval
-
-
 #
 # Up/down cast from BASE classes to RUN and RESULT classes.
 #
@@ -570,6 +514,31 @@ _base_to_run_class = {
     GEMM: GEMMRun,
     CodeGen: CodeGenRun,
 }
+
+
+def _is_nested_gemm_result(result: dict) -> bool:
+    return any(key in result for key in ("problem", "solution", "benchmark"))
+
+
+def _flatten_nested_gemm_result(result: dict) -> dict:
+    """
+    Flatten nested GEMM result sections into legacy top-level keys.
+
+    Merge order matches the old writer's effective behavior:
+    problem -> solution -> benchmark, where later sections override earlier values.
+    """
+    flattened = {
+        key: value
+        for key, value in result.items()
+        if key not in ("problem", "solution", "benchmark")
+    }
+
+    for key in ("problem", "solution", "benchmark"):
+        section = result.get(key)
+        if isinstance(section, dict):
+            flattened.update(section)
+
+    return flattened
 
 
 def cast_missing_parameters(result):
@@ -633,7 +602,13 @@ def load_results(path: pathlib.Path):
     """
     rv = []
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
+        if r is None:
+            continue
+
+        r = dict(r)
         ResultClass = _client_to_result_class[r["resultType"]]
+        if r.get("resultType") == "GEMM" and _is_nested_gemm_result(r):
+            r = _flatten_nested_gemm_result(r)
         r.pop("path", None)
         cast_missing_parameters(r)
         rv.append(ResultClass(path=path, **r))

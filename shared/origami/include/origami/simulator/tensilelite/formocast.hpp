@@ -278,9 +278,10 @@ namespace origami
          * @param bpRead Bytes per read operation
          * @param numWaves Number of waves
          * @param isStall Whether the pipeline is stalled
+         * @param isSgprOffset Whether the SGPR offset is used
          * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
-        int getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall);
+        int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset);
         
         /**
          * @brief Get the cycle when local read operations complete
@@ -301,16 +302,7 @@ namespace origami
          * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
         int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, int lrStallLatencyBuffer);
-        
-        /**
-         * @brief Push a local read operation into the FIFO
-         * @param currentCycle Current simulation cycle
-         * @param fifo FIFO queue to push to
-         * @param bpr Bytes per read operation
-         * @param isGfx950 Whether the hardware is GFX950
-         */
-        void pushLocalRead(int currentCycle, std::queue<int>& fifo, int bpr, bool isGfx950);
-        
+
         /**
          * @brief Calculate local read latency considering bank conflicts
          * @param baseLatency Base latency without conflicts
@@ -319,6 +311,15 @@ namespace origami
          * @return Total latency including bank conflict penalty
          */
         int getLocalReadLatency(int baseLatency, int conflictMultiplier, double bankConflict);
+
+        /**
+         * @brief Calculate local write latency considering bank conflicts
+         * @param baseLatency Base latency without conflicts
+         * @param conflictMultiplier Multiplier for bank conflict penalty
+         * @param bankConflict Bank conflict rate
+         * @return Total latency including bank conflict penalty
+         */
+         int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict);
         
         /**
          * @brief Analyze bank conflicts from VGPR state
