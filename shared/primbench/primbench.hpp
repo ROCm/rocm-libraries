@@ -3252,20 +3252,20 @@ public:
     template<typename Benchmark, typename... Args>
     static bool queue(Args&&... args)
     {
-        static_specializations.push_back(std::make_unique<Benchmark>(std::forward<Args>(args)...));
+        specializations.push_back(std::make_unique<Benchmark>(std::forward<Args>(args)...));
         return true;
     }
 
     /**
      * \brief Queue benchmarks using an autotune bulk creation function.
-     * \tparam BulkCreateFunction Callable that populates static_specializations.
+     * \tparam BulkCreateFunction Callable that populates specializations.
      * \param fn Function that creates benchmarks.
      * \return true to allow usage in global static initialization.
      */
     template<typename BulkCreateFunction>
     static bool queue_autotune(BulkCreateFunction&& fn)
     {
-        std::forward<BulkCreateFunction>(fn)(static_specializations);
+        std::forward<BulkCreateFunction>(fn)(specializations);
         return true;
     }
 
@@ -3299,24 +3299,11 @@ public:
         // Capture custom arguments after all have been registered.
         m_settings.custom_args = m_cli.get_all_custom_options();
 
-        // Only keep filtered specializations, based on their name.
-        std::regex pattern(m_settings.filter);
-        static_specializations.erase(std::remove_if(static_specializations.begin(),
-                                                    static_specializations.end(),
-                                                    [&pattern](const auto& spec) {
-                                                        return !std::regex_search(
-                                                            spec.get()->meta().serialize_name(),
-                                                            pattern);
-                                                    }),
-                                     static_specializations.end());
+        filter_specializations();
+        ensure_specializations_exist();
+        sort_specializations();
 
-        // Sort to get a consistent order.
-        std::sort(static_specializations.begin(),
-                  static_specializations.end(),
-                  [](const auto& l, const auto& r)
-                  { return l->meta().serialize_name() < r->meta().serialize_name(); });
-
-        size_t specialization_count = static_specializations.size();
+        size_t specialization_count = specializations.size();
 
         if(specialization_count == 0)
         {
@@ -3332,10 +3319,10 @@ public:
         std::string algorithm;
         try
         {
-            algorithm = static_specializations.front()->meta().get<std::string>("algo");
+            algorithm = specializations.front()->meta().get<std::string>("algo");
 
             // Validate that benchmarks have identical algo names.
-            for(const auto& bp : static_specializations)
+            for(const auto& bp : specializations)
             {
                 auto bp_algo = bp->meta().get<std::string>("algo");
 
@@ -3361,7 +3348,7 @@ public:
         m_spec_col_width = 0;
         std::unordered_set<std::string> seen_names;
 
-        for(const auto& bp : static_specializations)
+        for(const auto& bp : specializations)
         {
             std::string name = bp->meta().serialize_name();
             size_t      len  = name.size();
@@ -3397,7 +3384,7 @@ public:
 
         // Run all benchmarks.
         size_t family_index = 0;
-        for(auto& b_unique_ptr : static_specializations)
+        for(auto& b_unique_ptr : specializations)
         {
             auto b    = b_unique_ptr.get();
             auto meta = b->meta();
@@ -3586,6 +3573,49 @@ private:
         }
     }
 
+    /// Only keep filtered specializations, based on their name.
+    void filter_specializations()
+    {
+        std::regex pattern(m_settings.filter);
+        specializations.erase(std::remove_if(specializations.begin(),
+                                                    specializations.end(),
+                                                    [&pattern](const auto& spec) {
+                                                        return !std::regex_search(
+                                                            spec.get()->meta().serialize_name(),
+                                                            pattern);
+                                                    }),
+                                     specializations.end());
+    }
+
+    /// Ensures that at least one specialization is queued.
+    void ensure_specializations_exist()
+    {
+        if(specializations.size() == 0)
+        {
+            std::cerr << "Error: At least one benchmark must be queued\n";
+            if(!m_settings.filter.empty())
+            {
+                std::cerr << "Hint: The currently used --filter '" << m_settings.filter
+                          << "' is likely incorrect\n";
+            }
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    /// Sorts all registered specializations alphabetically by name.
+    ///
+    /// When specializations are added in global scope across multiple
+    /// translation units, the order of initialization is unspecified.
+    /// Calling this function ensures a consistent alphabetical order
+    /// regardless of initialization order.
+    void sort_specializations()
+    {
+        std::sort(specializations.begin(),
+                  specializations.end(),
+                  [](const auto& l, const auto& r)
+                  { return l->meta().serialize_name() < r->meta().serialize_name(); });
+    }
+
     /**
      * \brief Create a benchmark state object for execution.
      * \param algo Algorithm name.
@@ -3675,7 +3705,7 @@ private:
      * This vector is static, allowing queue_autotune()
      * to register all specializations of autotuned benchmarks in one place.
      */
-    inline static std::vector<std::unique_ptr<benchmark_interface>> static_specializations;
+    inline static std::vector<std::unique_ptr<benchmark_interface>> specializations;
 
     settings m_settings; /**< CLI user settings */
 
