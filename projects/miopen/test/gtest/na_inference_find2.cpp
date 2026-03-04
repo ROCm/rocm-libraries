@@ -380,8 +380,8 @@ struct TestNameGenerator
 };
 } // namespace
 
-using GPU_na_inference_find2_test_FP16  = na_inference_find2_test<half_float::half>;
-using GPU_na_inference_find2_test_FP32  = na_inference_find2_test<float>;
+using GPU_na_inference_find2_test_FP16 = na_inference_find2_test<half_float::half>;
+using GPU_na_inference_find2_test_FP32 = na_inference_find2_test<float>;
 
 TEST_P(GPU_na_inference_find2_test_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_na_inference_find2_test_FP32, TestFloat32) { Run(); }
