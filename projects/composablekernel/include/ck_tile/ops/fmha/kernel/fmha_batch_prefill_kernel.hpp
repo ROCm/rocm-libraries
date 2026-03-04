@@ -489,11 +489,11 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         {
             if(num_total_pages > 1)
             {
-                constexpr int64_t kInt32Max =
-                    static_cast<int64_t>(std::numeric_limits<index_t>::max());
-                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_k <= kInt32Max &&
+                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_k <=
+                           static_cast<int64_t>(std::numeric_limits<index_t>::max()) &&
                        "KV cache K offset overflow: exceed int32 max");
-                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_v <= kInt32Max &&
+                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_v <=
+                           static_cast<int64_t>(std::numeric_limits<index_t>::max()) &&
                        "KV cache V offset overflow: exceed int32 max");
             }
         }
@@ -656,11 +656,11 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         {
             if(num_total_pages > 1)
             {
-                constexpr int64_t kInt32Max =
-                    static_cast<int64_t>(std::numeric_limits<index_t>::max());
-                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_k <= kInt32Max &&
+                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_k <=
+                           static_cast<int64_t>(std::numeric_limits<index_t>::max()) &&
                        "KV cache K offset overflow: exceed int32 max");
-                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_v <= kInt32Max &&
+                assert(static_cast<int64_t>(num_total_pages - 1) * batch_stride_v <=
+                           static_cast<int64_t>(std::numeric_limits<index_t>::max()) &&
                        "KV cache V offset overflow: exceed int32 max");
             }
         }
