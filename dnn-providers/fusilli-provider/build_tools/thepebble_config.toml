@@ -1,9 +1,0 @@
-[versions]
-# Git ref (commit/tag/branch) for TheRock tooling
-therock_git_ref = "main"
-
-# GitHub CI run ID for Hip artifacts (from ROCm/TheRock actions)
-hip_run_id = "19089392286"
-
-# Git ref (commit/tag/branch) for rocm-libraries hipDNN
-hipdnn_git_ref = "develop"
