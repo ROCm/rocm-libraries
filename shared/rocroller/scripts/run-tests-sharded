@@ -169,6 +169,18 @@ def start_shard(
             ]
         )
 
+    # Log environment variables we set (added or overridden)
+    orig_env = os.environ
+    set_vars = [
+        (k, env[k])
+        for k in sorted(env.keys())
+        if k not in orig_env or orig_env.get(k) != env[k]
+    ]
+    if set_vars:
+        print(f"{shard_tag} Environment:", flush=True)
+        for k, v in set_vars:
+            print(f"{shard_tag}   {k}={v}", flush=True)
+
     # Log the command being executed
     cmd_str = " ".join(cmd)
     print(f"{shard_tag} Running command in {build_dir}:", flush=True)
