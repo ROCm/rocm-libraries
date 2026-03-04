@@ -155,6 +155,7 @@ HIPSOLVER_EXPORT hipsolverStatus_t hipsolverDnXsyevBatched_bufferSize(hipsolverD
                                                                       const void*         A,
                                                                       int64_t             lda,
                                                                       hipDataType         dataTypeW,
+                                                                      const void*         W,
                                                                       hipDataType computeType,
                                                                       size_t*     lworkOnDevice,
                                                                       size_t*     lworkOnHost,
