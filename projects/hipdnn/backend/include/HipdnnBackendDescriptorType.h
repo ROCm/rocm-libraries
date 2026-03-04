@@ -160,4 +160,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
 
+    /**
+     * @brief Batch normalization inference operation descriptor
+     *
+     * Represents a batch normalization inference operation with input (X),
+     * mean, inverse variance, scale, bias, and output (Y) tensors.
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_EXT_DESCRIPTOR,
+
 } hipdnnBackendDescriptorType_t;

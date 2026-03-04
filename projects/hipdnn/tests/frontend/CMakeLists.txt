@@ -18,6 +18,7 @@ add_executable(
     IntegrationGraphKnobsApi.cpp
     IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationBatchnormInferenceDescriptorLowering.cpp
 )
 
 target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
