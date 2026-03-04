@@ -37,7 +37,7 @@
 #include "rocblas_symm_hemm.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp"
 #include <type_traits>
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 template <typename T>
 static const T beta_1 = T(1);

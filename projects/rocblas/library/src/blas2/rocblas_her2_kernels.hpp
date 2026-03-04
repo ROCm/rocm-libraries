@@ -26,7 +26,7 @@
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas_her2.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 template <typename API_INT, typename T>
 __forceinline__ __device__ void rocblas_her2_kernel_calc(bool        is_upper,

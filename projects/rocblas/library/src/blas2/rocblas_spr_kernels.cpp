@@ -22,7 +22,7 @@
 
 #include "device_macros.hpp"
 #include "rocblas_spr.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 //TODO :-Add rocblas_check_numerics_sp_matrix_template for checking Matrix `A` which is a Symmetric Packed Matrix
 template <typename T, typename U>

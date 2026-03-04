@@ -25,7 +25,7 @@
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas_her.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 template <int DIM_X, typename T, typename U>
 ROCBLAS_KERNEL_ILF void rocblas_her_kernel_calc(bool        is_upper,

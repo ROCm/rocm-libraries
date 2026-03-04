@@ -22,6 +22,7 @@
 
 #include <string>
 
+#include "asan_helpers.hpp"
 #include "rocblas_data.hpp"
 #include "rocblas_parse_data.hpp"
 #include "rocblas_test.hpp"
@@ -277,16 +278,6 @@ static void rocblas_print_args(const std::string& args)
     rocblas_cout.flush();
 }
 
-static void rocblas_print_asan_kernel_warning()
-{
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    rocblas_cout << "rocblas-test WARNING: AddressSanitizer build active; some kernel launch "
-                    "configurations are reduced for stability and may not match production "
-                    "performance."
-                 << std::endl;
-#endif
-}
-
 // Device Query
 static void rocblas_set_test_device()
 {
@@ -323,7 +314,7 @@ int main(int argc, char** argv)
     }
 
     print_rocblas_version_string();
-    rocblas_print_asan_kernel_warning();
+    rocblas::print_asan_kernel_warning("rocblas-test");
 
     // Set test device
     rocblas_set_test_device();

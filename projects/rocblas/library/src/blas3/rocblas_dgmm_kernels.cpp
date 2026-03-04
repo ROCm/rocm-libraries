@@ -24,7 +24,7 @@
 #include "handle.hpp"
 #include "rocblas_dgmm.hpp"
 #include "rocblas_level3_threshold.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 template <int DIM_X, int DIM_Y, bool side_right, typename TConstPtr, typename TPtr>
 ROCBLAS_KERNEL(DIM_X* DIM_Y)

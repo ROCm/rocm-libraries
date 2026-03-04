@@ -30,7 +30,7 @@
 #include "rocblas_syr2k_her2k.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp" // int64 API called
 #include "utility.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 template <typename T>
 static const T beta_1 = T(1);

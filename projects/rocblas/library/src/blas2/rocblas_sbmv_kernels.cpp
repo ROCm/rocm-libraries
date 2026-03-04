@@ -24,7 +24,7 @@
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas_sbmv.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 /**
   *  create partial sums for each ty.

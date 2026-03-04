@@ -22,7 +22,7 @@
 
 #include "device_macros.hpp"
 #include "rocblas_syr.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 template <bool UPPER, rocblas_int DIM_X, typename T, typename U, typename V, typename W>
 ROCBLAS_KERNEL(DIM_X)

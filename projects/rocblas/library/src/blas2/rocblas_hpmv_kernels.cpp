@@ -24,7 +24,7 @@
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "rocblas_hpmv.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 /**
   *  A combined kernel to handle all hpmv cases.

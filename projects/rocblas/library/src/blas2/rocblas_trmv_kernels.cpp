@@ -26,7 +26,7 @@
 #include "rocblas.h"
 #include "rocblas_trmv.hpp"
 #include <cstddef>
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T>
 ROCBLAS_KERNEL_ILF void rocblas_trmvn_kernel_calc(

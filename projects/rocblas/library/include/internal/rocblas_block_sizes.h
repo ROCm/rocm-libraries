@@ -29,7 +29,7 @@
 #ifndef ROCBLAS_BLOCK_SIZES_H
 #define ROCBLAS_BLOCK_SIZES_H
 
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 // ASAN: cap total threads per block at 256 where kernels are register-limited on gfx942.
 

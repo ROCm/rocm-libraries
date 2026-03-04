@@ -25,7 +25,7 @@
 #include "check_numerics_vector.hpp"
 #include "handle.hpp"
 #include "rocblas_tbmv.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 /**
   *  Helper for the non-transpose case. Iterates through each diagonal

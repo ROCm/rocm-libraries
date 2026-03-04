@@ -34,7 +34,7 @@
 #include "rocblas_trsm.hpp"
 #include "src64/blas3/rocblas_gemm_64.hpp"
 #include "trtri_trsm.hpp"
-#include "asan_build_utils.hpp"
+#include "asan_helpers.hpp"
 
 /** Constants for block size of trsm **/
 // clang-format off
