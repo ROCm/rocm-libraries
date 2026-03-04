@@ -53,9 +53,12 @@ TIMING_HIERARCHY = {
             "python_kernel_build_co": {},
             "python_kernel_build_src_co": {
                 "python_kernel_build_src_co.setup": {},
+                "python_kernel_build_src_co.cache_check": {},
+                "python_kernel_build_src_co.cache_hit": {},
                 "python_kernel_build_src_co.compile": {},
                 "python_kernel_build_src_co.unbundle": {},
                 "python_kernel_build_src_co.move": {},
+                "python_kernel_build_src_co.cache_populate": {},
             },
             "python_kernel_bench_postprocess": {
                 "python_benchpost_naming": {},
