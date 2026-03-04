@@ -86,6 +86,24 @@ def _checkCache(cacheDir, cacheKey):
     return hsacoFiles
 
 
+def _populateCache(cacheDir, cacheKey, hsacoFiles):
+    """Atomically populate a cache entry. Safe under concurrent writes."""
+    cacheDir = Path(cacheDir)
+    finalDir = cacheDir / cacheKey
+    if finalDir.exists():
+        return
+
+    tmpDir = cacheDir / f".tmp_{cacheKey}_{os.getpid()}"
+    tmpDir.mkdir(parents=True, exist_ok=True)
+    for f in hsacoFiles:
+        shutil.copy2(Path(f), tmpDir / Path(f).name)
+
+    try:
+        tmpDir.rename(finalDir)
+    except OSError:
+        shutil.rmtree(tmpDir, ignore_errors=True)
+
+
 def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Path, str], arch: str) -> Union[Path, None]:
     """Generates a code object file path using the target, base, and build path.
 

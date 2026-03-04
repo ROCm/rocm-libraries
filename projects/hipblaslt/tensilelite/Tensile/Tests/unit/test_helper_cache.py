@@ -157,3 +157,51 @@ class TestCheckCache:
         (entry / "metadata.json").write_text("{}")
         result = _checkCache(tmp_path, "some_hash")
         assert len(result) == 1
+
+
+class TestPopulateCache:
+    def test_populates_empty_cache(self, tmp_path):
+        from Tensile.Toolchain.Source import _populateCache
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        f1 = src_dir / "Kernels.so-000-gfx942.hsaco"
+        f1.write_bytes(b"\x7fELF_data_1")
+        _populateCache(cache_dir, "abc123", [f1])
+        cached = cache_dir / "abc123" / "Kernels.so-000-gfx942.hsaco"
+        assert cached.exists()
+        assert cached.read_bytes() == b"\x7fELF_data_1"
+
+    def test_skips_when_entry_exists(self, tmp_path):
+        from Tensile.Toolchain.Source import _populateCache
+        cache_dir = tmp_path / "cache"
+        entry = cache_dir / "abc123"
+        entry.mkdir(parents=True)
+        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"original")
+        src = tmp_path / "new.hsaco"
+        src.write_bytes(b"different")
+        _populateCache(cache_dir, "abc123", [src])
+        assert (entry / "Kernels.so-000-gfx942.hsaco").read_bytes() == b"original"
+
+    def test_cleans_up_tmp_on_race(self, tmp_path):
+        from Tensile.Toolchain.Source import _populateCache
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        # Pre-create the final dir to simulate a race
+        (cache_dir / "abc123").mkdir()
+        (cache_dir / "abc123" / "f.hsaco").write_bytes(b"winner")
+        src = tmp_path / "f.hsaco"
+        src.write_bytes(b"loser")
+        _populateCache(cache_dir, "abc123", [src])
+        # No leftover tmp dirs
+        tmp_dirs = list(cache_dir.glob(".tmp_*"))
+        assert len(tmp_dirs) == 0
+
+    def test_creates_cache_dir_if_missing(self, tmp_path):
+        from Tensile.Toolchain.Source import _populateCache
+        cache_dir = tmp_path / "cache" / "subdir"
+        src = tmp_path / "f.hsaco"
+        src.write_bytes(b"\x7fELF")
+        _populateCache(cache_dir, "abc123", [src])
+        assert (cache_dir / "abc123" / "f.hsaco").exists()
