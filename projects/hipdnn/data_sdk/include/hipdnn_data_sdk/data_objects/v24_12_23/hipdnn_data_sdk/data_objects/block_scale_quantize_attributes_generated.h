@@ -28,7 +28,7 @@ struct BlockScaleQuantizeAttributesT : public ::flatbuffers::NativeTable {
   int64_t x_tensor_uid = 0;
   int64_t y_tensor_uid = 0;
   int64_t scale_tensor_uid = 0;
-  ::flatbuffers::Optional<int32_t> block_size = ::flatbuffers::nullopt;
+  int32_t block_size = 0;
   ::flatbuffers::Optional<int64_t> axis = ::flatbuffers::nullopt;
   bool transpose = false;
 };
@@ -62,11 +62,11 @@ struct BlockScaleQuantizeAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuff
   bool mutate_scale_tensor_uid(int64_t _scale_tensor_uid = 0) {
     return SetField<int64_t>(VT_SCALE_TENSOR_UID, _scale_tensor_uid, 0);
   }
-  ::flatbuffers::Optional<int32_t> block_size() const {
-    return GetOptional<int32_t, int32_t>(VT_BLOCK_SIZE);
+  int32_t block_size() const {
+    return GetField<int32_t>(VT_BLOCK_SIZE, 0);
   }
-  bool mutate_block_size(int32_t _block_size) {
-    return SetField<int32_t>(VT_BLOCK_SIZE, _block_size);
+  bool mutate_block_size(int32_t _block_size = 0) {
+    return SetField<int32_t>(VT_BLOCK_SIZE, _block_size, 0);
   }
   ::flatbuffers::Optional<int64_t> axis() const {
     return GetOptional<int64_t, int64_t>(VT_AXIS);
@@ -109,7 +109,7 @@ struct BlockScaleQuantizeAttributesBuilder {
     fbb_.AddElement<int64_t>(BlockScaleQuantizeAttributes::VT_SCALE_TENSOR_UID, scale_tensor_uid, 0);
   }
   void add_block_size(int32_t block_size) {
-    fbb_.AddElement<int32_t>(BlockScaleQuantizeAttributes::VT_BLOCK_SIZE, block_size);
+    fbb_.AddElement<int32_t>(BlockScaleQuantizeAttributes::VT_BLOCK_SIZE, block_size, 0);
   }
   void add_axis(int64_t axis) {
     fbb_.AddElement<int64_t>(BlockScaleQuantizeAttributes::VT_AXIS, axis);
@@ -133,7 +133,7 @@ inline ::flatbuffers::Offset<BlockScaleQuantizeAttributes> CreateBlockScaleQuant
     int64_t x_tensor_uid = 0,
     int64_t y_tensor_uid = 0,
     int64_t scale_tensor_uid = 0,
-    ::flatbuffers::Optional<int32_t> block_size = ::flatbuffers::nullopt,
+    int32_t block_size = 0,
     ::flatbuffers::Optional<int64_t> axis = ::flatbuffers::nullopt,
     bool transpose = false) {
   BlockScaleQuantizeAttributesBuilder builder_(_fbb);
@@ -141,7 +141,7 @@ inline ::flatbuffers::Offset<BlockScaleQuantizeAttributes> CreateBlockScaleQuant
   builder_.add_scale_tensor_uid(scale_tensor_uid);
   builder_.add_y_tensor_uid(y_tensor_uid);
   builder_.add_x_tensor_uid(x_tensor_uid);
-  if(block_size) { builder_.add_block_size(*block_size); }
+  builder_.add_block_size(block_size);
   builder_.add_transpose(transpose);
   return builder_.Finish();
 }

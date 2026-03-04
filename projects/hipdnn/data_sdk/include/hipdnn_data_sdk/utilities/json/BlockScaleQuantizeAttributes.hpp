@@ -37,9 +37,9 @@ inline void to_json(nlohmann::json& blockScaleJson, const BlockScaleQuantizeAttr
     outputs[keys::Y_TENSOR_UID] = bsq.y_tensor_uid();
     outputs[keys::SCALE_TENSOR_UID] = bsq.scale_tensor_uid();
 
-    if(bsq.block_size().has_value())
+    if(bsq.block_size() != 0)
     {
-        blockScaleJson[keys::BLOCK_SIZE] = bsq.block_size().value();
+        blockScaleJson[keys::BLOCK_SIZE] = bsq.block_size();
     }
 
     if(bsq.axis().has_value())
@@ -61,7 +61,7 @@ inline auto to<data_objects::BlockScaleQuantizeAttributes>(flatbuffers::FlatBuff
 
     auto& inputs = entry[keys::INPUTS];
 
-    flatbuffers::Optional<int32_t> blockSize = flatbuffers::nullopt;
+    int32_t blockSize = 0;
     if(entry.contains(keys::BLOCK_SIZE))
     {
         blockSize = entry[keys::BLOCK_SIZE].get<int32_t>();

@@ -451,8 +451,7 @@ TEST(TestBlockScaleQuantizeNode, PackNode)
     EXPECT_EQ(packedAttributes->x_tensor_uid(), xTensor->get_uid());
     EXPECT_EQ(packedAttributes->y_tensor_uid(), yTensor->get_uid());
     EXPECT_EQ(packedAttributes->scale_tensor_uid(), scaleTensor->get_uid());
-    ASSERT_TRUE(packedAttributes->block_size().has_value());
-    EXPECT_EQ(packedAttributes->block_size().value(), 32);
+    EXPECT_EQ(packedAttributes->block_size(), 32);
     ASSERT_TRUE(packedAttributes->axis().has_value());
     EXPECT_EQ(packedAttributes->axis().value(), 1);
     EXPECT_EQ(packedAttributes->transpose(), false);
@@ -490,8 +489,7 @@ TEST(TestBlockScaleQuantizeNode, PackNodeWithTranspose)
 
     ASSERT_NE(packedAttributes, nullptr);
     EXPECT_EQ(packedAttributes->transpose(), true);
-    ASSERT_TRUE(packedAttributes->block_size().has_value());
-    EXPECT_EQ(packedAttributes->block_size().value(), 64);
+    EXPECT_EQ(packedAttributes->block_size(), 64);
 }
 
 TEST(TestBlockScaleQuantizeNode, PackNodeWithoutOptionals)
@@ -524,7 +522,7 @@ TEST(TestBlockScaleQuantizeNode, PackNodeWithoutOptionals)
     auto packedAttributes = nodeFlatbuffer->attributes_as_BlockScaleQuantizeAttributes();
 
     ASSERT_NE(packedAttributes, nullptr);
-    EXPECT_FALSE(packedAttributes->block_size().has_value());
+    EXPECT_EQ(packedAttributes->block_size(), 0);
     EXPECT_FALSE(packedAttributes->axis().has_value());
     EXPECT_EQ(packedAttributes->transpose(), false);
 }

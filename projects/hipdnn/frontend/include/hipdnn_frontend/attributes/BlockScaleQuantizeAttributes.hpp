@@ -160,12 +160,6 @@ public:
     flatbuffers::Offset<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes>
         pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
     {
-        flatbuffers::Optional<int32_t> fbBlockSize = flatbuffers::nullopt;
-        if(block_size.has_value())
-        {
-            fbBlockSize = block_size.value();
-        }
-
         flatbuffers::Optional<int64_t> fbAxis = flatbuffers::nullopt;
         if(axis.has_value())
         {
@@ -177,7 +171,7 @@ public:
             get_x()->get_uid(),
             get_y()->get_uid(),
             get_scale()->get_uid(),
-            fbBlockSize,
+            block_size.value(), // Throws if block_size not set; requires prior validation
             fbAxis,
             transpose);
     }
@@ -192,9 +186,9 @@ public:
         attr.set_y(tensorMap.at(fb->y_tensor_uid()));
         attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
 
-        if(fb->block_size().has_value())
+        if(fb->block_size() != 0)
         {
-            attr.set_block_size(fb->block_size().value());
+            attr.set_block_size(fb->block_size());
         }
 
         if(fb->axis().has_value())
