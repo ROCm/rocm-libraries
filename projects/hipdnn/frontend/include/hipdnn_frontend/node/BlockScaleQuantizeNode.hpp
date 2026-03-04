@@ -39,15 +39,16 @@ public:
                                ErrorCode::ATTRIBUTE_NOT_SET,
                                "BlockScaleQuantizeNode missing scale for pre-validation");
 
-        // SECTION 2: Validate block_size if set
+        // SECTION 2: Validate block_size is set and positive
         auto blockSize = attributes.get_block_size();
-        if(blockSize.has_value())
-        {
-            HIPDNN_RETURN_IF_FALSE(blockSize.value() > 0,
-                                   ErrorCode::INVALID_VALUE,
-                                   "BlockScaleQuantizeNode block_size must be positive, got "
-                                       + std::to_string(blockSize.value()));
-        }
+        HIPDNN_RETURN_IF_FALSE(blockSize.has_value(),
+                               ErrorCode::ATTRIBUTE_NOT_SET,
+                               "BlockScaleQuantizeNode block_size not set");
+
+        HIPDNN_RETURN_IF_FALSE(blockSize.value() > 0,
+                               ErrorCode::INVALID_VALUE,
+                               "BlockScaleQuantizeNode block_size must be positive, got "
+                                   + std::to_string(blockSize.value()));
 
         // SECTION 3: Validate tensor dimensions (when set)
         auto x = attributes.get_x();
@@ -56,6 +57,8 @@ public:
         if(detail::areTensorDimensionsSet(x))
         {
             HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 1, "Input tensor (x)"));
+
+            auto const& xDims = x->get_dim();
 
             // Validate axis is within tensor rank
             auto axis = attributes.get_axis();
@@ -66,11 +69,24 @@ public:
                                        "BlockScaleQuantizeNode axis must be non-negative, got "
                                            + std::to_string(axis.value()));
 
-                HIPDNN_RETURN_IF_FALSE(static_cast<size_t>(axis.value()) < x->get_dim().size(),
+                HIPDNN_RETURN_IF_FALSE(static_cast<size_t>(axis.value()) < xDims.size(),
                                        ErrorCode::INVALID_VALUE,
                                        "BlockScaleQuantizeNode axis " + std::to_string(axis.value())
                                            + " exceeds input tensor rank "
-                                           + std::to_string(x->get_dim().size()));
+                                           + std::to_string(xDims.size()));
+            }
+
+            // Validate divisibility of the target dimension by block_size
+            size_t targetAxis
+                = axis.has_value() ? static_cast<size_t>(axis.value()) : xDims.size() - 1;
+            if(targetAxis < xDims.size() && xDims[targetAxis] > 0)
+            {
+                HIPDNN_RETURN_IF_FALSE(
+                    xDims[targetAxis] % blockSize.value() == 0,
+                    ErrorCode::INVALID_VALUE,
+                    "BlockScaleQuantizeNode dimension at axis " + std::to_string(targetAxis) + " ("
+                        + std::to_string(xDims[targetAxis]) + ") must be divisible by block_size ("
+                        + std::to_string(blockSize.value()) + ")");
             }
         }
 
@@ -88,6 +104,7 @@ public:
     {
         auto x = attributes.get_x();
         auto y = attributes.get_y();
+        auto scale = attributes.get_scale();
 
         if(!x)
         {
@@ -101,8 +118,15 @@ public:
                     "BlockScaleQuantizeNode missing y for setting properties"};
         }
 
+        if(!scale)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "BlockScaleQuantizeNode missing scale for setting properties"};
+        }
+
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
+        // Infer Y dims and strides from X
         if(y->get_dim().empty())
         {
             y->set_dim(x->get_dim());
@@ -117,6 +141,40 @@ public:
             else if(!y->get_dim().empty())
             {
                 y->set_stride(hipdnn_data_sdk::utilities::generateStrides(y->get_dim()));
+            }
+        }
+
+        // Infer scale dims from X dims and block_size
+        if(scale->get_dim().empty() && !x->get_dim().empty())
+        {
+            auto blockSize = attributes.get_block_size();
+            if(blockSize.has_value() && blockSize.value() > 0)
+            {
+                auto scaleDims = x->get_dim();
+                // Default axis is last dimension if not specified
+                auto axis = attributes.get_axis();
+                size_t scaleAxis
+                    = axis.has_value() ? static_cast<size_t>(axis.value()) : scaleDims.size() - 1;
+
+                if(scaleAxis < scaleDims.size())
+                {
+                    scaleDims[scaleAxis] /= blockSize.value();
+                }
+                scale->set_dim(scaleDims);
+            }
+        }
+
+        if(scale->get_stride().empty())
+        {
+            if(!x->get_stride().empty() && !scale->get_dim().empty())
+            {
+                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x->get_stride());
+                scale->set_stride(
+                    hipdnn_data_sdk::utilities::generateStrides(scale->get_dim(), strideOrder));
+            }
+            else if(!scale->get_dim().empty())
+            {
+                scale->set_stride(hipdnn_data_sdk::utilities::generateStrides(scale->get_dim()));
             }
         }
 

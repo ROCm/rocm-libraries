@@ -73,9 +73,9 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeMissingScale)
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestBlockScaleQuantizeNode, PreValidateNodeBlockSizeNotSetIsOK)
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeBlockSizeNotSet)
 {
-    // block_size is optional for quantize, so not setting it should be OK
+    // block_size is required for quantize
     BlockScaleQuantizeAttributes attrs;
 
     attrs.set_x(std::make_shared<TensorAttributes>());
@@ -86,7 +86,7 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeBlockSizeNotSetIsOK)
     BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::OK);
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
 TEST(TestBlockScaleQuantizeNode, PreValidateNodeBlockSizeZero)
@@ -218,6 +218,7 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisNegative)
 
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(32);
     attrs.set_axis(-1);
 
     GraphAttributes graphAttributes;
@@ -237,6 +238,7 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisExceedsRank)
 
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(32);
     attrs.set_axis(4); // rank is 4, so axis=4 is out of bounds
 
     GraphAttributes graphAttributes;
@@ -256,6 +258,7 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisValid)
 
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(32);
     attrs.set_axis(1);
 
     GraphAttributes graphAttributes;
@@ -273,6 +276,7 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisWithoutXDimsSkipsCheck)
     attrs.set_x(std::make_shared<TensorAttributes>()); // No dims
     attrs.set_y(std::make_shared<TensorAttributes>());
     attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(32);
     attrs.set_axis(100); // Would be invalid if dims were set
 
     GraphAttributes graphAttributes;
@@ -280,6 +284,67 @@ TEST(TestBlockScaleQuantizeNode, PreValidateNodeAxisWithoutXDimsSkipsCheck)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeDimNotDivisibleByBlockSize)
+{
+    // axis dim must be divisible by block_size
+    BlockScaleQuantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(30); // 64 is not divisible by 30
+    attrs.set_axis(1);
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeDefaultAxisDivisibility)
+{
+    // When axis is not set, default is last dim. Last dim 32 is divisible by 8.
+    BlockScaleQuantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(8); // 32 % 8 == 0
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBlockScaleQuantizeNode, PreValidateNodeDefaultAxisNotDivisible)
+{
+    // When axis is not set, default is last dim. Last dim 32 is not divisible by 7.
+    BlockScaleQuantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+
+    attrs.set_y(std::make_shared<TensorAttributes>());
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+    attrs.set_block_size(7); // 32 % 7 != 0
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestBlockScaleQuantizeNode, InferPropertiesNode)

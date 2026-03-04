@@ -154,6 +154,7 @@ protected:
         BlockScaleQuantizeAttributes attrs;
         attrs.set_name("block_scale_quantize");
         attrs.set_block_size(32);
+        attrs.set_axis(1);
         attrs.set_transpose(useTranspose);
 
         auto [y, scale] = graph->block_scale_quantize(tensors.x, std::move(attrs));
