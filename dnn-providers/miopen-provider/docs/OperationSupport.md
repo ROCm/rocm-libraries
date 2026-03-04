@@ -10,23 +10,24 @@ The following table lists all operations currently supported in hipDNN:
 
 | Operation | Datatypes | Layouts | Notes |
 |-----------|-----------|---------|-------|
-| Batchnorm Inference | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
-| Batchnorm Inference + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
-| Batchnorm Inference with Variance | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
-| Batchnorm Inference with Variance + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
-| Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
-| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
-| Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
-| Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
-| Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
-| Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
-| Convolution Forward + (Bias) + Activation⁴ | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph²³ |
-| Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
+| Batchnorm Inference | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only<sup>1</sup> |
+| Batchnorm Inference + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3</sup> |
+| Batchnorm Inference with Variance | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1</sup> |
+| Batchnorm Inference with Variance + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3</sup> |
+| Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3</sup> |
+| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1</sup> |
+| Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>3</sup> |
+| Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only<sup>1</sup> |
+| Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2</sup>, Deterministic<sup>5</sup> |
+| Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2</sup>, Deterministic<sup>5</sup> |
+| Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3</sup>, Deterministic<sup>5</sup> |
+| Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2</sup>, Deterministic<sup>5</sup> |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
 ³ See Fused Operations note below
 ⁴ See Detailed Requirements below
+⁵ See Deterministic Engine Support section
 
 ## Detailed Requirements
 
@@ -58,12 +59,14 @@ The following table lists all operations currently supported in hipDNN:
 > **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.
 
 > [!NOTE]
-> **Fused Operations:** Fused graph patterns combine multiple operations:
-> - **Batchnorm Inference + Activation:** Combines batchnorm inference (using invVariance) with forward activation (ReLU)
-> - **Batchnorm Inference with Variance + Activation:** Combines batchnorm inference (using variance) with forward activation (ReLU)
-> - **Batchnorm Inference + DReLU + Backward:** Combines batchnorm inference, activation backward (DReLU), and batchnorm backward
-> - **Batchnorm Training + Activation:** Combines batchnorm training with forward activation
-> - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
+> **Fused Operations:**
+> - Fused batchnorm operations require F32 data type for the virtual/intermediate tensors. This can be set either explicitly on the tensor or by setting the default intermediate data type for the graph (recommended).
+> - The fused graph patterns combine multiple operations:
+>   - **Batchnorm Inference + Activation:** Combines batchnorm inference (using invVariance) with forward activation (ReLU)
+>   - **Batchnorm Inference with Variance + Activation:** Combines batchnorm inference (using variance) with forward activation (ReLU)
+>   - **Batchnorm Inference + DReLU + Backward:** Combines batchnorm inference, activation backward (DReLU), and batchnorm backward
+>   - **Batchnorm Training + Activation:** Combines batchnorm training with forward activation
+>   - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
 > **Activation Functions:** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips).
@@ -73,6 +76,21 @@ The following table lists all operations currently supported in hipDNN:
 
 > [!NOTE]
 > **Batchnorm Training Running Statistics:** Batchnorm training supports updating running statistics using separate read and write buffers. The previous running statistics (`prev_running_mean`, `prev_running_variance`) are read-only inputs, while the next running statistics (`next_running_mean`, `next_running_variance`) are write-only outputs. The exponential moving average is computed as: `next_running = (1 - momentum) * prev_running + momentum * batch_statistic`.
+
+## Deterministic Engine Support
+
+The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
+
+To use the deterministic engine, set it as the preferred engine on your graph before building:
+
+```cpp
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+
+graph.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
+```
+
+> [!NOTE]
+> **Batchnorm Operations:** Batchnorm operations do not support deterministic execution in MIOpen and are only available through the default (non-deterministic) engine.
 
 ## Legend
 

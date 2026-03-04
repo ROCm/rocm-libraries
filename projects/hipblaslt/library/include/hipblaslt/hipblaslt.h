@@ -91,6 +91,8 @@ typedef enum {
   HIPBLASLT_EPILOGUE_GELU_BIAS = 36,              /**<Apply Bias and then GELU transform.*/
   HIPBLASLT_EPILOGUE_RELU_AUX = 130,              /**<Output GEMM results before applying RELU transform.*/
   HIPBLASLT_EPILOGUE_RELU_AUX_BIAS = 134,         /**<Output GEMM results after applying bias but before applying RELU transform.*/
+  HIPBLASLT_EPILOGUE_DRELU = 136,      
+  HIPBLASLT_EPILOGUE_DRELU_BGRAD = 152,           /**<Apply gradient RELU transform and bias gradient to the results. Requires additional auxiliary input. */           /**<Apply gradient RELU transform. Requires additional auxiliary input. */
   HIPBLASLT_EPILOGUE_GELU_AUX = 160,              /**<Output GEMM results before applying GELU transform.*/
   HIPBLASLT_EPILOGUE_GELU_AUX_BIAS = 164,         /**<Output GEMM results after applying bias but before applying GELU transform.*/
   HIPBLASLT_EPILOGUE_DGELU = 192,                 /**<Apply gradient GELU transform. Requires additional auxiliary input. */
@@ -310,10 +312,15 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *  \brief Handle to the hipBLASLt library context queue.
  *
  *  \details
- *  The ``hipblasLtHandle_t`` type is a pointer type to an opaque structure holding the hipBLASLt library context. Use the following functions to manipulate this library context:
+ *  The ``hipblasLtHandle_t`` type is a pointer type to an opaque structure holding the hipBLASLt library context.
+ *  A handle encapsulates the execution state and manages device-side resources associated with the submitted operations.
+ *
+ *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
+ *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():
- *  To initialize the hipBLASLt library context and return a handle to an opaque structure holding the hipBLASLt library context.
+ *  To initialize the hipBLASLt library context and return a handle to an opaque structure holding the hipBLASLt library context.  
  *  
  *  \ref hipblasLtDestroy():
  *  To destroy a previously created hipBLASLt library context descriptor and release the resources.

@@ -23,6 +23,6 @@ if(HIPBLASLT_ENABLE_BLIS)
     )
 endif()
 
-if(rocm_smi_FOUND)
-    target_link_libraries(hipblaslt-clients-common PRIVATE rocm_smi64)
+if(amd_smi_FOUND)
+    target_link_libraries(hipblaslt-clients-common PRIVATE amd_smi)
 endif()

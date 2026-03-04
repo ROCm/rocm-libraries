@@ -51,9 +51,9 @@ enum FusionKernelSourceType
 
 struct MIOPEN_INTERNALS_EXPORT FusionOpDescriptor : miopenFusionOpDescriptor
 {
-    virtual ~FusionOpDescriptor()                 = default;
-    FusionOpDescriptor(const FusionOpDescriptor&) = delete;
-    FusionOpDescriptor()                          = default;
+    virtual ~FusionOpDescriptor()                            = default;
+    FusionOpDescriptor(const FusionOpDescriptor&)            = delete;
+    FusionOpDescriptor()                                     = default;
     FusionOpDescriptor& operator=(const FusionOpDescriptor&) = delete;
     void SetIdx(int _id) { plan_idx = _id; };
     int GetIdx() const { return plan_idx; };

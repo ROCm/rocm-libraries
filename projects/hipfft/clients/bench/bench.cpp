@@ -293,7 +293,6 @@ int main(int argc, char* argv[])
     auto is_host_gen = (params.igen == fft_input_generator_host
                         || params.igen == fft_input_random_generator_host);
 
-#ifdef USE_HIPRAND
     if(!is_host_gen)
     {
         // Input data:
@@ -316,7 +315,7 @@ int main(int argc, char* argv[])
             params.print_ibuffer(ibuffer_cpu);
         }
     }
-#endif
+
     if(is_host_gen)
     {
         // Input data:

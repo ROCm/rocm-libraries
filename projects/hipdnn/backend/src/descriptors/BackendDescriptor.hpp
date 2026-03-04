@@ -126,6 +126,15 @@ struct HipdnnBackendDescriptor : public IBackendDescriptor
 
     bool operator==(const HipdnnBackendDescriptor& other) const;
 
+    // Attempts to cast the wrapped impl to interface T via dynamic_pointer_cast.
+    // Returns nullptr if the impl does not implement T.
+    // Enables type-agnostic extraction (e.g., tryAsInterface<IGraphOperation>()).
+    template <typename T>
+    std::shared_ptr<T> tryAsInterface() const
+    {
+        return std::dynamic_pointer_cast<T>(_impl);
+    }
+
     // Unpacks a HipdnnBackendDescriptor into a shared_ptr of the specified type.
     // Throws an exception if the descriptor is null.
     template <typename ChildDescriptor>

@@ -43,13 +43,13 @@ static size_t compute_ptrdiff(const std::vector<intT1>& length, const std::vecto
 
     // Negative lengths or strides are not permitted:
     using lengthtype = std::remove_reference_t<decltype(length)>::value_type;
-    if constexpr (std::is_signed<lengthtype>::value)
+    if constexpr(std::is_signed<lengthtype>::value)
     {
         if(std::any_of(length.begin(), length.end(), [](const auto& l) { return l < 0; }))
             throw std::runtime_error("Negative lengths given to compute_ptrdiff");
     }
     using stridetype = std::remove_reference_t<decltype(stride)>::value_type;
-    if constexpr (std::is_signed<stridetype>::value)
+    if constexpr(std::is_signed<stridetype>::value)
     {
         if(std::any_of(stride.begin(), stride.end(), [](const auto& s) { return s < 0; }))
             throw std::runtime_error("Negative strides given to compute_ptrdiff");
