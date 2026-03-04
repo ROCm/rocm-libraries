@@ -384,34 +384,51 @@ typedef enum
     /** @} */
 
     /**
-     * @name Batchnorm Inference Operation Attributes (1700-1799)
+     * @name Convolution Backward Operation Attributes (1700-1799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY = 1700,
+
+    /** @brief Weight tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W = 1701,
+
+    /** @brief Input gradient tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX = 1702,
+
+    /** @} */
+
+    /**
+     * @name Batchnorm Inference Operation Attributes (1800-1899)
      * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_EXT_DESCRIPTOR
      * @{
      */
 
     /** @brief Input tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X = 1700,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X = 1800,
 
     /** @brief Mean tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN = 1701,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN = 1801,
 
     /** @brief Inverse variance tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE = 1702,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE = 1802,
 
     /** @brief Scale tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE = 1703,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE = 1803,
 
     /** @brief Bias tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS = 1704,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS = 1804,
 
     /** @brief Output tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y = 1705,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y = 1805,
 
     /** @brief Compute data type for batchnorm inference */
-    HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE = 1706,
-
+    HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE = 1806,
+  
     /** @} */
-
+  
     /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
