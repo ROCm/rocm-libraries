@@ -9,6 +9,9 @@
 #include <hip/hiprtc.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+namespace hip_kernel_provider
+{
+
 HipProgram::HipProgram(std::string kernelFileName, const std::vector<std::string>& options)
     : _programName(std::move(kernelFileName))
 {
@@ -92,3 +95,5 @@ HipProgram::~HipProgram()
         }
     }
 }
+
+} // namespace hip_kernel_provider

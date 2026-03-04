@@ -4,6 +4,9 @@
 #include "HipKernel.hpp"
 #include "HipProgram.hpp"
 
+namespace hip_kernel_provider
+{
+
 HipKernel::HipKernel(const HipProgram& program, const std::string& kernelName)
     : _kernelName(kernelName)
     , _kernel(program.getKernel(kernelName))
@@ -43,3 +46,5 @@ void HipKernel::launchImpl(hipStream_t stream, void** kernelParams) const
                                     kernelParams,
                                     nullptr));
 }
+
+} // namespace hip_kernel_provider

@@ -7,9 +7,12 @@
 #include "IRunnableKernel.hpp"
 #include <string>
 
+namespace hip_kernel_provider
+{
+
 class HipProgram;
 
-class HipKernel : public hip_kernel_provider::IRunnableKernel
+class HipKernel : public IRunnableKernel
 {
 public:
     HipKernel(const HipProgram& program, const std::string& kernelName);
@@ -34,3 +37,5 @@ private:
     unsigned int _gridZ = 1;
     unsigned int _sharedMemBytes = 0;
 };
+
+} // namespace hip_kernel_provider

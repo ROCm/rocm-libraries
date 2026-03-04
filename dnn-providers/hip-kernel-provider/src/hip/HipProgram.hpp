@@ -7,6 +7,9 @@
 #include <string>
 #include <vector>
 
+namespace hip_kernel_provider
+{
+
 class HipProgram
 {
 public:
@@ -25,3 +28,5 @@ private:
     hipModule_t _module = nullptr;
     std::vector<char> _binary;
 };
+
+} // namespace hip_kernel_provider
