@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_test_sdk/utilities/LoggingUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;
@@ -307,6 +307,10 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithInvalidStringKnob)
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 {
+    // Set up log recorder to capture warning about deprecated knob
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
     Graph graph = createAndBuildSimpleGraph();
 
     // Try to set knob that doesn't exist on this engine
@@ -316,12 +320,22 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithUnsupportedKnob)
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
     // Should succeed - unsupported knobs are ignored with warning
-    // TODO: Add test to confirm log is emitted.
     EXPECT_TRUE(result.is_good()) << result.get_message();
+
+    // Verify warning log is emitted for unsupported knob
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_WARN, "Ignoring knob nonexistent.knob when creating execution plan for graph"))
+        << "Expected warning log 'Ignoring knob nonexistent.knob when creating execution plan for "
+           "graph'\nCaptured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 {
+    // Set up log recorder to capture warning about deprecated knob
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
     Graph graph = createAndBuildSimpleGraph();
 
     int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
@@ -330,12 +344,22 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithDeprecatedKnob)
 
     auto result = graph.create_execution_plan_ext(engineId, settings);
     // Should succeed - deprecated knobs are used with warning
-    // TODO: Add test to confirm log is emitted.
     EXPECT_TRUE(result.is_good()) << result.get_message();
+
+    // Verify warning log is emitted for deprecated knob
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_WARN, "Knob test.deprecated_knob has been marked as deprecated."))
+        << "Expected warning log 'Knob test.deprecated_knob has been marked as "
+           "deprecated.'\nCaptured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
 {
+    // Set up log recorder to verify no deprecation warning is emitted
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
     Graph graph = createAndBuildSimpleGraph();
 
     // Set shared knob for Engine A
@@ -354,6 +378,11 @@ TEST_F(IntegrationGraphKnobsApi, CreateExecutionPlanWithSharedKnob)
 
     result = graph.create_execution_plan_ext(engineIdB, settingsB);
     EXPECT_TRUE(result.is_good()) << "Engine B should accept shared knob: " << result.get_message();
+
+    // Verify no deprecation warning is emitted for shared knob
+    EXPECT_FALSE(recorder.hasLogContaining("has been marked as deprecated"))
+        << "Shared knob should not trigger deprecation warning.\nCaptured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationGraphKnobsApi, QueryKnobsBeforeGraphBuilt)
