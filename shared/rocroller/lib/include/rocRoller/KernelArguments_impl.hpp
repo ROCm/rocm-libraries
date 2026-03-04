@@ -146,10 +146,11 @@ namespace rocRoller
         auto constexpr PACKED_SCALE_SIZE = sizeof(typename PackedTypeOf<T>::type);
 
         size_t argSize = PACKED_SCALE_SIZE;
-        if(offset + argSize > m_data.size())
-        {
-            throw std::runtime_error("Value exceeds allocated bounds.");
-        }
+        AssertFatal(offset + argSize <= m_data.size(),
+                    "Value exceeds allocated bounds.",
+                    ShowValue(offset),
+                    ShowValue(argSize),
+                    ShowValue(m_data.size()));
 
         std::memset(&m_data[offset], value.scale, argSize);
     }
@@ -175,10 +176,11 @@ namespace rocRoller
     template <typename T>
     inline void KernelArguments::writeValue(size_t offset, T value)
     {
-        if(offset + sizeof(T) > m_data.size())
-        {
-            throw std::runtime_error("Value exceeds allocated bounds.");
-        }
+        AssertFatal(offset + sizeof(T) <= m_data.size(),
+                    "Value exceeds allocated bounds.",
+                    ShowValue(offset),
+                    ShowValue(sizeof(T)),
+                    ShowValue(m_data.size()));
 
         std::memcpy(&m_data[offset], &value, sizeof(T));
     }
