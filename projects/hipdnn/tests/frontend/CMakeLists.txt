@@ -16,8 +16,10 @@ add_executable(
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
     IntegrationConvFpropDescriptorLowering.cpp
+    IntegrationConvolutionDgradDescriptorLowering.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
+    IntegrationMatmul.cpp
     IntegrationRMSNormForward.cpp
 )
 

@@ -9,7 +9,7 @@
 namespace hipdnn_frontend::detail
 {
 
-// Builds a convolutionwrw operation descriptor from ConvWgradAttributes.
+// Builds a conv wgrad operation descriptor from ConvWgradAttributes.
 // Tensor descriptors are created/deduplicated via ensureAndSetTensorRef.
 inline Error createConvWgradOperation(
     const graph::ConvWgradAttributes& attributes,
@@ -22,7 +22,7 @@ inline Error createConvWgradOperation(
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                "Failed to create convolutionwrw operation descriptor"};
+                "Failed to create conv wgrad operation descriptor"};
     }
 
     // Create tensor descriptors (if needed) and set them on the operation
@@ -30,61 +30,61 @@ inline Error createConvWgradOperation(
                                              HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X,
                                              attributes.get_x(),
                                              tensorDescs,
-                                             "convolutionwrw X"));
+                                             "conv wgrad X"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
                                              HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY,
                                              attributes.get_dy(),
                                              tensorDescs,
-                                             "convolutionwrw DY"));
+                                             "conv wgrad DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
                                              HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW,
                                              attributes.get_dw(),
                                              tensorDescs,
-                                             "convolutionwrw DW"));
+                                             "conv wgrad DW"));
 
-    // Set convolutionwrw parameters
+    // Set conv wgrad parameters
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_pre_padding(),
-                                            "convolutionwrw pre_padding"));
+                                            "conv wgrad pre_padding"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_post_padding(),
-                                            "convolutionwrw post_padding"));
+                                            "conv wgrad post_padding"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_stride(),
-                                            "convolutionwrw stride"));
+                                            "conv wgrad stride"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
                                             HIPDNN_ATTR_CONVOLUTION_DILATIONS,
                                             HIPDNN_TYPE_INT64,
                                             attributes.get_dilation(),
-                                            "convolutionwrw dilation"));
+                                            "conv wgrad dilation"));
 
-    // Set convolutionwrw mode and compute data type
+    // Set conv wgrad mode and compute data type
     auto convMode = hipdnn_frontend::toBackendConvMode(attributes.get_convolution_mode());
     if(!convMode.has_value())
     {
         return {ErrorCode::INVALID_VALUE,
-                std::string("Unsupported convolution mode: ")
+                std::string("Unsupported conv wgrad mode: ")
                     + to_string(attributes.get_convolution_mode())};
     }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
                                                HIPDNN_TYPE_CONVOLUTION_MODE,
                                                *convMode,
-                                               "convolutionwrw mode"));
+                                               "conv wgrad mode"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
                                                  attributes.compute_data_type,
-                                                 "convolutionwrw compute data type"));
+                                                 "conv wgrad compute data type"));
 
     // Finalize operation descriptor
-    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "convolutionwrw operation descriptor"));
+    HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "conv wgrad operation descriptor"));
 
     operations.push_back(std::move(opDesc));
     return {};
