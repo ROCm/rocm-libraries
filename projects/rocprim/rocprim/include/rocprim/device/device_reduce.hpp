@@ -182,7 +182,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             }
             auto block_reduce_kernel = [=](auto target_config)
             {
-                block_reduce_kernel_impl<decltype(target_config), false, result_type, true, 1>(
+                block_reduce_kernel_impl<decltype(target_config), false, result_type>(
                     input + offset,
                     current_size,
                     block_prefixes + i * number_of_blocks_limit,
@@ -233,120 +233,131 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 
         auto block_reduce_kernel = [=](auto target_config) mutable
         {
+            static constexpr reduce_config_params params = decltype(target_config)::params;
+
             if(too_small > 1)
             {
-                // Decrease IPT for better utilisation
+                // Increase IPT for better utilisation
                 if(too_small <= 2)
                 {
+                    constexpr unsigned int items_per_thread
+                        = params.kernel_config.items_per_thread * 2;
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              true,
-                                              2>(input,
-                                                 size,
-                                                 output,
-                                                 initial_value,
-                                                 reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
                 }
                 else if(too_small <= 4)
                 {
+                    constexpr unsigned int items_per_thread
+                        = params.kernel_config.items_per_thread * 4;
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              true,
-                                              4>(input,
-                                                 size,
-                                                 output,
-                                                 initial_value,
-                                                 reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
                 }
                 else if(too_small <= 8)
                 {
+                    constexpr unsigned int items_per_thread
+                        = params.kernel_config.items_per_thread * 8;
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              true,
-                                              8>(input,
-                                                 size,
-                                                 output,
-                                                 initial_value,
-                                                 reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
                 }
                 else if(too_small <= 16)
                 {
+                    constexpr unsigned int items_per_thread
+                        = params.kernel_config.items_per_thread * 16;
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              true,
-                                              16>(input,
-                                                  size,
-                                                  output,
-                                                  initial_value,
-                                                  reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
                 }
             }
             else
             {
-                // Increase IPT to prevent kernel launch
+                // Decrease IPT to prevent kernel launch
                 if(too_large >= 16)
                 {
+                    constexpr unsigned int items_per_thread
+                        = ceiling_div(params.kernel_config.items_per_thread, 16u);
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              false,
-                                              16>(input,
-                                                  size,
-                                                  output,
-                                                  initial_value,
-                                                  reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
+
                 }
                 else if(too_large >= 8)
                 {
+                    constexpr unsigned int items_per_thread
+                        = ceiling_div(params.kernel_config.items_per_thread, 8u);
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              false,
-                                              8>(input,
-                                                 size,
-                                                 output,
-                                                 initial_value,
-                                                 reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
                 }
                 else if(too_large >= 4)
                 {
+                    constexpr unsigned int items_per_thread
+                        = ceiling_div(params.kernel_config.items_per_thread, 4u);
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              false,
-                                              4>(input,
-                                                 size,
-                                                 output,
-                                                 initial_value,
-                                                 reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
                 }
                 else if(too_large >= 2)
                 {
+                    constexpr unsigned int items_per_thread
+                        = ceiling_div(params.kernel_config.items_per_thread, 2u);
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              false,
-                                              2>(input,
-                                                 size,
-                                                 output,
-                                                 initial_value,
-                                                 reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
                 }
                 else
                 {
+                    constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
                     block_reduce_kernel_impl<decltype(target_config),
-                                              WithInitialValue,
-                                              result_type,
-                                              false,
-                                              1>(input,
-                                                 size,
-                                                 output,
-                                                 initial_value,
-                                                 reduce_op);
+                                             WithInitialValue,
+                                             result_type,
+                                             items_per_thread>(input,
+                                                               size,
+                                                               output,
+                                                               initial_value,
+                                                               reduce_op);
                 }
             }
         };
