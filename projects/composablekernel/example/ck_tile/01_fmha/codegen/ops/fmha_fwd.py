@@ -1110,7 +1110,8 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 32,  32) : [FmhaFwdTileSize( 64,  64,  16,  32,  32,   32,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 ( 64,  64) : [FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
-                (128, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                (128, 128) : [# FmhaFwdTileSize(64, 64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
+                              FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)],
                 (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
             }  # fmt: skip
@@ -1137,6 +1138,18 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
         return pipelines
+
+
+class KernelComponentFactoryGfx115(KernelComponentFactoryGfx11):
+    arch = ArchTrait("gfx115")
+
+    @classmethod
+    def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
+        result = KernelComponentFactoryGfx11.get_hdim_tile_size_dict(dtype)
+        if dtype in cls._DT_FP16_BF16:
+            if (128, 128) in result.keys():
+                result[(128, 128)] = [FmhaFwdTileSize(64, 64, 32, 128, 32, 128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  6)]  # fmt: skip
+        return result
 
 
 class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
@@ -1230,6 +1243,8 @@ def get_factory(target: str):
     if target.startswith("gfx9"):
         return KernelComponentFactoryGfx9
 
+    if target.startswith("gfx115"):
+        return KernelComponentFactoryGfx115
     if target.startswith("gfx11"):
         return KernelComponentFactoryGfx11
     if target.startswith("gfx12"):
