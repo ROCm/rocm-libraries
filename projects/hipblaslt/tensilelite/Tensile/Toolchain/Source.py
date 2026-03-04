@@ -153,6 +153,12 @@ def buildSourceCodeObjectFiles(
     """
     start = timer()
 
+    cacheEnabled = os.environ.get("TENSILE_DISABLE_HELPER_CACHE", "").upper() \
+                   not in ("1", "YES", "ON", "TRUE")
+    cacheDir = Path(os.environ.get("TENSILE_HELPER_CACHE_DIR",
+                                   str(_HELPER_CACHE_DIR_DEFAULT)))
+    cacheKey = None
+
     with timing_context("python_kernel_build_src_co.setup"):
         tmpObjDir = Path(ensurePath(tmpObjDir))
         destDir = Path(ensurePath(destDir))
@@ -161,6 +167,23 @@ def buildSourceCodeObjectFiles(
         objFilename = kernelPath.stem + '.o'
         coPathsRaw = []
         coPaths= []
+
+    if cacheEnabled:
+        with timing_context("python_kernel_build_src_co.cache_check"):
+            cacheKey = _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler)
+            cachedFiles = _checkCache(cacheDir, cacheKey)
+
+        if cachedFiles:
+            with timing_context("python_kernel_build_src_co.cache_hit"):
+                for f in cachedFiles:
+                    dst = destDir / f.name
+                    shutil.copy2(f, dst)
+                    coPaths.append(str(dst))
+            stop = timer()
+            print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}  [cache hit]")
+            return coPaths
+        else:
+            print1(f"# Helper kernel cache MISS ({cacheKey[:12]}...)")
 
     objPath = str(tmpObjDir / objFilename)
     with timing_context("python_kernel_build_src_co.compile"):
@@ -182,6 +205,11 @@ def buildSourceCodeObjectFiles(
     with timing_context("python_kernel_build_src_co.move"):
         for src, dst in zip(coPathsRaw, coPaths):
             shutil.move(src, dst)
+
+    if cacheEnabled and cacheKey:
+        with timing_context("python_kernel_build_src_co.cache_populate"):
+            cacheDir.mkdir(parents=True, exist_ok=True)
+            _populateCache(cacheDir, cacheKey, [Path(p) for p in coPaths])
 
     stop = timer()
     print1(f"buildSourceCodeObjectFile time (s): {(stop-start):3.2f}")

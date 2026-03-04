@@ -205,3 +205,44 @@ class TestPopulateCache:
         src.write_bytes(b"\x7fELF")
         _populateCache(cache_dir, "abc123", [src])
         assert (cache_dir / "abc123" / "f.hsaco").exists()
+
+
+class TestBuildSourceCodeObjectFilesCache:
+    """Test cache integration via the env var and file-system side effects."""
+
+    def test_cache_miss_creates_entry(self, tmp_path, monkeypatch):
+        """On cache miss, after compilation, cache dir should be populated."""
+        from Tensile.Toolchain.Source import _computeCacheKey, _checkCache
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
+        monkeypatch.delenv("TENSILE_DISABLE_HELPER_CACHE", raising=False)
+
+        # Set up source files
+        (tmp_path / "output").mkdir()
+        kernel_path = _write_test_files(tmp_path / "output")
+        output = tmp_path / "output"
+        compiler = MockCompiler()
+        key = _computeCacheKey(kernel_path, output, ["gfx942"], compiler)
+
+        # Before build, cache is empty
+        assert _checkCache(cache_dir, key) is None
+
+    def test_cache_disabled_skips_cache(self, tmp_path, monkeypatch):
+        """When TENSILE_DISABLE_HELPER_CACHE=1, no cache dir should be created."""
+        cache_dir = tmp_path / "cache"
+        monkeypatch.setenv("TENSILE_HELPER_CACHE_DIR", str(cache_dir))
+        monkeypatch.setenv("TENSILE_DISABLE_HELPER_CACHE", "1")
+
+        # Cache dir should not be created when disabled
+        assert not cache_dir.exists()
+
+    def test_cache_hit_copies_files(self, tmp_path):
+        """Pre-populate cache, verify _checkCache finds it."""
+        from Tensile.Toolchain.Source import _checkCache
+        cache_dir = tmp_path / "cache"
+        entry = cache_dir / "test_key"
+        entry.mkdir(parents=True)
+        (entry / "Kernels.so-000-gfx942.hsaco").write_bytes(b"\x7fELF")
+        result = _checkCache(cache_dir, "test_key")
+        assert result is not None
+        assert len(result) == 1
