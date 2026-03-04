@@ -29,7 +29,6 @@ namespace GEMMTests
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
         auto [arch, pretileScaleA, pretileScaleB, pretileB] = GetParam();
-        (void)arch;
 
         auto gemm           = GEMMProblemF8F6F4{32, 32, 64};
         gemm.transA         = "T";
@@ -71,5 +70,58 @@ namespace GEMMTests
                                                 ::testing::Bool(),
                                                 ::testing::Bool(),
                                                 ::testing::Bool()));
+
+    // ========================================================================
+    // GEMMPretileSwizzleScale32x8TestSuite
+    // ========================================================================
+
+    class GEMMPretileSwizzleScale32x8TestSuite : public BaseGEMMContextFixture<>
+    {
+    };
+
+    TEST_P(GEMMPretileSwizzleScale32x8TestSuite, GPU_GEMM_PretileB_SwizzleScale_32x8_F4_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
+
+        auto gemm           = GEMMProblemF8F6F4{32, 32, 64};
+        gemm.transA         = "T";
+        gemm.transB         = "N";
+        gemm.macM           = 256;
+        gemm.macN           = 256;
+        gemm.macK           = 256;
+        gemm.m              = 2 * gemm.macM;
+        gemm.n              = 2 * gemm.macN;
+        gemm.k              = 4 * gemm.macK;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
+
+        gemm.loadPathA      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB      = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadScalePathB = SolutionParams::LoadPath::BufferToVGPR;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
+
+        gemm.swizzleScale = true;
+        gemm.swizzleM     = 32;
+        gemm.swizzleN     = 32;
+        gemm.swizzleK     = 8;
+
+        gemm.scalePretileA = {32, 8};
+        gemm.scalePretileB = {8, 32};
+        gemm.pretileB      = {128, 128};
+
+        basicGEMM<FP4, FP4, float>(gemm);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(GEMMPretileTest,
+                             GEMMPretileSwizzleScale32x8TestSuite,
+                             currentGPUISA());
 
 }
