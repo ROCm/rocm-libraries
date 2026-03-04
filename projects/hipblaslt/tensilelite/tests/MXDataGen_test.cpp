@@ -112,12 +112,12 @@ INSTANTIATE_TEST_SUITE_P(
  * from GPU data, causing intermittent single-element validation failures.
  * rows=K (must be mxBlock-aligned), cols=M/N (need not be).
  */
-class MXScaleDeterminismTest
+class MXGeneratorDeterminismTest
     : public ::testing::TestWithParam<std::tuple<uint64_t, uint64_t, int, bool, bool>>
 {
 };
 
-TEST_P(MXScaleDeterminismTest, ScaleBufferIsDeterministic)
+TEST_P(MXGeneratorDeterminismTest, GeneratorOutputIsDeterministic)
 {
     auto [rows, cols, mxBlock, isTranspose, isMatrixA] = GetParam();
 
@@ -155,8 +155,8 @@ TEST_P(MXScaleDeterminismTest, ScaleBufferIsDeterministic)
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    ScaleDeterminism,
-    MXScaleDeterminismTest,
+    GeneratorDeterminism,
+    MXGeneratorDeterminismTest,
     ::testing::Values(
         // rows=K, cols=M or N  (tensorA.sizes()={K,M}, tensorB.sizes()={K,N})
         std::make_tuple(1024u, 128u, 32, true,  true),  // transposed A
