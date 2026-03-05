@@ -579,9 +579,9 @@ struct gpu_reference_conv_2d : public ::testing::TestWithParam<TestCase2D>
         miopenDestroyTensorDescriptor(weiDesc);
         miopenDestroyTensorDescriptor(outDesc);
 
-        hipFree(in_dev);
-        hipFree(wei_dev);
-        hipFree(out_dev);
+        (void)hipFree(in_dev);
+        (void)hipFree(wei_dev);
+        (void)hipFree(out_dev);
     }
 };
 
@@ -848,9 +848,9 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
         miopenDestroyTensorDescriptor(weiDesc);
         miopenDestroyTensorDescriptor(outDesc);
 
-        hipFree(in_dev);
-        hipFree(wei_dev);
-        hipFree(out_dev);
+        (void)hipFree(in_dev);
+        (void)hipFree(wei_dev);
+        (void)hipFree(out_dev);
     }
 };
 } // namespace

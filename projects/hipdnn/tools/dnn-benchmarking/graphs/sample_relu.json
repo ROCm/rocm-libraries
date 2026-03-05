@@ -1,0 +1,43 @@
+{
+    "name": "sample_relu_activation_64x128x56x56",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "input_x",
+            "dims": [64, 128, 56, 56],
+            "strides": [401408, 3136, 56, 1],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "output_y",
+            "dims": [64, 128, 56, 56],
+            "strides": [401408, 3136, 56, 1],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "relu_node",
+            "type": "PointwiseAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "operation": "relu_fwd",
+                "relu_lower_clip": 0.0,
+                "relu_upper_clip": 6.0,
+                "relu_lower_clip_slope": 0.0,
+                "in_0_tensor_uid": 1,
+                "in_1_tensor_uid": null,
+                "in_2_tensor_uid": null
+            },
+            "outputs": {
+                "out_0_tensor_uid": 2
+            }
+        }
+    ]
+}

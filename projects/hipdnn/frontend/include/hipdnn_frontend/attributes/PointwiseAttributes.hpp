@@ -48,6 +48,11 @@ namespace hipdnn_frontend::graph
  *              .set_mode(PointwiseMode::ADD));
  * @endcode
  *
+ * **Tensor Shapes:**
+ * Pointwise operations are dimension-agnostic — input tensors can have any shape.
+ * For binary and ternary operations, inputs are broadcast using NumPy-style rules
+ * (dimensions compared right-to-left; compatible if equal or 1).
+ *
  * @see Graph::pointwise(), PointwiseMode
  */
 class PointwiseAttributes : public Attributes<PointwiseAttributes>
@@ -326,5 +331,5 @@ public:
         return attr;
     }
 };
-typedef PointwiseAttributes Pointwise_attributes; ///< @brief cuDNN compatibility alias
+typedef PointwiseAttributes Pointwise_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

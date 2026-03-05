@@ -33,13 +33,6 @@ namespace rocRoller
 
                 auto containingScope = [&]() -> std::optional<int> {
                     auto stack = controlStack(scopeIdx, original);
-                    if(scopeIdx == 7107)
-                    {
-                        std::ostringstream msg;
-                        msg << "Scope " << scopeIdx << ": ";
-                        streamJoin(msg, stack, ", ");
-                        Log::debug(msg.str());
-                    }
 
                     for(auto iter = stack.rbegin(); iter != stack.rend(); ++iter)
                     {
