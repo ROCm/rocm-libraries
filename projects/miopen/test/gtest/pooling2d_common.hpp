@@ -18,7 +18,7 @@
 // network_data.hpp provides get_inputs() function used when TEST_GET_INPUT_TENSOR = 1
 // (currently TEST_GET_INPUT_TENSOR = 0, but include is needed to support both cases)
 #include "../network_data.hpp"
-#include "pooling_common.hpp"
+#include "./pooling_common.hpp"
 
 // Configuration defines matching the original ctest behavior
 #define WORKAROUND_ISSUE_1670 1
