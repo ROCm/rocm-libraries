@@ -35,16 +35,6 @@ public:
     using Graph::get_raw_graph_descriptor;
 };
 
-// -- Test constants for AutoAssignedUidsPreservedInRoundTrip --
-
-// A: (batch=1, M=4, K=8)
-constexpr std::array<int64_t, 3> K_AUTO_A_DIMS = {1, 4, 8};
-constexpr std::array<int64_t, 3> K_AUTO_A_STRIDES = {32, 8, 1};
-
-// B: (batch=1, K=8, N=6)
-constexpr std::array<int64_t, 3> K_AUTO_B_DIMS = {1, 8, 6};
-constexpr std::array<int64_t, 3> K_AUTO_B_STRIDES = {48, 6, 1};
-
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
 class IntegrationMatmulDescriptorLowering : public ::testing::Test
@@ -196,11 +186,11 @@ TEST_F(IntegrationMatmulDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip
 
     auto a = std::make_shared<TensorAttributes>();
     a->set_name("A").set_data_type(DataType::FLOAT);
-    a->set_dim(toVec(K_AUTO_A_DIMS)).set_stride(toVec(K_AUTO_A_STRIDES));
+    a->set_dim(toVec(K_MATMUL_TENSOR_A_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_A_STRIDES));
 
     auto b = std::make_shared<TensorAttributes>();
     b->set_name("B").set_data_type(DataType::FLOAT);
-    b->set_dim(toVec(K_AUTO_B_DIMS)).set_stride(toVec(K_AUTO_B_STRIDES));
+    b->set_dim(toVec(K_MATMUL_TENSOR_B_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_B_STRIDES));
 
     MatmulAttributes matmulAttrs;
 
