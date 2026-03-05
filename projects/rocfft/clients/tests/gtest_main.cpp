@@ -647,9 +647,12 @@ int main(int argc, char* argv[])
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
 
-    // Set host memory limit from command-line options
-    host_memory::singleton().set_limit_gbytes(ramgb);
-    std::cout << "Host memory limit: " << ramgb << " GiB" << std::endl;
+    // Set host memory limit from command-line options (if more restrictive)
+    const auto usable_bytes = host_memory::singleton().get_usable_bytes();
+    if(ramgb * ONE_GiB < usable_bytes)
+        host_memory::singleton().set_limit_gbytes(ramgb);
+    std::cout << "Usable host memory: " << bytes_to_GiB(host_memory::singleton().get_usable_bytes())
+              << " GiB" << std::endl;
 
     if(use_fftw_wisdom)
     {
