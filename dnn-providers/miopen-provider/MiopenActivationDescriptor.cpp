@@ -6,7 +6,7 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 MiopenActivationDescriptor::MiopenActivationDescriptor(
@@ -60,4 +60,4 @@ miopenActivationDescriptor_t MiopenActivationDescriptor::activationDescriptor() 
     return _descriptor;
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

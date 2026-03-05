@@ -3,9 +3,14 @@
 
 #pragma once
 
+#include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 
 namespace ck_tile::core::arch::mma {
 
@@ -15,7 +20,8 @@ namespace ck_tile::core::arch::mma {
  */
 struct Unsupported;
 
-#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
+#include <concepts>
 /**
  * @concept MmaOpI
  * @brief  Expresses the meta-data interface required for each MmaOp policy.
@@ -49,7 +55,7 @@ concept MmaOpI = requires(MmaOp op) {
     } -> std::convertible_to<typename MmaOp::CVecType>;
 };
 
-#endif // defined(__cpp_concepts) && __cpp_concepts >= 201907L
+#endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 /**
  *  @class  amdgcn_mma
@@ -77,11 +83,13 @@ template <typename ADataType,
           uint32_t BlockK,
           typename CtrlFlags,
           typename CompilerTarget,
+          MmaOpFamily OpFamily_,
           typename Enabler = void>
 struct amdgcn_mma
 {
     // The base instance is unsupported because there is no __builtin to wrap.
-    using OpType = Unsupported;
+    using OpType                          = Unsupported;
+    static constexpr MmaOpFamily OpFamily = MmaOpFamily::UNDEFINED;
 
     // Interface types for A, B, C vectors types
     using AVecType = ext_vector_t<ADataType, 1>;
@@ -112,7 +120,9 @@ struct amdgcn_mma
 };
 
 } // namespace ck_tile::core::arch::mma
+#pragma clang diagnostic pop
 
 // Include the implementations
 #include "wmma/wmma.hpp"
 #include "mfma/mfma.hpp"
+#include "sparse/sparse.hpp"

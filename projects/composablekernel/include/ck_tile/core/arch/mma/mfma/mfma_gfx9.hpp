@@ -8,6 +8,7 @@
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
+#include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 
 namespace ck_tile::core::arch::mma {
@@ -30,7 +31,8 @@ struct DefaultMfmaCtrlFlags
     static constexpr uint32_t Blgp = 0; // BLGP flag, default 0
 };
 
-#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
+#include <concepts>
 
 /**
  * @concept CtrlFlagsGfx9I
@@ -44,7 +46,7 @@ concept CtrlFlagsGfx9I = requires(CtrlFlags ctrlFlags) {
     { CtrlFlags::Blgp } -> std::convertible_to<int>;
 };
 
-#endif // defined(__cpp_concepts) && __cpp_concepts >= 201907L
+#endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 /**
  * @struct amdgcn_mma
@@ -67,10 +69,12 @@ struct amdgcn_mma<fp16_t,
                   16u,
                   CtrlFlags,
                   CompilerTarget,
+                  MmaOpFamily::DENSE,
                   enable_if_target_family_gfx9_t<CompilerTarget>>
 {
     // Mfma operation type
-    using OpType = MfmaOp;
+    using OpType                          = MfmaOp;
+    static constexpr MmaOpFamily OpFamily = MmaOpFamily::DENSE;
 
     // Register types
     using AVecType = ext_vector_t<fp16_t, 4>;
@@ -124,9 +128,11 @@ struct amdgcn_mma<fp16_t,
                   32u,
                   CtrlFlags,
                   CompilerTarget,
+                  MmaOpFamily::DENSE,
                   enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
 {
-    using OpType = MfmaOp;
+    using OpType                          = MfmaOp;
+    static constexpr MmaOpFamily OpFamily = MmaOpFamily::DENSE;
 
     // Packed register types
     using AVecType = ext_vector_t<fp16_t, 8>;

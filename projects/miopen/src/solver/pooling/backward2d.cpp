@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/pooling/solvers.hpp>
 
@@ -32,6 +9,7 @@
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/target_properties.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 namespace miopen {
 
@@ -56,7 +34,8 @@ struct kernel_params
     std::size_t grp_tile0;
     std::size_t grp_tile1;
 
-    kernel_params(const miopen::pooling::ProblemDescription& problem)
+    kernel_params(const miopen::pooling::ProblemDescription& problem,
+                  const PerformanceConfigPooling2dBackward& config)
     {
         const auto& pd = problem.GetPooling();
 
@@ -68,35 +47,10 @@ struct kernel_params
         std::tie(batch_sz, n_inputs, in_height, in_width) =
             miopen::tien<4>(problem.GetXDesc().GetLengths(), 1);
 
-        out_pix_tile0 = 1;
-        out_pix_tile1 = 1;
-        if(pd.GetMode() == miopenPoolingMax)
-        {
-            out_pix_tile0 = in_width > 8 && in_width <= 24 ? 4 : 1;
-            out_pix_tile1 = in_width <= 24 ? 1 : (in_width > 64 && in_width <= 96 ? 4 : 8);
-        }
-
-        grp_tile0 = 8;
-        grp_tile1 = 8;
-        if(pd.GetMode() == miopenPoolingMax)
-        {
-            grp_tile0 = in_width <= 8     ? 8  //
-                        : in_width <= 16  ? 4  //
-                        : in_width <= 24  ? 8  //
-                        : in_width <= 32  ? 32 //
-                        : in_width <= 64  ? 8  //
-                        : in_width <= 96  ? 16 //
-                        : in_width <= 128 ? 16
-                                          : 32;
-            grp_tile1 = in_width <= 8     ? 8  //
-                        : in_width <= 16  ? 16 //
-                        : in_width <= 24  ? 8  //
-                        : in_width <= 32  ? 4  //
-                        : in_width <= 64  ? 8  //
-                        : in_width <= 96  ? 4  //
-                        : in_width <= 128 ? 16
-                                          : 4;
-        }
+        out_pix_tile0 = config.out_pix_tile0;
+        out_pix_tile1 = config.out_pix_tile1;
+        grp_tile0     = config.local_size0;
+        grp_tile1     = config.local_size1;
     }
 };
 
@@ -119,9 +73,10 @@ inline std::size_t RoundUpToMultiple(std::size_t v, std::size_t m)
 
 // Compute amount of local memory required for holding the arrays defined
 // in the "mloPoolingAveBwd" and "mloPoolingMaxBwd" kernels.
-std::size_t sizeof_local_memory(const miopen::pooling::ProblemDescription& problem)
+std::size_t sizeof_local_memory(const miopen::pooling::ProblemDescription& problem,
+                                const PerformanceConfigPooling2dBackward& config)
 {
-    const kernel_params kp(problem);
+    const kernel_params kp(problem, config);
 
     // aliases to ease programming
     const auto& MLO_POOLING_KERNEL_SZ0      = kp.kernel_size_w;
@@ -174,22 +129,32 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
     static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
 
     return problem.GetDirection() == miopen::pooling::Direction::Backward &&
+           problem.GetXDesc().GetType() == problem.GetYDesc().GetType() &&
+           (problem.GetXDesc().GetType() == miopenFloat ||
+            problem.GetXDesc().GetType() == miopenHalf ||
+            problem.GetXDesc().GetType() == miopenBFloat16) &&
            (problem.GetPooling().GetMode() == miopenPoolingMax ||
             problem.GetPooling().GetMode() == miopenPoolingAverage ||
             problem.GetPooling().GetMode() == miopenPoolingAverageInclusive) &&
            problem.GetXDesc().GetNumDims() == 4 &&
            problem.GetXDesc().IsPossibleLayout4D5D("NCHW", strict) &&
-           problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict) &&
-           sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize();
+           problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict);
 }
 
-ConvSolution
-PoolingBackward2d::GetSolution(const ExecutionContext&,
-                               const miopen::pooling::ProblemDescription& problem) const
+ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext&,
+                                            const miopen::pooling::ProblemDescription& problem,
+                                            const PerformanceConfigPooling2dBackward& config) const
 {
+    // check local memory requirement
+    if(sizeof_local_memory(problem, config) > TargetProperties::GetMaxLocalMemorySize())
+    {
+        MIOPEN_THROW(
+            "The local memory requirement in PoolingBackward2d solver exceeds the device limit.");
+    }
+
     auto result = ConvSolution{miopenStatusSuccess};
 
-    const kernel_params kp(problem);
+    const kernel_params kp(problem, config);
 
     {
         auto kernel = KernelInfo{};
@@ -294,6 +259,23 @@ PoolingBackward2d::GetSolution(const ExecutionContext&,
     return result;
 }
 
+bool PerformanceConfigPooling2dBackward::IsValidValue(
+    const miopen::pooling::ProblemDescription& problem) const
+{
+    if(!IsTwoPower<min_out_pix_tile0, max_out_pix_tile0>(out_pix_tile0))
+        return false;
+    if(!IsTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
+        return false;
+    if(!IsTwoPower<min_local_size0, max_local_size0>(local_size0))
+        return false;
+    if(!IsTwoPower<min_local_size1, max_local_size1>(local_size1))
+        return false;
+    // this constraint is enforced to avoid exceedance of local memory limit
+    if(sizeof_local_memory(problem, *this) > TargetProperties::GetMaxLocalMemorySize())
+        return false;
+    return true;
+}
+
 std::size_t
 PoolingBackward2d::GetWorkspaceSize(const ExecutionContext&,
                                     const miopen::pooling::ProblemDescription& problem) const
@@ -301,6 +283,22 @@ PoolingBackward2d::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax)
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+bool PoolingBackward2d::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPooling2dBackward& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPooling2dBackward PoolingBackward2d::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPooling2dBackward config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling

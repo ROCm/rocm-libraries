@@ -1,65 +1,77 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
-
-/**
- */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <string>
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
+    AssemblyKernelArgument::AssemblyKernelArgument(std::string               name,
+                                                   VariableType              variableType,
+                                                   DataDirection             dataDir,
+                                                   Expression::ExpressionPtr expr,
+                                                   int                       offset,
+                                                   int                       size)
+        : m_name(name)
+        , m_variableType(variableType)
+        , m_dataDirection(dataDir)
+        , m_offset(offset)
+        , m_size(size)
+    {
+        setExpression(expr);
+    }
+
+    void AssemblyKernelArgument::setExpression(Expression::ExpressionPtr const& expr)
+    {
+        m_expression     = expr;
+        m_simplifiedExpr = simplify(m_expression);
+        if(identical(m_simplifiedExpr, m_expression))
+            m_simplifiedExpr = nullptr;
+
+        m_restoredExpr = Expression::restoreCommandArguments(m_expression);
+        if(identical(m_restoredExpr, m_expression))
+            m_restoredExpr = nullptr;
+
+        if(m_restoredExpr)
+        {
+            m_simplifiedRestoredExpr = simplify(m_restoredExpr);
+            if(identical(m_simplifiedRestoredExpr, m_restoredExpr))
+                m_simplifiedRestoredExpr = nullptr;
+        }
+    }
+
     bool AssemblyKernelArgument::operator==(AssemblyKernelArgument const& rhs) const
     {
-        return name == rhs.name //
-               && variableType == rhs.variableType //
-               && dataDirection == rhs.dataDirection //
-               && equivalent(expression, rhs.expression) //
-               && offset == rhs.offset //
-               && size == rhs.size;
+        return m_name == rhs.m_name //
+               && m_variableType == rhs.m_variableType //
+               && m_dataDirection == rhs.m_dataDirection //
+               && equivalent(m_expression, rhs.m_expression) //
+               && m_offset == rhs.m_offset //
+               && m_size == rhs.m_size && m_preloaded == rhs.m_preloaded;
     }
 
     std::string AssemblyKernelArgument::toString() const
     {
-        auto rv = concatenate("KernelArg{", name, ", ", variableType);
+        auto rv = concatenate("KernelArg{", m_name, ", ", m_variableType);
 
-        if(dataDirection != DataDirection::ReadOnly)
-            rv += concatenate(", ", dataDirection);
+        if(m_dataDirection != DataDirection::ReadOnly)
+            rv += concatenate(", ", m_dataDirection);
 
-        rv += concatenate(", ", expression);
-        if(expression)
-            rv += concatenate("(c ", complexity(expression), ")");
+        rv += concatenate(", ", m_expression);
+        if(m_expression)
+            rv += concatenate("(c ", complexity(m_expression), ")");
 
-        if(offset != -1)
-            rv += concatenate(", o:", offset);
+        if(m_offset != -1)
+            rv += concatenate(", o:", m_offset);
 
-        if(size != -1)
-            rv += concatenate(", s:", size);
+        if(m_size != -1)
+            rv += concatenate(", s:", m_size);
+
+        if(m_preloaded)
+            rv += concatenate(", preloaded");
 
         return rv + "}";
     }

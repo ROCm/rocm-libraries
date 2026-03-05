@@ -349,6 +349,12 @@ namespace TensileLite
         {
             return this->type();
         }
+
+        // Get the library filename for debug output
+        virtual std::string getLibraryFileName() const override
+        {
+            return filePrefix + suffix;
+        }
     };
 
 } // namespace TensileLite

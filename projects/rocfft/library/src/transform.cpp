@@ -183,26 +183,25 @@ void rocfft_plan_t::LogFields(const char* description, const std::vector<rocfft_
             os << "    comm_rank: " << b.location.comm_rank << std::endl;
             os << "    device: " << b.location.device << std::endl;
             os << "    lower bound:";
-            for(auto i : b.lower)
+            for(auto i : b.layout.lower())
                 os << " " << i;
             os << std::endl;
             os << "    upper bound:";
-            for(auto i : b.upper)
+            for(auto i : b.layout.upper())
                 os << " " << i;
             os << std::endl;
 
             os << "    stride:";
-            for(auto i : b.stride)
+            for(auto i : b.layout.strides_and_distances())
                 os << " " << i;
             os << std::endl;
 
-            auto len = b.length();
             os << "    length:";
-            for(auto i : len)
+            for(auto i : b.layout.lengths_and_batches())
                 os << " " << i;
             os << std::endl;
 
-            os << "    elements: " << b.count_elems() << std::endl;
+            os << "    elements: " << b.layout.logical_count() << std::endl;
         }
     }
 }
@@ -311,7 +310,7 @@ void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execut
     // Vector of topologically sorted indexes to the items in multiPlan
     auto sortedIdx = MultiPlanTopologicalSort();
 
-    const auto local_comm_rank = get_local_comm_rank();
+    const auto local_comm_rank = desc.get_local_comm_rank();
 
     // Log input/output pointers
     if(LOG_PLAN_ENABLED())
@@ -451,7 +450,7 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
 
     if(mgpuPlan)
     {
-        auto local_comm_rank = plan->get_local_comm_rank();
+        auto local_comm_rank = plan->desc.get_local_comm_rank();
         std::copy_n(
             in_buffer,
             plan->desc.count_pointers(plan->desc.inFields, plan->desc.inArrayType, local_comm_rank),
