@@ -35,6 +35,7 @@
 // auxiliary
 #include "common/auxiliary/testing_bdsqr.hpp"
 #include "common/auxiliary/testing_bdsvdx.hpp"
+#include "common/auxiliary/testing_gecon.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
 #include "common/auxiliary/testing_lange.hpp"
@@ -141,6 +142,8 @@ class rocsolver_dispatcher
             {"laswp", testing_laswp<T>},
             {"lange", testing_lange<T, rocblas_int>},
             {"lange_64", testing_lange<T, int64_t>},
+            {"gecon", testing_gecon<T, rocblas_int>},
+            {"gecon_64", testing_gecon<T, int64_t>},
             {"larfg", testing_larfg<T, rocblas_int>},
             {"larfg_64", testing_larfg<T, int64_t>},
             {"larf", testing_larf<T, rocblas_int>},

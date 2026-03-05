@@ -122,12 +122,6 @@ ninja check
 # Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
 ```
 
-### Building Specific Components
-```bash
-# Build without plugins
-cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
-```
-
 ### Disabling JSON Support
 By default, hipDNN includes JSON serialization support via [nlohmann_json](https://github.com/nlohmann/json). To build without the nlohmann_json dependency:
 ```bash

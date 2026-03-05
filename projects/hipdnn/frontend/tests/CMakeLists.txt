@@ -17,6 +17,8 @@ add_executable(
     TestAttributes.cpp
     TestBackendInterface.cpp
     TestBackendLoggingHelpers.cpp
+    TestBlockScaleDequantizeAttributes.cpp
+    TestBlockScaleDequantizeNode.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp
     TestBatchnormBackwardNode.cpp
@@ -34,6 +36,7 @@ add_executable(
     TestConvolutionWgradNode.cpp
     TestEngineOverrideConfig.cpp
     TestError.cpp
+    TestFrontendLogging.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
@@ -42,11 +45,17 @@ add_executable(
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
+    TestLayernormAttributes.cpp
+    TestLayerNormNode.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp
+    TestSdpaAttributes.cpp
+    TestSdpaFpropNode.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
+    TestRMSNormAttributes.cpp
+    TestRMSNormNode.cpp
     TestScopedHipdnnBackendDescriptor.cpp
     TestTensorAttributes.cpp
     TestTensorValueAttributes.cpp

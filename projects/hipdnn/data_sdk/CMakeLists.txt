@@ -18,8 +18,9 @@ if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
     hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
 endif()
 
-# Supported FlatBuffers versions - update this list when adding new version support.
-# Each version must have pre-generated headers in include/generated/v<version_tag>/
+# Supported FlatBuffers versions (oldest to newest) - update this list when adding new version support.
+# Each version must have pre-generated headers in include/hipdnn_data_sdk/data_objects/v<version_tag>/
+# 24.12.23 matches PyTorch's FlatBuffers version for compatibility
 set(HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS "24.12.23" "${HIPDNN_FLATBUFFERS_VERSION}")
 
 if(NOT HIPDNN_FLATBUFFERS_VERSION IN_LIST HIPDNN_SUPPORTED_FLATBUFFERS_VERSIONS)
@@ -144,6 +145,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/batchnorm_backward_attributes.fbs
             schemas/batchnorm_inference_attributes.fbs
             schemas/batchnorm_inference_attributes_variance_ext.fbs
+            schemas/block_scale_dequantize_attributes.fbs
             schemas/convolution_common.fbs
             schemas/convolution_fwd_attributes.fbs
             schemas/convolution_bwd_attributes.fbs
@@ -153,8 +155,12 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/engine_details.fbs
             schemas/graph.fbs
             schemas/knob_value.fbs
+            schemas/layernorm_attributes.fbs
             schemas/matmul_attributes.fbs
+            schemas/norm_common.fbs
             schemas/pointwise_attributes.fbs
+            schemas/rmsnorm_attributes.fbs
+            schemas/sdpa_attributes.fbs
             schemas/tensor_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         PRIMARY_VERSION ${HIPDNN_FLATBUFFERS_VERSION}
