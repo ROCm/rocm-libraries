@@ -190,59 +190,6 @@ struct WarpGemmAttributeMfmaImplF32F32F32M32N32K2
     }
 };
 
-// Define CK_TILE_TF32_USE_PACKED_CVT=0 to disable packed instructions for debugging
-#ifndef CK_TILE_TF32_USE_PACKED_CVT
-#define CK_TILE_TF32_USE_PACKED_CVT 1
-#endif
-
-// Helper function to convert float to bf16 pairs for tf32 emulation on gfx950
-// This is used to simulate tf32 using 3x bf16 MFMA: big*big + small*big + big*small
-// Uses packed instructions throughout: v_cvt_pk_bf16_f32, v_pk_add_f32, bit ops
-// Set CK_TILE_TF32_USE_PACKED_CVT=0 to use scalar fallback for debugging
-template <index_t VecSize>
-CK_TILE_DEVICE void convert_float_to_bf16_pairs(const ext_vector_t<float, VecSize>& reg_f32,
-                                                ext_vector_t<bf16_t, VecSize>& reg_bf16_big,
-                                                ext_vector_t<bf16_t, VecSize>& reg_bf16_small)
-{
-#if defined(__gfx94__) && CK_TILE_TF32_USE_PACKED_CVT
-    // Packed mode: use v_cvt_pk_bf16_f32 and v_pk_add_f32 instructions (gfx94x)
-    static_assert(VecSize % 2 == 0, "VecSize must be even for packed operations");
-
-    // Use packed instructions: 2 elements per iteration
-    static_for<0, VecSize, 2>{}([&](auto k) {
-        const float* f32_ptr = reinterpret_cast<const float*>(&reg_f32);
-        const index_t idx    = static_cast<index_t>(k);
-
-        // Pack convert 2 floats -> 2 bf16 (1 instruction)
-        bf16x2_t big_pair = cvt_pk_bf16_f32(f32_ptr[idx], f32_ptr[idx + 1]);
-
-        // Convert bf16x2 back to fp32x2 using bit operations (2 integer ops)
-        fp32x2_t big_f32 = bf16x2_to_fp32x2(big_pair);
-
-        // Pack original floats for packed subtraction
-        fp32x2_t orig = {f32_ptr[idx], f32_ptr[idx + 1]};
-
-        // Packed subtraction: orig - big_f32 (1 instruction with neg modifier)
-        fp32x2_t diff = pk_sub_f32(orig, big_f32);
-
-        // Pack convert residuals (1 instruction)
-        bf16x2_t small_pair = cvt_pk_bf16_f32(diff[0], diff[1]);
-
-        // Store results
-        reinterpret_cast<bf16x2_t*>(&reg_bf16_big)[idx / 2]   = big_pair;
-        reinterpret_cast<bf16x2_t*>(&reg_bf16_small)[idx / 2] = small_pair;
-    });
-#else
-    // Scalar mode: process elements one by one (for debugging or non-gfx94x)
-    static_for<0, VecSize, 1>{}([&](auto k) {
-        const index_t idx = static_cast<index_t>(k);
-        reg_bf16_big[idx] = type_convert<bf16_t>(reg_f32[idx]);
-        reg_bf16_small[idx] =
-            type_convert<bf16_t>(reg_f32[idx] - type_convert<float>(reg_bf16_big[idx]));
-    });
-#endif
-}
-
 // tf32/xf32 emulation on gfx950 using 3x bf16 MFMA
 // Algorithm: split float into bf16_big and bf16_small, then compute:
 //   out = A_big * B_big + A_small * B_big + A_big * B_small
