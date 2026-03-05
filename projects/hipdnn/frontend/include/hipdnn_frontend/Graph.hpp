@@ -71,6 +71,7 @@
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
@@ -85,12 +86,14 @@
 #include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
 #include <hipdnn_frontend/detail/GraphPacker.hpp>
+#include <hipdnn_frontend/detail/KnobPacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
@@ -148,6 +151,66 @@ private:
             return engineId;
         }();
         return s_defaultId;
+    }
+
+    // TODO: Remove this feature flag once all operation types support descriptor-based
+    // lowering and the flatbuffer path is no longer needed.
+    static bool useDescriptorApi()
+    {
+        static const bool s_useDescriptorApi
+            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_USE_DESCRIPTOR_API") == "1";
+        return s_useDescriptorApi;
+    }
+
+    /// Apply validated knob settings to the engine config descriptor, using
+    /// either the descriptor-based or FlatBuffer serialization path depending
+    /// on the HIPDNN_USE_DESCRIPTOR_API feature flag.
+    Error applyKnobSettingsToEngineConfig(const std::vector<KnobSetting>& validatedSettings)
+    {
+        if(validatedSettings.empty())
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        if(useDescriptorApi())
+        {
+            HIPDNN_FE_LOG_INFO("Using descriptor-based API for knob settings");
+            return detail::applyKnobSettingsViaDescriptors(_engineConfigDesc->get(),
+                                                           validatedSettings);
+        }
+
+        // FlatBuffer serialization path (existing default)
+        std::vector<flatbuffers::DetachedBuffer> knobBuffers;
+        knobBuffers.reserve(validatedSettings.size());
+
+        for(const auto& setting : validatedSettings)
+        {
+            flatbuffers::FlatBufferBuilder builder;
+            auto knobSettingOffset = setting.packKnobSetting(builder);
+            builder.Finish(knobSettingOffset);
+            knobBuffers.push_back(builder.Release());
+        }
+
+        std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray;
+        flatbufferDataArray.reserve(knobBuffers.size());
+
+        for(const auto& buffer : knobBuffers)
+        {
+            hipdnnBackendFlatbufferData_t fbData;
+            fbData.ptr = buffer.data();
+            fbData.size = buffer.size();
+            flatbufferDataArray.push_back(fbData);
+        }
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             _engineConfigDesc->get(),
+                                             HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                             HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                             static_cast<int64_t>(flatbufferDataArray.size()),
+                                             flatbufferDataArray.data()),
+                                         "Failed to set knob settings on engine config.");
+
+        return {ErrorCode::OK, ""};
     }
 
     void assignUnsetTensorUids()
@@ -660,6 +723,18 @@ private:
                         std::make_shared<RMSNormNode>(std::move(attr), graph_attributes));
                     break;
                 }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
+                {
+                    auto attr = BlockScaleDequantizeAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_BlockScaleDequantizeAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(std::make_shared<BlockScaleDequantizeNode>(
+                        std::move(attr), graph_attributes));
+                    break;
+                }
                 default:
                     return {ErrorCode::INVALID_VALUE, "Unsupported node type in deserialization"};
                 }
@@ -840,12 +915,7 @@ public:
      */
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
-        // TODO: Remove this feature flag once all operation types support descriptor-based
-        // lowering and the flatbuffer path is no longer needed.
-        static const bool s_useDescriptorApi
-            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_USE_DESCRIPTOR_API") == "1";
-
-        if(s_useDescriptorApi)
+        if(useDescriptorApi())
         {
             return build_operation_graph_via_descriptors(handle);
         }
@@ -1054,7 +1124,7 @@ public:
     /**
      * @brief Create an execution plan with specific engine and knob settings
      * @param engineId The engine ID to use
-     * @param settings Vector of KnobSetting objects to configure the engine
+     * @param settings Vector of KnobSetting objects to configure the engine (max 1024)
      * @return Error indicating success or failure
      *
      * This method allows fine-grained control over engine selection and
@@ -1103,38 +1173,7 @@ public:
             validatedSettings.emplace_back(setting);
         }
 
-        if(!validatedSettings.empty())
-        {
-            std::vector<flatbuffers::DetachedBuffer> knobBuffers;
-            knobBuffers.reserve(validatedSettings.size());
-
-            for(const auto& setting : validatedSettings)
-            {
-                flatbuffers::FlatBufferBuilder builder;
-                auto knobSettingOffset = setting.packKnobSetting(builder);
-                builder.Finish(knobSettingOffset);
-                knobBuffers.push_back(builder.Release());
-            }
-
-            std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray;
-            flatbufferDataArray.reserve(knobBuffers.size());
-
-            for(const auto& buffer : knobBuffers)
-            {
-                hipdnnBackendFlatbufferData_t fbData;
-                fbData.ptr = buffer.data();
-                fbData.size = buffer.size();
-                flatbufferDataArray.push_back(fbData);
-            }
-
-            HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
-                                                 _engineConfigDesc->get(),
-                                                 HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
-                                                 HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-                                                 static_cast<int64_t>(flatbufferDataArray.size()),
-                                                 flatbufferDataArray.data()),
-                                             "Failed to set knob settings on engine config.");
-        }
+        HIPDNN_CHECK_ERROR(applyKnobSettingsToEngineConfig(validatedSettings));
 
         // Finalize engine config after knobs have been set
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -1776,6 +1815,30 @@ public:
             std::make_shared<RMSNormNode>(std::move(attributes), graph_attributes));
 
         return {y, invRmsOut};
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        block_scale_dequantize(std::shared_ptr<TensorAttributes> x,
+                               std::shared_ptr<TensorAttributes> scale,
+                               BlockScaleDequantizeAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BlockScaleDequantize_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<BlockScaleDequantizeNode>(std::move(attributes), graph_attributes));
+
+        return y;
     }
 
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,

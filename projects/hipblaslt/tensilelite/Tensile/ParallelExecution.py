@@ -112,7 +112,6 @@ import re
 import shutil
 import subprocess
 import time
-import sys
 
 from Tensile.Common import print1, printWarning, ClientExecutionLock
 from Tensile.Common.GlobalParameters import globalParameters
@@ -227,7 +226,6 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
         Overall return code (max of all GPU return codes)
     """
     clientExe = getClientExecutablePath()
-    startTime = time.time_ns()
 
     # Process each config file
     overallReturnCode = 0
@@ -323,9 +321,5 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
             shutil.rmtree(parallelDir)
         else:
             printWarning(f"No results-file found in {configPath}; per-GPU results preserved at {parallelDir}")
-
-    if timingEnabled:
-        elapsed = (time.time_ns() - startTime) / 1_000_000
-        print(f"TIMING:python_client_execution:{elapsed:.3f}", file=sys.stderr)
 
     return overallReturnCode
