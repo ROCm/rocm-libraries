@@ -3785,7 +3785,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VAddU32(dst=vgpr(grov), src0=vgpr(tmpv), src1=vgpr(grov), \
                          comment="final" ))
       module.add(VLShiftLeftB32(dst=vgpr(grov), shiftHex=log2(tP["bpeGR"]), src=vgpr(grov)))
-      module.add(VAddU32(dst=vgpr(grov), src0=self.states.srdShiftLeft[tc] * tP["bpeGR"] , src1=vgpr(grov), \
+      module.add(VAddU32(dst=vgpr(grov), src0=int(self.states.srdShiftLeft[tc] * tP["bpeGR"]) , src1=vgpr(grov), \
                          comment="ptr-shift" ))
 
     self.vgprPool.checkIn(tmpv)
@@ -4552,9 +4552,9 @@ class KernelWriterAssembly(KernelWriter):
 
         tmp = self.vgprPool.checkOut(2)
         with self.allocTmpSgpr(1) as tmpSgprInfo:
-          module.add(vectorStaticDivide(tmp, rReg, tP["bpeGR"]*8, tmpVgprRes, comment="%s: %s = %s / %s"%(swizzledOrTrName, vgpr(tmp), vgpr(rReg), tP["bpeGR"]*8)))
-          module.add(vectorStaticMultiply(vgpr(tmp), vgpr(tmp), tP["bpeGR"]*4, tmpSgprInfo, comment="%s: %s = %s * %s"%(swizzledOrTrName, vgpr(tmp), vgpr(tmp), tP["bpeGR"]*4)))
-        module.add(vectorStaticRemainder(tmp+1, rReg, rReg, tP["bpeGR"]*4, tmpVgprRes, tmpSgprInfo, comment="%s: %s = %s %% %s"%(swizzledOrTrName, vgpr(tmp), vgpr(rReg), tP["bpeGR"]*4)))
+          module.add(vectorStaticDivide(tmp, rReg, int(tP["bpeGR"]*8), tmpVgprRes, comment="%s: %s = %s / %s"%(swizzledOrTrName, vgpr(tmp), vgpr(rReg), int(tP["bpeGR"]*8))))
+          module.add(vectorStaticMultiply(vgpr(tmp), vgpr(tmp), int(tP["bpeGR"]*4), tmpSgprInfo, comment="%s: %s = %s * %s"%(swizzledOrTrName, vgpr(tmp), vgpr(tmp), int(tP["bpeGR"]*4))))
+        module.add(vectorStaticRemainder(tmp+1, rReg, rReg, int(tP["bpeGR"]*4), tmpVgprRes, tmpSgprInfo, comment="%s: %s = %s %% %s"%(swizzledOrTrName, vgpr(tmp), vgpr(rReg), int(tP["bpeGR"]*4))))
         module.add(VAddU32(dst=vgpr(rReg), src0=vgpr(tmp), src1=vgpr(rReg), comment="%s: %s = %s + %s"%(swizzledOrTrName, vgpr(rReg), vgpr(rReg), vgpr(tmp))))
 
       WvG_M = kernel["MIWaveGroup"][0]
@@ -4574,7 +4574,7 @@ class KernelWriterAssembly(KernelWriter):
       if tP["isSwizzled"]:
         self.sgprPool.checkIn(tmp)
       elif isTr:
-        module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(dividendReg), src1=tP["bpeGR"]+1, src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
+        module.add(VBfeU32(dst=vgpr(tmp), src0=vgpr(dividendReg), src1=int(tP["bpeGR"])+1, src2=1, comment="%s: offset for the right half of the tile"%(swizzledOrTrName)))
         module.add(VAddU32(dst=vgpr(qReg), src0=vgpr(tmp), src1=vgpr(qReg), comment="%s: wave_id += offset for the right half of the tile"%(swizzledOrTrName)))
         self.vgprPool.checkIn(tmp)
     elif isDTVAB:
@@ -4823,7 +4823,7 @@ class KernelWriterAssembly(KernelWriter):
           src=vgpr(tmpv), \
           comment="Copy lds write address VGPR to SGPR"))
         module.add(SMulI32(dst=sgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), \
-                         src1=((kernel["WavefrontSize"] * kernel["GlobalReadVectorWidth%c"%tc]+kernel["LdsPad%s"%tc]) * tP["bpeGR"]) ))
+                         src1=int((kernel["WavefrontSize"] * kernel["GlobalReadVectorWidth%c"%tc]+kernel["LdsPad%s"%tc]) * tP["bpeGR"]) ))
         if tc == 'B':
           module.add(SAddU32(dst=sgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), \
                          src1=kernel["LdsOffsetB"] ))
@@ -5993,7 +5993,7 @@ class KernelWriterAssembly(KernelWriter):
                          comment="Calculate the remaining dimension along I/J direction."))
         imod.add(SSubU32(dst=sgpr(sTmp0), src0=sgpr(strSize), src1=sgpr(sTmp0), \
                          comment="Calculate the remaining dimension along I/J direction."))
-        imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(sTmp0), src1=tP["bpeGR"], \
+        imod.add(SMulI32(dst=sgpr(sTmp0), src0=sgpr(sTmp0), src1=int(tP["bpeGR"]), \
                          comment="In bytes"))
         imod.add(SAndB32(dst=sgpr(sTmp1), src0=sgpr("SizeL"), src1=(kernel["DepthU"] - 1), \
                          comment="Calculate the remaining dimension along L direction."))
@@ -9139,7 +9139,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VLShiftRightB32(dst=vgpr(maxGroVgpr), shiftHex=log2(WvG_M), src=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) /= MIWG[0]"%tc))
         module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) *= numKr"%tc))
 
-      module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=tP["bpeGR"]+1, src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
+      module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=int(tP["bpeGR"])+1, src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
       module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(tmp2), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id += offset for the right half of the tile"%(tc)))
 
       with self.allocTmpSgpr(1) as tmpSgprInfo:
@@ -10245,10 +10245,10 @@ class KernelWriterAssembly(KernelWriter):
                       # DirectToLds + NumLoadsCoalesced>1 case, need to adjust m0 increment value to store values to correct location in LDS
                       wSize = max(self.states.kernel["WavefrontSize"], divisor)
                       lscaOffset = int(para * wSize * tP["bpeGR"] * tP["glvw"])
-                      ldsOffset = ldsInc * tP["nrc"] * (sPerp + tP["nrpv"] * perp) + lscaOffset
+                      ldsOffset = int(ldsInc * tP["nrc"] * (sPerp + tP["nrpv"] * perp) + lscaOffset)
                       ldsInc = ldsOffset - prevLdsOffset
                       prevLdsOffset = ldsOffset
-                    loadModule.add(SAddU32(dst=mgpr(0), src0=mgpr(0), src1=ldsInc, comment="Move LDS write address to next line" ))
+                    loadModule.add(SAddU32(dst=mgpr(0), src0=mgpr(0), src1=int(ldsInc), comment="Move LDS write address to next line" ))
                   directToLdsLoads+=1
                   destVgpr=0
                   self.vgprs.globalReadRegisters[tc].append(0)
