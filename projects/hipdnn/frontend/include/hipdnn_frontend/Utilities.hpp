@@ -138,4 +138,5 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
 }
 
 } // namespace graph
+
 } // namespace hipdnn_frontend

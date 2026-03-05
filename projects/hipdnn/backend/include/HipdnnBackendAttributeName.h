@@ -165,6 +165,18 @@ typedef enum
     /** @brief Whether dynamic shapes are enabled for this graph */
     HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED = 603,
 
+    /** @brief Compute data type for the operation graph (hipdnnDataType_t, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT = 604,
+
+    /** @brief Intermediate data type for the operation graph (hipdnnDataType_t, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT = 605,
+
+    /** @brief I/O data type for the operation graph (hipdnnDataType_t, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT = 606,
+
+    /** @brief Preferred engine ID for execution plan selection (int64_t, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT = 607,
+
     /** @} */
 
     /**
@@ -351,6 +363,40 @@ typedef enum
 
     /** @brief Pre-padding values for each spatial dimension */
     HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS = 1505,
+
+    /** @} */
+
+    /**
+     * @name Convolution Backward Filter Operation Attributes (1600-1699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X = 1600,
+
+    /** @brief Output gradient tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY = 1601,
+
+    /** @brief Weight gradient tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW = 1602,
+
+    /** @} */
+
+    /**
+     * @name Convolution Backward Operation Attributes (1700-1799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY = 1700,
+
+    /** @brief Weight tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W = 1701,
+
+    /** @brief Input gradient tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX = 1702,
 
     /** @} */
 

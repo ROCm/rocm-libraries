@@ -282,6 +282,13 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                module.add(vectorStaticRemainder(dummy, tReg, kReg, kernel["MatrixInstN"], tmpVgprRes, tmpSgprInfo, \
                                              "1. N offset: nIdx = wtid %% MI_N(%u)" % kernel["MatrixInstN"]))
 
+            applyVWCalcEarly = perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0 and kernel["ProblemType"]["DataType"].numBytes() != 2
+            if applyVWCalcEarly:
+               # Apply vector width calc before we apply permutation to perp dim
+               module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
+                                               "1. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
+               perpPerm(tReg)
+
             module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
                 "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
             if enableLDSTr:
@@ -298,8 +305,9 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             else:
                 module.addComment0("Skip. 2. block offset: bnOffset = 0 when num1DBlocks = 1")
 
-            module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
-                                            "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
+            if not applyVWCalcEarly:
+                module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
+                                                "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
 
             if perpBlockSize > 0:
                # Moved here since we need to wait until vectorwidth calculation is applied

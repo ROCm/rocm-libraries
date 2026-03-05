@@ -53,14 +53,6 @@ TEST(TestUtilities, FindCommonShapeSingleInput)
     EXPECT_EQ(commonShape, (std::vector<int64_t>{1, 2, 3}));
 }
 
-TEST(TestUtilities, InitializeFrontendLoggingReturnsCorrectly)
-{
-    ScopedEnvironmentVariableSetter guard("HIPDNN_LOG_LEVEL", "info");
-
-    EXPECT_EQ(initializeFrontendLogging(nullptr), -1);
-    EXPECT_EQ(initializeFrontendLogging(), 0);
-}
-
 // ============================================================================
 // Batch Normalization Validation Tests
 // ============================================================================

@@ -74,28 +74,6 @@ private:
     // Compute data type for this operation (stored at node level in graph)
     hipdnn_data_sdk::data_objects::DataType _computeDataType
         = hipdnn_data_sdk::data_objects::DataType::UNSET;
-
-    // Private setAttribute helpers
-    void setTensorDesc(hipdnnBackendAttributeName_t attributeName,
-                       hipdnnBackendAttributeType_t attributeType,
-                       int64_t elementCount,
-                       const void* arrayOfElements);
-
-    void setConvMode(hipdnnBackendAttributeType_t attributeType,
-                     int64_t elementCount,
-                     const void* arrayOfElements);
-
-    // Private getAttribute helpers
-    void getTensorDesc(hipdnnBackendAttributeName_t attributeName,
-                       hipdnnBackendAttributeType_t attributeType,
-                       int64_t requestedElementCount,
-                       int64_t* elementCount,
-                       void* arrayOfElements) const;
-
-    void getConvMode(hipdnnBackendAttributeType_t attributeType,
-                     int64_t requestedElementCount,
-                     int64_t* elementCount,
-                     void* arrayOfElements) const;
 };
 
 } // namespace hipdnn_backend

@@ -29,6 +29,12 @@ namespace hipdnn_frontend::graph
  * Unlike batch normalization which normalizes across the batch dimension,
  * layer normalization normalizes across the feature dimensions.
  *
+ * **Tensor Shapes:**
+ * - **X** (input): `(N, ...)` — batch first, then feature dims
+ * - **Scale, Bias**: `(1, C, H, W)` — batch dim = 1, feature dims match input
+ * - **Y** (output): Same shape as X
+ * - **Mean, InvVariance**: Batch dims from input, normalized dims = 1
+ *
  * **Required inputs:**
  * - X: Input tensor to normalize
  * - Scale: Per-feature scale (gamma) tensor
