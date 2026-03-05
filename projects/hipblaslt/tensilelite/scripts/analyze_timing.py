@@ -66,7 +66,12 @@ TIMING_HIERARCHY = {
         },
         "python_write_cache": {},
         "python_solution_indexing": {},
-        "python_write_solutions": {},
+        "python_write_solutions": {
+            "python_wsol_prepare": {
+                "python_wsol_prepare_cache": {},
+                "python_wsol_prepare_nocache": {},
+            },
+        },
         "python_client_execution": {
             "hip_initialization": {},
             "library_loading": {},

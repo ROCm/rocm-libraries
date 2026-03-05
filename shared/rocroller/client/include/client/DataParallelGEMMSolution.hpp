@@ -66,13 +66,26 @@ namespace rocRoller
                         }
                     };
 
+                    auto pretileB = not solutionParams.types.pretileB.empty();
+
                     m_tagTensorA = command->addOperation(
                         Operations::Tensor(2, typeA, {}, unitStrides(solutionParams.types.transA)));
                     m_tagA = command->addOperation(Operations::T_Load_Tiled(m_tagTensorA));
 
-                    m_tagTensorB = command->addOperation(
-                        Operations::Tensor(2, typeB, {}, unitStrides(solutionParams.types.transB)));
-                    m_tagB = command->addOperation(Operations::T_Load_Tiled(m_tagTensorB));
+                    auto stridesB = pretileB ? std::vector<size_t>{}
+                                             : unitStrides(solutionParams.types.transB);
+                    m_tagTensorB
+                        = command->addOperation(Operations::Tensor(2, typeB, {}, stridesB));
+
+                    auto loadInputB = m_tagTensorB;
+
+                    if(pretileB)
+                    {
+                        loadInputB = command->addOperation(Operations::SubTileTranspose(
+                            loadInputB, solutionParams.types.pretileB));
+                    }
+
+                    m_tagB = command->addOperation(Operations::T_Load_Tiled(loadInputB));
 
                     auto mulInputA = m_tagA;
                     auto mulInputB = m_tagB;
@@ -104,29 +117,31 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
-                        if(not solutionParams.types.scalePretileA.empty())
+                        auto isPreTiled = not solutionParams.types.scalePretileA.empty();
+
+                        m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
+                            2,
+                            solutionParams.types.scaleTypeA,
+                            {},
+                            isPreTiled ? std::vector<size_t>{}
+                                       : unitStrides(solutionParams.types.transA)));
+
+                        auto loadScaleInputA = m_tagTensorScaleA;
+
+                        if(isPreTiled)
                         {
-                            size_t stride = solutionParams.types.scalePretileA[1];
                             AssertFatal(solutionParams.types.transA == TransposeType::T);
-                            m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                                4,
-                                solutionParams.types.scaleTypeA,
-                                std::vector<size_t>{0ull,
-                                                    0ull,
-                                                    solutionParams.types.scalePretileA[0],
-                                                    solutionParams.types.scalePretileA[1]},
-                                std::vector<size_t>{0ull, 0ull, stride, 1ull}));
+                            AssertFatal(solutionParams.types.scalePretileA.size() == 2,
+                                        ShowValue(solutionParams.types.scalePretileA));
+                            loadScaleInputA
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    loadScaleInputA.value(),
+                                    solutionParams.types.scalePretileA,
+                                    solutionParams.types.transA == TransposeType::T));
                         }
-                        else
-                        {
-                            m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                                2,
-                                solutionParams.types.scaleTypeA,
-                                {},
-                                unitStrides(solutionParams.types.transA)));
-                        }
+
                         m_tagLoadScaleA = command->addOperation(
-                            rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
+                            rocRoller::Operations::T_Load_Tiled(loadScaleInputA.value()));
 
                         auto scaleInputA = m_tagLoadScaleA;
 
@@ -148,9 +163,8 @@ namespace rocRoller
 
                             scaleInputA
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *m_tagLoadScaleA, solutionParams.types.scaleShuffleTileA));
+                                    scaleInputA.value(), solutionParams.types.scaleShuffleTileA));
                         }
-
                         m_tagBlockScaleA = mulInputA
                             = command->addOperation(rocRoller::Operations::BlockScale(
                                 m_tagA,
@@ -171,30 +185,31 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
-                        if(not solutionParams.types.scalePretileB.empty())
-                        {
-                            size_t stride = solutionParams.types.scalePretileB[0];
-                            AssertFatal(solutionParams.types.transB == TransposeType::N);
-                            m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                                4,
-                                solutionParams.types.scaleTypeB,
-                                std::vector<size_t>{0ull,
-                                                    0ull,
-                                                    solutionParams.types.scalePretileB[0],
-                                                    solutionParams.types.scalePretileB[1]},
+                        auto isPreTiled = not solutionParams.types.scalePretileB.empty();
 
-                                std::vector<size_t>{0ull, 0ull, 1ull, stride}));
-                        }
-                        else
+                        m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
+                            2,
+                            solutionParams.types.scaleTypeB,
+                            {},
+                            isPreTiled ? std::vector<size_t>{}
+                                       : unitStrides(solutionParams.types.transB)));
+
+                        auto loadScaleInputB = m_tagTensorScaleB;
+
+                        if(isPreTiled)
                         {
-                            m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                                2,
-                                solutionParams.types.scaleTypeB,
-                                {},
-                                unitStrides(solutionParams.types.transB)));
+                            AssertFatal(solutionParams.types.transB == TransposeType::N);
+                            AssertFatal(solutionParams.types.scalePretileB.size() == 2,
+                                        ShowValue(solutionParams.types.scalePretileB));
+                            loadScaleInputB
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    loadScaleInputB.value(),
+                                    solutionParams.types.scalePretileB,
+                                    solutionParams.types.transB == TransposeType::T));
                         }
+
                         m_tagLoadScaleB = command->addOperation(
-                            rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
+                            rocRoller::Operations::T_Load_Tiled(loadScaleInputB.value()));
 
                         auto scaleInputB = m_tagLoadScaleB;
 
@@ -205,7 +220,7 @@ namespace rocRoller
 
                             scaleInputB
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *m_tagLoadScaleB, solutionParams.types.scaleShuffleTileB));
+                                    *scaleInputB, solutionParams.types.scaleShuffleTileB));
                         }
 
                         m_tagBlockScaleB = mulInputB
@@ -635,6 +650,35 @@ namespace rocRoller
                                            {K, N},
                                            problemParams.types.transB == TransposeType::T ? "T"
                                                                                           : "N");
+
+                    if(not problemParams.types.pretileB.empty()
+                       && problemParams.types.pretileB.size() == 2)
+                    {
+                        AssertFatal(problemParams.types.transB == TransposeType::N,
+                                    "Pre-tiling B only supported for TransposeType::N");
+
+                        auto const K     = problemParams.k;
+                        auto const N     = problemParams.n;
+                        auto const tileK = problemParams.types.pretileB[0];
+                        auto const tileN = problemParams.types.pretileB[1];
+
+                        AssertFatal(
+                            K % tileK == 0,
+                            "B matrix dimension K must be divisible by pretileB tile size in K.",
+                            ShowValue(K),
+                            ShowValue(tileK));
+                        AssertFatal(
+                            N % tileN == 0,
+                            "B matrix dimension N must be divisible by pretileB tile size in N.",
+                            ShowValue(N),
+                            ShowValue(tileN));
+
+                        descB
+                            = TensorDescriptor(fromString<DataType>(problemParams.types.typeB),
+                                               {K, N},
+                                               {static_cast<size_t>(tileK * tileN),
+                                                static_cast<size_t>((K / tileK) * tileK * tileN)});
+                    }
 
                     setCommandTensorArg(commandArgs, m_tagTensorA, descA, (float*)nullptr);
                     setCommandTensorArg(commandArgs, m_tagTensorB, descB, (float*)nullptr);
