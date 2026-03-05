@@ -42,7 +42,7 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     {% block primbench_settings %}
     auto settings = primbench::settings();
     settings.json_out = "/dev/null";
-    settings.bytes = bytes_size;
+    settings.size = bytes_size;
     settings.skip_header = true;
     {% endblock %}
 
