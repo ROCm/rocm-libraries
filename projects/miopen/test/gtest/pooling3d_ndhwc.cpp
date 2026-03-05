@@ -1,34 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
 #include <miopen/env.hpp>
-#include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "pooling3d.hpp"
+#include "pooling3d_harness_gtest.hpp"
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_TEST_FLAGS_ARGS)
 
@@ -60,7 +36,7 @@ void GetArgs(const std::string& param, std::vector<std::string>& tokens)
         tokens.push_back(*begin++);
 }
 
-void Run3dDriver(miopenDataType_t prec)
+void Run3dHarness(miopenDataType_t prec)
 {
 
     std::vector<std::string> params;
@@ -94,7 +70,7 @@ void Run3dDriver(miopenDataType_t prec)
         });
 
         testing::internal::CaptureStderr();
-        test_drive<pooling3d_driver>(ptrs.size(), ptrs.data());
+        test_drive<pooling3d_harness>(ptrs.size(), ptrs.data());
         auto capture = testing::internal::GetCapturedStderr();
         std::cerr << capture;
     }
@@ -125,7 +101,7 @@ TEST_P(GPU_Pooling3d_NDHWC_FP32, FloatTest_pooling3d_ndhwc)
 {
     if(IsTestSupportedForDevice())
     {
-        Run3dDriver(miopenFloat);
+        Run3dHarness(miopenFloat);
     }
     else
     {
@@ -137,7 +113,7 @@ TEST_P(GPU_Pooling3d_NDHWC_FP16, HalfTest_pooling3d_ndhwc)
 {
     if(IsTestSupportedForDevice())
     {
-        Run3dDriver(miopenHalf);
+        Run3dHarness(miopenHalf);
     }
     else
     {
@@ -149,7 +125,7 @@ TEST_P(GPU_Pooling3d_NDHWC_BFP16, BFloat16Test_pooling3d_ndhwc)
 {
     if(IsTestSupportedForDevice())
     {
-        Run3dDriver(miopenBFloat16);
+        Run3dHarness(miopenBFloat16);
     }
     else
     {

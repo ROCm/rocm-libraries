@@ -13,10 +13,8 @@
 
 #include <miopen/logger.hpp>
 
-#include "pooling_common.hpp"
+#include "pooling_gtest_common.hpp"
 #include "pooling2d_common.hpp"
-#include "get_handle.hpp"
-#include "gtest_common.hpp"
 
 namespace {
 

@@ -18,7 +18,7 @@
 // network_data.hpp provides get_inputs() function used when TEST_GET_INPUT_TENSOR = 1
 // (currently TEST_GET_INPUT_TENSOR = 0, but include is needed to support both cases)
 #include "../network_data.hpp"
-#include "./pooling_common.hpp"
+#include "pooling_gtest_common.hpp"
 
 // Configuration defines matching the original ctest behavior
 #define WORKAROUND_ISSUE_1670 1
@@ -26,7 +26,7 @@
 
 namespace pooling2d_gtest {
 
-// Dataset definitions (matching original pooling2d.hpp ctest driver, now removed):
+// Dataset definitions (matching original pooling2d.hpp ctest harness, now removed):
 // - Dataset 0: Default dataset with various tensor sizes (tested in pooling2d.cpp)
 // - Dataset 1: Intended for testing of asymmetric configs (tested in pooling2d_asymmetric.cpp)
 // - Dataset 2: Intended for testing of configs with wide window (tested in pooling2d_wide.cpp)
@@ -95,7 +95,7 @@ inline size_t GetIndexMax(miopenIndexType_t index_type)
 }
 
 // Filtering function matching ctest's run() method exactly
-// This copies the exact logic from pooling_common.hpp pooling_driver::run()
+// This copies the exact logic from pooling_gtest_common.hpp pooling_harness::run()
 // Matching variable names: idx_typ, idx_sz, spt_dim, wide_dataset, full_set
 inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
                                   int& num_uint16_case,
@@ -281,7 +281,7 @@ inline bool ShouldIncludeTestCase(const PoolingTestCase& test_case,
 // Helper function to generate test cases for a single input configuration
 // Uses original loops matching ctest generation order
 // Note: Global counters (num_uint16_case, etc.) accumulate globally across all test cases
-// in ctest, matching the behavior where test_driver processes test cases sequentially.
+// in ctest, matching the behavior where the test harness processes cases sequentially.
 // These counters are NOT reset per input shape - they accumulate to limit the total number
 // of non-uint8 index type test cases when apply_index_type_limits is true.
 inline void AddTestCasesForInput(const std::vector<int>& input_dims,
@@ -302,7 +302,7 @@ inline void AddTestCasesForInput(const std::vector<int>& input_dims,
                                  bool is_wide_dataset         = false)
 {
     // Match ctest order exactly: index_type -> mode -> lens -> strides -> pads -> wsidx
-    // This matches the order parameters are added in pooling_driver (base class adds index_type,
+    // This matches the order parameters are added in pooling_harness (base class adds index_type,
     // mode first, then derived class adds lens, strides, pads, wsidx)
     for(const auto& index_type : index_types)
     {
@@ -494,7 +494,8 @@ struct Pooling2dCommon : public testing::TestWithParam<PoolingTestCase>
         prng::reset_seed();
         // Reset internal environment values - ensure clean state for each test
         // Note: get_handle() is called inside verify_forward_pooling::gpu() and
-        // verify_backward_pooling::gpu() (in pooling_common.hpp), which creates a fresh handle
+        // verify_backward_pooling::gpu() (in pooling_gtest_common.hpp), which creates a fresh
+        // handle
         // for each test execution, resetting internal MIOpen state
     }
 
