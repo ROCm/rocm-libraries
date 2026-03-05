@@ -32,7 +32,6 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
     ck_tile::index_t stride_B = arg_parser.get_int("stride_b");
     ck_tile::index_t stride_C = arg_parser.get_int("stride_c");
 
-    ck_tile::index_t kbatch      = arg_parser.get_int("split_k");
     ck_tile::index_t init_method = arg_parser.get_int("init");
     ck_tile::index_t n_warmup    = arg_parser.get_int("warmup");
     ck_tile::index_t n_repeat    = arg_parser.get_int("repeat");
@@ -151,7 +150,6 @@ int run_mx_flatmm_with_layouts(const ck_tile::ArgParser& arg_parser,
                                           stride_A,
                                           stride_B,
                                           stride_C,
-                                          kbatch,
                                           scale_a_dev_ptr,
                                           scale_b_dev_ptr,
                                           n_warmup,
