@@ -123,7 +123,7 @@ class FloatAttribute : public GTestDescriptorSingleValueAttribute<float, char>
 public:
     FloatAttribute(const char* textName, miopenBackendAttributeName_t name)
         : GTestDescriptorSingleValueAttribute<float, char>(
-              true, textName, name, MIOPEN_TYPE_DOUBLE, MIOPEN_TYPE_CHAR, 2, 0.7f)
+              true, textName, name, MIOPEN_TYPE_FLOAT, MIOPEN_TYPE_CHAR, 2, 0.7f)
     {
     }
 };

@@ -23,6 +23,13 @@ add_library(
     descriptors/EngineHeuristicDescriptor.cpp
     descriptors/ExecutionPlanDescriptor.cpp
     descriptors/GraphDescriptor.cpp
+    descriptors/TensorDescriptor.cpp
+    descriptors/ConvolutionFwdOperationDescriptor.cpp
+    descriptors/ConvolutionWrwOperationDescriptor.cpp
+    descriptors/KnobSettingDescriptor.cpp
+    descriptors/ConvolutionBwdOperationDescriptor.cpp
+    descriptors/DescriptorAttributeUtils.cpp
+    descriptors/DataTypeConversion.cpp
     descriptors/VariantDescriptor.cpp
     descriptors/DescriptorFactory.cpp
     handle/HandleFactory.cpp
