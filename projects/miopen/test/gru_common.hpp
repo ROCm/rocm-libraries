@@ -3041,7 +3041,7 @@ struct gru_basic_driver : test_driver
                 clCreateBuffer(ctx, CL_MEM_READ_WRITE, statesSizeInBytes, nullptr, nullptr);
 #elif MIOPEN_BACKEND_HIP
             void* dropout_state_buf;
-            hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
+            (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 #endif
 
             miopenSetDropoutDescriptor(DropoutDesc,
