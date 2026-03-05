@@ -1249,18 +1249,14 @@ struct GridwiseMoeGemmBlockScale
         }();
 
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_a_grid,
-            a_grid_desc_ak0_m_ak1.GetElementSpaceSize() -
-                splitk_offset.a_k_split_offset);
+            p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize() - splitk_offset.a_k_split_offset);
         const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global, b_coherence_flag>(
             p_b_grid + expert_id * static_cast<long_index_t>(expert_stride) / BPackedSize,
-            b_grid_desc_bpreshuffled.GetElementSpaceSize() -
-                splitk_offset.b_k_split_offset);
+            b_grid_desc_bpreshuffled.GetElementSpaceSize() - splitk_offset.b_k_split_offset);
 
         const auto a_scale_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_scale_grid,
-            a_scale_grid_desc_am_ak.GetElementSpaceSize() -
-                splitk_offset.ascale_k_split_offset);
+            a_scale_grid_desc_am_ak.GetElementSpaceSize() - splitk_offset.ascale_k_split_offset);
         const auto b_scale_grid_buf =
             make_dynamic_buffer<AddressSpaceEnum::Global, b_coherence_flag>(
                 p_b_scale_grid + expert_id * expert_scale_stride,
@@ -1775,18 +1771,14 @@ struct GridwiseMoeGemmBlockScale
         }();
 
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
-            p_a_grid,
-            a_grid_desc_ak0_m_ak1.GetElementSpaceSize() -
-                splitk_offset.a_k_split_offset);
+            p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize() - splitk_offset.a_k_split_offset);
         const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global, b_coherence_flag>(
             p_b_grid + expert_id * static_cast<long_index_t>(expert_stride) / BPackedSize,
-            b_grid_desc_bpreshuffled.GetElementSpaceSize() -
-                splitk_offset.b_k_split_offset);
+            b_grid_desc_bpreshuffled.GetElementSpaceSize() - splitk_offset.b_k_split_offset);
 
         const auto a_scale_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_scale_grid,
-            a_scale_grid_desc_am_ak.GetElementSpaceSize() -
-                splitk_offset.ascale_k_split_offset);
+            a_scale_grid_desc_am_ak.GetElementSpaceSize() - splitk_offset.ascale_k_split_offset);
         const auto b_scale_grid_buf =
             make_dynamic_buffer<AddressSpaceEnum::Global, b_coherence_flag>(
                 p_b_scale_grid + expert_id * expert_scale_stride,
