@@ -168,4 +168,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR,
 
+    /**
+     * @brief Matrix multiplication operation descriptor
+     *
+     * Represents a matrix multiplication operation with input (A),
+     * input (B), and output (C) tensors plus a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR,
+
 } hipdnnBackendDescriptorType_t;

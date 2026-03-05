@@ -401,6 +401,26 @@ typedef enum
     /** @} */
 
     /**
+     * @name Matmul Operation Attributes (1800-1899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Left input matrix tensor (A) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_A = 1800,
+
+    /** @brief Right input matrix tensor (B) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_B = 1801,
+
+    /** @brief Output matrix tensor (C) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_C = 1802,
+
+    /** @brief Compute data type for matmul */
+    HIPDNN_ATTR_MATMUL_COMP_TYPE = 1803,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{

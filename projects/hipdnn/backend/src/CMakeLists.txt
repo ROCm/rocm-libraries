@@ -28,6 +28,7 @@ add_library(
     descriptors/ConvolutionWrwOperationDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
+    descriptors/MatmulOperationDescriptor.cpp
     descriptors/DescriptorAttributeUtils.cpp
     descriptors/DataTypeConversion.cpp
     descriptors/VariantDescriptor.cpp
