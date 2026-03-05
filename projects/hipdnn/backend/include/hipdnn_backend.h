@@ -579,8 +579,17 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              char* type,
                                                              size_t* typeLen);
 
-// Deprecated - Use hipdnnVersionString_ext instead
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
+/**
+ * @brief Returns hipdnn backend version string. Returns an error if nullptr is passed
+ *
+ * @deprecated Use hipdnnVersionString_ext instead
+ *
+ * @param[out] version pointer to where version string will be written
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   If version parameter is nullptr
+ */
+HIPDNN_BACKEND_DEPRECATED_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
 
 /**
  * @brief Returns hipdnn backend version string

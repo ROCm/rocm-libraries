@@ -137,6 +137,12 @@ inline std::shared_ptr<IHipdnnBackend> tryToUseBackendInterface(const char* vers
 {
     using namespace hipdnn_data_sdk::utilities;
 
+    if(version == nullptr)
+    {
+        HIPDNN_FE_LOG_ERROR("Error parsing backend version: version is nullptr");
+        return std::make_shared<IncompatibleBackendWrapper>();
+    }
+
     Version backendVersion;
     try
     {

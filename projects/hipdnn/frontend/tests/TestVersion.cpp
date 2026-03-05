@@ -12,3 +12,13 @@ TEST(TestVersion, ParsedSuccessfully)
 {
     EXPECT_NO_THROW(Version(std::string_view{HIPDNN_FRONTEND_VERSION_STRING}));
 }
+
+TEST(TestVersion, PositiveVersion)
+{
+    Version version;
+    ASSERT_NO_THROW(version = Version(std::string_view{HIPDNN_FRONTEND_VERSION_STRING}));
+
+    EXPECT_GE(version.major, 0);
+    EXPECT_GE(version.minor, 0);
+    EXPECT_GE(version.patch, 0);
+}

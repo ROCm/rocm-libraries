@@ -33,3 +33,14 @@ TEST(TestBackendInterface, TryToUseBackendInterfaceBadlyFormedVersion)
     EXPECT_TRUE(std::dynamic_pointer_cast<IncompatibleBackendWrapper>(
         tryToUseBackendInterface("CantParseThis")));
 }
+
+TEST(TestBackendInterface, TryToUseBackendInterfaceNullptr)
+{
+    EXPECT_TRUE(
+        std::dynamic_pointer_cast<IncompatibleBackendWrapper>(tryToUseBackendInterface(nullptr)));
+}
+
+TEST(TestBackendInterface, VersionEqualsVersionString)
+{
+    EXPECT_EQ(hipdnnBackend()->version(), Version(hipdnnBackend()->versionString))
+}
