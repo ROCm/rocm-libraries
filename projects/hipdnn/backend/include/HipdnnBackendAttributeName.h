@@ -402,33 +402,33 @@ typedef enum
 
     /**
      * @name Batchnorm Inference Variance Ext Operation Attributes (1900-1999)
-     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_DESCRIPTOR
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT
      * @{
      */
 
     /** @brief Input tensor for batchnorm inference variance ext */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_X = 1900,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_X_EXT = 1900,
 
     /** @brief Mean tensor for batchnorm inference variance ext */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_MEAN = 1901,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_MEAN_EXT = 1901,
 
     /** @brief Variance tensor for batchnorm inference variance ext */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_VARIANCE = 1902,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_VARIANCE_EXT = 1902,
 
     /** @brief Scale tensor for batchnorm inference variance ext */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_SCALE = 1903,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_SCALE_EXT = 1903,
 
     /** @brief Bias tensor for batchnorm inference variance ext */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_BIAS = 1904,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_BIAS_EXT = 1904,
 
     /** @brief Output tensor for batchnorm inference variance ext */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_Y = 1905,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_Y_EXT = 1905,
 
     /** @brief Epsilon tensor for batchnorm inference variance ext */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_EPSILON = 1906,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EPSILON_EXT = 1906,
 
     /** @brief Compute data type for batchnorm inference variance ext */
-    HIPDNN_ATTR_BATCHNORM_INF_VAR_EXT_COMP_TYPE = 1907,
+    HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT = 1907,
 
     /** @} */
 

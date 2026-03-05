@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/BnInfVarExtConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -18,6 +19,7 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
@@ -32,24 +34,6 @@ public:
     using Graph::build_operation_graph_via_descriptors;
     using Graph::get_raw_graph_descriptor;
 };
-
-// -- Test constants for BnInfVarExtGraphRoundTrip --
-constexpr int64_t K_TENSOR_X_UID = 80;
-constexpr int64_t K_TENSOR_MEAN_UID = 81;
-constexpr int64_t K_TENSOR_VARIANCE_UID = 82;
-constexpr int64_t K_TENSOR_SCALE_UID = 83;
-constexpr int64_t K_TENSOR_BIAS_UID = 84;
-constexpr int64_t K_TENSOR_Y_UID = 85;
-constexpr int64_t K_TENSOR_EPSILON_UID = 86;
-
-constexpr std::array<int64_t, 4> K_TENSOR_X_DIMS = {1, 64, 32, 32};
-constexpr std::array<int64_t, 4> K_TENSOR_X_STRIDES = {65536, 1024, 32, 1};
-
-constexpr std::array<int64_t, 4> K_PARAM_DIMS = {1, 64, 1, 1};
-constexpr std::array<int64_t, 4> K_PARAM_STRIDES = {64, 1, 1, 1};
-
-constexpr std::array<int64_t, 4> K_EPSILON_DIMS = {1, 1, 1, 1};
-constexpr std::array<int64_t, 4> K_EPSILON_STRIDES = {1, 1, 1, 1};
 
 // -- Test constants for AutoAssignedUidsPreservedInRoundTrip --
 constexpr std::array<int64_t, 4> K_AUTO_X_DIMS = {2, 32, 8, 8};
@@ -101,28 +85,37 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, BnInfVarExtGraphRoundTrip)
         .set_compute_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+    x->set_uid(K_BN_INF_VAR_EXT_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_BN_INF_VAR_EXT_X_DIMS)).set_stride(toVec(K_BN_INF_VAR_EXT_X_STRIDES));
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_uid(K_TENSOR_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
-    mean->set_dim(toVec(K_PARAM_DIMS)).set_stride(toVec(K_PARAM_STRIDES));
+    mean->set_uid(K_BN_INF_VAR_EXT_MEAN_UID).set_name("Mean").set_data_type(DataType::FLOAT);
+    mean->set_dim(toVec(K_BN_INF_VAR_EXT_MEAN_DIMS))
+        .set_stride(toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
 
     auto variance = std::make_shared<TensorAttributes>();
-    variance->set_uid(K_TENSOR_VARIANCE_UID).set_name("Variance").set_data_type(DataType::FLOAT);
-    variance->set_dim(toVec(K_PARAM_DIMS)).set_stride(toVec(K_PARAM_STRIDES));
+    variance->set_uid(K_BN_INF_VAR_EXT_VARIANCE_UID)
+        .set_name("Variance")
+        .set_data_type(DataType::FLOAT);
+    variance->set_dim(toVec(K_BN_INF_VAR_EXT_VARIANCE_DIMS))
+        .set_stride(toVec(K_BN_INF_VAR_EXT_VARIANCE_STRIDES));
 
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
-    scale->set_dim(toVec(K_PARAM_DIMS)).set_stride(toVec(K_PARAM_STRIDES));
+    scale->set_uid(K_BN_INF_VAR_EXT_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_BN_INF_VAR_EXT_SCALE_DIMS))
+        .set_stride(toVec(K_BN_INF_VAR_EXT_SCALE_STRIDES));
 
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(K_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
-    bias->set_dim(toVec(K_PARAM_DIMS)).set_stride(toVec(K_PARAM_STRIDES));
+    bias->set_uid(K_BN_INF_VAR_EXT_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
+    bias->set_dim(toVec(K_BN_INF_VAR_EXT_BIAS_DIMS))
+        .set_stride(toVec(K_BN_INF_VAR_EXT_BIAS_STRIDES));
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(K_TENSOR_EPSILON_UID).set_name("Epsilon").set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_EPSILON_DIMS)).set_stride(toVec(K_EPSILON_STRIDES));
+    epsilon->set_uid(K_BN_INF_VAR_EXT_EPSILON_UID)
+        .set_name("Epsilon")
+        .set_data_type(DataType::FLOAT);
+    epsilon->set_dim(toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS))
+        .set_stride(toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
     epsilon->set_value(1e-5f);
 
     BatchnormInferenceAttributesVarianceExt bnAttrs;
@@ -130,7 +123,7 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, BnInfVarExtGraphRoundTrip)
 
     auto y = graph->batchnorm_inference_variance_ext(
         x, mean, variance, scale, bias, epsilon, std::move(bnAttrs));
-    y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
+    y->set_uid(K_BN_INF_VAR_EXT_Y_UID).set_output(true).set_name("Y");
 
     // -- Validate and lower --
     auto result = graph->validate();
@@ -174,49 +167,49 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, BnInfVarExtGraphRoundTrip)
     }
 
     // Verify X tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    auto* xT = tensorMap[K_TENSOR_X_UID];
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_X_UID), 0u);
+    auto* xT = tensorMap[K_BN_INF_VAR_EXT_X_UID];
     EXPECT_EQ(xT->name, "X");
     EXPECT_EQ(xT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(xT->dims, toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(xT->strides, toVec(K_TENSOR_X_STRIDES));
+    EXPECT_EQ(xT->dims, toVec(K_BN_INF_VAR_EXT_X_DIMS));
+    EXPECT_EQ(xT->strides, toVec(K_BN_INF_VAR_EXT_X_STRIDES));
     EXPECT_FALSE(xT->virtual_);
 
     // Verify Mean tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_MEAN_UID), 0u);
-    auto* meanT = tensorMap[K_TENSOR_MEAN_UID];
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_MEAN_UID), 0u);
+    auto* meanT = tensorMap[K_BN_INF_VAR_EXT_MEAN_UID];
     EXPECT_EQ(meanT->name, "Mean");
     EXPECT_EQ(meanT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(meanT->dims, toVec(K_PARAM_DIMS));
-    EXPECT_EQ(meanT->strides, toVec(K_PARAM_STRIDES));
+    EXPECT_EQ(meanT->dims, toVec(K_BN_INF_VAR_EXT_MEAN_DIMS));
+    EXPECT_EQ(meanT->strides, toVec(K_BN_INF_VAR_EXT_MEAN_STRIDES));
 
     // Verify Variance tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_VARIANCE_UID), 0u);
-    auto* varianceT = tensorMap[K_TENSOR_VARIANCE_UID];
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_VARIANCE_UID), 0u);
+    auto* varianceT = tensorMap[K_BN_INF_VAR_EXT_VARIANCE_UID];
     EXPECT_EQ(varianceT->name, "Variance");
     EXPECT_EQ(varianceT->data_type, DataTypeSdk::FLOAT);
 
     // Verify Scale tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_SCALE_UID), 0u);
-    auto* scaleT = tensorMap[K_TENSOR_SCALE_UID];
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_SCALE_UID), 0u);
+    auto* scaleT = tensorMap[K_BN_INF_VAR_EXT_SCALE_UID];
     EXPECT_EQ(scaleT->name, "Scale");
     EXPECT_EQ(scaleT->data_type, DataTypeSdk::FLOAT);
 
     // Verify Bias tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_BIAS_UID), 0u);
-    auto* biasT = tensorMap[K_TENSOR_BIAS_UID];
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_BIAS_UID), 0u);
+    auto* biasT = tensorMap[K_BN_INF_VAR_EXT_BIAS_UID];
     EXPECT_EQ(biasT->name, "Bias");
     EXPECT_EQ(biasT->data_type, DataTypeSdk::FLOAT);
 
     // Verify Epsilon tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_EPSILON_UID), 0u);
-    auto* epsilonT = tensorMap[K_TENSOR_EPSILON_UID];
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_EPSILON_UID), 0u);
+    auto* epsilonT = tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID];
     EXPECT_EQ(epsilonT->name, "Epsilon");
     EXPECT_EQ(epsilonT->data_type, DataTypeSdk::FLOAT);
 
     // Verify Y tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    auto* yT = tensorMap[K_TENSOR_Y_UID];
+    ASSERT_NE(tensorMap.count(K_BN_INF_VAR_EXT_Y_UID), 0u);
+    auto* yT = tensorMap[K_BN_INF_VAR_EXT_Y_UID];
     EXPECT_EQ(yT->name, "Y");
     EXPECT_EQ(yT->data_type, DataTypeSdk::FLOAT);
     EXPECT_FALSE(yT->virtual_);
@@ -230,13 +223,13 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, BnInfVarExtGraphRoundTrip)
     auto* bnFwd = node->attributes.AsBatchnormInferenceAttributesVarianceExt();
     ASSERT_NE(bnFwd, nullptr);
 
-    EXPECT_EQ(bnFwd->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(bnFwd->mean_tensor_uid, K_TENSOR_MEAN_UID);
-    EXPECT_EQ(bnFwd->variance_tensor_uid, K_TENSOR_VARIANCE_UID);
-    EXPECT_EQ(bnFwd->scale_tensor_uid, K_TENSOR_SCALE_UID);
-    EXPECT_EQ(bnFwd->bias_tensor_uid, K_TENSOR_BIAS_UID);
-    EXPECT_EQ(bnFwd->y_tensor_uid, K_TENSOR_Y_UID);
-    EXPECT_EQ(bnFwd->epsilon_tensor_uid, K_TENSOR_EPSILON_UID);
+    EXPECT_EQ(bnFwd->x_tensor_uid, K_BN_INF_VAR_EXT_X_UID);
+    EXPECT_EQ(bnFwd->mean_tensor_uid, K_BN_INF_VAR_EXT_MEAN_UID);
+    EXPECT_EQ(bnFwd->variance_tensor_uid, K_BN_INF_VAR_EXT_VARIANCE_UID);
+    EXPECT_EQ(bnFwd->scale_tensor_uid, K_BN_INF_VAR_EXT_SCALE_UID);
+    EXPECT_EQ(bnFwd->bias_tensor_uid, K_BN_INF_VAR_EXT_BIAS_UID);
+    EXPECT_EQ(bnFwd->y_tensor_uid, K_BN_INF_VAR_EXT_Y_UID);
+    EXPECT_EQ(bnFwd->epsilon_tensor_uid, K_BN_INF_VAR_EXT_EPSILON_UID);
 }
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
@@ -271,7 +264,8 @@ TEST_F(IntegrationBnInfVarExtDescriptorLowering, AutoAssignedUidsPreservedInRoun
 
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_name("Epsilon").set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_EPSILON_DIMS)).set_stride(toVec(K_EPSILON_STRIDES));
+    epsilon->set_dim(toVec(K_BN_INF_VAR_EXT_EPSILON_DIMS))
+        .set_stride(toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
     epsilon->set_value(1e-5f);
 
     BatchnormInferenceAttributesVarianceExt bnAttrs;

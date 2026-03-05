@@ -66,7 +66,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_X:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_X_EXT:
         setTensorDescriptor(_xDesc,
                             _data.x_tensor_uid,
                             attributeType,
@@ -74,7 +74,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_MEAN:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_MEAN_EXT:
         setTensorDescriptor(_meanDesc,
                             _data.mean_tensor_uid,
                             attributeType,
@@ -82,7 +82,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_VARIANCE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_VARIANCE_EXT:
         setTensorDescriptor(_varianceDesc,
                             _data.variance_tensor_uid,
                             attributeType,
@@ -90,7 +90,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_SCALE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_SCALE_EXT:
         setTensorDescriptor(_scaleDesc,
                             _data.scale_tensor_uid,
                             attributeType,
@@ -98,7 +98,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_BIAS:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_BIAS_EXT:
         setTensorDescriptor(_biasDesc,
                             _data.bias_tensor_uid,
                             attributeType,
@@ -106,7 +106,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_Y:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_Y_EXT:
         setTensorDescriptor(_yDesc,
                             _data.y_tensor_uid,
                             attributeType,
@@ -114,7 +114,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_EPSILON:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EPSILON_EXT:
         setTensorDescriptor(_epsilonDesc,
                             _data.epsilon_tensor_uid,
                             attributeType,
@@ -122,7 +122,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::setAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_INF_VAR_EXT_COMP_TYPE:
+    case HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -155,7 +155,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_X:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_X_EXT:
         getTensorDescriptor(_xDesc,
                             attributeType,
                             requestedElementCount,
@@ -163,7 +163,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_MEAN:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_MEAN_EXT:
         getTensorDescriptor(_meanDesc,
                             attributeType,
                             requestedElementCount,
@@ -171,7 +171,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_VARIANCE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_VARIANCE_EXT:
         getTensorDescriptor(_varianceDesc,
                             attributeType,
                             requestedElementCount,
@@ -179,7 +179,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_SCALE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_SCALE_EXT:
         getTensorDescriptor(_scaleDesc,
                             attributeType,
                             requestedElementCount,
@@ -187,7 +187,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_BIAS:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_BIAS_EXT:
         getTensorDescriptor(_biasDesc,
                             attributeType,
                             requestedElementCount,
@@ -195,7 +195,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_Y:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_Y_EXT:
         getTensorDescriptor(_yDesc,
                             attributeType,
                             requestedElementCount,
@@ -203,7 +203,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_EPSILON:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EPSILON_EXT:
         getTensorDescriptor(_epsilonDesc,
                             attributeType,
                             requestedElementCount,
@@ -211,7 +211,7 @@ void BatchnormInferenceVarianceExtOperationDescriptor::getAttribute(
                             arrayOfElements,
                             "BatchnormInferenceVarianceExtOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_INF_VAR_EXT_COMP_TYPE:
+    case HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -249,12 +249,11 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t BatchnormInferenceVarianceExtOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_DESCRIPTOR;
+    return HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT;
 }
 
 std::string BatchnormInferenceVarianceExtOperationDescriptor::toString() const
 {
-    using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "BatchnormInferenceVarianceExtOperationDescriptor: {";
     str += "x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", mean_uid=" + std::to_string(_data.mean_tensor_uid);

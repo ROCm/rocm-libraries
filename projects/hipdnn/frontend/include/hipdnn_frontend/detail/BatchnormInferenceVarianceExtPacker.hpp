@@ -19,7 +19,7 @@ inline Error createBatchnormInferenceVarianceExtOperation(
 {
     // Create operation descriptor
     ScopedHipdnnBackendDescriptor opDesc(
-        HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_DESCRIPTOR);
+        HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -29,50 +29,50 @@ inline Error createBatchnormInferenceVarianceExtOperation(
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(
         ensureAndSetTensorRef(opDesc.get(),
-                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_X,
+                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_X_EXT,
                               attributes.get_x(),
                               tensorDescs,
                               "batchnorm inference variance ext X"));
     HIPDNN_CHECK_ERROR(
         ensureAndSetTensorRef(opDesc.get(),
-                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_MEAN,
+                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_MEAN_EXT,
                               attributes.get_mean(),
                               tensorDescs,
                               "batchnorm inference variance ext MEAN"));
     HIPDNN_CHECK_ERROR(
         ensureAndSetTensorRef(opDesc.get(),
-                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_VARIANCE,
+                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_VARIANCE_EXT,
                               attributes.get_variance(),
                               tensorDescs,
                               "batchnorm inference variance ext VARIANCE"));
     HIPDNN_CHECK_ERROR(
         ensureAndSetTensorRef(opDesc.get(),
-                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_SCALE,
+                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_SCALE_EXT,
                               attributes.get_scale(),
                               tensorDescs,
                               "batchnorm inference variance ext SCALE"));
     HIPDNN_CHECK_ERROR(
         ensureAndSetTensorRef(opDesc.get(),
-                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_BIAS,
+                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_BIAS_EXT,
                               attributes.get_bias(),
                               tensorDescs,
                               "batchnorm inference variance ext BIAS"));
     HIPDNN_CHECK_ERROR(
         ensureAndSetTensorRef(opDesc.get(),
-                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_Y,
+                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_Y_EXT,
                               attributes.get_y(),
                               tensorDescs,
                               "batchnorm inference variance ext Y"));
     HIPDNN_CHECK_ERROR(
         ensureAndSetTensorRef(opDesc.get(),
-                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EXT_EPSILON,
+                              HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EPSILON_EXT,
                               attributes.get_epsilon(),
                               tensorDescs,
                               "batchnorm inference variance ext EPSILON"));
 
     HIPDNN_CHECK_ERROR(
         setDescriptorAttrDataType(opDesc.get(),
-                                  HIPDNN_ATTR_BATCHNORM_INF_VAR_EXT_COMP_TYPE,
+                                  HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT,
                                   attributes.compute_data_type,
                                   "batchnorm inference variance ext compute data type"));
 
