@@ -32,8 +32,6 @@
 
 #include "../../../config.hpp"
 
-#include "../thread/thread_operators.hpp"
-
 #include <rocprim/block/block_scan.hpp> // IWYU pragma: export
 
 #include _HIPCUB_STD_INCLUDE(functional)

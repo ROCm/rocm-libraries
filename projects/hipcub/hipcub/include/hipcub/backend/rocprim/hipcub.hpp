@@ -82,7 +82,6 @@
 
 // Thread
 #include "thread/thread_load.hpp"
-#include "thread/thread_operators.hpp"
 #include "thread/thread_reduce.hpp"
 #include "thread/thread_scan.hpp"
 #include "thread/thread_search.hpp"

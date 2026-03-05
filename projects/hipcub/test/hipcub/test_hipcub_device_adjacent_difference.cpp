@@ -24,7 +24,6 @@
 
 // hipcub API
 #include <hipcub/device/device_adjacent_difference.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
