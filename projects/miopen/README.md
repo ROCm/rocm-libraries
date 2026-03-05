@@ -329,7 +329,7 @@ switch branches or merge changes in Git to ensure any large binaries are kept in
 If you're using Ubuntu, you can install the `BZip2` packages using:
 
 ```shell
-   sudo apt-get install libbz2-dev
+sudo apt-get install libbz2-dev
 ```
 
 You must install the `half` header from the [half website](http://half.sourceforge.net/).
