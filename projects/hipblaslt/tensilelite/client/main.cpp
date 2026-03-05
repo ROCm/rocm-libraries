@@ -629,8 +629,13 @@ int main(int argc, const char* argv[])
 
     ClientProblemFactory problemFactory(args);
 
-    auto        hardware = GetHardware(args);
-    hipStream_t stream   = GetStream(args);
+    std::shared_ptr<Hardware> hardware;
+    hipStream_t              stream;
+    {
+        ScopedTimer timer("hip_initialization");
+        hardware = GetHardware(args);
+        stream   = GetStream(args);
+    }
 
     std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library;
     {
@@ -703,7 +708,11 @@ int main(int argc, const char* argv[])
         dataInit = std::make_shared<DataInitialization>(args, problemFactory);
     }
 
-    auto solutionIterator = SolutionIterator::Default(library, hardware, args);
+    std::shared_ptr<SolutionIterator> solutionIterator;
+    {
+        ScopedTimer timer("solution_iterator_setup");
+        solutionIterator = SolutionIterator::Default(library, hardware, args);
+    }
 
     MetaRunListener listeners;
     std::shared_ptr<BenchmarkTimer> benchmarkTimer;
@@ -828,6 +837,7 @@ int main(int argc, const char* argv[])
                             {
                                 if(resetInput)
                                 {
+                                    ScopedTimer timer("gpu_input_reset");
                                     auto inputs = dataInit->prepareGPUInputs(problem);
                                     inputArr[0] = inputs;
                                 }
@@ -862,22 +872,36 @@ int main(int argc, const char* argv[])
                                 TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
 
+                                if(warmupInvocations > 0)
                                 {
-                                    ScopedTimer timer("warmup_runs");
-                                    listeners.preWarmup();
-                                    for(int i = 0; i < warmupInvocations; i++)
                                     {
-                                        size_t kIdx = i % kernels.size();
-                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
+                                        ScopedTimer timer("warmup_runs");
+                                        listeners.preWarmup();
+                                        HIP_CHECK_EXC(adapter.launchKernels(kernels[0],
                                                                             stream,
-                                                                            warmupStartEvents[i],
-                                                                            warmupStopEvents[i]));
-                                        // Do validation after first warmup
-                                        if(i == 0)
-                                            listeners.validateWarmups(
-                                                inputs, warmupStartEvents, warmupStopEvents);
+                                                                            warmupStartEvents[0],
+                                                                            warmupStopEvents[0]));
                                     }
-                                    listeners.postWarmup(warmupStartEvents, warmupStopEvents, stream);
+
+                                    {
+                                        ScopedTimer timer("validate_warmups");
+                                        listeners.validateWarmups(
+                                            inputs, warmupStartEvents, warmupStopEvents);
+                                    }
+
+                                    {
+                                        ScopedTimer timer("warmup_runs");
+                                        for(int i = 1; i < warmupInvocations; i++)
+                                        {
+                                            size_t kIdx = i % kernels.size();
+                                            HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
+                                                                                stream,
+                                                                                warmupStartEvents[i],
+                                                                                warmupStopEvents[i]));
+                                        }
+                                        listeners.postWarmup(
+                                            warmupStartEvents, warmupStopEvents, stream);
+                                    }
                                 }
 
                                 size_t syncs      = listeners.numSyncs();
@@ -936,6 +960,7 @@ int main(int argc, const char* argv[])
 
                     if(exitOnError && listeners.error() > 0)
                     {
+                        flushTimingBuffer();
                         // error range in shell is [0-255]
                         return std::min(listeners.error(), 255);
                     }
@@ -955,6 +980,9 @@ int main(int argc, const char* argv[])
         ScopedTimer timer("finalize_report");
         listeners.finalizeReport();
     }
+
+    // Flush all buffered timing records to stderr
+    flushTimingBuffer();
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);

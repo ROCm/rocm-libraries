@@ -1677,7 +1677,7 @@ public:
                     std::cout << "istride:";
                     for(const auto& i : istride)
                         std::cout << " " << i;
-                    std::cout << " ostride0:";
+                    std::cout << " ostride:";
                     for(const auto& i : ostride)
                         std::cout << " " << i;
                     std::cout << " differ; skipped for in-place transforms: skipping test"
@@ -1702,20 +1702,48 @@ public:
                 return false;
             }
 
-            if((transform_type == fft_transform_type_real_forward
-                || transform_type == fft_transform_type_real_inverse)
-               && (istride.back() != 1 || ostride.back() != 1) && length.back() > 1)
+            if(transform_type == fft_transform_type_real_forward
+               || transform_type == fft_transform_type_real_inverse)
             {
-                // In-place real/complex transforms require unit strides.
-                if(verbose)
+                bool invalid = length.back() > 1 && (istride.back() != 1 || ostride.back() != 1);
+                if(invalid)
                 {
-                    std::cout
-                        << "istride.back(): " << istride.back()
-                        << " ostride.back(): " << ostride.back()
-                        << " must be unitary for in-place real/complex transforms: skipping test"
-                        << std::endl;
+                    // In-place real/complex transforms require unit strides.
+                    if(verbose)
+                    {
+                        std::cout << "istride.back(): " << istride.back()
+                                  << " ostride.back(): " << ostride.back()
+                                  << " must be unitary for in-place real/complex transforms: "
+                                     "skipping test"
+                                  << std::endl;
+                    }
+                    return false;
                 }
-                return false;
+                const auto& real_strides
+                    = transform_type == fft_transform_type_real_forward ? istride : ostride;
+                const auto& hermitian_strides
+                    = transform_type == fft_transform_type_real_forward ? ostride : istride;
+                const auto& real_dist
+                    = transform_type == fft_transform_type_real_forward ? idist : odist;
+                const auto& hermitian_dist
+                    = transform_type == fft_transform_type_real_forward ? odist : idist;
+                for(size_t dim = 0; dim < stridesize - 1; dim++)
+                {
+                    if(length[dim] == 1)
+                        continue;
+                    invalid |= real_strides[dim] != 2 * hermitian_strides[dim];
+                }
+                if(nbatch > 1)
+                    invalid |= real_dist != 2 * hermitian_dist;
+                if(invalid)
+                {
+                    if(verbose)
+                    {
+                        std::cout << "Inconsistency detected in strides/distances for in-place "
+                                     "real/complex transforms; skipped\n";
+                    }
+                    return false;
+                }
             }
 
             if((itype == fft_array_type_complex_interleaved

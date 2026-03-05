@@ -39,6 +39,92 @@ void executeConvFpropGraph(graph::Graph& graph,
     yTensor.memory().markDeviceModified();
 }
 
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+template <typename InputType>
+bool testJsonSerialization(const graph::Graph& originalGraph,
+                           hipdnnHandle_t handle,
+                           utilities::Tensor<InputType>& xTensor,
+                           utilities::Tensor<InputType>& wTensor,
+                           utilities::Tensor<InputType>& yOriginal,
+                           TensorLayout layout)
+{
+    std::cout << "\n--- Testing JSON serialization/deserialization ---\n";
+
+    nlohmann::json jsonData;
+    HIPDNN_FE_CHECK(originalGraph.serialize(jsonData));
+    std::cout << "Serialized to JSON (" << jsonData.dump().size() << " bytes)\n";
+
+    graph::Graph jsonGraph;
+    HIPDNN_FE_CHECK(jsonGraph.deserialize(jsonData));
+    std::cout << "Deserialized from JSON.\n";
+
+    HIPDNN_FE_CHECK(jsonGraph.validate());
+    HIPDNN_FE_CHECK(jsonGraph.build_operation_graph(handle));
+    HIPDNN_FE_CHECK(jsonGraph.create_execution_plans());
+    HIPDNN_FE_CHECK(jsonGraph.check_support());
+    HIPDNN_FE_CHECK(jsonGraph.build_plans());
+
+    auto jsonTensors = jsonGraph.getTensorsByName();
+    auto xAttrJson = jsonTensors.at("x");
+    auto wAttrJson = jsonTensors.at("w");
+    auto yAttrJson = jsonTensors.at("y");
+
+    utilities::Tensor<InputType> yJson(yAttrJson->get_dim(), layout);
+    yJson.fillWithValue(static_cast<InputType>(0.0f));
+
+    executeConvFpropGraph(
+        jsonGraph, handle, xAttrJson, wAttrJson, yAttrJson, xTensor, wTensor, yJson);
+    std::cout << "JSON-deserialized graph execution complete.\n";
+
+    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
+    bool passed = validator->allClose(yOriginal, yJson);
+    std::cout << "JSON round-trip result: " << (passed ? "PASSED" : "FAILED") << "\n";
+    return passed;
+}
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
+
+template <typename InputType>
+bool testBinarySerialization(const graph::Graph& originalGraph,
+                             hipdnnHandle_t handle,
+                             utilities::Tensor<InputType>& xTensor,
+                             utilities::Tensor<InputType>& wTensor,
+                             utilities::Tensor<InputType>& yOriginal,
+                             TensorLayout layout)
+{
+    std::cout << "\n--- Testing binary serialization/deserialization ---\n";
+
+    std::vector<uint8_t> binaryData;
+    HIPDNN_FE_CHECK(originalGraph.serialize(binaryData));
+    std::cout << "Serialized to binary (" << binaryData.size() << " bytes)\n";
+
+    graph::Graph binaryGraph;
+    HIPDNN_FE_CHECK(binaryGraph.deserialize(handle, binaryData));
+    std::cout << "Deserialized from binary.\n";
+
+    HIPDNN_FE_CHECK(binaryGraph.validate());
+    HIPDNN_FE_CHECK(binaryGraph.build_operation_graph(handle));
+    HIPDNN_FE_CHECK(binaryGraph.create_execution_plans());
+    HIPDNN_FE_CHECK(binaryGraph.check_support());
+    HIPDNN_FE_CHECK(binaryGraph.build_plans());
+
+    auto binaryTensors = binaryGraph.getTensorsByName();
+    auto xAttrBin = binaryTensors.at("x");
+    auto wAttrBin = binaryTensors.at("w");
+    auto yAttrBin = binaryTensors.at("y");
+
+    utilities::Tensor<InputType> yBinary(yAttrBin->get_dim(), layout);
+    yBinary.fillWithValue(static_cast<InputType>(0.0f));
+
+    executeConvFpropGraph(
+        binaryGraph, handle, xAttrBin, wAttrBin, yAttrBin, xTensor, wTensor, yBinary);
+    std::cout << "Binary-deserialized graph execution complete.\n";
+
+    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
+    bool passed = validator->allClose(yOriginal, yBinary);
+    std::cout << "Binary round-trip result: " << (passed ? "PASSED" : "FAILED") << "\n";
+    return passed;
+}
+
 template <typename InputType, typename IntermediateType>
 bool SampleRunner::operator()(const TensorLayout& layout)
 {
@@ -92,69 +178,17 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         originalGraph, handle, xAttrOrig, wAttrOrig, yAttrOrig, xTensor, wTensor, yOriginal);
     std::cout << "Original graph execution complete.\n";
 
-    // ==================== JSON SERIALIZATION & DESERIALIZATION ====================
-    std::cout << "\n--- Testing JSON serialization/deserialization ---\n";
+    // ==================== RUN SERIALIZATION TESTS ====================
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    bool jsonMatch = testJsonSerialization<InputType>(
+        originalGraph, handle, xTensor, wTensor, yOriginal, layout);
+#else
+    std::cout << "\n--- Skipping JSON serialization test (JSON support disabled) ---\n";
+    bool jsonMatch = true;
+#endif
 
-    nlohmann::json jsonData;
-    HIPDNN_FE_CHECK(originalGraph.serialize(jsonData));
-    std::cout << "Serialized to JSON (" << jsonData.dump().size() << " bytes)\n";
-
-    graph::Graph jsonGraph;
-    HIPDNN_FE_CHECK(jsonGraph.deserialize(jsonData));
-    std::cout << "Deserialized from JSON.\n";
-
-    HIPDNN_FE_CHECK(jsonGraph.validate());
-    HIPDNN_FE_CHECK(jsonGraph.build_operation_graph(handle));
-    HIPDNN_FE_CHECK(jsonGraph.create_execution_plans());
-    HIPDNN_FE_CHECK(jsonGraph.check_support());
-    HIPDNN_FE_CHECK(jsonGraph.build_plans());
-
-    auto jsonTensors = jsonGraph.getTensorsByName();
-    auto xAttrJson = jsonTensors.at("x");
-    auto wAttrJson = jsonTensors.at("w");
-    auto yAttrJson = jsonTensors.at("y");
-
-    utilities::Tensor<InputType> yJson(yAttrJson->get_dim(), layout);
-    yJson.fillWithValue(static_cast<InputType>(0.0f));
-
-    executeConvFpropGraph(
-        jsonGraph, handle, xAttrJson, wAttrJson, yAttrJson, xTensor, wTensor, yJson);
-    std::cout << "JSON-deserialized graph execution complete.\n";
-
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
-    bool jsonMatch = validator->allClose(yOriginal, yJson);
-    std::cout << "JSON round-trip result: " << (jsonMatch ? "PASSED" : "FAILED") << "\n";
-
-    // ==================== BINARY SERIALIZATION ====================
-    std::cout << "\n--- Testing binary serialization/deserialization ---\n";
-
-    std::vector<uint8_t> binaryData;
-    HIPDNN_FE_CHECK(originalGraph.serialize(binaryData));
-    std::cout << "Serialized to binary (" << binaryData.size() << " bytes)\n";
-
-    graph::Graph binaryGraph;
-    HIPDNN_FE_CHECK(binaryGraph.deserialize(handle, binaryData));
-    std::cout << "Deserialized from binary.\n";
-
-    HIPDNN_FE_CHECK(binaryGraph.validate());
-    HIPDNN_FE_CHECK(binaryGraph.build_operation_graph(handle));
-    HIPDNN_FE_CHECK(binaryGraph.create_execution_plans());
-    HIPDNN_FE_CHECK(binaryGraph.check_support());
-    HIPDNN_FE_CHECK(binaryGraph.build_plans());
-
-    auto binaryTensors = binaryGraph.getTensorsByName();
-    auto xAttrBin = binaryTensors.at("x");
-    auto wAttrBin = binaryTensors.at("w");
-    auto yAttrBin = binaryTensors.at("y");
-
-    utilities::Tensor<InputType> yBinary(yAttrBin->get_dim(), layout);
-    yBinary.fillWithValue(static_cast<InputType>(0.0f));
-    executeConvFpropGraph(
-        binaryGraph, handle, xAttrBin, wAttrBin, yAttrBin, xTensor, wTensor, yBinary);
-    std::cout << "Binary-deserialized graph execution complete.\n";
-
-    bool binaryMatch = validator->allClose(yOriginal, yBinary);
-    std::cout << "Binary round-trip result: " << (binaryMatch ? "PASSED" : "FAILED") << "\n";
+    bool binaryMatch = testBinarySerialization<InputType>(
+        originalGraph, handle, xTensor, wTensor, yOriginal, layout);
 
     return jsonMatch && binaryMatch;
 }
@@ -162,8 +196,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
-
-    initializeFrontendLogging();
 
     auto [handle, handleError] = createHipdnnHandle();
     HIPDNN_FE_CHECK(handleError);

@@ -213,25 +213,20 @@ void EnginePluginResourceManager::getLoadedPluginFiles(size_t* numPlugins,
 
 std::shared_ptr<EnginePluginResourceManager> EnginePluginResourceManager::create()
 {
+    std::lock_guard<std::mutex> lock(pluginMutex);
+
     auto pm = pmPtr.lock();
 
     if(!pm)
     {
-        std::lock_guard<std::mutex> lock(pluginMutex);
+        pm = std::make_shared<EnginePluginManager>();
+        pm->loadPlugins(pluginConfig.paths, pluginConfig.mode);
+        pmPtr = pm;
 
-        pm = pmPtr.lock();
-
-        if(!pm)
+        // In lazy mode, keep the plugin manager alive by storing in persistent pointer
+        if(pluginConfig.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)
         {
-            pm = std::make_shared<EnginePluginManager>();
-            pm->loadPlugins(pluginConfig.paths, pluginConfig.mode);
-            pmPtr = pm;
-
-            // In lazy mode, keep the plugin manager alive by storing in persistent pointer
-            if(pluginConfig.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)
-            {
-                persistentPmPtr = pm;
-            }
+            persistentPmPtr = pm;
         }
     }
 
