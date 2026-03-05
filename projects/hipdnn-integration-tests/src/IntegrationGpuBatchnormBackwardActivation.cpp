@@ -197,12 +197,12 @@ class BatchnormBackwardActivation
 
 // 2D layout tests (NCHW, NHWC)
 using IntegrationGpuBatchnormBackwardActivation2dFp32 = BatchnormBackwardActivation<float>;
-using IntegrationGpuBatchnormBackwardActivation2dBfp16 = BatchnormBackwardActivation<hip_bfloat16>;
+using IntegrationGpuBatchnormBackwardActivation2dBfp16 = BatchnormBackwardActivation<bfloat16>;
 using IntegrationGpuBatchnormBackwardActivation2dFp16 = BatchnormBackwardActivation<half>;
 
 // 3D layout tests (NCDHW, NDHWC)
 using IntegrationGpuBatchnormBackwardActivation3dFp32 = BatchnormBackwardActivation<float>;
-using IntegrationGpuBatchnormBackwardActivation3dBfp16 = BatchnormBackwardActivation<hip_bfloat16>;
+using IntegrationGpuBatchnormBackwardActivation3dBfp16 = BatchnormBackwardActivation<bfloat16>;
 using IntegrationGpuBatchnormBackwardActivation3dFp16 = BatchnormBackwardActivation<half>;
 
 }  // namespace

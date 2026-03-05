@@ -91,12 +91,12 @@ class ConvForward
 
 // 2D layout tests (NCHW, NHWC)
 using IntegrationGpuConvFwd2dFp32 = ConvForward<float>;
-using IntegrationGpuConvFwd2dBfp16 = ConvForward<hip_bfloat16>;
+using IntegrationGpuConvFwd2dBfp16 = ConvForward<bfloat16>;
 using IntegrationGpuConvFwd2dFp16 = ConvForward<half>;
 
 // 3D layout tests (NCDHW, NDHWC)
 using IntegrationGpuConvFwd3dFp32 = ConvForward<float>;
-using IntegrationGpuConvFwd3dBfp16 = ConvForward<hip_bfloat16>;
+using IntegrationGpuConvFwd3dBfp16 = ConvForward<bfloat16>;
 using IntegrationGpuConvFwd3dFp16 = ConvForward<half>;
 
 }  // namespace

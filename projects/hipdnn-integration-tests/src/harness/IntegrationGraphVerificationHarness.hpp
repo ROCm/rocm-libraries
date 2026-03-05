@@ -24,6 +24,7 @@
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -39,6 +40,7 @@
 namespace hipdnn_integration_tests {
 
 using namespace hipdnn_data_sdk;
+using namespace hipdnn_frontend;
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
@@ -198,7 +200,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
             << "At least one output tensor id must be specified for "
                "validation.";
 
-        HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds);
+        HIPDNN_PLUGIN_LOG_INFO("Validating " << outputTensorIds.size() << " output tensors");
 
         // Lazily register validators after graph execution since tensor Ids and types may be
         // inferred during graph finalization
@@ -289,7 +291,7 @@ class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<Test
             case hipdnn_frontend::DataType::HALF:
                 return toleranceForNodeTyped<half>(node);
             case hipdnn_frontend::DataType::BFLOAT16:
-                return toleranceForNodeTyped<hip_bfloat16>(node);
+                return toleranceForNodeTyped<bfloat16>(node);
             default:
                 ADD_FAILURE() << "toleranceForNode: unsupported data type";
                 return 0.0f;
