@@ -84,12 +84,14 @@ class ErrorExtractor:
                 result = subprocess.run(
                     [
                         "grep",
-                        "-riE",
+                        "--recursive",
+                        "--ignore-case",
+                        "--extended-regexp",
                         "(error|failed|fatal|exception)",
                         str(self.log_path),
-                        "-A",
+                        "--after-context",
                         "3",
-                        "-B",
+                        "--before-context",
                         "2",
                         "--max-count=5",
                     ],
