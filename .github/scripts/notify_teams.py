@@ -354,7 +354,7 @@ def main():
         "--failure-stage",
         required=True,
         choices=["build", "test"],
-        help="Type of failure (build or test)",
+        help="Stage of failure (build or test)",
     )
     parser.add_argument(
         "--platform",
