@@ -47,42 +47,42 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<BatchnormBackwardOperationDescriptor>();
     auto desc = wrapper->asDescriptor<BatchnormBackwardOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DY,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dyDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_SCALE,
+        HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DX,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DX_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dxDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DSCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dscaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DBIAS,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dbiasDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_MEAN,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &invVarianceDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_BATCHNORM_BWD_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     if(!peerStatsDescs.empty())
     {
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BWD_EXT_PEER_STATS,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            static_cast<int64_t>(peerStatsDescs.size()),
                            peerStatsDescs.data());

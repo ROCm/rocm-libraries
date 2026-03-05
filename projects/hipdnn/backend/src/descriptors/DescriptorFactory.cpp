@@ -66,7 +66,7 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionBwdOperationDescriptor>();
         break;
-    case HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_EXT_DESCRIPTOR:
+    case HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BatchnormBackwardOperationDescriptor>();
         break;
     default:

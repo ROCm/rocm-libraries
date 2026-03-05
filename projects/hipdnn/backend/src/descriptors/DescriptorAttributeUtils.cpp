@@ -231,6 +231,9 @@ void setTensorDescriptorArray(std::vector<std::shared_ptr<TensorDescriptor>>& de
     std::vector<std::shared_ptr<TensorDescriptor>> tensorDescs;
     std::vector<int64_t> uids;
 
+    tensorDescs.reserve(static_cast<size_t>(elementCount));
+    uids.reserve(static_cast<size_t>(elementCount));
+
     for(int64_t i = 0; i < elementCount; ++i)
     {
         auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(

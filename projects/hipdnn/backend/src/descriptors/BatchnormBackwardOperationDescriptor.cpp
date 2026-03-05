@@ -35,6 +35,14 @@ void BatchnormBackwardOperationDescriptor::finalize()
                   "BatchnormBackwardOperationDescriptor::finalize() failed: compute data type not "
                   "set");
 
+    bool hasMean = _meanDesc != nullptr;
+    bool hasInvVariance = _invVarianceDesc != nullptr;
+    THROW_IF_TRUE(
+        hasMean != hasInvVariance,
+        HIPDNN_STATUS_BAD_PARAM,
+        "BatchnormBackwardOperationDescriptor::finalize() failed: mean and inverse variance "
+        "tensors must both be set or both be null");
+
     HipdnnBackendDescriptorImpl<BatchnormBackwardOperationDescriptor>::finalize();
 }
 
@@ -54,7 +62,7 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DY:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT:
         setTensorDescriptor(_dyDesc,
                             _data.dy_tensor_uid,
                             attributeType,
@@ -62,7 +70,7 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_X:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT:
         setTensorDescriptor(_xDesc,
                             _data.x_tensor_uid,
                             attributeType,
@@ -70,7 +78,7 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_SCALE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_SCALE_EXT:
         setTensorDescriptor(_scaleDesc,
                             _data.scale_tensor_uid,
                             attributeType,
@@ -78,7 +86,7 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DX:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DX_EXT:
         setTensorDescriptor(_dxDesc,
                             _data.dx_tensor_uid,
                             attributeType,
@@ -86,7 +94,7 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DSCALE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DSCALE_EXT:
         setTensorDescriptor(_dscaleDesc,
                             _data.dscale_tensor_uid,
                             attributeType,
@@ -94,7 +102,7 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DBIAS:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DBIAS_EXT:
         setTensorDescriptor(_dbiasDesc,
                             _data.dbias_tensor_uid,
                             attributeType,
@@ -102,7 +110,7 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_MEAN:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT:
     {
         int64_t uid = 0;
         setTensorDescriptor(_meanDesc,
@@ -114,7 +122,7 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
         _data.mean_tensor_uid = uid;
         break;
     }
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_INV_VARIANCE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT:
     {
         int64_t uid = 0;
         setTensorDescriptor(_invVarianceDesc,
@@ -126,14 +134,14 @@ void BatchnormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
         _data.inv_variance_tensor_uid = uid;
         break;
     }
-    case HIPDNN_ATTR_BATCHNORM_BWD_EXT_COMP_TYPE:
+    case HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
                     arrayOfElements,
                     "BatchnormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BWD_EXT_PEER_STATS:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT:
         setTensorDescriptorArray(_peerStatsDescs,
                                  _data.peer_stats_tensor_uid,
                                  attributeType,
@@ -165,7 +173,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DY:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT:
         getTensorDescriptor(_dyDesc,
                             attributeType,
                             requestedElementCount,
@@ -173,7 +181,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_X:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT:
         getTensorDescriptor(_xDesc,
                             attributeType,
                             requestedElementCount,
@@ -181,7 +189,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_SCALE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_SCALE_EXT:
         getTensorDescriptor(_scaleDesc,
                             attributeType,
                             requestedElementCount,
@@ -189,7 +197,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DX:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DX_EXT:
         getTensorDescriptor(_dxDesc,
                             attributeType,
                             requestedElementCount,
@@ -197,7 +205,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DSCALE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DSCALE_EXT:
         getTensorDescriptor(_dscaleDesc,
                             attributeType,
                             requestedElementCount,
@@ -205,7 +213,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DBIAS:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DBIAS_EXT:
         getTensorDescriptor(_dbiasDesc,
                             attributeType,
                             requestedElementCount,
@@ -213,7 +221,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_MEAN:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT:
         getTensorDescriptor(_meanDesc,
                             attributeType,
                             requestedElementCount,
@@ -221,7 +229,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_INV_VARIANCE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT:
         getTensorDescriptor(_invVarianceDesc,
                             attributeType,
                             requestedElementCount,
@@ -229,7 +237,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_BWD_EXT_COMP_TYPE:
+    case HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -237,7 +245,7 @@ void BatchnormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                     arrayOfElements,
                     "BatchnormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_BWD_EXT_PEER_STATS:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT:
         getTensorDescriptorArray(_peerStatsDescs,
                                  attributeType,
                                  requestedElementCount,
@@ -262,14 +270,13 @@ std::vector<std::shared_ptr<TensorDescriptor>>
 {
     std::vector<std::shared_ptr<TensorDescriptor>> result
         = {_dyDesc, _xDesc, _scaleDesc, _dxDesc, _dscaleDesc, _dbiasDesc};
-    if(_meanDesc)
+
+    if(_meanDesc && _invVarianceDesc)
     {
         result.push_back(_meanDesc);
-    }
-    if(_invVarianceDesc)
-    {
         result.push_back(_invVarianceDesc);
     }
+
     result.insert(result.end(), _peerStatsDescs.begin(), _peerStatsDescs.end());
     return result;
 }
@@ -285,7 +292,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t BatchnormBackwardOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_EXT_DESCRIPTOR;
+    return HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT;
 }
 
 std::string BatchnormBackwardOperationDescriptor::toString() const

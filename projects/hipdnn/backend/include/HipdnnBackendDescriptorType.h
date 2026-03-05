@@ -174,6 +174,6 @@ typedef enum
      * Represents a backward batch normalization operation computing gradients
      * with respect to input (DX), scale (DScale), and bias (DBias).
      */
-    HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_EXT_DESCRIPTOR,
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT,
 
 } hipdnnBackendDescriptorType_t;

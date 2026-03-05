@@ -402,33 +402,33 @@ typedef enum
 
     /**
      * @name Batchnorm Backward Ext Operation Attributes (2000-2099)
-     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_EXT_DESCRIPTOR
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT
      * @{
      */
 
     /** @brief Gradient input tensor (dy) for batchnorm backward */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DY = 2000,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT = 2000,
 
     /** @brief Input tensor (x) for batchnorm backward */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_X = 2001,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT = 2001,
 
     /** @brief Scale tensor for batchnorm backward */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_SCALE = 2002,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_SCALE_EXT = 2002,
 
     /** @brief Gradient output tensor (dx) for batchnorm backward */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DX = 2003,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DX_EXT = 2003,
 
     /** @brief Scale gradient tensor (dscale) for batchnorm backward */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DSCALE = 2004,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DSCALE_EXT = 2004,
 
     /** @brief Bias gradient tensor (dbias) for batchnorm backward */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DBIAS = 2005,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DBIAS_EXT = 2005,
 
     /** @brief Saved mean tensor from forward pass */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_MEAN = 2006,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT = 2006,
 
     /** @brief Saved inverse variance tensor from forward pass */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_INV_VARIANCE = 2007,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT = 2007,
 
     /** @} */
 
@@ -438,10 +438,10 @@ typedef enum
      */
 
     /** @brief Compute data type for batchnorm backward */
-    HIPDNN_ATTR_BATCHNORM_BWD_EXT_COMP_TYPE = 2100,
+    HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT = 2100,
 
     /** @brief Peer statistics tensor array for multi-GPU batchnorm backward */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_BWD_EXT_PEER_STATS = 2101,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT = 2101,
 
     /** @} */
 

@@ -18,7 +18,7 @@ inline Error createBatchnormBackwardOperation(
 {
     // Create operation descriptor
     ScopedHipdnnBackendDescriptor opDesc(
-        HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_EXT_DESCRIPTOR);
+        HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -27,32 +27,32 @@ inline Error createBatchnormBackwardOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DY,
+                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT,
                                              attributes.get_dy(),
                                              tensorDescs,
                                              "batchnorm backward DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_X,
+                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT,
                                              attributes.get_x(),
                                              tensorDescs,
                                              "batchnorm backward X"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_SCALE,
+                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_SCALE_EXT,
                                              attributes.get_scale(),
                                              tensorDescs,
                                              "batchnorm backward SCALE"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DX,
+                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DX_EXT,
                                              attributes.get_dx(),
                                              tensorDescs,
                                              "batchnorm backward DX"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DSCALE,
+                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DSCALE_EXT,
                                              attributes.get_dscale(),
                                              tensorDescs,
                                              "batchnorm backward DSCALE"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_DBIAS,
+                                             HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DBIAS_EXT,
                                              attributes.get_dbias(),
                                              tensorDescs,
                                              "batchnorm backward DBIAS"));
@@ -61,7 +61,7 @@ inline Error createBatchnormBackwardOperation(
     if(attributes.get_mean())
     {
         HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                                 HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_MEAN,
+                                                 HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT,
                                                  attributes.get_mean(),
                                                  tensorDescs,
                                                  "batchnorm backward MEAN"));
@@ -70,7 +70,7 @@ inline Error createBatchnormBackwardOperation(
     {
         HIPDNN_CHECK_ERROR(
             ensureAndSetTensorRef(opDesc.get(),
-                                  HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_EXT_INV_VARIANCE,
+                                  HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT,
                                   attributes.get_inv_variance(),
                                   tensorDescs,
                                   "batchnorm backward INV_VARIANCE"));
@@ -78,7 +78,7 @@ inline Error createBatchnormBackwardOperation(
 
     // Set compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_BATCHNORM_BWD_EXT_COMP_TYPE,
+                                                 HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT,
                                                  attributes.compute_data_type,
                                                  "batchnorm backward compute data type"));
 
@@ -89,7 +89,7 @@ inline Error createBatchnormBackwardOperation(
         {
             HIPDNN_CHECK_ERROR(
                 ensureAndSetTensorArrayRef(opDesc.get(),
-                                           HIPDNN_ATTR_OPERATION_BATCHNORM_BWD_EXT_PEER_STATS,
+                                           HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT,
                                            peerStatsAttrs,
                                            tensorDescs,
                                            "batchnorm backward peer_stats"));
