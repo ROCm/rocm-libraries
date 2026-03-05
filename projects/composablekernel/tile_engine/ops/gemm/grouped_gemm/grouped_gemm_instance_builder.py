@@ -212,21 +212,30 @@ def main():
 
     args = parser.parse_args()
 
-    assert args.datatype in ["fp16", "bf16", "fp8", "bf8"], (
-        f"Invalid datatype string: {args.datatype} (supported datatypes are [fp16, bf16, fp8, and bf8])"
-    )
+    if args.datatype not in ["fp16", "bf16", "fp8", "bf8"]:
+        parser.error(
+            f"Invalid datatype string: {args.datatype} (supported datatypes are [fp16, bf16, fp8, and bf8])"
+        )
 
-    layout_parts = args.layout.lower()
-    assert len(layout_parts) == 3, (
-        f"Invalid layout string: {args.layout} (must be 3 characters like 'rcr' where r stands for row major and c stands for column major)"
-    )
-    assert layout_parts[0] in ["r", "c"] and layout_parts[1] in ["r", "c"], (
-        f"Invalid matrix_a layout : {layout_parts[0]} or matrix_b layout: {layout_parts[1]} (matrix_a and matrix_b must be either 'r' for row major or 'c' for column major)"
-    )
-    assert layout_parts[2] == "r", (
-        f"Invalid matrix_c layout: {layout_parts[2]} (must be 'r' only as currently we are supporting only row major)"
-    )
+    layout_str = args.layout.lower()
+    if len(layout_str) != 3:
+        parser.error(
+            f"Invalid layout string: {args.layout} (must be 3 characters like 'rcr' where r stands for row major and c stands for column major)"
+        )
 
+    matrix_a_layout = layout_str[0]
+    matrix_b_layout = layout_str[1]
+    matrix_c_layout = layout_str[2]
+
+    if matrix_a_layout not in ["r", "c"] or matrix_b_layout not in ["r", "c"]:
+        parser.error(
+            f"Invalid matrix_a layout : {matrix_a_layout} or matrix_b layout: {matrix_b_layout} (matrix_a and matrix_b must be either 'r' for row major or 'c' for column major)"
+        )
+
+    if matrix_c_layout != "r":
+        parser.error(
+            f"Invalid matrix_c layout: {matrix_c_layout} (must be 'r' only as currently we are supporting only row major)"
+        )
     kernel_name_prefix = "grouped_gemm"
     builder = GroupedGemmKernelBuilder(
         kernel_name_prefix,
