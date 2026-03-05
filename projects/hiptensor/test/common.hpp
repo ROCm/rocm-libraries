@@ -65,12 +65,12 @@ namespace hiptensor
     // Cross-platform safe temporary filename generator
     inline std::string generateTempFilename(const std::string& prefix = "hiptensor_test_")
     {
-        std::random_device rd;
-        std::mt19937 gen(rd());
+        std::random_device              rd;
+        std::mt19937                    gen(rd());
         std::uniform_int_distribution<> dis(100000, 999999);
 
-        std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
-        std::string temp_filename = prefix + std::to_string(dis(gen)) + ".tmp";
+        std::filesystem::path temp_dir      = std::filesystem::temp_directory_path();
+        std::string           temp_filename = prefix + std::to_string(dis(gen)) + ".tmp";
 
         return (temp_dir / temp_filename).string();
     }

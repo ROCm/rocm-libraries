@@ -31,6 +31,7 @@
 #include <string>
 
 #include <hiptensor/hiptensor.h>
+
 #include "hiptensor_ostream.hpp"
 #include "singleton.hpp"
 

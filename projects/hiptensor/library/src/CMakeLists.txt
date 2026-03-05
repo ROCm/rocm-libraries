@@ -74,56 +74,7 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
 endfunction()
 
-# Create static library target for tests to access internal symbols
-function(create_hiptensor_static_library)
-    add_library(hiptensor_static STATIC
-        $<TARGET_OBJECTS:hiptensor_core>
-        $<TARGET_OBJECTS:hiptensor_contraction>
-        $<TARGET_OBJECTS:hiptensor_contraction_instances>
-        $<TARGET_OBJECTS:hiptensor_elementwise>
-        $<TARGET_OBJECTS:hiptensor_reduction>
-    )
-
-    # Copy properties from the shared library to the static library
-    target_link_libraries(hiptensor_static PUBLIC hip::device hip::host)
-    target_link_libraries(hiptensor_static PRIVATE Threads::Threads)
-    target_include_directories(hiptensor_static PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/hiptensor>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-    )
-    target_include_directories(hiptensor_static PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${PROJECT_BINARY_DIR}/include/hiptensor
-        ${PROJECT_BINARY_DIR}/include
-        ${composable_kernel_INCLUDES}
-    )
-
-    # For static library, define the static define to disable dllimport/export
-    target_compile_definitions(hiptensor_static PUBLIC HIPTENSOR_STATIC_DEFINE)
-
-    # Copy compile options from shared library
-    target_compile_options(hiptensor_static PRIVATE ${CMAKE_CXX_FLAGS} ${CLANG_DRIVER_MODE})
-    target_link_options(hiptensor_static PRIVATE ${CLANG_DRIVER_MODE})
-
-    # Copy other compile flags
-    if(BUILD_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-        target_compile_options(hiptensor_static PRIVATE "--offload-compress")
-    endif()
-
-    if(HIPTENSOR_BUILD_COMPRESSED_DBG)
-        target_compile_options(hiptensor_static PRIVATE
-            "$<$<CONFIG:Debug>:-gz>"
-            "$<$<CONFIG:RelWithDebInfo>:-gz>"
-        )
-    endif()
-
-    # Create an alias for tests to use
-    add_library(hiptensor::hiptensor_static ALIAS hiptensor_static)
-endfunction()
-
-# Create shared library target for production use
+# Create shared library target
 function(create_hiptensor_shared_library)
     add_library(hiptensor SHARED
         $<TARGET_OBJECTS:hiptensor_core>
@@ -211,13 +162,6 @@ generate_export_header(hiptensor EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/
 if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(hiptensor PRIVATE -Wno-ignored-attributes -Wno-unknown-warning-option)
 endif()
-
-# Create static library target for tests to access internal symbols
-# Commented out while testing HIPTENSOR_EXPORT approach
-# if(HIPTENSOR_BUILD_TESTS)
-#     create_hiptensor_static_library()
-# endif()
-
 
 rocm_install_targets(
     TARGETS hiptensor

@@ -26,11 +26,12 @@
 
 #pragma once
 
-#include "singleton.hpp"
-#include <hiptensor/hiptensor.h>
-
 #include <cstdio>
 #include <mutex>
+
+#include <hiptensor/hiptensor.h>
+
+#include "singleton.hpp"
 
 // Cross-platform safe file opening function
 HIPTENSOR_EXPORT FILE* safeFopen(const char* filename, const char* mode);

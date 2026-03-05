@@ -27,6 +27,7 @@
 #pragma once
 
 #include <memory>
+
 #include <hiptensor/hiptensor.h>
 
 namespace hiptensor
@@ -44,4 +45,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

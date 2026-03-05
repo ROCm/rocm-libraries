@@ -103,7 +103,7 @@ namespace hiptensor
     }
 
     HIPTENSOR_EXPORT std::optional<hiptensorDataType_t>
-        convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType)
+                     convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType)
     {
         switch(computeType)
         {
@@ -167,7 +167,8 @@ namespace hiptensor
     }
     // @endcond
 
-    HIPTENSOR_EXPORT void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
+    HIPTENSOR_EXPORT void
+        writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value)
     {
         switch(id)
         {

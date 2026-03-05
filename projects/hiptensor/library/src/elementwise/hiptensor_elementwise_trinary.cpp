@@ -175,13 +175,13 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
         solutions       = instances->query({alphaF, betaF, gammaF},
                                      descA->mLengths,
-                                     {descA->mType, descB->mType, descC->mType},
-                                     {descD->mType},
-                                     {{modeA, modeA + descA->mLengths.size()},
+                                           {descA->mType, descB->mType, descC->mType},
+                                           {descD->mType},
+                                           {{modeA, modeA + descA->mLengths.size()},
                                             {modeB, modeB + descB->mLengths.size()},
                                             {modeC, modeC + descC->mLengths.size()}},
-                                     {{modeD, modeD + descD->mLengths.size()}},
-                                     {opABC, opAB, opA, opB, opC},
+                                           {{modeD, modeD + descD->mLengths.size()}},
+                                           {opABC, opAB, opA, opB, opC},
                                      hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
     }
 

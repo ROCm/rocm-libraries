@@ -37,8 +37,8 @@
 #include <hip/hip_fp16.h>
 // clang-format on
 
-#include <hiptensor/hiptensor_types.h>
 #include <hiptensor/hiptensor.h>
+#include <hiptensor/hiptensor_types.h>
 
 #include "hip_device.hpp"
 #include "plan_cache.hpp"
@@ -201,7 +201,7 @@ namespace hiptensor
 
     // Convert hiptensorDataType_t to hiptensorComputeDescriptor_t
     HIPTENSOR_EXPORT hiptensorComputeDescriptor_t convertToComputeType(hiptensorDataType_t hipType);
-    HIPTENSOR_EXPORT std::optional<hiptensorDataType_t>
+    HIPTENSOR_EXPORT                              std::optional<hiptensorDataType_t>
         convertToHipTensorDataType(hiptensorComputeDescriptor_t computeType);
 
     // Read a single value from void pointer, casted to T
@@ -211,7 +211,8 @@ namespace hiptensor
     template <typename T>
     T readVal(void const* value, hiptensorComputeDescriptor_t id);
 
-    HIPTENSOR_EXPORT void writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
+    HIPTENSOR_EXPORT void
+        writeVal(void const* addr, hiptensorComputeDescriptor_t id, ScalarData value);
 
     HIPTENSOR_EXPORT std::string computeTypeToString(hiptensorComputeDescriptor_t computeType);
     HIPTENSOR_EXPORT std::string hipTypeToString(hiptensorDataType_t hipType);

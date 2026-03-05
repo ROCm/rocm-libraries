@@ -69,7 +69,6 @@ namespace hiptensor
 #endif
     }
 
-
     template <typename T>
     static inline std::vector<T> stridesFromLengths(std::vector<T> const& lengths,
                                                     bool                  col_major = true)
