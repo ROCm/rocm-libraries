@@ -98,8 +98,8 @@ void buildPlanInferenceSingleNode(
         = nodeWrapper.attributesAs<hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes>();
 
     BatchnormFwdInferenceParams params(attr, opGraph.getTensorMap());
-    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params), kernelCompiler);
-    plan->compile(devicePropertyProvider.getDeviceProperties());
+    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
+    plan->compile(kernelCompiler, devicePropertyProvider.getDeviceProperties());
     executionContext.setPlan(std::move(plan));
 }
 

@@ -97,8 +97,7 @@ TEST(TestBatchnormFwdInferenceParams, IsNotCopyConstructible)
 namespace
 {
 
-BatchnormFwdInferencePlan createPlanFromGraph(const IKernelCompiler& kernelCompiler,
-                                              const std::vector<int64_t>& strides
+BatchnormFwdInferencePlan createPlanFromGraph(const std::vector<int64_t>& strides
                                               = {150528, 50176, 224, 1},
                                               const std::vector<int64_t>& dims = {1, 3, 224, 224},
                                               hipdnn_data_sdk::data_objects::DataType inputDataType
@@ -113,7 +112,7 @@ BatchnormFwdInferencePlan createPlanFromGraph(const IKernelCompiler& kernelCompi
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
 
     BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
-    return {std::move(params), kernelCompiler};
+    return BatchnormFwdInferencePlan{std::move(params)};
 }
 
 hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
@@ -133,24 +132,21 @@ hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
 
 TEST(TestBatchnormFwdInferencePlan, ExecuteWithoutCompileThrows)
 {
-    MockKernelCompiler mockCompiler;
-    auto plan = createPlanFromGraph(mockCompiler);
+    auto plan = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdInferencePlan, GetWorkspaceSizeReturnsZero)
 {
-    MockKernelCompiler mockCompiler;
-    auto plan = createPlanFromGraph(mockCompiler);
+    auto plan = createPlanFromGraph();
     HipKernelHandle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
 TEST(TestBatchnormFwdInferencePlan, IsMoveConstructible)
 {
-    MockKernelCompiler mockCompiler;
-    auto plan = createPlanFromGraph(mockCompiler);
+    auto plan = createPlanFromGraph();
 
     BatchnormFwdInferencePlan moved(std::move(plan));
     HipKernelHandle handle;
@@ -181,10 +177,10 @@ TEST(TestBatchnormFwdInferencePlan, CompileCallsCompilerWithCorrectKernelName)
     EXPECT_CALL(mockCompiler, compile("BatchNormFwdInferSpatial.cpp", ::testing::_))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
-    auto plan = createPlanFromGraph(mockCompiler);
+    auto plan = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps();
 
-    plan.compile(deviceProps);
+    plan.compile(mockCompiler, deviceProps);
 }
 
 TEST(TestBatchnormFwdInferencePlan, CompileIncludesOffloadArchOption)
@@ -203,10 +199,10 @@ TEST(TestBatchnormFwdInferencePlan, CompileIncludesOffloadArchOption)
                 compile(::testing::_, ::testing::Contains(std::string("--offload-arch=gfx942"))))
         .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
 
-    auto plan = createPlanFromGraph(mockCompiler);
+    auto plan = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps("gfx942");
 
-    plan.compile(deviceProps);
+    plan.compile(mockCompiler, deviceProps);
 }
 
 TEST(TestBatchnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
@@ -226,10 +222,10 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp32SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph(mockCompiler);
+    auto plan = createPlanFromGraph();
     auto deviceProps = createTestDeviceProps();
 
-    plan.compile(deviceProps);
+    plan.compile(mockCompiler, deviceProps);
 
     auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
@@ -258,13 +254,11 @@ TEST(TestBatchnormFwdInferencePlan, CompileFp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph(mockCompiler,
-                                    {150528, 50176, 224, 1},
-                                    {1, 3, 224, 224},
-                                    hipdnn_data_sdk::data_objects::DataType::HALF);
+    auto plan = createPlanFromGraph(
+        {150528, 50176, 224, 1}, {1, 3, 224, 224}, hipdnn_data_sdk::data_objects::DataType::HALF);
     auto deviceProps = createTestDeviceProps();
 
-    plan.compile(deviceProps);
+    plan.compile(mockCompiler, deviceProps);
 
     auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
@@ -294,13 +288,12 @@ TEST(TestBatchnormFwdInferencePlan, CompileBfp16SetsCorrectDefines)
             return program;
         });
 
-    auto plan = createPlanFromGraph(mockCompiler,
-                                    {150528, 50176, 224, 1},
+    auto plan = createPlanFromGraph({150528, 50176, 224, 1},
                                     {1, 3, 224, 224},
                                     hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
     auto deviceProps = createTestDeviceProps();
 
-    plan.compile(deviceProps);
+    plan.compile(mockCompiler, deviceProps);
 
     auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
@@ -331,10 +324,10 @@ TEST(TestBatchnormFwdInferencePlan, CompileNchwLayoutSetsCorrectDefine)
         });
 
     // NCHW strides: N=C*H*W, C=H*W, H=W, W=1
-    auto plan = createPlanFromGraph(mockCompiler, {150528, 50176, 224, 1}, {1, 3, 224, 224});
+    auto plan = createPlanFromGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
     auto deviceProps = createTestDeviceProps();
 
-    plan.compile(deviceProps);
+    plan.compile(mockCompiler, deviceProps);
 
     auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
@@ -362,10 +355,10 @@ TEST(TestBatchnormFwdInferencePlan, CompileNhwcLayoutSetsCorrectDefine)
         });
 
     // NHWC strides: N=H*W*C, H=W*C, W=C, C=1
-    auto plan = createPlanFromGraph(mockCompiler, {150528, 1, 672, 3}, {1, 3, 224, 224});
+    auto plan = createPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
     auto deviceProps = createTestDeviceProps();
 
-    plan.compile(deviceProps);
+    plan.compile(mockCompiler, deviceProps);
 
     auto hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
@@ -389,9 +382,9 @@ TEST(TestBatchnormFwdInferencePlan, CompileWithUnsupportedDimensionThrows)
     const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
 
     BatchnormFwdInferenceParams params(attr, graph.getTensorMap());
-    BatchnormFwdInferencePlan plan(std::move(params), mockCompiler);
+    BatchnormFwdInferencePlan plan(std::move(params));
 
     auto deviceProps = createTestDeviceProps();
 
-    EXPECT_THROW(plan.compile(deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
 }

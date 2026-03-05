@@ -4,6 +4,7 @@
 #include "BatchnormFwdInferencePlan.hpp"
 
 #include "HipKernelUtils.hpp"
+#include "hip/IKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -56,10 +57,8 @@ const hipdnn_data_sdk::data_objects::TensorAttributes*
     return _invVariance;
 }
 
-BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
-                                                     const IKernelCompiler& kernelCompiler)
+BatchnormFwdInferencePlan::BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams)
     : _inferenceParams(std::move(inferenceParams))
-    , _kernelCompiler(kernelCompiler)
 {
 }
 
@@ -93,7 +92,8 @@ size_t computeVectorSize(bool isLayoutNhwc, int channels, unsigned int inCstride
 
 } // namespace
 
-void BatchnormFwdInferencePlan::compile(const hipDeviceProp_t& deviceProperties)
+void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
+                                        const hipDeviceProp_t& deviceProperties)
 {
     // Determine data type configuration
     auto xDataType = _inferenceParams.x()->data_type();
@@ -228,7 +228,7 @@ void BatchnormFwdInferencePlan::compile(const hipDeviceProp_t& deviceProperties)
     options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
 
     // Compile kernel and configure launch dimensions
-    _compiledProgram = _kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
+    _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
     _runnableKernel = _compiledProgram->getKernel("BatchNormFwdInferSpatialEstInvVar");
 
     _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),

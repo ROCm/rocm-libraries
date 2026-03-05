@@ -9,13 +9,14 @@
 
 #include "HipKernelHandle.hpp"
 #include "hip/ICompiledProgram.hpp"
-#include "hip/IKernelCompiler.hpp"
 #include "hip/IRunnableKernel.hpp"
 
 #include <memory>
 
 namespace hip_kernel_provider
 {
+
+class IKernelCompiler;
 
 class BatchnormFwdInferenceParams
 {
@@ -50,8 +51,7 @@ private:
 class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::IPlan<HipKernelHandle>
 {
 public:
-    BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams,
-                              const IKernelCompiler& kernelCompiler);
+    explicit BatchnormFwdInferencePlan(BatchnormFwdInferenceParams&& inferenceParams);
 
     BatchnormFwdInferencePlan(const BatchnormFwdInferencePlan&) = delete;
     BatchnormFwdInferencePlan& operator=(const BatchnormFwdInferencePlan&) = delete;
@@ -59,7 +59,7 @@ public:
     BatchnormFwdInferencePlan(BatchnormFwdInferencePlan&&) = default;
     BatchnormFwdInferencePlan& operator=(BatchnormFwdInferencePlan&&) = delete;
 
-    void compile(const hipDeviceProp_t& deviceProperties);
+    void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
     size_t getWorkspaceSize(const HipKernelHandle& handle) const override;
 
@@ -70,7 +70,6 @@ public:
 
 private:
     BatchnormFwdInferenceParams _inferenceParams;
-    const IKernelCompiler& _kernelCompiler;
 
     // Populated by compile()
     std::unique_ptr<ICompiledProgram> _compiledProgram;
