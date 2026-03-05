@@ -135,6 +135,14 @@ class GroupedConvKernelConfig:
     epilogue: str = "cshuffle"
     scheduler: str = "intrawave"
 
+    # ConvConfigBase parity fields
+    vector_size_a: int = 4
+    vector_size_b: int = 8
+    vector_size_c: int = 8
+    block_per_cu: int = 1
+    num_wave_groups: int = 1
+    num_groups_to_merge: int = 1
+
     # Padding (enables arbitrary problem sizes)
     pad_m: bool = True
     pad_n: bool = True
@@ -158,6 +166,10 @@ class GroupedConvKernelConfig:
         return f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}"
 
     @property
+    def vec_str(self) -> str:
+        return f"{self.vector_size_a}x{self.vector_size_b}x{self.vector_size_c}"
+
+    @property
     def name(self) -> str:
         return (f"grouped_conv_{self.variant}_{self.dtype}_{self.ndim_spatial}d_"
                 f"{self.tile_str}_{self.pipeline}")
@@ -175,6 +187,12 @@ class GroupedConvKernelConfig:
                 "pipeline": [self.pipeline], "epilogue": [self.epilogue],
                 "scheduler": [self.scheduler],
                 "pad_m": [self.pad_m], "pad_n": [self.pad_n], "pad_k": [self.pad_k],
+                "vector_size_a": [self.vector_size_a],
+                "vector_size_b": [self.vector_size_b],
+                "vector_size_c": [self.vector_size_c],
+                "block_per_cu": [self.block_per_cu],
+                "num_wave_groups": [self.num_wave_groups],
+                "num_groups_to_merge": [self.num_groups_to_merge],
             },
             "variant": self.variant, "ndim_spatial": self.ndim_spatial,
             "arch": self.arch, "layout": self.layout, "dtype": self.dtype,
@@ -193,6 +211,10 @@ class GroupedConvKernelConfig:
                 "wave": self.wave_str, "warp": self.warp_str,
                 "pipeline": self.pipeline, "epilogue": self.epilogue,
                 "scheduler": self.scheduler,
+                "vector_sizes": [self.vector_size_a, self.vector_size_b, self.vector_size_c],
+                "block_per_cu": self.block_per_cu,
+                "num_wave_groups": self.num_wave_groups,
+                "num_groups_to_merge": self.num_groups_to_merge,
             },
             "arch": self.arch,
         }
@@ -207,6 +229,8 @@ class GroupedConvKernelConfig:
         print(f"{indent}  Wave:     {self.wave_str}")
         print(f"{indent}  Warp:     {self.warp_str}")
         print(f"{indent}  Pipeline: {self.pipeline}/{self.scheduler}/{self.epilogue}")
+        print(f"{indent}  VecSizes: {self.vec_str}")
+        print(f"{indent}  BlockCU:  {self.block_per_cu}  WaveGroups: {self.num_wave_groups}  MergeGroups: {self.num_groups_to_merge}")
 
 
 # =============================================================================
@@ -651,6 +675,32 @@ class GroupedConvRegistry:
     def __len__(self) -> int:
         return len(self._kernels)
 
+    def select(self, problem: "GroupedConvProblem",
+               heuristic=None) -> Optional[GroupedConvKernelConfig]:
+        """Select the best kernel for a problem.
+
+        Args:
+            problem:   The convolution problem.
+            heuristic: Optional callable(problem) -> List[str] returning
+                       ranked kernel name substrings.  The registry tries
+                       each in order; falls back to first matching kernel.
+
+        Returns:
+            The best matching GroupedConvKernelConfig, or None.
+        """
+        matching = [k for k in self._kernels if k.variant == problem.direction]
+        if not matching:
+            return None
+
+        if heuristic is not None:
+            ranked = heuristic(problem)
+            for hint in ranked:
+                for k in matching:
+                    if hint in k.name:
+                        return k
+
+        return matching[0] if matching else None
+
     def filter_by_variant(self, variant: str) -> "GroupedConvRegistry":
         variant = _resolve_variant(variant)
         reg = GroupedConvRegistry(f"{self.name}_{variant}")
@@ -681,6 +731,7 @@ class GroupedConvRegistry:
             algo = kd.get("algorithm", {})
             wave = algo.get("wave", "2x2x1").split("x")
             warp = algo.get("warp", "32x32x16").split("x")
+            vec = algo.get("vector_sizes", [4, 8, 8])
             reg.add(GroupedConvKernelConfig(
                 variant=sig.get("variant", "forward"),
                 ndim_spatial=sig.get("ndim_spatial", 2),
@@ -695,6 +746,12 @@ class GroupedConvRegistry:
                 pipeline=algo.get("pipeline", "compv3"),
                 epilogue=algo.get("epilogue", "cshuffle"),
                 scheduler=algo.get("scheduler", "intrawave"),
+                vector_size_a=vec[0] if len(vec) > 0 else 4,
+                vector_size_b=vec[1] if len(vec) > 1 else 8,
+                vector_size_c=vec[2] if len(vec) > 2 else 8,
+                block_per_cu=algo.get("block_per_cu", 1),
+                num_wave_groups=algo.get("num_wave_groups", 1),
+                num_groups_to_merge=algo.get("num_groups_to_merge", 1),
             ))
         return reg
 
