@@ -346,7 +346,7 @@ class BaseTuner(ABC):
             "compiler": "hipcc",
             "compiler_options": self._get_compiler_options(),
             "restrictions": self._get_restrictions(key_type, value_type),
-            "verbose": True,
+            "verbose": False,
             "iterations": 1,
             "log": False,
             "device": self.device_id,
