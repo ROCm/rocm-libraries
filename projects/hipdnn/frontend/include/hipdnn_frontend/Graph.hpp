@@ -71,6 +71,7 @@
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
@@ -93,6 +94,7 @@
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
 #include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
@@ -721,6 +723,18 @@ private:
                     }
                     _sub_nodes.emplace_back(
                         std::make_shared<RMSNormNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
+                {
+                    auto attr = BlockScaleDequantizeAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_BlockScaleDequantizeAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(std::make_shared<BlockScaleDequantizeNode>(
+                        std::move(attr), graph_attributes));
                     break;
                 }
                 case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
@@ -1815,6 +1829,30 @@ public:
             std::make_shared<RMSNormNode>(std::move(attributes), graph_attributes));
 
         return {y, invRmsOut};
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        block_scale_dequantize(std::shared_ptr<TensorAttributes> x,
+                               std::shared_ptr<TensorAttributes> scale,
+                               BlockScaleDequantizeAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BlockScaleDequantize_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<BlockScaleDequantizeNode>(std::move(attributes), graph_attributes));
+
+        return y;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

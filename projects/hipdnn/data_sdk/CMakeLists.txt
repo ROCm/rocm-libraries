@@ -145,6 +145,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/batchnorm_backward_attributes.fbs
             schemas/batchnorm_inference_attributes.fbs
             schemas/batchnorm_inference_attributes_variance_ext.fbs
+            schemas/block_scale_dequantize_attributes.fbs
             schemas/convolution_common.fbs
             schemas/convolution_fwd_attributes.fbs
             schemas/convolution_bwd_attributes.fbs

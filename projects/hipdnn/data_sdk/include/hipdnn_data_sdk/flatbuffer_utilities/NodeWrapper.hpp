@@ -83,6 +83,8 @@ public:
             return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
             return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
             return typeid(hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
@@ -99,6 +101,8 @@ public:
             return typeid(hipdnn_data_sdk::data_objects::PointwiseAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
             return typeid(hipdnn_data_sdk::data_objects::RMSNormAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::SdpaAttributes);
         default:
             throw std::invalid_argument("Node attributes type is not recognized");
         }
