@@ -1,0 +1,66 @@
+.. meta::
+   :description: hipDNN is a plugin-based deep learning library that provides graph-based operation support through backend plugins 
+   :keywords: hipDNN, ROCm, library, API
+
+.. _what-is:
+
+******************
+What is hipDNN?
+******************
+
+hipDNN (Deep Neural Network) is a graph-based deep learning library that enables multi-operation fusion for improved performance on AMD GPUs. 
+It uses operation graphs as an intermediate representation to describe computations, allowing different backend engines to optimize and execute these graphs efficiently.
+
+hipDNN allows developers to run deep learning workloads on AMD GPUs by providing an interface modeled after the cuDNN frontend API.
+
+hipDNN has a plugin-based architecture which allows advanced users to extend hipDNN without modifying the core library.
+
+hipDNN and the ROCm ecosystem
+=============================
+
+.. list-table::
+   :widths: 3 3 5
+   :header-rows: 1
+
+   * - Layer
+     - Component
+     - Function
+   * - Framework
+     - PyTorch/TensorFlow
+     - The high-level AI tools developers use.
+   * - Interface
+     - **hipDNN**
+     - The portable API for deep learning operations.
+   * - Primitives
+     - MIOpen
+     - The AMD open-source, deep-learning primitives library for GPUs.
+   * - Runtime
+     - HIP
+     - The translation layer between C++ and GPU hardware.
+   * - Hardware
+     - AMD Instinct / Radeon
+     - The physical GPU.
+
+Features
+========
+
+- **Graph-based API**: Operations are expressed as computational graphs rather than individual function calls, enabling optimization opportunities.
+- **Plugin architecture**: Backend kernel engines are implemented through plugins, allowing extensibility without modifying the core library.
+- **Performance through fusion**: Multiple operations can be fused into single kernels for better performance.
+- **Engine selection**: Heuristics will be implemented as plugins, allowing extensibility without modifying the core library, and benchmarking will be implemented as an extensible frontend API allowing customized engine selection logic.
+- **Industry standard API**: Provides a familiar interface that matches established deep learning library conventions.
+
+Components
+==========
+
+- **Frontend**: A header-only C++ library that provides the industry standard API for interacting with hipDNN. The frontend wraps the backend C API to provide a more user-friendly C++ interface.
+- **Backend**: A shared library which provides a C API for hipDNN. The backend is the core component of hipDNN which acts as a plugin loader and manager, connecting problems to engines (provided via plugins) that can solve them.
+- **SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides three SDKs: Data SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
+- **Plugins**: Plugins provide additional operational support or performance improvements.
+
+Plugins
+=======
+
+hipDNN operations are implemented through plugins. Each plugin provides its own set of supported operations. See :ref:`plugin-support` for more information.
+
+
