@@ -55,7 +55,7 @@ void BatchnormInferenceOperationDescriptor::setAttribute(hipdnnBackendAttributeN
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT:
         setTensorDescriptor(_xDesc,
                             _data.x_tensor_uid,
                             attributeType,
@@ -63,7 +63,7 @@ void BatchnormInferenceOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT:
         setTensorDescriptor(_meanDesc,
                             _data.mean_tensor_uid,
                             attributeType,
@@ -71,7 +71,7 @@ void BatchnormInferenceOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT:
         setTensorDescriptor(_invVarianceDesc,
                             _data.inv_variance_tensor_uid,
                             attributeType,
@@ -79,7 +79,7 @@ void BatchnormInferenceOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT:
         setTensorDescriptor(_scaleDesc,
                             _data.scale_tensor_uid,
                             attributeType,
@@ -87,7 +87,7 @@ void BatchnormInferenceOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT:
         setTensorDescriptor(_biasDesc,
                             _data.bias_tensor_uid,
                             attributeType,
@@ -95,7 +95,7 @@ void BatchnormInferenceOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT:
         setTensorDescriptor(_yDesc,
                             _data.y_tensor_uid,
                             attributeType,
@@ -103,7 +103,7 @@ void BatchnormInferenceOperationDescriptor::setAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE:
+    case HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -134,7 +134,7 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT:
         getTensorDescriptor(_xDesc,
                             attributeType,
                             requestedElementCount,
@@ -142,7 +142,7 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT:
         getTensorDescriptor(_meanDesc,
                             attributeType,
                             requestedElementCount,
@@ -150,7 +150,7 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT:
         getTensorDescriptor(_invVarianceDesc,
                             attributeType,
                             requestedElementCount,
@@ -158,7 +158,7 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT:
         getTensorDescriptor(_scaleDesc,
                             attributeType,
                             requestedElementCount,
@@ -166,7 +166,7 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT:
         getTensorDescriptor(_biasDesc,
                             attributeType,
                             requestedElementCount,
@@ -174,7 +174,7 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y:
+    case HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT:
         getTensorDescriptor(_yDesc,
                             attributeType,
                             requestedElementCount,
@@ -182,7 +182,7 @@ void BatchnormInferenceOperationDescriptor::getAttribute(hipdnnBackendAttributeN
                             arrayOfElements,
                             "BatchnormInferenceOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE:
+    case HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -219,12 +219,11 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t BatchnormInferenceOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_EXT_DESCRIPTOR;
+    return HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT;
 }
 
 std::string BatchnormInferenceOperationDescriptor::toString() const
 {
-    using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "BatchnormInferenceOperationDescriptor: {";
     str += "x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", mean_uid=" + std::to_string(_data.mean_tensor_uid);

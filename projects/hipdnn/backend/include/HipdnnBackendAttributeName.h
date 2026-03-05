@@ -407,25 +407,25 @@ typedef enum
      */
 
     /** @brief Input tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X = 1800,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT = 1800,
 
     /** @brief Mean tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN = 1801,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT = 1801,
 
     /** @brief Inverse variance tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE = 1802,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT = 1802,
 
     /** @brief Scale tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE = 1803,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT = 1803,
 
     /** @brief Bias tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS = 1804,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT = 1804,
 
     /** @brief Output tensor for batchnorm inference */
-    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y = 1805,
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT = 1805,
 
     /** @brief Compute data type for batchnorm inference */
-    HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE = 1806,
+    HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT = 1806,
 
     /** @} */
 

@@ -34,44 +34,48 @@ public:
     void setTensors() const
     {
         auto desc = getDescriptor();
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_xDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_meanDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_invVarianceDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_scaleDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_biasDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_yDesc);
     }
 
-    void setBatchnormInferenceParams() const
+    void setTensors(
+        const std::unordered_map<hipdnnBackendAttributeName_t, const void*>& tensorMap) const
     {
         auto desc = getDescriptor();
+        for(const auto& [attributeName, tensorDesc] : tensorMap)
+        {
+            desc->setAttribute(attributeName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensorDesc);
+        }
     }
 
     void setRequiredAttributes() const
     {
         setTensors();
-        setBatchnormInferenceParams();
         auto computeType = HIPDNN_DATA_FLOAT;
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+            HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     }
 
     void makeFinalized() const
@@ -124,7 +128,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, CreateDescriptor)
     auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_EXT_DESCRIPTOR);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT);
 }
 
 TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeWithRequiredAttributes)
@@ -137,55 +141,12 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeWithRequiredAttributes
 TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutXTensor)
 {
     auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_biasDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_yDesc);
-    setBatchnormInferenceParams();
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutMeanTensor)
-{
-    auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_biasDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_yDesc);
-    setBatchnormInferenceParams();
+    setTensors(
+        {{HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT, _meanDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT, _invVarianceDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT, _scaleDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT, _biasDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT, _yDesc.get()}});
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -193,27 +154,24 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutMeanTensor
 TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutInvVarianceTensor)
 {
     auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_biasDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_yDesc);
-    setBatchnormInferenceParams();
+    setTensors({{HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT, _xDesc.get()},
+                {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT, _meanDesc.get()},
+                {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT, _scaleDesc.get()},
+                {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT, _biasDesc.get()},
+                {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT, _yDesc.get()}});
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutMeanTensor)
+{
+    auto desc = getDescriptor();
+    setTensors(
+        {{HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT, _xDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT, _invVarianceDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT, _scaleDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT, _biasDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT, _yDesc.get()}});
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -221,27 +179,12 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutInvVarianc
 TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutScaleTensor)
 {
     auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_biasDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_yDesc);
-    setBatchnormInferenceParams();
+    setTensors(
+        {{HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT, _xDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT, _invVarianceDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT, _meanDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT, _biasDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT, _yDesc.get()}});
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -249,27 +192,12 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutScaleTenso
 TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutBiasTensor)
 {
     auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_yDesc);
-    setBatchnormInferenceParams();
+    setTensors(
+        {{HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT, _xDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT, _invVarianceDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT, _meanDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT, _scaleDesc.get()},
+         {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT, _yDesc.get()}});
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -277,27 +205,13 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutBiasTensor
 TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutYTensor)
 {
     auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
-                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                       1,
-                       &_biasDesc);
-    setBatchnormInferenceParams();
+    setTensors({
+        {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT, _xDesc.get()},
+        {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT, _invVarianceDesc.get()},
+        {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT, _meanDesc.get()},
+        {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT, _scaleDesc.get()},
+        {HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT, _biasDesc.get()},
+    });
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -305,7 +219,6 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutYTensor)
 TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
     setTensors();
-    setBatchnormInferenceParams();
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -316,7 +229,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, FinalizeFailsWithoutComputeTyp
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorX)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_xDesc));
@@ -329,7 +242,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorX)
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorMean)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_meanDesc));
@@ -341,7 +254,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorMean)
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorInvVariance)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_invVarianceDesc));
@@ -353,7 +266,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorInvVariance
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorScale)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_scaleDesc));
@@ -365,7 +278,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorScale)
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorBias)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_biasDesc));
@@ -377,7 +290,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorBias)
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorY)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_yDesc));
@@ -389,7 +302,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorDescriptorY)
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorFailsNotFinalized)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_unfinalizedTensor),
@@ -401,14 +314,14 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorFailsWrongType)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X, HIPDNN_TYPE_INT64, 1, &_xDesc),
+            HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT, HIPDNN_TYPE_INT64, 1, &_xDesc),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorFailsWrongElementCount)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   2,
                                                   &_xDesc),
@@ -418,7 +331,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorFailsWrongElementCoun
 TEST_F(TestBatchnormInferenceOperationDescriptor, SetTensorFailsNullPointer)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr),
@@ -435,7 +348,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetComputeDataType)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -447,7 +360,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetComputeDataTypeWrongElement
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+            HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -460,7 +373,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, SetAttributeFailsAfterFinalize
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_xDesc),
@@ -488,7 +401,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorDescriptor)
 
     HipdnnBackendDescriptor* retrievedX = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
@@ -508,12 +421,12 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeComputeType)
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
-        HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT,
                                        HIPDNN_TYPE_DATA_TYPE,
                                        1,
                                        &elementCount,
@@ -533,7 +446,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeFailsBeforeFinaliz
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -546,7 +459,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeFailsNullPointer)
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -575,7 +488,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorXQueryReturn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -589,7 +502,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorMeanQueryRet
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -603,7 +516,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorInvVarianceQ
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -617,7 +530,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorScaleQueryRe
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -631,7 +544,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorBiasQueryRet
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -645,7 +558,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorYQueryReturn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -660,7 +573,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeComputeTypeQueryRe
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -669,7 +582,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, GetAttributeTensorQueryFailsNu
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   0,
                                                   nullptr,
@@ -749,7 +662,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, BuildNodeProducesCorrectNodeT)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
-        HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -774,7 +687,7 @@ TEST_F(TestBatchnormInferenceOperationDescriptor, BuildNodeWithHalfComputeType)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
-        HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();

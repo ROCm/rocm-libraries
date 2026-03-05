@@ -166,7 +166,7 @@ typedef enum
      * Represents a batch normalization inference operation with input (X),
      * mean, inverse variance, scale, bias, and output (Y) tensors.
      */
-    HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_EXT_DESCRIPTOR,
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT,
 
     /**
      * @brief Convolution backward data (Dgrad) operation descriptor

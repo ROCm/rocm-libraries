@@ -45,27 +45,27 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto desc = wrapper->asDescriptor<BatchnormInferenceOperationDescriptor>();
 
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_MEAN,
+        HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_SCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_BIAS,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &biasDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_EXT_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yDesc);
+        HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &yDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_BATCHNORM_INF_EXT_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     desc->finalize();
     return wrapper;
