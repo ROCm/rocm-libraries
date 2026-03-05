@@ -157,6 +157,7 @@ namespace rocRoller
                 iot::mapRequired(io, "tag", op.m_tag);
                 iot::mapRequired(io, "input", op.m_input);
                 iot::mapRequired(io, "tileDimensions", op.m_tileDimensions);
+                iot::mapRequired(io, "transpose", op.m_transpose);
             }
 
             static void mapping(IO& io, TOp& val)

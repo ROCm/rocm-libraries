@@ -24,13 +24,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
 if(NOT CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
         CACHE FILEPATH "Toolchain file"
     )
 endif()
 set(HIPDNN_VERSION "0.0.1")
 
-project(hipDNN VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+project(hipdnn VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
 
@@ -223,7 +223,7 @@ add_subdirectory(tools)
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    finalize_test_targets("${PROJECT_NAME}")
 endif()
 
 # keep this after all the targets have been added that could use the HIP language compiler.
