@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,16 +28,12 @@
 
 #include "CSVStackFile.hpp"
 #include "ResultReporter.hpp"
-#include "TimingInstrumentation.hpp"
 
 #include <cstddef>
 #include <string>
 #include <unordered_set>
 
-#include <boost/lexical_cast.hpp>
-#include <boost/program_options.hpp>
-
-namespace po = boost::program_options;
+#include "ProgramOptions.hpp"
 
 namespace TensileLite
 {
@@ -369,7 +365,6 @@ namespace TensileLite
 
             virtual void postSolution() override
             {
-                ScopedTimer timer("post_solution_log");
                 std::unordered_map<std::string, std::string> curRow;
                 m_csvOutput.readCurrentRow(curRow);
                 bool  validation    = !(curRow[ResultKey::Validation] == "FAILED"
