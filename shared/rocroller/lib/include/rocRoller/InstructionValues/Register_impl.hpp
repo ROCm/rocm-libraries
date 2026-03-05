@@ -1050,28 +1050,38 @@ namespace rocRoller
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
-            , m_options(options)
             , m_valueCount(count)
         {
             AssertFatal(context != nullptr);
 
             setRegisterCount();
-            if(options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
+
+            setOptions(options);
+        }
+
+        inline void Allocation::setOptions(AllocationOptions opts)
+        {
+            m_options = opts;
+
+            if(m_options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
             {
                 m_options.contiguousChunkWidth = m_registerCount;
             }
-            else if(options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
+            else if(m_options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
             {
-                m_options.contiguousChunkWidth = CeilDivide<int>(variableType.getElementSize(), 4);
+                m_options.contiguousChunkWidth
+                    = CeilDivide<int>(m_variableType.getElementSize(), 4);
             }
 
-            if(options.alignment <= 0)
+            if(m_options.alignment <= 0)
             {
-                m_options.alignment = m_variableType.registerAlignment(
-                    m_regType, m_options.contiguousChunkWidth, context->targetArchitecture());
+                m_options.alignment
+                    = m_variableType.registerAlignment(m_regType,
+                                                       m_options.contiguousChunkWidth,
+                                                       m_context.lock()->targetArchitecture());
             }
 
-            if(options.contiguousChunkWidth != Register::MANUAL)
+            if(m_options.contiguousChunkWidth != Register::MANUAL)
             {
                 AssertFatal(m_options.alignment <= m_options.contiguousChunkWidth,
                             ShowValue(m_options),

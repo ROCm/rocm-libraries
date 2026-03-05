@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/tensor.hpp>
 
 #include <miopen/errors.hpp>
@@ -37,15 +15,17 @@
 #include <miopen/find_solution.hpp>
 #include <miopen/visit_float.hpp>
 
-#include <boost/range/combine.hpp>
-
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <tuple>
+#include <vector>
 
 namespace miopen {
 
@@ -970,19 +950,24 @@ TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc)
     std::vector<std::size_t> flat_lengths;
     std::vector<std::size_t> flat_strides;
 
-    auto non1_length_strides = boost::combine(desc.GetLengths(), desc.GetStrides()) |
-                               boost::adaptors::filtered(f_length_is_not_1_t());
+    const auto& length_      = desc.GetLengths();
+    const auto& strides_     = desc.GetStrides();
+    auto non1_length_strides = std::views::iota(std::size_t(0), length_.size()) |
+                               std::views::transform([&](std::size_t i) {
+                                   return std::make_tuple(length_[i], strides_[i]);
+                               }) |
+                               std::views::filter([](const auto& v) { return std::get<0>(v) > 1; });
 
     auto i               = non1_length_strides.begin();
-    std::size_t flat_len = boost::get<0>(*i);
+    std::size_t flat_len = std::get<0>(*i);
     auto i_previous      = i++;
 
     // the 0-th dimension full-length doesn't matter
     for(; i != non1_length_strides.end(); ++i)
     {
-        std::size_t len             = boost::get<0>(*i);
-        std::size_t stride          = boost::get<1>(*i);
-        std::size_t previous_stride = boost::get<1>(*i_previous);
+        std::size_t len             = std::get<0>(*i);
+        std::size_t stride          = std::get<1>(*i);
+        std::size_t previous_stride = std::get<1>(*i_previous);
         std::size_t full_len        = previous_stride / stride;
 
         if(len == full_len)
@@ -998,7 +983,7 @@ TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc)
         i_previous = i;
     }
     flat_lengths.push_back(flat_len);
-    flat_strides.push_back(boost::get<1>(*i_previous));
+    flat_strides.push_back(std::get<1>(*i_previous));
 
     return {desc.GetType(), flat_lengths, flat_strides};
 }
@@ -1890,10 +1875,9 @@ void TransformTensor(const Handle& handle,
     }
     else
     {
-        auto x_y_len          = boost::combine(x_len, y_len);
-        bool same_spatial_len = std::all_of(x_y_len.begin(), x_y_len.end(), [](auto v) {
-            return boost::get<0>(v) == boost::get<1>(v);
-        });
+        bool same_spatial_len =
+            std::ranges::all_of(std::views::iota(std::size_t(0), x_len.size()),
+                                [&](std::size_t i) { return x_len[i] == y_len[i]; });
 
         if(!same_spatial_len)
         {

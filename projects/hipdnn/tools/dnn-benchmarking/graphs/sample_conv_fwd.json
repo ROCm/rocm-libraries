@@ -1,0 +1,53 @@
+{
+    "name": "sample_conv_fwd_16x16x16x16_k16_3x3",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 0,
+            "name": "output_y",
+            "dims": [16, 16, 16, 16],
+            "strides": [4096, 256, 16, 1],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 1,
+            "name": "input_x",
+            "dims": [16, 16, 16, 16],
+            "strides": [4096, 256, 16, 1],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "weight",
+            "dims": [16, 16, 3, 3],
+            "strides": [144, 9, 3, 1],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "conv_fprop_node",
+            "type": "ConvolutionFwdAttributes",
+            "compute_data_type": "unset",
+            "inputs": {
+                "x_tensor_uid": 1,
+                "w_tensor_uid": 2
+            },
+            "outputs": {
+                "y_tensor_uid": 0
+            },
+            "parameters": {
+                "conv_mode": "CROSS_CORRELATION",
+                "pre_padding": [1, 1],
+                "post_padding": [1, 1],
+                "stride": [1, 1],
+                "dilation": [1, 1]
+            }
+        }
+    ]
+}

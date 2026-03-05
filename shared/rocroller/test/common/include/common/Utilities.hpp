@@ -21,6 +21,7 @@
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -78,6 +79,11 @@ auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
     using T = std::remove_cvref_t<decltype(init.front())>;
     return make_shared_device<T, T>(init, padding);
 }
+
+/**
+ * Return a new device array that contains the value stored in `arg`.
+ */
+std::shared_ptr<void> make_shared_device(rocRoller::CommandArgumentValue const& arg);
 
 template <typename T>
 double normL2(std::vector<T> a)
