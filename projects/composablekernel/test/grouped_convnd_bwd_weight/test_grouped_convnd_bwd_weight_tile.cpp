@@ -70,7 +70,7 @@ class TestGroupedConvndBwdWeightTile : public ::testing::Test
                 ckt::init_tensor_buffer_uniform_int(
                     inputs.get().input, args.make_input_descriptor(), -5, 5);
                 ckt::init_tensor_buffer_uniform_int(
-                    inputs.get().output, args.make_weight_descriptor(), -5, 5);
+                    inputs.get().output, args.make_output_descriptor(), -5, 5);
 
                 std::cout << args.make_input_descriptor() << std::endl;
                 std::cout << args.make_weight_descriptor() << std::endl;
