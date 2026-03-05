@@ -204,6 +204,7 @@ struct settings
     bool        output_batches          = false; ///< Flag to output batch details.
     uint32_t    spaces_per_indent       = 4; ///< JSON indentation spaces.
     double stream_blocking_timeout_secs = 10.0; ///< Max duration before stream blocking times out.
+    bool   skip_header                  = false; //< Skip printing the header to output.
 
     using custom_arg_value = std::variant<std::string, bool, double, int, unsigned int, size_t>;
     std::map<std::string, custom_arg_value>
@@ -3896,7 +3897,7 @@ private:
                                                m_index_column_width,
                                                specializations.size());
         }
-        else
+        else if(!m_settings.skip_header)
         {
             detail::progress::print_header(algorithm,
                                            m_specialization_column_width,
