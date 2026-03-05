@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <optional>
 #include <miopen/env.hpp>
+#include <miopen/stringutils.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
@@ -185,21 +186,21 @@ struct CKArgs
         }
 
         filter_strides   = {ProblemInterpreter::GetAdjustedConvolutionStrideD(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                            ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
+                            ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
         filter_dilations = {ProblemInterpreter::GetAdjustedConvolutionDilationD(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
         lPadding         = {ProblemInterpreter::GetInputLeftPadD(problem),
-                    ProblemInterpreter::GetInputLeftPadH(problem),
-                    ProblemInterpreter::GetInputLeftPadW(problem)};
+                            ProblemInterpreter::GetInputLeftPadH(problem),
+                            ProblemInterpreter::GetInputLeftPadW(problem)};
         rPadding         = {ProblemInterpreter::GetAdjustedInputRightPadD(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                            ProblemInterpreter::GetAdjustedInputRightPadH(problem),
+                            ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
 
-    CKArgs(const CKArgs&)     = default;
-    CKArgs(CKArgs&&) noexcept = default;
+    CKArgs(const CKArgs&)            = default;
+    CKArgs(CKArgs&&) noexcept        = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>
@@ -656,8 +657,13 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
 
     // 3. AI heuristics (if enabled)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    // Skip AI heuristics for RDNA architectures (gfx11x, gfx12x) - models not available
+    const std::string& device_name = ctx.GetStream().GetDeviceName();
+    const bool is_rdna =
+        miopen::StartsWith(device_name, "gfx11") || miopen::StartsWith(device_name, "gfx12");
+
     if(&ctx != &GetDummyCtx() &&
-       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
+       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR) && !is_rdna)
     {
         MIOPEN_LOG_I2(
             "Step 3: Attempting AI heuristics for data type: " << problem.GetInDataType());
@@ -734,6 +740,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
             MIOPEN_LOG_I2("Step 3: AI heuristics failed, proceeding to default initialization");
             // Continue to default initialization
         }
+    }
+    else if(is_rdna)
+    {
+        MIOPEN_LOG_I2("Step 3: AI heuristics skipped (not supported for RDNA architecture: "
+                      << device_name << ")");
     }
     else
     {
