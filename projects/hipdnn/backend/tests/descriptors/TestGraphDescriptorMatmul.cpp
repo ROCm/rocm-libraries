@@ -38,12 +38,9 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<MatmulOperationDescriptor>();
     auto desc = wrapper->asDescriptor<MatmulOperationDescriptor>();
 
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &aDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &bDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &cDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &aDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &bDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &cDesc);
     desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     desc->finalize();

@@ -39,28 +39,36 @@ public:
         return _wrapper->asDescriptor<MatmulOperationDescriptor>();
     }
 
-    void setAllAttributesExcept(
-        std::initializer_list<hipdnnBackendAttributeName_t> exclusions = {}) const
+    void setAllAttributesExcept(std::initializer_list<hipdnnBackendAttributeName_t> exclusions
+                                = {}) const
     {
         auto desc = getDescriptor();
         auto shouldSet = [&](hipdnnBackendAttributeName_t attr) {
             for(auto ex : exclusions)
             {
                 if(ex == attr)
+                {
                     return false;
+                }
             }
             return true;
         };
 
         if(shouldSet(HIPDNN_ATTR_OPERATION_MATMUL_A))
+        {
             desc->setAttribute(
                 HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc);
+        }
         if(shouldSet(HIPDNN_ATTR_OPERATION_MATMUL_B))
+        {
             desc->setAttribute(
                 HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_bDesc);
+        }
         if(shouldSet(HIPDNN_ATTR_OPERATION_MATMUL_C))
+        {
             desc->setAttribute(
                 HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_cDesc);
+        }
         if(shouldSet(HIPDNN_ATTR_MATMUL_COMP_TYPE))
         {
             auto computeType = HIPDNN_DATA_FLOAT;

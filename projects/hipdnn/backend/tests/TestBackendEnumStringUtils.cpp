@@ -47,9 +47,8 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(
                      HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR),
                  "HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR");
-    EXPECT_STREQ(
-        hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR),
-        "HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR");
+    EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR),
+                 "HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
