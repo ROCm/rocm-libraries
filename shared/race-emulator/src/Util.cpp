@@ -11,6 +11,15 @@
 #include <string_view>
 #include <vector>
 
+// PEEPHOLE BUG 1: gcc -Wmaybe-uninitialized (gcc-specific, clang doesn't warn)
+static int bugForGcc(int x) {
+  int result;
+  if (x > 0)
+    result = x * 2;
+  return result;
+}
+[[maybe_unused]] static int bugForGccUser = bugForGcc(1);
+
 namespace raceemulator {
 
 // split line into tokens based on whitespace and commas.

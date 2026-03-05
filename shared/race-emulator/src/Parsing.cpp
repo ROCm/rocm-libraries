@@ -12,6 +12,13 @@
 #include <string_view>
 #include <vector>
 
+// PEEPHOLE BUG 4: clang-analyzer-deadcode.DeadStores (caught by clang-tidy only)
+[[maybe_unused]] static int bugForClangTidy(int x) {
+  int result = x * 2;
+  result = x * 3; // dead store: first assignment is never read
+  return result;
+}
+
 namespace raceemulator {
 
 namespace {

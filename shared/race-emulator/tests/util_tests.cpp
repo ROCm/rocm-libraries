@@ -1,9 +1,27 @@
 #include "race-emulator/Util.h"
 #include <cstring>
 #include <gtest/gtest.h>
+#include <limits>
 #include <string>
 
 using namespace raceemulator;
+
+// PEEPHOLE BUG 3: signed integer overflow (caught by UBSAN only)
+TEST(UtilTests, PeepholeBugUbsan) {
+  int x = std::numeric_limits<int>::max();
+  x += 1; // undefined behavior: signed overflow
+  EXPECT_NE(x, 0);
+}
+
+// PEEPHOLE BUG 2: heap-buffer-overflow (caught by ASAN only)
+TEST(UtilTests, PeepholeBugAsan) {
+  int size = 4;
+  int *p = new int[size];
+  for (int i = 0; i <= size; i++) // off-by-one: writes p[4]
+    p[i] = i;
+  EXPECT_EQ(p[0], 0);
+  delete[] p;
+}
 
 TEST(UtilTests, SymbolArithmeticTest0) {
   const std::map<std::string, uint32_t> table = {{"present", 4}};
