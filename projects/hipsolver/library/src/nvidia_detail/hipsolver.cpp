@@ -2287,12 +2287,22 @@ try
     cublasCreate(&cublas_handle);
     cublasSetStream(cublas_handle, stream);
 
+    int hInfo = 0;
+
     auto status = hipsolver::cuda2hip_status(
-        cublasSgeqrfBatched(cublas_handle, m, n, A, lda, tauArray, devInfo, batch_count));
+        cublasSgeqrfBatched(cublas_handle, m, n, A, lda, tauArray, &hInfo, batch_count));
 
     cublasDestroy(cublas_handle);
 
     CHECK_HIP_ERROR(hipFree(tauArray));
+
+    if(status == HIPSOLVER_STATUS_SUCCESS)
+    {
+        CHECK_HIP_ERROR(hipMemset(devInfo, 0, batch_count * sizeof(int)));
+        if(hInfo < 0)
+            CHECK_HIP_ERROR(
+                hipMemcpy(devInfo + (-hInfo - 1), &hInfo, sizeof(int), hipMemcpyHostToDevice));
+    }
 
     return status;
 }
@@ -2336,12 +2346,22 @@ try
     cublasCreate(&cublas_handle);
     cublasSetStream(cublas_handle, stream);
 
+    int hInfo = 0;
+
     auto status = hipsolver::cuda2hip_status(
-        cublasDgeqrfBatched(cublas_handle, m, n, A, lda, tauArray, devInfo, batch_count));
+        cublasDgeqrfBatched(cublas_handle, m, n, A, lda, tauArray, &hInfo, batch_count));
 
     cublasDestroy(cublas_handle);
 
     CHECK_HIP_ERROR(hipFree(tauArray));
+
+    if(status == HIPSOLVER_STATUS_SUCCESS)
+    {
+        CHECK_HIP_ERROR(hipMemset(devInfo, 0, batch_count * sizeof(int)));
+        if(hInfo < 0)
+            CHECK_HIP_ERROR(
+                hipMemcpy(devInfo + (-hInfo - 1), &hInfo, sizeof(int), hipMemcpyHostToDevice));
+    }
 
     return status;
 }
@@ -2385,12 +2405,22 @@ try
     cublasCreate(&cublas_handle);
     cublasSetStream(cublas_handle, stream);
 
+    int hInfo = 0;
+
     auto status = hipsolver::cuda2hip_status(cublasCgeqrfBatched(
-        cublas_handle, m, n, (cuComplex**)A, lda, tauArray, devInfo, batch_count));
+        cublas_handle, m, n, (cuComplex**)A, lda, tauArray, &hInfo, batch_count));
 
     cublasDestroy(cublas_handle);
 
     CHECK_HIP_ERROR(hipFree(tauArray));
+
+    if(status == HIPSOLVER_STATUS_SUCCESS)
+    {
+        CHECK_HIP_ERROR(hipMemset(devInfo, 0, batch_count * sizeof(int)));
+        if(hInfo < 0)
+            CHECK_HIP_ERROR(
+                hipMemcpy(devInfo + (-hInfo - 1), &hInfo, sizeof(int), hipMemcpyHostToDevice));
+    }
 
     return status;
 }
@@ -2436,12 +2466,22 @@ try
     cublasCreate(&cublas_handle);
     cublasSetStream(cublas_handle, stream);
 
+    int hInfo = 0;
+
     auto status = hipsolver::cuda2hip_status(cublasZgeqrfBatched(
-        cublas_handle, m, n, (cuDoubleComplex**)A, lda, tauArray, devInfo, batch_count));
+        cublas_handle, m, n, (cuDoubleComplex**)A, lda, tauArray, &hInfo, batch_count));
 
     cublasDestroy(cublas_handle);
 
     CHECK_HIP_ERROR(hipFree(tauArray));
+
+    if(status == HIPSOLVER_STATUS_SUCCESS)
+    {
+        CHECK_HIP_ERROR(hipMemset(devInfo, 0, batch_count * sizeof(int)));
+        if(hInfo < 0)
+            CHECK_HIP_ERROR(
+                hipMemcpy(devInfo + (-hInfo - 1), &hInfo, sizeof(int), hipMemcpyHostToDevice));
+    }
 
     return status;
 }
