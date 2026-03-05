@@ -92,4 +92,34 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
     }
 }
 
+hipdnn_data_sdk::data_objects::ConvMode toSdkConvMode(hipdnnConvolutionMode_t mode)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+
+    switch(mode)
+    {
+    case HIPDNN_CONVOLUTION_MODE_CONVOLUTION:
+        return ConvMode::CONVOLUTION;
+    case HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION:
+        return ConvMode::CROSS_CORRELATION;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported hipdnnConvolutionMode_t value");
+    }
+}
+
+hipdnnConvolutionMode_t fromSdkConvMode(hipdnn_data_sdk::data_objects::ConvMode mode)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+
+    switch(mode)
+    {
+    case ConvMode::CONVOLUTION:
+        return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    case ConvMode::CROSS_CORRELATION:
+        return HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK ConvMode value");
+    }
+}
+
 } // namespace hipdnn_backend

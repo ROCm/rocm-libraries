@@ -8,6 +8,7 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnBackendFlatbufferData.h"
 #include "HipdnnException.hpp"
+#include "KnobSettingDescriptor.hpp"
 #include "handle/Handle.hpp"
 
 #include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
@@ -153,8 +154,10 @@ void EngineConfigDescriptor::setAttribute(hipdnnBackendAttributeName_t attribute
     case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT:
         setKnobChoice(attributeType, elementCount, arrayOfElements);
         break;
-    case HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO:
     case HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES:
+        setKnobSettingDescriptor(attributeType, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO:
     case HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE:
     default:
         throw HipdnnException(
@@ -273,6 +276,51 @@ void EngineConfigDescriptor::setKnobChoice(hipdnnBackendAttributeType_t attribut
         // Convert to KnobSettingT and add to the engine config data
         auto knobSettingT = wrapper.toKnobSettingT();
         _engineConfigData->knobs.push_back(std::move(knobSettingT));
+    }
+}
+
+void EngineConfigDescriptor::setKnobSettingDescriptor(hipdnnBackendAttributeType_t attributeType,
+                                                      int64_t elementCount,
+                                                      const void* arrayOfElements)
+{
+    THROW_IF_NE(attributeType,
+                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                HIPDNN_STATUS_BAD_PARAM,
+                "EngineConfigDescriptor failed to set knob choices: Invalid attribute type.");
+
+    THROW_IF_LT(elementCount,
+                1,
+                HIPDNN_STATUS_BAD_PARAM,
+                "EngineConfigDescriptor failed to set knob choices: Element count must be > 0.");
+
+    THROW_IF_TRUE(elementCount > MAX_KNOB_CHOICES,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "EngineConfigDescriptor failed to set knob choices: "
+                  "Element count exceeds MAX_KNOB_CHOICES ("
+                      + std::to_string(MAX_KNOB_CHOICES) + ").");
+
+    THROW_IF_NULL(arrayOfElements,
+                  HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                  "EngineConfigDescriptor failed to set knob choices: Null pointer.");
+
+    auto* descriptorArray = static_cast<HipdnnBackendDescriptor* const*>(arrayOfElements);
+
+    for(int64_t i = 0; i < elementCount; ++i)
+    {
+        auto knobDesc = HipdnnBackendDescriptor::unpackDescriptor<const KnobSettingDescriptor>(
+            descriptorArray[i],
+            HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+            "EngineConfigDescriptor failed to set knob choices: "
+            "Knob setting descriptor at index "
+                + std::to_string(i) + " is null.");
+
+        THROW_IF_FALSE(knobDesc->isFinalized(),
+                       HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
+                       "EngineConfigDescriptor failed to set knob choices: "
+                       "Knob setting descriptor at index "
+                           + std::to_string(i) + " is not finalized.");
+
+        _engineConfigData->knobs.push_back(knobDesc->toKnobSettingT());
     }
 }
 

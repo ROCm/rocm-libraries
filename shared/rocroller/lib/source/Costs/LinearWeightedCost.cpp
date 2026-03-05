@@ -328,11 +328,13 @@ namespace rocRoller
                 lgkmcnt    = 1 + maxLgkmcnt - cnt;
             }
 
-            int vmQueueLen = status.waitLengths.at(GPUWaitQueueType::LoadQueue)
-                             + status.waitLengths.at(GPUWaitQueueType::StoreQueue);
+            int vmQueueLen
+                = status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::LoadQueue))
+                  + status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::StoreQueue));
             float vectorQueueSat = std::max(vmQueueLen - m_weights.vmQueueLen, 0);
-            int   kmQueueLen     = status.waitLengths.at(GPUWaitQueueType::SMemQueue)
-                             + status.waitLengths.at(GPUWaitQueueType::DSQueue);
+            int   kmQueueLen
+                = status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::SMemQueue))
+                  + status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::DSQueue));
             float ldsQueueSat = std::max(kmQueueLen - m_weights.lgkmQueueLen, 0);
 
             float newSGPRs = status.allocatedRegisters.at(Register::Type::Scalar);

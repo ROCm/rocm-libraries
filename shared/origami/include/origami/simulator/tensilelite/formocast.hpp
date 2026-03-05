@@ -278,9 +278,10 @@ namespace origami
          * @param bpRead Bytes per read operation
          * @param numWaves Number of waves
          * @param isStall Whether the pipeline is stalled
+         * @param isSgprOffset Whether the SGPR offset is used
          * @return Stall cycles if FIFO is full, currentCycle otherwise
          */
-        int getGlobalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves, bool isStall);
+        int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead, int numWaves, bool isStall, bool isSgprOffset);
         
         /**
          * @brief Get the cycle when local read operations complete
