@@ -326,6 +326,12 @@ switch branches or merge changes in Git to ensure any large binaries are kept in
 
 ## Installing the dependencies manually
 
+If you're using Ubuntu, you can install the `BZip2` packages using:
+
+.. code:: shell
+
+   sudo apt-get install libbz2-dev
+
 You must install the `half` header from the [half website](http://half.sourceforge.net/).
 
 ## Using Docker
