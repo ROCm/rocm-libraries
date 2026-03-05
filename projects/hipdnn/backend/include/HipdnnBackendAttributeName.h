@@ -34,7 +34,12 @@
  * - 1000-1099: Engine attributes
  * - 1100-1199: Kernel cache attributes
  * - 1200-1299: Device properties attributes
+ * - 1300-1399: Tensor attributes
+ * - 1400-1499: Convolution forward operation attributes
+ * - 1500-1599: Shared convolution descriptor attributes
+ * - 1600-1699: Convolution backward filter operation attributes
  * - 1700-1799: Convolution backward data operation attributes
+ * - 1800-1899: Batchnorm inference operation attributes
  * - 1900-1999: Pointwise operation attributes
  * - 2000-2099: Shared pointwise descriptor attributes
  * - 60000+: Extension attributes
@@ -450,9 +455,6 @@ typedef enum
     /** @brief Tertiary input tensor for pointwise operation (ternary) */
     HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT = 1903,
 
-    /** @brief Axis tensor for pointwise operation */
-    HIPDNN_ATTR_OPERATION_POINTWISE_AXIS = 1904,
-
     /** @} */
 
     /**
@@ -485,6 +487,9 @@ typedef enum
 
     /** @brief Compute data type for pointwise operation */
     HIPDNN_ATTR_POINTWISE_MATH_PREC = 2007,
+
+    /** @brief Axis index for pointwise operation */
+    HIPDNN_ATTR_POINTWISE_AXIS = 2008,
 
     /** @} */
 

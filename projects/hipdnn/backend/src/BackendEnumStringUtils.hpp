@@ -370,8 +370,6 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT";
     case HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT:
         return "HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT";
-    case HIPDNN_ATTR_OPERATION_POINTWISE_AXIS:
-        return "HIPDNN_ATTR_OPERATION_POINTWISE_AXIS";
 
     // Shared pointwise descriptor attributes
     case HIPDNN_ATTR_POINTWISE_MODE:
@@ -390,6 +388,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA";
     case HIPDNN_ATTR_POINTWISE_MATH_PREC:
         return "HIPDNN_ATTR_POINTWISE_MATH_PREC";
+    case HIPDNN_ATTR_POINTWISE_AXIS:
+        return "HIPDNN_ATTR_POINTWISE_AXIS";
 
     // Convolution backward operation attributes
     case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY:

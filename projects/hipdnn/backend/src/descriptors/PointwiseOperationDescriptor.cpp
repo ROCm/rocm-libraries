@@ -61,24 +61,22 @@ void PointwiseOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                             "PointwiseOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT:
-        setTensorDescriptor(_in1Desc,
-                            _in1Uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "PointwiseOperationDescriptor::setAttribute()");
-        _data.in_1_tensor_uid = _in1Uid;
+        setOptionalTensorDescriptor(_in1Desc,
+                                    _data.in_1_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "PointwiseOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT:
-        setTensorDescriptor(_in2Desc,
-                            _in2Uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "PointwiseOperationDescriptor::setAttribute()");
-        _data.in_2_tensor_uid = _in2Uid;
+        setOptionalTensorDescriptor(_in2Desc,
+                                    _data.in_2_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "PointwiseOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_POINTWISE_AXIS:
+    case HIPDNN_ATTR_POINTWISE_AXIS:
         setOptionalInt64(_data.axis_tensor_uid,
                          attributeType,
                          elementCount,
@@ -181,44 +179,22 @@ void PointwiseOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                             "PointwiseOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT:
-        if(!_in1Desc)
-        {
-            checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                         attributeType,
-                         "PointwiseOperationDescriptor::getAttribute()");
-            if(elementCount != nullptr)
-            {
-                *elementCount = 0;
-            }
-            break;
-        }
-        getTensorDescriptor(_in1Desc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "PointwiseOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_in1Desc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "PointwiseOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT:
-        if(!_in2Desc)
-        {
-            checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                         attributeType,
-                         "PointwiseOperationDescriptor::getAttribute()");
-            if(elementCount != nullptr)
-            {
-                *elementCount = 0;
-            }
-            break;
-        }
-        getTensorDescriptor(_in2Desc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "PointwiseOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_in2Desc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "PointwiseOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_POINTWISE_AXIS:
+    case HIPDNN_ATTR_POINTWISE_AXIS:
         getOptionalInt64(_data.axis_tensor_uid,
                          attributeType,
                          requestedElementCount,
@@ -340,8 +316,7 @@ std::string PointwiseOperationDescriptor::toString() const
            + (_data.in_1_tensor_uid ? std::to_string(*_data.in_1_tensor_uid) : "nullopt");
     str += ", in_2_uid="
            + (_data.in_2_tensor_uid ? std::to_string(*_data.in_2_tensor_uid) : "nullopt");
-    str += ", axis_uid="
-           + (_data.axis_tensor_uid ? std::to_string(*_data.axis_tensor_uid) : "nullopt");
+    str += ", axis=" + (_data.axis_tensor_uid ? std::to_string(*_data.axis_tensor_uid) : "nullopt");
     str += ", operation=";
     str += hipdnn_data_sdk::data_objects::EnumNamePointwiseMode(_data.operation);
     str += ", relu_lower_clip="

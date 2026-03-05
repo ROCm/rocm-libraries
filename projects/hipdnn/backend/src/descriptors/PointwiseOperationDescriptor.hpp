@@ -76,10 +76,6 @@ private:
     std::shared_ptr<TensorDescriptor> _in1Desc;
     std::shared_ptr<TensorDescriptor> _in2Desc;
 
-    // Intermediate storage for optional tensor UIDs (setTensorDescriptor requires int64_t&)
-    int64_t _in1Uid = 0;
-    int64_t _in2Uid = 0;
-
     // Compute data type for this operation (stored at node level in graph)
     hipdnn_data_sdk::data_objects::DataType _computeDataType
         = hipdnn_data_sdk::data_objects::DataType::UNSET;

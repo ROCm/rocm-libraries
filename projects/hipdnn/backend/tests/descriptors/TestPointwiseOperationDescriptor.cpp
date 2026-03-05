@@ -224,7 +224,7 @@ TEST_F(TestPointwiseOperationDescriptor, SetAxisAsInt64)
     auto desc = getDescriptor();
     int64_t axisValue = 2;
     ASSERT_NO_THROW(
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue));
+        desc->setAttribute(HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue));
 
     ASSERT_EQ(desc->getData().axis_tensor_uid, 2);
 }
@@ -234,13 +234,13 @@ TEST_F(TestPointwiseOperationDescriptor, GetAxisAsInt64)
     setRequiredAttributes();
     auto desc = getDescriptor();
     int64_t axisValue = 3;
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue);
+    desc->setAttribute(HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue);
     desc->finalize();
 
     int64_t retrieved = 0;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &elementCount, &retrieved));
+        HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &elementCount, &retrieved));
     ASSERT_EQ(elementCount, 1);
     ASSERT_EQ(retrieved, 3);
 }
@@ -507,21 +507,20 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeAxisQueryReturnsZeroWhenUns
 
     int64_t elementCount = -1;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 0);
 }
 
 TEST_F(TestPointwiseOperationDescriptor, GetAttributeAxisQueryReturnsOneWhenSet)
 {
     int64_t axisValue = 3;
-    getDescriptor()->setAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue);
+    getDescriptor()->setAttribute(HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 1, &axisValue);
     makeFinalized();
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_POINTWISE_AXIS, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -586,7 +585,7 @@ TEST_F(TestPointwiseOperationDescriptor, ToStringContainsExpectedInfo)
     ASSERT_NE(str.find("out_0_uid=41"), std::string::npos);
     ASSERT_NE(str.find("in_1_uid=3"), std::string::npos);
     ASSERT_NE(str.find("in_2_uid=4"), std::string::npos);
-    ASSERT_NE(str.find("axis_uid=nullopt"), std::string::npos);
+    ASSERT_NE(str.find("axis=nullopt"), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 

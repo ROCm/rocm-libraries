@@ -125,115 +125,31 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
                       void* arrayOfElements,
                       const char* errorPrefix);
 
-inline void setOptionalFloat(flatbuffers::Optional<float>& target,
-                             hipdnnBackendAttributeType_t attributeType,
-                             int64_t elementCount,
-                             const void* arrayOfElements,
-                             const char* context)
-{
-    checkSetArgs(HIPDNN_TYPE_FLOAT, attributeType, arrayOfElements, context);
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(context) + ": expected elementCount=1, got "
-                       + std::to_string(elementCount));
-    float value = 0.0F;
-    std::memcpy(&value, arrayOfElements, sizeof(float));
-    target = value;
-}
+void setOptionalFloat(flatbuffers::Optional<float>& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* context);
 
-inline void getOptionalFloat(const flatbuffers::Optional<float>& source,
-                             hipdnnBackendAttributeType_t attributeType,
-                             int64_t requestedCount,
-                             int64_t* elementCount,
-                             void* arrayOfElements,
-                             const char* context)
-{
-    checkGetArgs(HIPDNN_TYPE_FLOAT, attributeType, context);
+void getOptionalFloat(const flatbuffers::Optional<float>& source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* context);
 
-    if(!source.has_value())
-    {
-        if(elementCount != nullptr)
-        {
-            *elementCount = 0;
-        }
-        return;
-    }
+void setOptionalInt64(flatbuffers::Optional<int64_t>& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* context);
 
-    if(arrayOfElements == nullptr || requestedCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      std::string(context) + ": elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(context) + ": requestedElementCount < 1");
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
-    }
-    auto value = source.value();
-    std::memcpy(arrayOfElements, &value, sizeof(float));
-}
-
-inline void setOptionalInt64(flatbuffers::Optional<int64_t>& target,
-                             hipdnnBackendAttributeType_t attributeType,
-                             int64_t elementCount,
-                             const void* arrayOfElements,
-                             const char* context)
-{
-    checkSetArgs(HIPDNN_TYPE_INT64, attributeType, arrayOfElements, context);
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(context) + ": expected elementCount=1, got "
-                       + std::to_string(elementCount));
-    int64_t value = 0;
-    std::memcpy(&value, arrayOfElements, sizeof(int64_t));
-    target = value;
-}
-
-inline void getOptionalInt64(const flatbuffers::Optional<int64_t>& source,
-                             hipdnnBackendAttributeType_t attributeType,
-                             int64_t requestedCount,
-                             int64_t* elementCount,
-                             void* arrayOfElements,
-                             const char* context)
-{
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, context);
-
-    if(!source.has_value())
-    {
-        if(elementCount != nullptr)
-        {
-            *elementCount = 0;
-        }
-        return;
-    }
-
-    if(arrayOfElements == nullptr || requestedCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      std::string(context) + ": elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(context) + ": requestedElementCount < 1");
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
-    }
-    auto value = source.value();
-    std::memcpy(arrayOfElements, &value, sizeof(int64_t));
-}
+void getOptionalInt64(const flatbuffers::Optional<int64_t>& source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* context);
 
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                          int64_t& uidTarget,
@@ -248,5 +164,19 @@ void getTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
                          int64_t* elementCount,
                          void* arrayOfElements,
                          const char* errorPrefix);
+
+void setOptionalTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
+                                 flatbuffers::Optional<int64_t>& uidTarget,
+                                 hipdnnBackendAttributeType_t attributeType,
+                                 int64_t elementCount,
+                                 const void* arrayOfElements,
+                                 const char* errorPrefix);
+
+void getOptionalTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
+                                 hipdnnBackendAttributeType_t attributeType,
+                                 int64_t requestedElementCount,
+                                 int64_t* elementCount,
+                                 void* arrayOfElements,
+                                 const char* errorPrefix);
 
 } // namespace hipdnn_backend

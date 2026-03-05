@@ -253,9 +253,6 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT),
                  "HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT");
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_POINTWISE_AXIS),
-                 "HIPDNN_ATTR_OPERATION_POINTWISE_AXIS");
-
     // Shared pointwise descriptor attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_POINTWISE_MODE),
                  "HIPDNN_ATTR_POINTWISE_MODE");
@@ -273,6 +270,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_POINTWISE_MATH_PREC),
                  "HIPDNN_ATTR_POINTWISE_MATH_PREC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_POINTWISE_AXIS),
+                 "HIPDNN_ATTR_POINTWISE_AXIS");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY),
                  "HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY");
@@ -416,6 +415,11 @@ TEST(TestBackendEnumStringUtils, GetPointwiseModeString)
                  "HIPDNN_POINTWISE_RELU_FWD");
     EXPECT_STREQ(hipdnnGetPointwiseModeString(HIPDNN_POINTWISE_TANH_FWD),
                  "HIPDNN_POINTWISE_TANH_FWD");
+    EXPECT_STREQ(hipdnnGetPointwiseModeString(HIPDNN_POINTWISE_CMP_GE), "HIPDNN_POINTWISE_CMP_GE");
+    EXPECT_STREQ(hipdnnGetPointwiseModeString(HIPDNN_POINTWISE_GELU_BWD),
+                 "HIPDNN_POINTWISE_GELU_BWD");
+    EXPECT_STREQ(hipdnnGetPointwiseModeString(HIPDNN_POINTWISE_LOGICAL_AND),
+                 "HIPDNN_POINTWISE_LOGICAL_AND");
 
     EXPECT_STREQ(hipdnnGetPointwiseModeString(static_cast<hipdnnPointwiseMode_t>(-1)),
                  "HIPDNN_POINTWISE_UNKNOWN");
