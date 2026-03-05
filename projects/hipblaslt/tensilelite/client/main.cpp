@@ -372,9 +372,7 @@ namespace TensileLite
                 ("rotating-buffer-mode",      po::value<int32_t>()->default_value(0), "Rotating mode.")
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
                 ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
-#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
                 ("rocprof-counter",           vector_default_empty<std::string>(), "Rocprof counters.")
-#endif
                 ;
             // clang-format on
 
@@ -596,6 +594,12 @@ namespace TensileLite
                 }
             }
 
+#if !(TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
+            if(args["rocprof-counter"].as<std::vector<std::string>>().size())
+            {
+                throw std::runtime_error("rocprof-counter is provided but client is not built with -DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK.");
+            }
+#endif
             fix_data_types(args);
 
             parse_arg_ints(args, "problem-size");
@@ -651,10 +655,16 @@ int main(int argc, const char* argv[])
     }
 
     TensileLite::hip::SolutionAdapter adapter;
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+    RocProfiler::getInstance().start();
+#endif
     {
         ScopedTimer timer("code_object_loading");
         LoadCodeObjects(args, adapter);
     }
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+    RocProfiler::getInstance().stop();
+#endif
 
     auto filename = args["library-file"].as<std::string>();
 
@@ -895,8 +905,8 @@ int main(int argc, const char* argv[])
                                 }
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
-                                TimingEvents ProfilerStartEvents(1, 1);
-                                TimingEvents ProfilerStopEvents(1, 1);
+                                TimingEvents ProfilerStartEvents(1, warmupEventCount);
+                                TimingEvents ProfilerStopEvents(1, warmupEventCount);
                                 listeners.preProfiler();
                                 HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
                                                                     stream,

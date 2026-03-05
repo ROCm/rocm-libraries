@@ -34,7 +34,6 @@ namespace TensileLite
         public:
             struct ProfileInfo {
                 uint64_t kernel_id;
-                double execution_time_us;
                 std::unordered_map<uint64_t, std::variant<double, std::vector<double>>> counters;
             };
 
@@ -116,6 +115,7 @@ namespace TensileLite
             }
         private:
             int m_currentSolutionIdx = 0;
+            uint64_t m_currentKernelId = 0;
             bool m_currentDone = false;
             std::set<std::string> m_counterNames;
             std::unordered_map<int, uint64_t> m_solutionIdx2DispatchId;
@@ -151,7 +151,7 @@ namespace TensileLite
             RocProfiler& operator=(const RocProfiler&) = delete;
 
             // Initialize profiler with desired counters
-            bool initialize(int deviceIdx, const std::vector<std::string>& counter_names, Profiler* profiler);
+            bool initialize(int deviceIdx, Profiler* profiler);
 
             // Query GPU agents
             void queryAgents(int deviceIdx);
@@ -170,6 +170,9 @@ namespace TensileLite
                 m_promise = std::promise<void>();
                 m_future = m_promise.get_future();
             }
+
+            // get kernel id of given kernel name
+            uint64_t getKernelId(std::string kernelName);
 
             // Disable rocprof
             void disable() { m_do = false; }
@@ -198,9 +201,16 @@ namespace TensileLite
             std::unordered_map<uint64_t, CounterInfo> m_counterInfos;
             Profiler* m_profiler;
             std::unordered_map<std::string, rocprofiler_counter_id_t> m_counterName2Id;
+            std::unordered_map<std::string, uint64_t> m_kernelName2Id;
 
             // Tool initialization callback
             static int tool_init_impl(rocprofiler_client_finalize_t fini_func, void* tool_data);
+
+            // Tracing callback - configured to record kernel id and name during loading
+            static void kernelLoadingCallback(
+                                              rocprofiler_callback_tracing_record_t record,
+                                              rocprofiler_user_data_t *user_data,
+                                              void *callback_data);
 
             // Dispatch callback - called for each kernel dispatch
             static void dispatchCallback(

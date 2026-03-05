@@ -19,8 +19,8 @@ namespace TensileLite
         Profiler::Profiler(int deviceIdx, std::vector<std::string> counters)
         {
             m_counterNames = std::set<std::string>(counters.begin(), counters.end());
-            auto& rocprof = TensileLite::Client::RocProfiler::getInstance();
-            rocprof.initialize(deviceIdx, counters, this);
+            auto& rocprof = RocProfiler::getInstance();
+            rocprof.initialize(deviceIdx, this);
             rocprof.start();
         }
 
@@ -32,6 +32,8 @@ namespace TensileLite
         void Profiler::preSolution(ContractionSolution* const solution)
         {
             m_currentSolutionIdx = solution->index;
+            auto& rocprof = RocProfiler::getInstance();
+            m_currentKernelId = rocprof.getKernelId(solution->kernelName);
             m_currentDone = false;
         }
 
@@ -39,7 +41,7 @@ namespace TensileLite
         {
             if (m_currentDone)
             {
-                auto counters = TensileLite::Client::RocProfiler::getInstance().fetch(m_currentSolutionIdx);
+                auto counters = RocProfiler::getInstance().fetch(m_currentSolutionIdx);
                 m_reporter->report(ResultKey::RocProfCounter, counters);
             }
             else
@@ -51,12 +53,12 @@ namespace TensileLite
         void Profiler::preProfiler()
         {
             if (!m_currentDone)
-                TensileLite::Client::RocProfiler::getInstance().enable();
+                RocProfiler::getInstance().enable();
         }
 
         void Profiler::postProfiler()
         {
-            TensileLite::Client::RocProfiler::getInstance().disable();
+            RocProfiler::getInstance().disable();
             m_currentDone = true;
         }
 

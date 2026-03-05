@@ -13,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <iostream>
+#include <regex>
 
 #include "Profiler.hpp"
 
@@ -83,7 +84,7 @@ namespace TensileLite
             }
         }
 
-        bool RocProfiler::initialize(int deviceIdx, const std::vector<std::string>& counter_names, Profiler* profiler) {
+        bool RocProfiler::initialize(int deviceIdx, Profiler* profiler) {
             if (m_initialized) return true;
             std::lock_guard<std::mutex> lock(m_mutex);
             m_profiler = profiler;
@@ -255,6 +256,13 @@ namespace TensileLite
             return ss.str();
         }
 
+        uint64_t RocProfiler::getKernelId(std::string kernelName) {
+            auto it = m_kernelName2Id.find(kernelName);
+            if (it == m_kernelName2Id.end())
+                throw std::runtime_error("kernel id not found: " + kernelName);
+            return it->second;
+        }
+
         void RocProfiler::shutdown() {
             if (m_initialized) {
                 stop();
@@ -271,6 +279,15 @@ namespace TensileLite
             if (!ROCPROFILER_CHECK(rocprofiler_create_context(&rocprofiler->m_context), "Failed to create context in tool_init"))
                 return -1;
 
+            // configure tracing service for kernel loading
+            rocprofiler_tracing_operation_t operation = ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+            if (!ROCPROFILER_CHECK(rocprofiler_configure_callback_tracing_service(rocprofiler->m_context,
+                                                                                  ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+                                                                                  &operation, 1,
+                                                                                  RocProfiler::kernelLoadingCallback, tool_data),
+                                   "Failed to configure callback tracing service"))
+                return -1;
+
             // configure dispatch counting service
             if (!ROCPROFILER_CHECK(rocprofiler_configure_callback_dispatch_counting_service(rocprofiler->m_context,
                                                                                             RocProfiler::dispatchCallback, tool_data,
@@ -281,15 +298,27 @@ namespace TensileLite
             return 0;
         }
 
-        void RocProfiler::dispatchCallback(
-                              rocprofiler_dispatch_counting_service_data_t dispatch_data,
-                              rocprofiler_counter_config_id_t* config,
-                              rocprofiler_user_data_t* user_data,
-                              void* callback_data)
+        void RocProfiler::kernelLoadingCallback(rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t *user_data, void *callback_data)
         {
             auto* rocprofiler = static_cast<RocProfiler*>(callback_data);
             std::lock_guard<std::mutex> lock(rocprofiler->m_mutex);
-            if (rocprofiler->m_do) {
+            if (record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD &&
+                record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+                record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER) {
+                auto* kernelinfo = static_cast<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t*>(record.payload);
+                std::string kernel_name = std::regex_replace(kernelinfo->kernel_name, std::regex{"(\\.kd)$"}, "");
+                rocprofiler->m_kernelName2Id.emplace(std::move(kernel_name), kernelinfo->kernel_id);
+            }
+        }
+
+        void RocProfiler::dispatchCallback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
+                                           rocprofiler_counter_config_id_t* config,
+                                           rocprofiler_user_data_t* user_data,
+                                           void* callback_data)
+        {
+            auto* rocprofiler = static_cast<RocProfiler*>(callback_data);
+            std::lock_guard<std::mutex> lock(rocprofiler->m_mutex);
+            if (rocprofiler->m_do && dispatch_data.dispatch_info.kernel_id == rocprofiler->m_profiler->m_currentKernelId) {
                 *config = rocprofiler->m_agentProfile;
                 user_data->value = rocprofiler->m_profiler->m_currentSolutionIdx;
             } else {
@@ -310,7 +339,6 @@ namespace TensileLite
             rocprofiler->m_profiler->m_solutionIdx2DispatchId[solutionIdx] = dispatch_id;
             Profiler::ProfileInfo pinfo;
             pinfo.kernel_id = dispatch_data.dispatch_info.kernel_id;
-            pinfo.execution_time_us = (dispatch_data.end_timestamp - dispatch_data.start_timestamp) / 1e3;
             auto& counters = pinfo.counters;
             for (size_t i = 0; i < record_count; ++i) {
                 const auto& record = record_data[i];
@@ -347,7 +375,7 @@ namespace TensileLite
         {
             inline int tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             {
-                return TensileLite::Client::RocProfiler::tool_init_impl(fini_func, tool_data);
+                return RocProfiler::tool_init_impl(fini_func, tool_data);
             }
         }
     }
