@@ -206,13 +206,17 @@ bool compare_grouped(std::string instanceName,
     return pass;
 }
 
-/// @brief Function to get the kernel output with reference implementation on CPU for all groups
+/// @brief Function to get the kernel output with reference implementation on CPU/GPU for all groups
 void gemm_host_reference_grouped(int verify,
-                                 int group_count,
+                                 const GroupedGemmProblem& problem,
                                  std::vector<ck_tile::HostTensor<ADataType>>& a_tensors,
                                  std::vector<ck_tile::HostTensor<BDataType>>& b_tensors,
-                                 std::vector<ck_tile::HostTensor<CDataType>>& c_host_results)
+                                 std::vector<ck_tile::HostTensor<CDataType>>& c_host_results,
+                                 std::vector<std::unique_ptr<ck_tile::DeviceMem>>& a_dev_bufs,
+                                 std::vector<std::unique_ptr<ck_tile::DeviceMem>>& b_dev_bufs)
 {
+    const int group_count = problem.group_count_;
+
     if(verify == 1)
     {
         for(int i = 0; i < group_count; ++i)
@@ -220,6 +224,42 @@ void gemm_host_reference_grouped(int verify,
             c_host_results[i].SetZero();
             ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
                 a_tensors[i], b_tensors[i], c_host_results[i]);
+        }
+    }
+    else if(verify == 2)
+    {
+        for(int i = 0; i < group_count; ++i)
+        {
+            if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
+            {
+                b_dev_bufs[i]->ToDevice(b_tensors[i].data());
+            }
+
+            ck_tile::DeviceMem c_gpu_buf_ref(c_host_results[i].get_element_space_size_in_bytes());
+            c_host_results[i].SetZero();
+            c_gpu_buf_ref.SetZero();
+
+            ADataType* d_A = static_cast<ADataType*>(a_dev_bufs[i]->GetDeviceBuffer());
+            BDataType* d_B = static_cast<BDataType*>(b_dev_bufs[i]->GetDeviceBuffer());
+            CDataType* d_C = static_cast<CDataType*>(c_gpu_buf_ref.GetDeviceBuffer());
+
+            ck_tile::reference_gemm_gpu<ADataType,
+                                        BDataType,
+                                        AccDataType,
+                                        CDataType,
+                                        ALayout,
+                                        BLayout,
+                                        CLayout>(d_A,
+                                                 d_B,
+                                                 d_C,
+                                                 problem.Ms_[i],
+                                                 problem.Ns_[i],
+                                                 problem.Ks_[i],
+                                                 problem.stride_As_[i],
+                                                 problem.stride_Bs_[i],
+                                                 problem.stride_Cs_[i]);
+
+            c_gpu_buf_ref.FromDevice(c_host_results[i].data());
         }
     }
 }

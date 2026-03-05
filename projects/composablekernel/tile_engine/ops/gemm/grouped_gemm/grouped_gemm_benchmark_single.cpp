@@ -35,9 +35,9 @@ inline auto create_args(int argc, char* argv[])
         .insert("group_count", "8", "Number of groups. Default is 8.")
         .insert("kbatch", "1", "SplitK batch count. Default is 1.")
         .insert("verify",
-                "1",
-                "The type of validation. Set to 0 for no validation, 1 for validation on CPU. "
-                "Default is 1, CPU validation.")
+                "2",
+                "The type of validation. Set to 0 for no validation, 1 for validation on CPU, "
+                "2 for validation on GPU. Default is 2, GPU validation.")
         .insert("log",
                 "false",
                 "Whether output kernel instance information or not. Possible values are true or "

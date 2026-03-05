@@ -165,8 +165,13 @@ class GroupedGemmProfiler
                                                     problem.stride_Cs_[i],
                                                     is_row_major(layout_c))));
             }
-            gemm_host_reference_grouped(
-                setting_.verify_, group_count, a_tensors, b_tensors, c_host_results);
+            gemm_host_reference_grouped(setting_.verify_,
+                                        problem,
+                                        a_tensors,
+                                        b_tensors,
+                                        c_host_results,
+                                        a_dev_bufs,
+                                        b_dev_bufs);
         }
 
         for(auto& callable : callables)
