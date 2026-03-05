@@ -337,7 +337,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnPeekLastErrorString_ext(char* message, size_t m
 
 HIPDNN_BACKEND_EXPORT void hipdnnLoggingCallback_ext(hipdnnSeverity_t severity, const char* msg)
 {
-    hipdnn_backend::logging::hipdnnLoggingCallback(severity, msg);
+    hipdnn_backend::logging::backendLoggingCallback(severity, msg);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
@@ -406,6 +406,39 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                         *numPluginPaths,
                         *maxStringLen);
     });
+}
+
+// NOLINTBEGIN(readability-identifier-naming) - C API function
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle)
+// NOLINTEND(readability-identifier-naming)
+{
+    return hipdnn_backend::logging::setUserLogCallback(callback, minLevel, mode, userHandle);
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level)
+{
+    // Validate log level
+    if(level != HIPDNN_SEV_INFO && level != HIPDNN_SEV_WARN && level != HIPDNN_SEV_ERROR
+       && level != HIPDNN_SEV_FATAL && level != HIPDNN_SEV_OFF)
+    {
+        return HIPDNN_STATUS_BAD_PARAM;
+    }
+
+    return hipdnn_backend::logging::setGlobalLogLevel(level);
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSeverity_t* level)
+{
+    if(level == nullptr)
+    {
+        return HIPDNN_STATUS_BAD_PARAM;
+    }
+
+    return hipdnn_backend::logging::getGlobalLogLevel(*level);
 }
 
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineCount_ext(hipdnnHandle_t handle,

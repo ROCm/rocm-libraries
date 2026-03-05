@@ -1,8 +1,7 @@
 /*******************************************************************************
  *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,38 +22,29 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#pragma once
 
-#ifndef GUARD_MIOPEN_TEST_LSTM_COMMON_HPP
-#define GUARD_MIOPEN_TEST_LSTM_COMMON_HPP
-
-#include "workspace.hpp"
-#include "driver.hpp"
-#include "dropout_util.hpp"
-#include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "test.hpp"
-#include "verify.hpp"
-#include "rnn_util.hpp"
-#include "random.hpp"
-#include "cpu_rnn.hpp"
-#include <array>
-#include <cmath>
-#include <ctime>
-#include <iomanip>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <memory>
 #include <miopen/rnn.hpp>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
-#include <utility>
-#include <cfloat>
+#include "dropout_util.hpp"
+#include "rnn_util.hpp"
+#include "cpu_rnn.hpp"
+#include "workspace.hpp"
+#include "verify.hpp"
+
+#include <tuple>
+#include <numeric>
+#include <algorithm>
+#include <gtest/gtest.h>
 
 #define MIO_LSTM_TEST_DEBUG 0
 #define MIO_RNN_TIME_EVERYTHING 0
 
-#define WORKAROUND_ISSUE_692 1
+#if(MIO_LSTM_TEST_DEBUG > 0)
+#include <iostream>
+#endif
+#if(MIO_RNN_TIME_EVERYTHING > 0)
+#include <chrono>
+#endif
 
 //****************************************************
 // FORWARD BASE
@@ -202,8 +192,7 @@ struct verify_backward_data_lstm
 
     void fail(int badtensor) const
     {
-
-        std::cout << "./bin/MIOpenDriver rnn -n ";
+        std::cout << "MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
             if(i < seqLength - 1)
@@ -320,7 +309,7 @@ struct verify_backward_weights_lstm
 
     void fail(int) const
     {
-        std::cout << "./bin/MIOpenDriver rnn -n ";
+        std::cout << "MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
             if(i < seqLength - 1)
@@ -428,11 +417,9 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
     std::vector<T> cpu() const
     {
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -503,13 +490,12 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 #if(MIO_LSTM_TEST_DEBUG == 2)
         for(int i = 0; i < output.size(); i++)
         {
-            printf("CPU outdata[%d]: %f\n", i, output[i]);
+            std::cout << "CPU outdata[" << i << "]: " << output[i] << std::endl;
         }
 #endif
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
-
         std::cout << "Wall clock: CPU forward inference LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
@@ -523,11 +509,9 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
     std::vector<T> gpu() const
     {
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
         auto&& handle = get_handle();
 
         size_t out_sz = 0;
@@ -599,13 +583,12 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
-            printf("GPU outdata[%d]: %f\n", i, outdata[i]);
+            std::cout << "GPU outdata[" << i << "]: " << outdata[i] << std::endl;
         }
 #endif
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
-
         std::cout << "Wall clock: GPU forward_infer LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
@@ -618,7 +601,7 @@ struct verify_forward_infer_lstm : verify_forward_lstm<T>
 
     void fail(int) const
     {
-        std::cout << "./bin/MIOpenDriver rnn -n ";
+        std::cout << "MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
             if(i < seqLength - 1)
@@ -736,11 +719,9 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> cpu() const
     {
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
         auto&& handle = get_handle();
 
         int bi        = dirMode != 0 ? 2 : 1;
@@ -849,7 +830,6 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
-
         std::cout << "Wall clock: CPU forward train LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
@@ -862,7 +842,8 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
         if(reserveSpace.size() != RSVcpu.size())
         {
-            std::abort();
+            // std::abort();
+            return {};
         }
         std::copy(reserveSpace.begin(), reserveSpace.end(), RSVcpu.begin());
 
@@ -878,11 +859,9 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
     std::tuple<std::vector<T>, std::vector<T>, std::vector<T>> gpu() const
     {
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
         auto&& handle = get_handle();
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
@@ -967,7 +946,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
         auto outdata = handle.Read<T>(output_dev, output.size());
         for(int i = 0; i < outdata.size(); i++)
         {
-            printf("GPU outdata[%d]: %f\n", i, outdata[i]);
+            std::cout << "GPU outdata[" << i << "]: " << outdata[i] << std::endl;
         }
 #endif
         rspace.ReadTo(RSVgpu);
@@ -980,7 +959,6 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
-
         std::cout << "Wall clock: GPU forward_train LSTM pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
                   << std::endl;
@@ -993,8 +971,7 @@ struct verify_forward_train_lstm : verify_forward_lstm<T>
 
     void fail(int badtensor) const
     {
-
-        std::cout << "./bin/MIOpenDriver rnn -n ";
+        std::cout << "MIOpenDriver rnn -n ";
         for(int i = 0; i < seqLength; i++)
         {
             if(i < seqLength - 1)
@@ -1035,11 +1012,9 @@ template <class T>
 std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>>
 verify_backward_data_lstm<T>::cpu() const
 {
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
     auto&& handle = get_handle();
 
     int bi        = dirMode != 0 ? 2 : 1;
@@ -1086,7 +1061,8 @@ verify_backward_data_lstm<T>::cpu() const
 
     if(reserveSpaceSize != RSVcpu.size())
     {
-        std::abort();
+        // std::abort();
+        return {};
     }
     std::vector<T> reserveSpace(RSVcpu);
 
@@ -1166,7 +1142,6 @@ verify_backward_data_lstm<T>::cpu() const
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
-
     std::cout << "Wall clock: CPU backward data LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
@@ -1204,11 +1179,9 @@ template <class T>
 std::tuple<std::vector<T>, std::vector<T>, std::vector<T>, std::vector<T>>
 verify_backward_data_lstm<T>::gpu() const
 {
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
     auto&& handle = get_handle();
 
     std::vector<miopen::TensorDescriptor> inputCPPDescs;
@@ -1228,7 +1201,8 @@ verify_backward_data_lstm<T>::gpu() const
     miopenGetRNNWorkspaceSize(&handle, rnnDesc, seqLength, inputDescs.data(), &workspace_size);
     if(workspace_size % sizeof(T) != 0)
     {
-        std::abort();
+        // std::abort();
+        return {};
     }
     Workspace wspace{};
     // Needed to zero out the workspace (happens in std::vector's constructor)
@@ -1247,7 +1221,8 @@ verify_backward_data_lstm<T>::gpu() const
 
     if(reserveSpaceSize != (RSVgpu.size() * sizeof(T)))
     {
-        std::abort();
+        // std::abort();
+        return {};
     }
     Workspace rspace{};
     rspace.Write(RSVgpu);
@@ -1315,7 +1290,6 @@ verify_backward_data_lstm<T>::gpu() const
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
-
     std::cout << "Wall clock: GPU backward data LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
@@ -1332,7 +1306,6 @@ verify_backward_data_lstm<T>::gpu() const
 template <class T>
 std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 {
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
@@ -1409,7 +1382,6 @@ std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
-
     std::cout << "Wall clock: CPU backward_weights LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
@@ -1423,11 +1395,9 @@ std::vector<T> verify_backward_weights_lstm<T>::cpu() const
 template <class T>
 std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 {
-
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
-
     auto&& handle = get_handle();
 
     std::vector<miopen::TensorDescriptor> inputCPPDescs;
@@ -1479,7 +1449,6 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 
 #if(MIO_RNN_TIME_EVERYTHING == 1)
     auto t_end = std::chrono::high_resolution_clock::now();
-
     std::cout << "Wall clock: GPU backwards_weights LSTM pass time: "
               << std::chrono::duration<double>(t_end - t_start).count() << " seconds." << std::endl;
 #endif
@@ -1491,48 +1460,214 @@ std::vector<T> verify_backward_weights_lstm<T>::gpu() const
 }
 //~~~~~~~~~~~~ END BACKWARD WEIGHTS CPU & GPU ~~~~~~~~~~~~~~~~~~~~~~~~
 
-//====================== DRIVER ============================
-template <class T>
-struct lstm_basic_driver : test_driver
+struct Verifier
 {
-    std::vector<int> batchSeq;
-    int seqLength{};
-    int inVecLen{};
-    int hiddenSize{};
-    int numLayers{};
-    int inputMode{};
-    int biasMode{};
-    int dirMode{};
-    int algoMode{};
-    int batchSize{};
-    int useDropout{};
+    bool time{false};
+    int time_iter{1};
+    int warmup_iter{0};
+    double tolerance{80.0};
 
-    // Null pointer input
-    bool nohx          = false;
-    bool nodhy         = false;
-    bool nocx          = false;
-    bool nodcy         = false;
-    bool nohy          = false;
-    bool nodhx         = false;
-    bool nocy          = false;
-    bool nodcx         = false;
-    bool flatBatchFill = false;
-    bool usePadding    = false;
-
-    lstm_basic_driver() {}
-
-    void run()
+    template <class CpuRange, class GpuRange, class Compare, class Report, class Fail>
+    bool compare_and_report(
+        const CpuRange& out_cpu, const GpuRange& out_gpu, Compare compare, Report report, Fail fail)
     {
-        const double Data_scale = 0.001;
-#if(MIOPEN_BACKEND_OPENCL == 1)
-#if WORKAROUND_ISSUE_692 == 1
-        std::cout << "Skip test for Issue #692: " << std::endl;
-        exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
-#endif
-        if(type == miopenHalf)
-            exit(EXIT_SUCCESS); // NOLINT (concurrency-mt-unsafe)
-#endif
+        std::vector<double> error;
+        bool pass = compare(error, out_cpu, out_gpu);
+        return report(pass, error, out_cpu, out_gpu, fail);
+    }
 
+    template <class... CpuRanges, class... GpuRanges, class Compare, class Report, class Fail>
+    bool compare_and_report(const std::tuple<CpuRanges...>& out_cpu,
+                            const std::tuple<GpuRanges...>& out_gpu,
+                            Compare compare,
+                            Report report,
+                            Fail fail)
+    {
+        static_assert(sizeof...(CpuRanges) == sizeof...(GpuRanges), "CPU and GPU mismatch");
+        return miopen::sequence([&](auto... is) {
+            bool continue_ = true;
+            miopen::each_args(
+                [&](auto i) {
+                    // cppcheck-suppress knownConditionTrueFalse
+                    if(continue_)
+                    {
+                        continue_ = this->compare_and_report(
+                            std::get<i>(out_cpu), std::get<i>(out_gpu), compare, report, [&](int) {
+                                return fail(i);
+                            });
+                    }
+                },
+                is...);
+            return continue_;
+        })(std::integral_constant<std::size_t, sizeof...(CpuRanges)>{});
+    }
+
+    auto verify_reporter()
+    {
+        return [=](bool pass,
+                   std::vector<double> error,
+                   const auto& out_cpu,
+                   const auto& out_gpu,
+                   auto fail) {
+            if(not pass)
+            {
+                if(not error.empty())
+                {
+                    std::cout << "FAILED: " << error.front() << std::endl;
+                    fail(-1);
+                }
+
+                auto mxdiff = miopen::max_diff(out_cpu, out_gpu);
+                std::cout << "Max diff: " << mxdiff << std::endl;
+
+                if(miopen::range_zero(out_cpu))
+                    std::cout << "CPU data is all zeros" << std::endl;
+                if(miopen::range_zero(out_gpu))
+                    std::cout << "GPU data is all zeros" << std::endl;
+
+                auto idx = miopen::mismatch_idx(out_cpu, out_gpu, miopen::float_equal);
+                if(idx < miopen::range_distance(out_cpu))
+                {
+                    std::cout << "Mismatch at " << idx << ": " << out_cpu[idx]
+                              << " != " << out_gpu[idx] << std::endl;
+                }
+
+                auto cpu_nan_idx = find_idx(out_cpu, miopen::not_finite);
+                if(cpu_nan_idx >= 0)
+                {
+                    std::cout << "Non finite number found in CPU data at " << cpu_nan_idx << ": "
+                              << out_cpu[cpu_nan_idx] << std::endl;
+                }
+
+                auto gpu_nan_idx = find_idx(out_gpu, miopen::not_finite);
+                if(gpu_nan_idx >= 0)
+                {
+                    std::cout << "Non finite number found in GPU data at " << gpu_nan_idx << ": "
+                              << out_gpu[gpu_nan_idx] << std::endl;
+                }
+            }
+            else if(miopen::range_zero(out_cpu) and miopen::range_zero(out_gpu) and
+                    (miopen::range_distance(out_cpu) != 0))
+            {
+                std::cout << "Warning: Both CPU and GPU data is all zero" << std::endl;
+                fail(-1);
+            }
+            return true;
+        };
+    }
+
+    template <class V, class... Ts>
+    auto cpu_async(V& v, Ts&&... xs) -> std::future<decltype(v.cpu(xs...))>
+    {
+        return std::async(std::launch::deferred, [&] { return v.cpu(xs...); });
+    }
+
+    template <class F, class V, class... Ts>
+    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
+                                                                          v.gpu(xs...)))
+    {
+        decltype(v.cpu(xs...)) cpu;
+        decltype(v.gpu(xs...)) gpu;
+
+        try
+        {
+            auto&& h = get_handle();
+            // Compute cpu
+            std::future<decltype(v.cpu(xs...))> cpuf;
+            {
+                cpuf = cpu_async(v, xs...);
+            }
+            // Compute gpu
+            if(time)
+            {
+                for(size_t i = 0; i < warmup_iter; ++i)
+                {
+                    v.gpu(xs...);
+                }
+                h.EnableProfiling();
+                h.ResetKernelTime();
+            }
+            gpu = v.gpu(xs...);
+            if(time)
+            {
+                float total_time = h.GetKernelTime();
+                for(size_t i = 1; i < time_iter; ++i)
+                {
+                    h.ResetKernelTime();
+                    v.gpu(xs...);
+                    total_time += h.GetKernelTime();
+                }
+                std::cout << "Kernel time: " << (total_time / time_iter) << " ms" << std::endl;
+                h.EnableProfiling(false);
+            }
+
+            cpu         = cpuf.get();
+            auto report = verify_reporter();
+            compare_and_report(cpu, gpu, f, report, [&](int mode) { v.fail(mode, xs...); });
+
+            if(time)
+                v.fail(std::integral_constant<int, -1>{}, xs...);
+        }
+        catch(const std::exception& ex)
+        {
+            std::cout << "FAILED: " << ex.what() << std::endl;
+            v.fail(-1, xs...);
+        }
+        catch(...)
+        {
+            std::cout << "FAILED with unknown exception" << std::endl;
+            v.fail(-1, xs...);
+        }
+
+        return std::make_pair(cpu, gpu);
+    }
+
+    template <class V, class... Ts>
+    auto verify(V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
+    {
+        return verify_impl(
+            [&](std::vector<double>& error, auto&& cpu, auto&& gpu) {
+                EXPECT_EQ(miopen::range_distance(cpu), miopen::range_distance(gpu));
+
+                using value_type = miopen::range_value<decltype(gpu)>;
+                double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
+                error            = {miopen::rms_range(cpu, gpu)};
+                return error.front() <= threshold;
+            },
+            v,
+            xs...);
+    }
+};
+
+template <typename T>
+struct LSTM_test : Verifier
+{
+    int batchSize{4};
+    int seqLength{10};
+    int inVecLen{32};
+    int numLayers{1};
+    int hiddenSize{0};
+    int useDropout{0};
+    int usePadding{0};
+    int flatBatchFill{0};
+    int inputMode{0};
+    int biasMode{0};
+    int dirMode{0};
+    int algoMode{0};
+    bool nohx{false};
+    bool nodhy{false};
+    bool nocx{false};
+    bool nodcy{false};
+    bool nohy{false};
+    bool nodhx{false};
+    bool nocy{false};
+    bool nodcx{false};
+    std::vector<int> batchSeq;
+    const double dataScale{0.001};
+    miopenDataType_t dataType{miopenFloat};
+
+    void RunTest()
+    {
         if(batchSeq.empty() || 0 == batchSeq[0])
         {
             std::cout << "Empty batch sequence. Filling uniformly with batch size: " << batchSize
@@ -1550,9 +1685,7 @@ struct lstm_basic_driver : test_driver
 
         if(batchSeq.size() != seqLength)
         {
-            std::cerr << "FAILED: Batch sequence vector length, does not match sequence length."
-                      << std::endl;
-            std::abort();
+            GTEST_SKIP() << "FAILED: Batch sequence vector length, does not match sequence length.";
         }
 
 #if(MIO_LSTM_TEST_DEBUG == 2)
@@ -1563,9 +1696,6 @@ struct lstm_basic_driver : test_driver
 #endif
 
         auto&& handle = get_handle();
-
-        int batch_n = std::accumulate(batchSeq.begin(), batchSeq.end(), 0);
-
         miopenRNNDescriptor_t rnnDesc;
         miopenCreateRNNDescriptor(&rnnDesc);
         miopenDropoutDescriptor_t DropoutDesc;
@@ -1574,29 +1704,15 @@ struct lstm_basic_driver : test_driver
 
         if(useDropout != 0)
         {
-// Workaround for issue #2335.
-// OpenCL error creating buffer: 0 Invalid Buffer Size
-#if MIOPEN_BACKEND_OPENCL
-            std::cout << "Skip test for Issue #2335: " << std::endl;
-            return;
-#endif
             miopenHandle_t mio_handle;
             miopenCreateWithStream(&mio_handle, handle.GetStream());
 
-            float dropout_rate              = 0.5;
-            unsigned long long dropout_seed = 0ULL;
+            float dropout_rate{0.5f};
+            unsigned long long dropout_seed{0ULL};
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
-#if MIOPEN_BACKEND_OPENCL
-            cl_context ctx;
-            clGetCommandQueueInfo(
-                handle.GetStream(), CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-            cl_mem dropout_state_buf =
-                clCreateBuffer(ctx, CL_MEM_READ_WRITE, statesSizeInBytes, nullptr, nullptr);
-#elif MIOPEN_BACKEND_HIP
             void* dropout_state_buf;
-            hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
-#endif
+            (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(DropoutDesc,
                                        mio_handle,
@@ -1617,7 +1733,7 @@ struct lstm_basic_driver : test_driver
                                       miopenLSTM,
                                       miopenRNNBiasMode_t(biasMode),
                                       miopenRNNAlgo_t(algoMode),
-                                      type);
+                                      dataType);
         }
         else
         {
@@ -1629,7 +1745,7 @@ struct lstm_basic_driver : test_driver
                                    miopenLSTM,
                                    miopenRNNBiasMode_t(biasMode),
                                    miopenRNNAlgo_t(algoMode),
-                                   type); // defined in superclass testdriver
+                                   dataType);
         }
 
         if(usePadding)
@@ -1654,7 +1770,7 @@ struct lstm_basic_driver : test_driver
         std::vector<T> input(in_sz);
         for(std::size_t i = 0; i < in_sz; i++)
         {
-            input[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+            input[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
         }
 
         std::size_t hx_sz = ((dirMode != 0) ? 2ULL : 1ULL) * hiddenSize * batchSize * numLayers;
@@ -1667,17 +1783,17 @@ struct lstm_basic_driver : test_driver
         std::vector<int> inlens(2, 0);
         inlens.at(0)        = batchSeq.at(0);
         inlens.at(1)        = inVecReal;
-        auto firstInputDesc = miopen::TensorDescriptor(miopen::deref(rnnDesc).dataType, inlens);
-        miopenGetRNNParamsSize(
-            &handle, rnnDesc, &firstInputDesc, &wei_bytes, miopen::deref(rnnDesc).dataType);
+        auto firstInputDesc = miopen::TensorDescriptor(dataType, inlens);
+        miopenGetRNNParamsSize(&handle, rnnDesc, &firstInputDesc, &wei_bytes, dataType);
         auto wei_sz = int(wei_bytes / sizeof(T));
         std::vector<T> weights(wei_sz);
         for(std::size_t i = 0; i < wei_sz; i++)
         {
-            weights[i] = prng::gen_descreet_uniform_sign<T>(Data_scale, 100);
+            weights[i] = prng::gen_descreet_uniform_sign<T>(dataScale, 100);
         }
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+        int batch_n = std::accumulate(batchSeq.begin(), batchSeq.end(), 0);
+#if(MIO_LSTM_TEST_DEBUG == 2)
         printf("inputMode: %d, biasMode: %d, dirMode: %d\n", inputMode, biasMode, dirMode);
         printf("hz: %d, batch_n: %d, seqLength: %d, inputLen: %d, numLayers: %d\n",
                hiddenSize,
@@ -1699,7 +1815,7 @@ struct lstm_basic_driver : test_driver
         {
             for(std::size_t i = 0; i < hx_sz; i++)
             {
-                hx[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+                hx[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
             }
         }
 
@@ -1707,7 +1823,7 @@ struct lstm_basic_driver : test_driver
         {
             for(std::size_t i = 0; i < hx_sz; i++)
             {
-                dhyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+                dhyin[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
             }
         }
 
@@ -1715,7 +1831,7 @@ struct lstm_basic_driver : test_driver
         {
             for(std::size_t i = 0; i < hx_sz; i++)
             {
-                cx[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+                cx[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
             }
         }
 
@@ -1723,25 +1839,21 @@ struct lstm_basic_driver : test_driver
         {
             for(std::size_t i = 0; i < hx_sz; i++)
             {
-                dcyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+                dcyin[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
             }
         }
 
         std::vector<miopen::TensorDescriptor> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
-        createTensorDescArray(
-            inputCPPDescs, inputDescs, batchSeq, inVecLen, miopen::deref(rnnDesc).dataType);
+        createTensorDescArray(inputCPPDescs, inputDescs, batchSeq, inVecLen, dataType);
         size_t reserveSpaceSize;
         miopenGetRNNTrainingReserveSize(
             &handle, rnnDesc, seqLength, inputDescs.data(), &reserveSpaceSize);
 
         std::vector<miopen::TensorDescriptor> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
-        createTensorDescArray(outputCPPDescs,
-                              outputDescs,
-                              batchSeq,
-                              hiddenSize * ((dirMode != 0) ? 2 : 1),
-                              miopen::deref(rnnDesc).dataType);
+        createTensorDescArray(
+            outputCPPDescs, outputDescs, batchSeq, hiddenSize * ((dirMode != 0) ? 2 : 1), dataType);
 
         size_t out_sz = getSuperTensorSize(batchSeq,
                                            seqLength,
@@ -1763,10 +1875,9 @@ struct lstm_basic_driver : test_driver
         size_t device_mem = handle.GetGlobalMemorySize();
         if(total_mem >= device_mem)
         {
-            show_command();
             std::cout << "Config requires " << total_mem
                       << " Bytes to write all necessary tensors to GPU. GPU has " << device_mem
-                      << " Bytes of memory." << std::endl;
+                      << " bytes of memory." << std::endl;
         }
 
         reserveSpaceSize = (reserveSpaceSize + sizeof(T) - 1) / sizeof(T);
@@ -1811,10 +1922,10 @@ struct lstm_basic_driver : test_driver
         std::vector<T> dyin(out_sz);
         for(std::size_t i = 0; i < out_sz; i++)
         {
-            dyin[i] = prng::gen_descreet_unsigned<T>(Data_scale, 100);
+            dyin[i] = prng::gen_descreet_unsigned<T>(dataScale, 100);
         }
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if(MIO_LSTM_TEST_DEBUG == 2)
         printf("Running backward data LSTM.\n");
 #endif
         auto bwdDataOutputPair =
@@ -1832,9 +1943,9 @@ struct lstm_basic_driver : test_driver
         // RETURNS:  std::make_tuple(dx, dhx, dcx, reserveSpace, workSpace);
         auto workSpaceBwdData = std::get<3>(bwdDataOutputPair.second);
 
-#if(MIO_LSTM_TEST_DEBUG > 0)
+#if(MIO_LSTM_TEST_DEBUG == 2)
         printf("Running backward weights LSTM.\n");
-        printf("reserve sz: %d, workSpace sz: %d, weight sz: %d\n",
+        printf("reserve sz: %zu, workSpace sz: %zu, weight sz: %d\n",
                rsvcpu.size(),
                workSpaceBwdData.size(),
                wei_sz);
@@ -1845,50 +1956,5 @@ struct lstm_basic_driver : test_driver
             rnnDesc,  input,      dyin,      hx,      rsvgpu,    rsvcpu,           workSpaceBwdData,
             batchSeq, hiddenSize, wei_sz,    batch_n, seqLength, numLayers,        biasMode,
             dirMode,  inputMode,  inVecReal, hx_sz,   nohx,      bool(useDropout), usePadding});
-
-/// \todo Resolve the issue and remove workaround.
-/// ROCm3.3, Radeon VII: Many test cases always fail with:
-/// "Forward Inference LSTM:"
-/// "Output tensor output failed verification."
-#if 0
-        if(useDropout == 0)
-        {
-            verify(verify_forward_infer_lstm<T>{rnnDesc,
-                                                input,
-                                                hx,
-                                                cx,
-                                                weights,
-                                                batchSeq,
-                                                hiddenSize,
-                                                batch_n,
-                                                seqLength,
-                                                numLayers,
-                                                biasMode,
-                                                dirMode,
-                                                inputMode,
-                                                inVecReal,
-                                                hx_sz,
-                                                nohx,
-                                                nocx,
-                                                nohy,
-                                                nocy});
-        }
-#endif
-        /* normal hx/cx/dhy/dcy input test end */
-
-        // DLOWELL: Subtracting delta weights may produce NAN and infinities. Further investigation
-        // is needed.
-        //        auto dweights = std::get<1>(dweights_pair);
-        //        std::transform(weightData.begin( ), weightData.end( ), dweights.begin( ),
-        //        weightData.begin( ),std::minus<T>( ));
-        //        verify(verify_forward_infer_lstm<T>{rnnDesc, inputData,
-        //                                        curHiddenState, curCellState, weightData,
-        //                                        batchSeq,
-        //                                        hiddenSize, batch_n,
-        //                                        seqLength, numLayers,
-        //                                        biasMode, dirMode,
-        //                                        inputMode, inVecReal});
     }
 };
-
-#endif
