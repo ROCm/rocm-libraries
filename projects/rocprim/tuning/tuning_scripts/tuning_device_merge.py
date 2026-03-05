@@ -41,8 +41,8 @@ class Tuner(BaseTuner):
         """Returns tuning parameters and their possible values as an OrderedDict.
         Each parameter maps to a list of valid values to explore during tuning."""
         params = OrderedDict()
-        params["block_size_x"] = [64 * i for i in range(1, 17)]
-        params["ipt"] = [1, 2] + [4 * i for i in range(1, 65)]
+        params["block_size_x"] = list(range(64, 1025, 64))
+        params["ipt"] = [1, 2] + list(range(4, 33, 4))
         return params
 
     def _get_restrictions(

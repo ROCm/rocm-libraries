@@ -56,6 +56,8 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
 
     executor.queue<benchmark_type>();
     executor.run();
-    return executor.get_last_bytes_per_second();
+
+    // Return the time as milliseconds per GiB.
+    return (1000 * primbench::GiB) / executor.get_last_bytes_per_second();
 }
 {% endblock %}

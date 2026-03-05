@@ -231,8 +231,8 @@ class BaseTuner(ABC):
 
     def _get_metrics(self, key_type: str, value_type: Optional[str] = None) -> Dict:
         """Default metrics for performance measurement."""
-        # p["time"] is actually measured in bytes per second
-        return {"GB/s": lambda p: (p["time"] / 1e6)}
+        # p["time"] is measured in ms/GiB
+        return {"GiB/s": lambda p: (1000.0 / p["time"])}
 
     def _run_default_config(
         self, tune_kernel_args: Dict, key_type: str, value_type: Optional[str] = None
@@ -351,7 +351,8 @@ class BaseTuner(ABC):
             "log": False,
             "device": self.device_id,
             "simulation_mode": self.simulation_mode,
-            "objective_higher_is_better": True,
+            "objective_higher_is_better": False,
+            "quiet": True,
         }
 
         if self.strategy != "brute_force":
