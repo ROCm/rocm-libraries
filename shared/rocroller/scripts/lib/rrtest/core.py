@@ -12,14 +12,13 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Set
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 
-def build_gtest_filter_args(include: List[str], exclude: List[str]) -> List[str]:
+def build_gtest_filter_args(include: list[str], exclude: list[str]) -> list[str]:
     """
     Build GTest command-line filter arguments.
 
@@ -54,7 +53,7 @@ def build_gtest_filter_args(include: List[str], exclude: List[str]) -> List[str]
     return [f"--gtest_filter={filter_string}"]
 
 
-def build_catch2_filter_args(include: List[str], exclude: List[str]) -> List[str]:
+def build_catch2_filter_args(include: list[str], exclude: list[str]) -> list[str]:
     """
     Build Catch2 command-line filter arguments.
 
@@ -88,7 +87,7 @@ def build_catch2_filter_args(include: List[str], exclude: List[str]) -> List[str
     return args
 
 
-def build_ctest_filter_args(include: List[str], exclude: List[str]) -> List[str]:
+def build_ctest_filter_args(include: list[str], exclude: list[str]) -> list[str]:
     """
     Build CTest command-line filter arguments.
 
@@ -125,7 +124,7 @@ class Test:
     framework: str
 
 
-def parse_gtest_xml(xml_file: Path) -> Set[Test]:
+def parse_gtest_xml(xml_file: Path) -> set[Test]:
     """
     Parse GTest XML output to extract test names.
 
@@ -155,7 +154,7 @@ def parse_gtest_xml(xml_file: Path) -> Set[Test]:
     return tests
 
 
-def parse_catch2_xml(xml_file: Path) -> Set[Test]:
+def parse_catch2_xml(xml_file: Path) -> set[Test]:
     """
     Parse Catch2 XML output to extract test names.
 
@@ -181,7 +180,7 @@ def parse_catch2_xml(xml_file: Path) -> Set[Test]:
     return tests
 
 
-def parse_ctest_json(json_file: Path) -> Set[Test]:
+def parse_ctest_json(json_file: Path) -> set[Test]:
     """
     Parse CTest JSON output to extract test names.
 
@@ -209,10 +208,10 @@ def parse_ctest_json(json_file: Path) -> Set[Test]:
 
 def discover_gtest_tests(
     executable: str,
-    include: List[str] = None,
-    exclude: List[str] = None,
-    build_dir: Optional[Path] = None,
-) -> Set[Test]:
+    include: list[str] = None,
+    exclude: list[str] = None,
+    build_dir: Path | None = None,
+) -> set[Test]:
     """
     Discover GTest tests by running the executable.
 
@@ -258,10 +257,10 @@ def discover_gtest_tests(
 
 def discover_catch2_tests(
     executable: str,
-    include: List[str] = None,
-    exclude: List[str] = None,
-    build_dir: Optional[Path] = None,
-) -> Set[Test]:
+    include: list[str] = None,
+    exclude: list[str] = None,
+    build_dir: Path | None = None,
+) -> set[Test]:
     """
     Discover Catch2 tests by running the executable.
 
@@ -314,10 +313,10 @@ def discover_catch2_tests(
 
 def discover_ctest_tests(
     executable: str,
-    include: List[str] = None,
-    exclude: List[str] = None,
-    build_dir: Optional[Path] = None,
-) -> Set[Test]:
+    include: list[str] = None,
+    exclude: list[str] = None,
+    build_dir: Path | None = None,
+) -> set[Test]:
     """
     Discover CTest tests by running ctest.
 
@@ -362,8 +361,8 @@ def discover_ctest_tests(
 
 
 def list_tests_for_executable(
-    executable: str, profile: str, build_dir: Optional[Path] = None
-) -> Set[Test]:
+    executable: str, profile: str, build_dir: Path | None = None
+) -> set[Test]:
     """
     List tests for a given executable and profile.
 
@@ -422,7 +421,7 @@ def list_tests_for_executable(
         raise ValueError(f"Unknown framework: {framework}")
 
 
-def list_tests(profile: str, build_dir: Optional[Path] = None) -> Set[Test]:
+def list_tests(profile: str, build_dir: Path | None = None) -> set[Test]:
     """
     List all tests for a given profile (across all executables).
 
@@ -468,7 +467,7 @@ def list_tests(profile: str, build_dir: Optional[Path] = None) -> Set[Test]:
     return all_tests
 
 
-def get_test_commands(profile_name: str, config_file: Optional[Path] = None) -> dict:
+def get_test_commands(profile_name: str, config_file: Path | None = None) -> dict:
     """
     Get command lines for all executables in a profile, organized by framework.
 
