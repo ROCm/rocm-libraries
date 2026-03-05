@@ -458,7 +458,7 @@ CK_TILE_HOST_DEVICE constexpr fp32x2_t bf16x2_to_fp32x2(bf16x2_t x)
 #else
     uint32_t packed = bit_cast<uint32_t>(x);
     float f0        = bit_cast<float>(packed << 16);
-    float f1 = bit_cast<float>(packed & 0xFFFF0000u);
+    float f1        = bit_cast<float>(packed & 0xFFFF0000u);
     return fp32x2_t{f0, f1};
 #endif
 }
@@ -468,10 +468,10 @@ CK_TILE_HOST_DEVICE constexpr fp32x2_t bf16x2_to_fp32x2(bf16x2_t x)
 #endif
 
 template <int VecSize>
-CK_TILE_DEVICE void convert_float_to_bf16_pairs(
-    const float __attribute__((ext_vector_type(VecSize)))& reg_f32,
-    bfloat16_t __attribute__((ext_vector_type(VecSize)))& reg_bf16_big,
-    bfloat16_t __attribute__((ext_vector_type(VecSize)))& reg_bf16_small)
+CK_TILE_DEVICE void
+convert_float_to_bf16_pairs(const float __attribute__((ext_vector_type(VecSize))) & reg_f32,
+                            bfloat16_t __attribute__((ext_vector_type(VecSize))) & reg_bf16_big,
+                            bfloat16_t __attribute__((ext_vector_type(VecSize))) & reg_bf16_small)
 {
 #if defined(__gfx94__) && CK_TILE_TF32_USE_PACKED_CVT && CK_TILE_USE_LLVM_BUILTIN_BF16
     static_assert(VecSize % 2 == 0, "VecSize must be even for packed operations");
@@ -481,10 +481,10 @@ CK_TILE_DEVICE void convert_float_to_bf16_pairs(
     {
         fp32x2_t orig = {reg_f32[i], reg_f32[i + 1]};
 
-        bf16x2_t big_pair    = cvt_pk_bf16_f32(orig[0], orig[1]);
-        fp32x2_t big_f32     = bf16x2_to_fp32x2(big_pair);
-        fp32x2_t diff        = orig - big_f32;
-        bf16x2_t small_pair  = cvt_pk_bf16_f32(diff[0], diff[1]);
+        bf16x2_t big_pair   = cvt_pk_bf16_f32(orig[0], orig[1]);
+        fp32x2_t big_f32    = bf16x2_to_fp32x2(big_pair);
+        fp32x2_t diff       = orig - big_f32;
+        bf16x2_t small_pair = cvt_pk_bf16_f32(diff[0], diff[1]);
 
         reinterpret_cast<bf16x2_t*>(&reg_bf16_big)[i / 2]   = big_pair;
         reinterpret_cast<bf16x2_t*>(&reg_bf16_small)[i / 2] = small_pair;
