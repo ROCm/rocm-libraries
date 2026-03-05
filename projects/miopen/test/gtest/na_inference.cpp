@@ -304,7 +304,7 @@ struct na_fusion_inference_test : public ::testing::TestWithParam<TestCase>
         miopenStatus_t miopenError = miopenCompileFusionPlan(&handle, ptr_fusionplan.get());
         if(miopenError != miopenStatusSuccess)
         {
-            std::cerr << "BatchNorm+Activation Inference plan not supported." << std::endl;
+            GTEST_SKIP() << "BatchNorm+Activation Inference plan not supported." << std::endl;
         }
         else
         {
