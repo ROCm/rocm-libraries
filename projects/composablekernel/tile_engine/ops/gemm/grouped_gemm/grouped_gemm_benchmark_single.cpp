@@ -102,11 +102,9 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
     std::vector<int> stride_Cs = arg_parser.get_int_vec("stride_Cs");
 
     // If Ms/Ns/Ks not provided or wrong size, use -m/-n/-k defaults for all groups
-    auto valid_input = [&](int gc, const auto&... vecs) {
-        return gc != 0 && ((vecs.size() == static_cast<size_t>(gc)) && ...);
-    };
+    const auto gc_size = static_cast<std::size_t>(group_count);
 
-    if(!valid_input(group_count, Ms, Ns, Ks, stride_As, stride_Bs, stride_Cs))
+    if(group_count == 0 || Ms.size() != gc_size || Ns.size() != gc_size || Ks.size() != gc_size)
     {
         const int default_m = arg_parser.get_int("m");
         const int default_n = arg_parser.get_int("n");
@@ -115,10 +113,15 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
         Ms.assign(group_count, default_m);
         Ns.assign(group_count, default_n);
         Ks.assign(group_count, default_k);
-        stride_As.assign(group_count, 0);
-        stride_Bs.assign(group_count, 0);
-        stride_Cs.assign(group_count, 0);
     }
+
+    // Default stride vectors to 0 independently if missing or wrong size
+    if(stride_As.size() != gc_size)
+        stride_As.assign(group_count, 0);
+    if(stride_Bs.size() != gc_size)
+        stride_Bs.assign(group_count, 0);
+    if(stride_Cs.size() != gc_size)
+        stride_Cs.assign(group_count, 0);
 
     // Create GroupedGemmProblem struct
     GroupedGemmProblem problem{group_count,
