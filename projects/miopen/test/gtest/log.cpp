@@ -133,7 +133,7 @@ struct Tensor
 #if MIOPEN_BACKEND_OPENCL
         clReleaseMemObject(data);
 #elif MIOPEN_BACKEND_HIP
-        hipFree(data);
+        (void)hipFree(data);
 #endif
     }
 };
