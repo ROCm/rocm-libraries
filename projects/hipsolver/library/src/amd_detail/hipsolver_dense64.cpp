@@ -1124,29 +1124,29 @@ try
     else if(dataTypeA == HIP_C_64F && dataTypeW == HIP_R_64F && computeType == HIP_C_64F)
         e_workspace_size = sizeof(double) * n * batchSize;
 
-    size_t rocsolver_workspace = lwork_device - e_workspace_size;
+    rocblas_device_malloc mem((rocblas_handle)handle);
+    void*                 E_workspace;
 
-    // Allocate or use provided workspace only if there is already enough allocated
-    void* workspace_ptr = workOnDevice;
-    if(!workOnDevice || lworkOnDevice < lwork_device)
+    if(workOnDevice && lworkOnDevice)
     {
-        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, lwork_device));
-        // Get the managed workspace pointer
-        size_t actual_size;
+        // User provided workspace: E at the beginning, rocSOLVER workspace after
+        E_workspace                = workOnDevice;
+        void*  rocsolver_work      = (char*)workOnDevice + e_workspace_size;
+        size_t rocsolver_workspace = lworkOnDevice - e_workspace_size;
         CHECK_ROCBLAS_ERROR(
-            rocblas_get_workspace((rocblas_handle)handle, &workspace_ptr, &actual_size));
+            rocblas_set_workspace((rocblas_handle)handle, rocsolver_work, rocsolver_workspace));
     }
-
-    // Set rocSOLVER's internal workspace (first part of the buffer)
-    if(rocsolver_workspace > 0)
+    else
     {
-        CHECK_ROCBLAS_ERROR(
-            rocblas_set_workspace((rocblas_handle)handle, workspace_ptr, rocsolver_workspace));
-    }
+        // No user workspace: use managed workspace for rocSOLVER, device_malloc for E
+        size_t rocsolver_workspace = lwork_device - e_workspace_size;
+        CHECK_ROCBLAS_ERROR(hipsolverManageWorkspace((rocblas_handle)handle, rocsolver_workspace));
 
-    // E workspace is at the end of the buffer
-    // cast to (char*) in order to do pointer arithmetic
-    void* E_workspace = (char*)workspace_ptr + rocsolver_workspace;
+        mem = rocblas_device_malloc((rocblas_handle)handle, e_workspace_size);
+        if(!mem)
+            return HIPSOLVER_STATUS_ALLOC_FAILED;
+        E_workspace = (void*)mem[0];
+    }
 
     // TODO: Update to call 64-bit versions once rocSOLVER adds rocsolver_*syev_strided_batched_64
     // Currently rocSOLVER only has 32-bit versions, so we cast int64_t to rocblas_int
