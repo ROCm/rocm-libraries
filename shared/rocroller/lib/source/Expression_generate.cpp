@@ -114,6 +114,9 @@ namespace rocRoller
                                                  bool              allowSpecial = true,
                                                  float             packingRatio = 1.f)
             {
+                auto packing = resType.varType.dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(resType.varType).packing;
                 auto regType = resType.regType;
                 if(IsWriteableSpecial(regType))
                 {
@@ -125,7 +128,7 @@ namespace rocRoller
                 return Register::Value::Placeholder(m_context,
                                                     regType,
                                                     resType.varType,
-                                                    resType.valueCount * packingRatio,
+                                                    resType.valueCount * packingRatio / packing,
                                                     Register::AllocationOptions::FullyContiguous());
             }
 
@@ -448,7 +451,7 @@ namespace rocRoller
 
                     auto conversion = resultPlaceholder(resType, true);
 
-                    for(size_t k = 0; k < dest->valueCount(); ++k)
+                    for(size_t k = 0; k < resType.valueCount; ++k)
                     {
                         auto lhsVal = lhs->regType() == Register::Type::Literal
                                               || IsSpecial(lhs->regType()) || lhs->valueCount() == 1
@@ -774,7 +777,7 @@ namespace rocRoller
 
                 dest->setName(dest->name() + results[0]->name());
 
-                if(dest->valueCount() == 1 && results[0]->valueCount() == 1)
+                if(destType.valueCount == 1 && results[0]->valueCount() == 1)
                 {
                     co_yield generateOp<Operation>(dest, results[0], expr);
                 }

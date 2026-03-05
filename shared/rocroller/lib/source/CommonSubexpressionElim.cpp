@@ -719,6 +719,9 @@ namespace rocRoller
                                                  bool              allowSpecial = true,
                                                  float             packingRatio = 1.f) const
             {
+                auto packing = resType.varType.dataType == DataType::None
+                                   ? 1
+                                   : DataTypeInfo::Get(resType.varType).packing;
                 if(Register::IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
                     if(allowSpecial)
@@ -727,10 +730,13 @@ namespace rocRoller
                         return Register::Value::Placeholder(m_context,
                                                             Register::Type::Scalar,
                                                             resType.varType,
-                                                            resType.valueCount * packingRatio);
+                                                            resType.valueCount * packingRatio
+                                                                / packing);
                 }
-                return Register::Value::Placeholder(
-                    m_context, resType.regType, resType.varType, resType.valueCount * packingRatio);
+                return Register::Value::Placeholder(m_context,
+                                                    resType.regType,
+                                                    resType.varType,
+                                                    resType.valueCount * packingRatio / packing);
             }
 
             /**

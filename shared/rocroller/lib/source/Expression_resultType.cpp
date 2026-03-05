@@ -118,10 +118,11 @@ namespace rocRoller
             {
                 auto lhsVal  = call(expr.lhs);
                 auto r1hsVal = call(expr.r1hs);
+                auto r2hsVal = call(expr.r2hs);
 
                 auto regType    = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
                 auto varType    = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
-                auto valueCount = broadcastValueCount({lhsVal, r1hsVal});
+                auto valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -129,13 +130,29 @@ namespace rocRoller
             ResultType operator()(ShiftLAdd const& expr)
             {
                 auto lhsVal  = call(expr.lhs);
+                auto r1hsVal = call(expr.r1hs);
                 auto r2hsVal = call(expr.r2hs);
 
                 auto regType    = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
                 auto varType    = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
-                auto valueCount = broadcastValueCount({lhsVal, r2hsVal});
+                auto valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
 
                 return {regType, varType, valueCount};
+            }
+
+            ResultType operator()(MatrixMultiply const& expr)
+            {
+                auto matAVal = call(expr.lhs);
+                auto matBVal = call(expr.r1hs);
+                auto matCVal = call(expr.r2hs);
+
+                auto regType = Register::PromoteType(matAVal.regType, matBVal.regType);
+                regType      = Register::PromoteType(regType, matCVal.regType);
+
+                auto varType = VariableType::Promote(matAVal.varType, matBVal.varType);
+                varType      = VariableType::Promote(varType, matCVal.varType);
+
+                return {regType, varType, matCVal.valueCount};
             }
 
             ResultType operator()(ScaledMatrixMultiply const& expr)
@@ -150,9 +167,7 @@ namespace rocRoller
                 auto varType = VariableType::Promote(matAVal.varType, matBVal.varType);
                 varType      = VariableType::Promote(varType, matCVal.varType);
 
-                size_t valueCount = broadcastValueCount({matAVal, matBVal, matCVal});
-
-                return {regType, varType, valueCount};
+                return {regType, varType, matCVal.valueCount};
             }
 
             template <typename T>
@@ -383,7 +398,8 @@ namespace rocRoller
                     actualNumRegister
                         = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
 
-                    operandValueCount *= DataTypeInfo::Get(operandVariableType).packing;
+                    if(operandVariableType.dataType != DataType::None)
+                        operandValueCount *= DataTypeInfo::Get(operandVariableType).packing;
                     if(operandValueCount != 1)
                     {
                         // Each value count of an operand in an expression
