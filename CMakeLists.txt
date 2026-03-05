@@ -47,7 +47,7 @@ set(DEFAULT_COMPONENTS
     rocrand
 )
 
-set(SUPPORTED_COMPONENTS
+set(AVAILABLE_COMPONENTS
     ${DEFAULT_COMPONENTS}
     # dnn
     hipdnn
@@ -92,7 +92,7 @@ endif()
 
 message(STATUS "Enabling components:")
 foreach(component ${ROCM_LIBS_ENABLE_COMPONENTS})
-    if(component IN_LIST SUPPORTED_COMPONENTS)
+    if(component IN_LIST AVAILABLE_COMPONENTS)
         message(STATUS "  ${component} (supported)")
     elseif(component IN_LIST UNSUPPORTED_COMPONENTS)
         message(STATUS "  ${component} (unsupported)")
