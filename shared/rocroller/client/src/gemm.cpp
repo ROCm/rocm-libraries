@@ -204,10 +204,37 @@ namespace rocRoller::Client::GEMMClient
                       problemParams.initModeC);
         }
 
+        // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
+        std::vector<PackedTypeB> hostBForKernel(hostB);
+        if(not problemParams.types.pretileB.empty() && problemParams.types.pretileB.size() == 2)
+        {
+            auto const packing = TypeInfo<PackedTypeB>::ElementBits / TypeInfo<B>::ElementBits;
+
+            std::vector<size_t> sizes       = descB.sizes();
+            std::vector<size_t> preTileSize = problemParams.types.pretileB;
+            if(packing > 1)
+            {
+                // Tile sizes are in logical elements; convert sizes and preTileSize to packed
+                // element space so that product(sizes) == hostB.size() and tiles align.
+                // Packing is along the first (fast) dimension for B (K).
+                AssertFatal(sizes[0] % packing == 0,
+                            "pretileB: K dimension must be a multiple of packing factor (",
+                            packing,
+                            ") for packed type B.");
+                AssertFatal(preTileSize[0] % packing == 0,
+                            "pretileB: tile K must be a multiple of packing factor (",
+                            packing,
+                            ") for packed type B.");
+                sizes[0] /= packing;
+                preTileSize[0] /= packing;
+            }
+            hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
+        }
+
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
         RotatingBuffer<PackedTypeA> rotatingA(hostA, rotatingSize);
-        RotatingBuffer<PackedTypeB> rotatingB(hostB, rotatingSize);
+        RotatingBuffer<PackedTypeB> rotatingB(hostBForKernel, rotatingSize);
         RotatingBuffer<C>           rotatingC(hostC, rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
 
@@ -346,6 +373,8 @@ namespace rocRoller::Client::GEMMClient
                 //
                 //   tileM * ((K // T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
                 //
+                // Note the strides.
+                //
 
                 // Only works for TranspostType::T for now
                 AssertFatal(problemParams.types.transA == TransposeType::T,
@@ -357,14 +386,9 @@ namespace rocRoller::Client::GEMMClient
                 auto const tileK = problemParams.types.scalePretileA[1];
 
                 descAScale = TensorDescriptor(problemParams.types.scaleTypeA,
-                                              {static_cast<size_t>(M / tileM),
-                                               static_cast<size_t>(K / tileK),
-                                               static_cast<size_t>(tileM),
-                                               static_cast<size_t>(tileK)},
+                                              {M, K},
                                               {static_cast<size_t>((K / tileK) * tileM * tileK),
-                                               static_cast<size_t>(tileM * tileK),
-                                               static_cast<size_t>(tileK),
-                                               static_cast<size_t>(1)});
+                                               static_cast<size_t>(tileM * tileK)});
             }
             else
             {
@@ -400,6 +424,8 @@ namespace rocRoller::Client::GEMMClient
                 //
                 //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
                 //
+                // Note the strides.
+                //
 
                 // Only works for TranspostType::T for now
                 AssertFatal(problemParams.types.transB == TransposeType::N,
@@ -411,16 +437,9 @@ namespace rocRoller::Client::GEMMClient
                 auto const tileN = problemParams.types.scalePretileB[1];
 
                 descBScale = TensorDescriptor(problemParams.types.scaleTypeB,
-                                              {static_cast<size_t>(K / tileK),
-                                               static_cast<size_t>(N / tileN),
-                                               static_cast<size_t>(tileK),
-                                               static_cast<size_t>(tileN)},
-                                              {
-                                                  static_cast<size_t>(tileK * tileN),
-                                                  static_cast<size_t>((K / tileK) * tileK * tileN),
-                                                  static_cast<size_t>(1),
-                                                  static_cast<size_t>(tileK),
-                                              });
+                                              {K, N},
+                                              {static_cast<size_t>(tileK * tileN),
+                                               static_cast<size_t>((K / tileK) * tileK * tileN)});
             }
             else
             {
@@ -1353,8 +1372,27 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         // Workgroup size
 
-        update(SN(&SP::workgroupSizeX), solution.workgroupSizeX);
-        update(SN(&SP::workgroupSizeY), solution.workgroupSizeY);
+        bool wgsXYSet = false;
+        wgsXYSet |= update(SN(&SP::workgroupSizeX), solution.workgroupSizeX);
+        wgsXYSet |= update(SN(&SP::workgroupSizeY), solution.workgroupSizeY);
+
+        bool wgsSet = false;
+        if(app.get_option("--wgs")->count())
+        {
+            XYTuple xy{0, 0};
+            if(!ParseXY(app.get_option("--wgs")->as<std::string>(), xy))
+                Throw<FatalError>("Failed to parse WGS argument.");
+            solution.workgroupSizeX = xy.x;
+            solution.workgroupSizeY = xy.y;
+            wgsSet                  = true;
+        }
+
+        if(wgsSet && wgsXYSet)
+        {
+            Throw<FatalError>(
+                "Workgroup size was overspecified.  Please use only --wgs or "
+                "the --workgroup_size_x and --workgroup_size_y arguments; but not both.");
+        }
 
         // Workgroup mapping
 
@@ -1684,6 +1722,8 @@ int main(int argc, const char* argv[])
                    "Experimental: Skip Permlane instructions for scale data. Options: None, "
                    "PreSwizzleScale, PreSwizzleScaleGFX950.");
 
+    auto pretileBOption = app.add_option("--pretileB", "Pre-tile B matrix. Dimensions are: KxN.");
+
     bool pretileScale = false;
     app.add_flag("--pretileScale", pretileScale, "Experimental: pretile scale data.");
 
@@ -1710,6 +1750,7 @@ int main(int argc, const char* argv[])
 
     app.add_option(SN(&SP::workgroupSizeX), "Workgroup size in the x dimension.");
     app.add_option(SN(&SP::workgroupSizeY), "Workgroup size in the y dimension.");
+    app.add_option("--wgs", "Workgroup size (x/y pair).");
 
     app.add_option(SN(&SP::workgroupMappingDim),
                    "Workgroup mapping dimension (-1, 0, 1). Default: -1")
@@ -1901,6 +1942,12 @@ int main(int argc, const char* argv[])
     //
 
     CLI11_PARSE(app, argc, argv);
+
+    if(pretileBOption->count() > 0)
+    {
+        auto xy        = pretileBOption->as<Client::GEMMClient::XYTuple>();
+        types.pretileB = {static_cast<unsigned long>(xy.x), static_cast<unsigned long>(xy.y)};
+    }
 
     updateSolutionFromArguments(solution, app);
 
