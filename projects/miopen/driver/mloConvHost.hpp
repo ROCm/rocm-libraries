@@ -1174,8 +1174,7 @@ bool mloVerify_mt(const miopenTensorDescriptor_t& cpu_,
                         {
                             match = false;
                             std::cout << "ULPs: " << ulps << " is too large (> " << ulps_tolerance
-                                      << ")"
-                                      << " at {" << b << ',' << c << ',';
+                                      << ")" << " at {" << b << ',' << c << ',';
                             if(spatial_dim == 3)
                                 std::cout << k << ',';
                             std::cout << j << ',' << i << "}, cpu_val = " << c_val
