@@ -1643,12 +1643,12 @@ class Solution(collections.abc.Mapping):
     #   return
 
     state["enableGLTrA"] = state["DirectToVgprA"] and state["ProblemType"]["TLUA"] \
-      and ((numBytes == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
-        or (numBytes == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
+      and ((numBytesA == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
+        or (numBytesA == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
     state["enableGLTrB"] = state["DirectToVgprB"] and state["ProblemType"]["TLUB"] \
-      and ((numBytes == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
-        or (numBytes == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
+      and ((numBytesB == 1 and isaInfoMap[isa].asmCaps["HasGLTr8B64"]) \
+        or (numBytesB == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
 
     if state["enableLDSTrA"] or state["enableGLTrA"]:
@@ -2328,14 +2328,14 @@ class Solution(collections.abc.Mapping):
         if state["DirectToLds%s"%tc]:
           bpeA = state["ProblemType"]["DataType%s"%tc].numBytes()
           # For DTL lds padding must be a multiple of the instruction load size (in bytes)
-          MinLdsBlockSizePerPad = (state[f"GlobalReadVectorWidth%s"%tc] * bpeA) * state["WavefrontSize"]
+          MinLdsBlockSizePerPad = int((state[f"GlobalReadVectorWidth%s"%tc] * bpeA) * state["WavefrontSize"])
           if state["UseGeneralizedNLCOne%s"%tc]:
             LdsBlockSizePerPad = MinLdsBlockSizePerPad
           else:
             LdsBlockSizePerPad = max(LdsBlockSizePerPad, MinLdsBlockSizePerPad)
             LdsBlockSizePerPad = roundUpToNearestMultiple(LdsBlockSizePerPad, MinLdsBlockSizePerPad)
 
-        return LdsBlockSizePerPad
+        return int(LdsBlockSizePerPad)
 
 
       def calcLdsNumBytesAB(mxTc: str, ldsPad: int, LdsBlockSizePerPad: int):
