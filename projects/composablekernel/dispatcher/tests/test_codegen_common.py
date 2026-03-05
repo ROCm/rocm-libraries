@@ -11,7 +11,6 @@ Run: python3 -m pytest tests/test_codegen_common.py -v
 """
 
 import sys
-import logging
 import unittest
 from pathlib import Path
 
@@ -218,9 +217,7 @@ class TestArchAwareExpansion(unittest.TestCase):
 
     def test_valid_trait_configs_includes_mem_interwave(self):
         configs = valid_trait_configs()
-        has_mem_interwave = any(
-            p == "mem" and s == "interwave" for p, s in configs
-        )
+        has_mem_interwave = any(p == "mem" and s == "interwave" for p, s in configs)
         self.assertTrue(has_mem_interwave)
 
     def test_needs_wave_expansion_wildcard(self):

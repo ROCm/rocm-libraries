@@ -14,7 +14,17 @@ to eliminate duplication.
 import logging
 import concurrent.futures
 from dataclasses import dataclass
-from typing import Callable, ClassVar, Dict, FrozenSet, List, Optional, Sequence, Tuple, TypeVar
+from typing import (
+    Callable,
+    ClassVar,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+)
 
 log = logging.getLogger(__name__)
 
@@ -62,8 +72,8 @@ class TraitConfigBase:
     ``double_smem_buffer`` and ``num_groups_to_merge``.
     """
 
-    pipeline: str   # mem, compv3, compv4, compv5, ...
-    epilogue: str   # cshuffle, default
+    pipeline: str  # mem, compv3, compv4, compv5, ...
+    epilogue: str  # cshuffle, default
     scheduler: str  # intrawave, interwave
     pad_m: bool
     pad_n: bool
@@ -72,18 +82,20 @@ class TraitConfigBase:
     # Unsupported (pipeline, epilogue, scheduler) combinations.
     # Only 'mem' pipeline supports interwave; all compute pipelines
     # (compv3/v4/v5/v6/async) only support intrawave.
-    _UNSUPPORTED: ClassVar[FrozenSet] = frozenset({
-        ("compv3", "cshuffle", "interwave"),
-        ("compv3", "default", "interwave"),
-        ("compv4", "cshuffle", "interwave"),
-        ("compv4", "default", "interwave"),
-        ("compv5", "cshuffle", "interwave"),
-        ("compv5", "default", "interwave"),
-        ("compv6", "cshuffle", "interwave"),
-        ("compv6", "default", "interwave"),
-        ("comp_async", "cshuffle", "interwave"),
-        ("comp_async", "default", "interwave"),
-    })
+    _UNSUPPORTED: ClassVar[FrozenSet] = frozenset(
+        {
+            ("compv3", "cshuffle", "interwave"),
+            ("compv3", "default", "interwave"),
+            ("compv4", "cshuffle", "interwave"),
+            ("compv4", "default", "interwave"),
+            ("compv5", "cshuffle", "interwave"),
+            ("compv5", "default", "interwave"),
+            ("compv6", "cshuffle", "interwave"),
+            ("compv6", "default", "interwave"),
+            ("comp_async", "cshuffle", "interwave"),
+            ("comp_async", "default", "interwave"),
+        }
+    )
 
     def is_valid(self) -> bool:
         return (self.pipeline, self.epilogue, self.scheduler) not in self._UNSUPPORTED
@@ -190,7 +202,7 @@ def generate_cpp_compilation_unit(kernel_name: str) -> str:
     the generated .hpp header, causing template instantiation.
     """
     return (
-        f'// Auto-generated compilation unit for {kernel_name}\n'
+        f"// Auto-generated compilation unit for {kernel_name}\n"
         f'#include "{kernel_name}.hpp"\n'
     )
 
@@ -211,9 +223,7 @@ def parallel_generate(
 
     if parallel and len(items) > 1:
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = {
-                executor.submit(generate_fn, item): item for item in items
-            }
+            futures = {executor.submit(generate_fn, item): item for item in items}
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
                 results.append(result)
@@ -250,6 +260,7 @@ def _get_arch_data() -> Dict:
             TRAIT_UNSUPPORTED_COMBINATIONS,
             get_supported_archs,
         )
+
         _arch_data_cache = {
             "warp_combos": WARP_SUPPORTED_COMBINATIONS,
             "warp_tile_combos": WARP_TILE_SUPPORTED_COMBINATIONS,

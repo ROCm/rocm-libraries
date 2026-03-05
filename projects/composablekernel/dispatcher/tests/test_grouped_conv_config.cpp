@@ -32,7 +32,7 @@ void test_grouped_conv_signature_info()
     assert(sig.out_type == "fp16");
     assert(sig.acc_type == "fp32");
     assert(sig.num_groups == 1);
-    sig.in_type = "bf16";
+    sig.in_type    = "bf16";
     sig.num_groups = 4;
     assert(sig.in_type == "bf16");
     assert(sig.num_groups == 4);

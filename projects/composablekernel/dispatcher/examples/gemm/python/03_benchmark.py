@@ -63,7 +63,9 @@ Examples:
         "--iterations", type=int, default=10, help="Benchmark iterations (default: 10)"
     )
     parser.add_argument(
-        "--arch", default=detect_gpu_arch(), help="Target architecture (auto-detected from rocminfo)"
+        "--arch",
+        default=detect_gpu_arch(),
+        help="Target architecture (auto-detected from rocminfo)",
     )
     args = parser.parse_args()
 

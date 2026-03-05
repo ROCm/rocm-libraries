@@ -54,7 +54,9 @@ Examples:
         help="Data type (default: fp16)",
     )
     parser.add_argument(
-        "--arch", default=detect_gpu_arch(), help="Target architecture (auto-detected from rocminfo)"
+        "--arch",
+        default=detect_gpu_arch(),
+        help="Target architecture (auto-detected from rocminfo)",
     )
     args = parser.parse_args()
 

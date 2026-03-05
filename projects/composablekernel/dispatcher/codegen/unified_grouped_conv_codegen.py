@@ -22,15 +22,14 @@ from typing import List, Optional, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-log = logging.getLogger(__name__)
-
 from codegen_common import (
     TileConfig,
     TraitConfigBase,
-    CommonTypeMappings,
     parallel_generate,
 )
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+log = logging.getLogger(__name__)
 
 # Import architecture filter for GPU-specific validation
 try:
@@ -96,7 +95,9 @@ class GroupedConvKernelConfig:
     variant: GroupedConvVariant = GroupedConvVariant.FORWARD
     ndim_spatial: int = 2  # 1D, 2D, or 3D
     arch: str = "gfx942"  # Target architecture
-    layout: Union[str, GroupedConvLayout] = "nhwgc"  # Data layout (e.g., "nhwgc", "ndhwgc")
+    layout: Union[str, GroupedConvLayout] = (
+        "nhwgc"  # Data layout (e.g., "nhwgc", "ndhwgc")
+    )
 
     # Vector sizes
     vector_size_a: int = 4
@@ -114,7 +115,9 @@ class GroupedConvKernelConfig:
 
     def __post_init__(self):
         if self.vector_sizes is not None:
-            self.vector_size_a, self.vector_size_b, self.vector_size_c = self.vector_sizes[:3]
+            self.vector_size_a, self.vector_size_b, self.vector_size_c = (
+                self.vector_sizes[:3]
+            )
 
     def _layout_str(self) -> str:
         """Get layout as lowercase string for naming."""
@@ -153,7 +156,9 @@ class GroupedConvKernelConfig:
         }[self.variant]
 
         # Core identity: variant, dtype, layout, dims
-        name = f"grouped_conv_{variant_str}_{datatype}_{layout_str}_{self.ndim_spatial}d"
+        name = (
+            f"grouped_conv_{variant_str}_{datatype}_{layout_str}_{self.ndim_spatial}d"
+        )
 
         # Pipeline configuration
         name += f"_{tr.pipeline}_{tr.epilogue}_{tr.scheduler}"
@@ -334,9 +339,7 @@ class CKTileGroupedConvKernelGenerator:
 using namespace ck_tile;
 """
 
-    def _config_struct(
-        self, config: GroupedConvKernelConfig, kernel_name: str
-    ) -> str:
+    def _config_struct(self, config: GroupedConvKernelConfig, kernel_name: str) -> str:
         """Generate config struct"""
         t = config.tile
         tr = config.trait
@@ -1077,7 +1080,9 @@ namespace ck_tile {{ namespace generated {{
             except Exception as e:
                 return ("fail", None, None, str(e))
 
-        raw = parallel_generate(_safe_generate, items, parallel=parallel and len(items) > 1)
+        raw = parallel_generate(
+            _safe_generate, items, parallel=parallel and len(items) > 1
+        )
         for r in raw:
             if r[0] == "ok":
                 results["kernels"].append(r[1])
@@ -1119,8 +1124,16 @@ namespace ck_tile {{ namespace generated {{
         # Generate include_all headers (for simple include-all usage)
         headers_to_generate = [
             ("include_all_grouped_conv_fwd_kernels.hpp", fwd_headers, "forward"),
-            ("include_all_grouped_conv_bwdd_kernels.hpp", bwdd_headers, "backward data"),
-            ("include_all_grouped_conv_bwdw_kernels.hpp", bwdw_headers, "backward weight"),
+            (
+                "include_all_grouped_conv_bwdd_kernels.hpp",
+                bwdd_headers,
+                "backward data",
+            ),
+            (
+                "include_all_grouped_conv_bwdw_kernels.hpp",
+                bwdw_headers,
+                "backward weight",
+            ),
         ]
 
         for header_name, kernel_headers, variant_desc in headers_to_generate:
@@ -1169,7 +1182,9 @@ namespace ck_tile {{ namespace generated {{
         """Generate master registration header for all grouped conv kernels"""
         # Scan wrapper directory for ALL wrapper files
         all_wrappers = []
-        for wrapper_path in self.wrapper_dir.glob("dispatcher_wrapper_grouped_conv_*.hpp"):
+        for wrapper_path in self.wrapper_dir.glob(
+            "dispatcher_wrapper_grouped_conv_*.hpp"
+        ):
             all_wrappers.append(wrapper_path.name)
 
         wrapper_includes = "\n".join(f'#include "{w}"' for w in sorted(all_wrappers))

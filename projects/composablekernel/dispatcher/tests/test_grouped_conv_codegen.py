@@ -76,17 +76,23 @@ class TestGroupedConvLayout(unittest.TestCase):
 
     def test_1d_layouts_exist(self):
         """1D conv layouts (e.g., NWGC, GYXC, NWGK)."""
-        layouts_1d = [l for l in GroupedConvLayout if "W" in l.value and "H" not in l.value]
+        layouts_1d = [
+            lay
+            for lay in GroupedConvLayout
+            if "W" in lay.value and "H" not in lay.value
+        ]
         self.assertGreater(len(layouts_1d), 0)
 
     def test_2d_layouts_exist(self):
         """2D conv layouts (e.g., NHWGC, GKYXC, NHWGK)."""
-        layouts_2d = [l for l in GroupedConvLayout if "HW" in l.value]
+        layouts_2d = [lay for lay in GroupedConvLayout if "HW" in lay.value]
         self.assertGreater(len(layouts_2d), 0)
 
     def test_3d_layouts_exist(self):
         """3D conv layouts (e.g., NDHWGC, GDKYXC)."""
-        layouts_3d = [l for l in GroupedConvLayout if "D" in l.value or "DHW" in l.value]
+        layouts_3d = [
+            lay for lay in GroupedConvLayout if "D" in lay.value or "DHW" in lay.value
+        ]
         self.assertGreater(len(layouts_3d), 0)
 
 
@@ -103,7 +109,12 @@ class TestGroupedConvKernelConfig(unittest.TestCase):
 
     def _make_trait(self):
         return GroupedConvTraitConfig(
-            "mem", "cshuffle", "intrawave", False, False, False,
+            "mem",
+            "cshuffle",
+            "intrawave",
+            False,
+            False,
+            False,
             double_smem_buffer=False,
             num_groups_to_merge=1,
         )
@@ -210,7 +221,12 @@ class TestCKTileGroupedConvKernelGenerator(unittest.TestCase):
     def _make_config(self):
         tile = TileConfig(128, 128, 32, 2, 2, 1, 32, 32, 16)
         trait = GroupedConvTraitConfig(
-            "mem", "cshuffle", "intrawave", False, False, False,
+            "mem",
+            "cshuffle",
+            "intrawave",
+            False,
+            False,
+            False,
             double_smem_buffer=False,
             num_groups_to_merge=1,
         )
@@ -262,7 +278,12 @@ class TestGroupedConvDispatcherWrapperGenerator(unittest.TestCase):
     def _make_config(self):
         tile = TileConfig(128, 128, 32, 2, 2, 1, 32, 32, 16)
         trait = GroupedConvTraitConfig(
-            "mem", "cshuffle", "intrawave", False, False, False,
+            "mem",
+            "cshuffle",
+            "intrawave",
+            False,
+            False,
+            False,
             double_smem_buffer=False,
             num_groups_to_merge=1,
         )
@@ -346,7 +367,12 @@ class TestUnifiedGroupedConvCodegen(unittest.TestCase):
         # Use a real config - patch the config source to return one config
         tile = TileConfig(128, 128, 32, 2, 2, 1, 32, 32, 16)
         trait = GroupedConvTraitConfig(
-            "mem", "cshuffle", "intrawave", False, False, False,
+            "mem",
+            "cshuffle",
+            "intrawave",
+            False,
+            False,
+            False,
             double_smem_buffer=False,
             num_groups_to_merge=1,
         )
@@ -399,7 +425,12 @@ class TestSharedImports(unittest.TestCase):
     def test_grouped_conv_trait_config_has_double_smem_buffer(self):
         """GroupedConvTraitConfig has double_smem_buffer field."""
         trait = GroupedConvTraitConfig(
-            "mem", "cshuffle", "intrawave", False, False, False,
+            "mem",
+            "cshuffle",
+            "intrawave",
+            False,
+            False,
+            False,
             double_smem_buffer=True,
             num_groups_to_merge=2,
         )
@@ -409,7 +440,12 @@ class TestSharedImports(unittest.TestCase):
     def test_grouped_conv_trait_config_has_num_groups_to_merge(self):
         """GroupedConvTraitConfig has num_groups_to_merge field."""
         trait = GroupedConvTraitConfig(
-            "mem", "cshuffle", "intrawave", False, False, False,
+            "mem",
+            "cshuffle",
+            "intrawave",
+            False,
+            False,
+            False,
             double_smem_buffer=False,
             num_groups_to_merge=4,
         )
@@ -418,7 +454,12 @@ class TestSharedImports(unittest.TestCase):
     def test_grouped_conv_trait_config_inherits_base_fields(self):
         """GroupedConvTraitConfig inherits pipeline, epilogue, scheduler from base."""
         trait = GroupedConvTraitConfig(
-            "compv4", "cshuffle", "intrawave", True, True, True,
+            "compv4",
+            "cshuffle",
+            "intrawave",
+            True,
+            True,
+            True,
             double_smem_buffer=False,
             num_groups_to_merge=1,
         )

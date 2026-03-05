@@ -599,7 +599,9 @@ class GroupedConvKernelConfigSet:
         return tile_count * trait_count * extra_count * len(self.gpu_targets)
 
 
-def load_grouped_conv_kernel_configs(json_path: str | Path) -> GroupedConvKernelConfigSet:
+def load_grouped_conv_kernel_configs(
+    json_path: str | Path,
+) -> GroupedConvKernelConfigSet:
     """
     Load convolution kernel configurations from a JSON file.
 

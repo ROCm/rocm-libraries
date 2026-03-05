@@ -90,8 +90,8 @@ void test_grouped_conv_registry_thread_safe()
     GroupedConvRegistry& reg = GroupedConvRegistry::instance();
     reg.clear();
 
-    const int num_threads        = 4;
-    const int sets_per_thread    = 10;
+    const int num_threads     = 4;
+    const int sets_per_thread = 10;
     std::vector<std::thread> threads;
     std::atomic<int> success_count{0};
 
@@ -155,9 +155,8 @@ void test_grouped_conv_registry_filter()
     set.add("bf16", "nhwc", "forward", 128, 128);
     reg.register_set(set);
 
-    auto fp16_only = reg.filter([](const GroupedConvKernelInstance& k) {
-        return k.key().dtype_in == "fp16";
-    });
+    auto fp16_only =
+        reg.filter([](const GroupedConvKernelInstance& k) { return k.key().dtype_in == "fp16"; });
     assert(fp16_only.size() == 2);
 
     auto large_tile = reg.filter([](const GroupedConvKernelInstance& k) {

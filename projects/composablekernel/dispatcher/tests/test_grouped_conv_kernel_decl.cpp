@@ -34,7 +34,11 @@ void test_grouped_conv_algorithm_builder()
 {
     std::cout << "  test_grouped_conv_algorithm_builder... ";
     GroupedConvAlgorithm algo;
-    algo.tile(128, 128, 64).wave(2, 2, 1).warp(32, 32, 16).pipeline("compv4").scheduler("intrawave");
+    algo.tile(128, 128, 64)
+        .wave(2, 2, 1)
+        .warp(32, 32, 16)
+        .pipeline("compv4")
+        .scheduler("intrawave");
     assert(algo.tile_m_ == 128);
     assert(algo.tile_n_ == 128);
     assert(algo.tile_k_ == 64);

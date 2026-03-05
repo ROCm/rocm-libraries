@@ -1571,6 +1571,7 @@ def main():
     if args.tile_config_json and args.config and args.config.exists():
         try:
             import os as _os
+
             _os.unlink(args.config)
         except OSError:
             pass

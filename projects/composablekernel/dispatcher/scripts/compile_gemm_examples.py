@@ -415,7 +415,7 @@ def generate_conv_kernels(declarations: list, gpu_target: str = "gfx942") -> int
         print_error(f"  Failed to import grouped conv codegen: {e}")
         return 0
 
-    codegen = UnifiedGroupedConvCodegen(kernel_dir)
+    codegen = UnifiedConvCodegen(kernel_dir)
     total_generated = 0
 
     # Group by dtype and variant for efficient generation
@@ -1864,7 +1864,9 @@ In your C++ code, declare kernels like:
 
     if not gemm_declarations and not conv_declarations:
         print_error("  No kernel declarations found!")
-        print("  Add DECL_KERNEL_SET for GEMM or DECL_GROUPED_CONV_KERNEL_SET for Grouped Conv")
+        print(
+            "  Add DECL_KERNEL_SET for GEMM or DECL_GROUPED_CONV_KERNEL_SET for Grouped Conv"
+        )
         return 1
 
     # Handle GEMM declarations

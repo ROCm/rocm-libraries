@@ -55,7 +55,9 @@ Examples:
         help="Maximum problem size (default: 4096)",
     )
     parser.add_argument(
-        "--arch", default=detect_gpu_arch(), help="Target architecture (auto-detected from rocminfo)"
+        "--arch",
+        default=detect_gpu_arch(),
+        help="Target architecture (auto-detected from rocminfo)",
     )
     args = parser.parse_args()
 

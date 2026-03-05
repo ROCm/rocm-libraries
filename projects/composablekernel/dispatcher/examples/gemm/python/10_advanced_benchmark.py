@@ -70,7 +70,11 @@ def parse_args():
     # Kernel configuration
     parser.add_argument("--dtype", default="fp16", help="Data type")
     parser.add_argument("--pipeline", default="compv4", help="Pipeline type")
-    parser.add_argument("--arch", default=detect_gpu_arch(), help="GPU architecture (auto-detected from rocminfo)")
+    parser.add_argument(
+        "--arch",
+        default=detect_gpu_arch(),
+        help="GPU architecture (auto-detected from rocminfo)",
+    )
 
     return parser.parse_args()
 

@@ -50,10 +50,10 @@ void test_grouped_conv_problem_strided()
 {
     std::cout << "  test_grouped_conv_problem_strided... ";
     GroupedConvProblem p;
-    p.N = 1;
-    p.C = 64;
-    p.K = 64;
-    p.G = 1;
+    p.N              = 1;
+    p.C              = 64;
+    p.K              = 64;
+    p.G              = 1;
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.stride         = {1, 2, 2};
@@ -69,10 +69,10 @@ void test_grouped_conv_problem_grouped()
 {
     std::cout << "  test_grouped_conv_problem_grouped... ";
     GroupedConvProblem p;
-    p.N = 2;
-    p.C = 64;
-    p.K = 64;
-    p.G = 4;
+    p.N              = 2;
+    p.C              = 64;
+    p.K              = 64;
+    p.G              = 4;
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.stride         = {1, 1, 1};
@@ -90,10 +90,10 @@ void test_grouped_conv_problem_depthwise()
 {
     std::cout << "  test_grouped_conv_problem_depthwise... ";
     GroupedConvProblem p;
-    p.N = 2;
-    p.C = 64;
-    p.K = 64;
-    p.G = 64;
+    p.N              = 2;
+    p.C              = 64;
+    p.K              = 64;
+    p.G              = 64;
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.stride         = {1, 1, 1};
@@ -109,10 +109,10 @@ void test_grouped_conv_problem_pointwise()
 {
     std::cout << "  test_grouped_conv_problem_pointwise... ";
     GroupedConvProblem p;
-    p.N = 2;
-    p.C = 64;
-    p.K = 128;
-    p.G = 1;
+    p.N              = 2;
+    p.C              = 64;
+    p.K              = 128;
+    p.G              = 1;
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 1, 1};
     p.stride         = {1, 1, 1};
@@ -128,10 +128,10 @@ void test_grouped_conv_problem_flops()
 {
     std::cout << "  test_grouped_conv_problem_flops... ";
     GroupedConvProblem p;
-    p.N = 2;
-    p.C = 64;
-    p.K = 64;
-    p.G = 1;
+    p.N              = 2;
+    p.C              = 64;
+    p.K              = 64;
+    p.G              = 1;
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.stride         = {1, 1, 1};
@@ -148,10 +148,10 @@ void test_grouped_conv_problem_is_valid()
 {
     std::cout << "  test_grouped_conv_problem_is_valid... ";
     GroupedConvProblem p;
-    p.N = 1;
-    p.C = 64;
-    p.K = 64;
-    p.G = 1;
+    p.N              = 1;
+    p.C              = 64;
+    p.K              = 64;
+    p.G              = 1;
     p.input_spatial  = {1, 14, 14};
     p.filter_spatial = {1, 3, 3};
     p.compute_output_size();

@@ -33,7 +33,7 @@ CK_ROOT = DISPATCHER_DIR.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
-from dispatcher_common import (
+from dispatcher_common import (  # noqa: E402
     print_phase,
     print_success,
     print_error,
@@ -765,7 +765,11 @@ def main():
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument(
-        "--jobs", "-j", type=int, default=None, help="Parallel jobs for kernel generation (default: cpu_count)"
+        "--jobs",
+        "-j",
+        type=int,
+        default=None,
+        help="Parallel jobs for kernel generation (default: cpu_count)",
     )
     args = parser.parse_args()
 

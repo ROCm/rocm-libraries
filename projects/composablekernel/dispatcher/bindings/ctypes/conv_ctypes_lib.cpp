@@ -103,32 +103,39 @@ int conv_dispatcher_get_kernel_name(int index, char* buffer, int buffer_size)
 // =========================================================================
 int conv_dispatcher_is_supported(const ConvProblemC* prob)
 {
-    if(!prob) return 0;
+    if(!prob)
+        return 0;
     const bool is_3d = (prob->input_d > 1 || prob->filter_z > 1);
     switch(prob->direction)
     {
     case 0: // forward
 #if defined(CONV_FWD_3D_AVAILABLE)
-        if(is_3d) return 1;
+        if(is_3d)
+            return 1;
 #endif
 #if defined(CONV_FWD_2D_AVAILABLE)
-        if(!is_3d) return 1;
+        if(!is_3d)
+            return 1;
 #endif
         return 0;
     case 1: // bwd_data
 #if defined(CONV_BWDD_3D_AVAILABLE)
-        if(is_3d) return 1;
+        if(is_3d)
+            return 1;
 #endif
 #if defined(CONV_BWDD_2D_AVAILABLE)
-        if(!is_3d) return 1;
+        if(!is_3d)
+            return 1;
 #endif
         return 0;
     case 2: // bwd_weight
 #if defined(CONV_BWDW_3D_AVAILABLE)
-        if(is_3d) return 1;
+        if(is_3d)
+            return 1;
 #endif
 #if defined(CONV_BWDW_2D_AVAILABLE)
-        if(!is_3d) return 1;
+        if(!is_3d)
+            return 1;
 #endif
         return 0;
     default: return 0;
@@ -140,26 +147,32 @@ int conv_dispatcher_is_supported(const ConvProblemC* prob)
 // =========================================================================
 static ck_tile::conv::ConvParam make_param_2d(const ConvProblemC* p)
 {
-    return ck_tile::conv::ConvParam{
-        2, p->G, p->N, p->K, p->C,
-        {p->filter_y, p->filter_x},
-        {p->input_h, p->input_w},
-        {p->stride_h, p->stride_w},
-        {p->dilation_h, p->dilation_w},
-        {p->pad_h, p->pad_w},
-        {p->pad_h, p->pad_w}};
+    return ck_tile::conv::ConvParam{2,
+                                    p->G,
+                                    p->N,
+                                    p->K,
+                                    p->C,
+                                    {p->filter_y, p->filter_x},
+                                    {p->input_h, p->input_w},
+                                    {p->stride_h, p->stride_w},
+                                    {p->dilation_h, p->dilation_w},
+                                    {p->pad_h, p->pad_w},
+                                    {p->pad_h, p->pad_w}};
 }
 
 static ck_tile::conv::ConvParam make_param_3d(const ConvProblemC* p)
 {
-    return ck_tile::conv::ConvParam{
-        3, p->G, p->N, p->K, p->C,
-        {p->filter_z, p->filter_y, p->filter_x},
-        {p->input_d, p->input_h, p->input_w},
-        {p->stride_d, p->stride_h, p->stride_w},
-        {p->dilation_d, p->dilation_h, p->dilation_w},
-        {p->pad_d, p->pad_h, p->pad_w},
-        {p->pad_d, p->pad_h, p->pad_w}};
+    return ck_tile::conv::ConvParam{3,
+                                    p->G,
+                                    p->N,
+                                    p->K,
+                                    p->C,
+                                    {p->filter_z, p->filter_y, p->filter_x},
+                                    {p->input_d, p->input_h, p->input_w},
+                                    {p->stride_d, p->stride_h, p->stride_w},
+                                    {p->dilation_d, p->dilation_h, p->dilation_w},
+                                    {p->pad_d, p->pad_h, p->pad_w},
+                                    {p->pad_d, p->pad_h, p->pad_w}};
 }
 
 // =========================================================================
@@ -167,8 +180,8 @@ static ck_tile::conv::ConvParam make_param_3d(const ConvProblemC* p)
 // =========================================================================
 
 #ifdef CONV_FWD_2D_AVAILABLE
-static float launch_fwd_2d(const void* in, const void* wei, void* out,
-                           const ConvProblemC* p, hipStream_t stream)
+static float
+launch_fwd_2d(const void* in, const void* wei, void* out, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_2d(p);
     ck_tile::GroupedConvFwdHostArgs<> args(param, in, wei, {}, out, 1);
@@ -178,8 +191,8 @@ static float launch_fwd_2d(const void* in, const void* wei, void* out,
 #endif
 
 #ifdef CONV_FWD_3D_AVAILABLE
-static float launch_fwd_3d(const void* in, const void* wei, void* out,
-                           const ConvProblemC* p, hipStream_t stream)
+static float
+launch_fwd_3d(const void* in, const void* wei, void* out, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_3d(p);
     ck_tile::GroupedConvFwdHostArgs<> args(param, in, wei, {}, out, 1);
@@ -189,8 +202,8 @@ static float launch_fwd_3d(const void* in, const void* wei, void* out,
 #endif
 
 #ifdef CONV_BWDD_2D_AVAILABLE
-static float launch_bwdd_2d(const void* dy, const void* wei, void* dx,
-                            const ConvProblemC* p, hipStream_t stream)
+static float
+launch_bwdd_2d(const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_2d(p);
     // CK Tile bwd_data: in_ptr=dX(output), wei_ptr=W, out_ptr=dY(input)
@@ -201,8 +214,8 @@ static float launch_bwdd_2d(const void* dy, const void* wei, void* dx,
 #endif
 
 #ifdef CONV_BWDD_3D_AVAILABLE
-static float launch_bwdd_3d(const void* dy, const void* wei, void* dx,
-                            const ConvProblemC* p, hipStream_t stream)
+static float
+launch_bwdd_3d(const void* dy, const void* wei, void* dx, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_3d(p);
     ck_tile::GroupedConvBwdDataHostArgs args(param, dx, wei, {}, dy, 1);
@@ -212,8 +225,8 @@ static float launch_bwdd_3d(const void* dy, const void* wei, void* dx,
 #endif
 
 #ifdef CONV_BWDW_2D_AVAILABLE
-static float launch_bwdw_2d(const void* x, const void* dy, void* dw,
-                            const ConvProblemC* p, hipStream_t stream)
+static float
+launch_bwdw_2d(const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_2d(p);
     // CK Tile bwd_weight: in_ptr=X, wei_ptr=dW(output), out_ptr=dY(input)
@@ -224,8 +237,8 @@ static float launch_bwdw_2d(const void* x, const void* dy, void* dw,
 #endif
 
 #ifdef CONV_BWDW_3D_AVAILABLE
-static float launch_bwdw_3d(const void* x, const void* dy, void* dw,
-                            const ConvProblemC* p, hipStream_t stream)
+static float
+launch_bwdw_3d(const void* x, const void* dy, void* dw, const ConvProblemC* p, hipStream_t stream)
 {
     auto param = make_param_3d(p);
     ck_tile::GroupedConvBwdWeightHostArgs args(param, x, dw, {}, dy, 1);
@@ -241,16 +254,13 @@ static float launch_bwdw_3d(const void* x, const void* dy, void* dw,
 //  direction=1 (bwd_data):    a=dY(grad_out),  b=W(weight),      c=dX(grad_in)
 //  direction=2 (bwd_weight):  a=X(input),      b=dY(grad_out),   c=dW(grad_wei)
 // =========================================================================
-float conv_dispatcher_run(const void* a_ptr,
-                          const void* b_ptr,
-                          void* c_ptr,
-                          const ConvProblemC* prob,
-                          void* stream)
+float conv_dispatcher_run(
+    const void* a_ptr, const void* b_ptr, void* c_ptr, const ConvProblemC* prob, void* stream)
 {
     if(!prob || !a_ptr || !b_ptr || !c_ptr)
         return -1.0f;
 
-    const bool is_3d = (prob->input_d > 1 || prob->filter_z > 1);
+    const bool is_3d       = (prob->input_d > 1 || prob->filter_z > 1);
     hipStream_t hip_stream = static_cast<hipStream_t>(stream);
 
     try
@@ -259,33 +269,38 @@ float conv_dispatcher_run(const void* a_ptr,
         {
         case 0: // Forward
 #ifdef CONV_FWD_3D_AVAILABLE
-            if(is_3d) return launch_fwd_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+            if(is_3d)
+                return launch_fwd_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
 #ifdef CONV_FWD_2D_AVAILABLE
-            if(!is_3d) return launch_fwd_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+            if(!is_3d)
+                return launch_fwd_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
             return -2.0f;
 
         case 1: // Backward data
 #ifdef CONV_BWDD_3D_AVAILABLE
-            if(is_3d) return launch_bwdd_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+            if(is_3d)
+                return launch_bwdd_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
 #ifdef CONV_BWDD_2D_AVAILABLE
-            if(!is_3d) return launch_bwdd_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+            if(!is_3d)
+                return launch_bwdd_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
             return -2.0f;
 
         case 2: // Backward weight
 #ifdef CONV_BWDW_3D_AVAILABLE
-            if(is_3d) return launch_bwdw_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+            if(is_3d)
+                return launch_bwdw_3d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
 #ifdef CONV_BWDW_2D_AVAILABLE
-            if(!is_3d) return launch_bwdw_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
+            if(!is_3d)
+                return launch_bwdw_2d(a_ptr, b_ptr, c_ptr, prob, hip_stream);
 #endif
             return -2.0f;
 
-        default:
-            return -1.0f;
+        default: return -1.0f;
         }
     }
     catch(const std::exception&)

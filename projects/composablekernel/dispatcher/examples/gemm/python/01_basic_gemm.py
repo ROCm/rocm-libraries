@@ -25,7 +25,6 @@ import time
 import argparse
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "python"))
 import numpy as np
@@ -79,12 +78,25 @@ KERNEL_SPECS = [
 def spec_to_config(spec: KernelSpec, dtype: str, arch: str) -> KernelConfig:
     warp_m, warp_n = (16, 16) if spec.tile_m <= 64 else (32, 32)
     return KernelConfig(
-        dtype_a=dtype, dtype_b=dtype, dtype_c=dtype, dtype_acc="fp32",
-        layout_a="row", layout_b="col", layout_c="row",
-        tile_m=spec.tile_m, tile_n=spec.tile_n, tile_k=spec.tile_k,
-        wave_m=2, wave_n=2, wave_k=1,
-        warp_m=warp_m, warp_n=warp_n, warp_k=16,
-        pipeline=spec.pipeline, scheduler=spec.scheduler, epilogue="cshuffle",
+        dtype_a=dtype,
+        dtype_b=dtype,
+        dtype_c=dtype,
+        dtype_acc="fp32",
+        layout_a="row",
+        layout_b="col",
+        layout_c="row",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+        wave_m=2,
+        wave_n=2,
+        wave_k=1,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_k=16,
+        pipeline=spec.pipeline,
+        scheduler=spec.scheduler,
+        epilogue="cshuffle",
         gfx_arch=arch,
     )
 
@@ -95,22 +107,27 @@ def main():
     parser.add_argument("--arch", default=detect_gpu_arch())
     parser.add_argument("--size", type=int, default=512, help="Problem size MxNxK")
     parser.add_argument("--num-kernels", type=int, default=0, help="0 = all")
-    parser.add_argument("--workers", type=int, default=0,
-                        help="Max parallel JIT workers (0 = auto)")
+    parser.add_argument(
+        "--workers", type=int, default=0, help="Max parallel JIT workers (0 = auto)"
+    )
     args = parser.parse_args()
 
     print("=" * 70)
     print("Example 01: Basic GEMM with Multiple Kernels")
     print("=" * 70)
 
-    specs = KERNEL_SPECS[:args.num_kernels] if args.num_kernels > 0 else KERNEL_SPECS
+    specs = KERNEL_SPECS[: args.num_kernels] if args.num_kernels > 0 else KERNEL_SPECS
 
     # Step 1: Build registry
-    print(f"\n  {len(specs)} kernel configurations, dtype={args.dtype}, arch={args.arch}")
+    print(
+        f"\n  {len(specs)} kernel configurations, dtype={args.dtype}, arch={args.arch}"
+    )
     print(f"\n  {'#':<3} {'Name':<22} {'Tile':<14} {'Pipeline':<10} {'Scheduler':<12}")
     print("  " + "-" * 64)
     for i, s in enumerate(specs, 1):
-        print(f"  {i:<3} {s.name:<22} {s.tile_m}x{s.tile_n}x{s.tile_k:<6} {s.pipeline:<10} {s.scheduler:<12}")
+        print(
+            f"  {i:<3} {s.name:<22} {s.tile_m}x{s.tile_n}x{s.tile_k:<6} {s.pipeline:<10} {s.scheduler:<12}"
+        )
 
     reg = Registry(name="basic_gemm")
     for s in specs:
@@ -118,7 +135,9 @@ def main():
 
     # Step 2: Parallel JIT build via registry.build()
     workers = args.workers if args.workers > 0 else None
-    print(f"\n--- Parallel JIT Build ({len(specs)} kernels{f', workers={workers}' if workers else ''}) ---")
+    print(
+        f"\n--- Parallel JIT Build ({len(specs)} kernels{f', workers={workers}' if workers else ''}) ---"
+    )
 
     t0 = time.perf_counter()
     setups = reg.build(verbose=False, max_workers=workers)
@@ -141,7 +160,9 @@ def main():
     B = (np.random.randn(K, N) * 0.1).astype(np_dtype)
     C_ref = np.matmul(A.astype(np.float32), B.astype(np.float32)).astype(np_dtype)
 
-    print(f"\n  {'#':<3} {'Name':<22} {'Tile':<14} {'Time(ms)':>10} {'TFLOPS':>10} {'MaxErr':>10} {'Status':<6}")
+    print(
+        f"\n  {'#':<3} {'Name':<22} {'Tile':<14} {'Time(ms)':>10} {'TFLOPS':>10} {'MaxErr':>10} {'Status':<6}"
+    )
     print("  " + "-" * 80)
 
     results = []
@@ -149,26 +170,34 @@ def main():
         tile = f"{spec.tile_m}x{spec.tile_n}x{spec.tile_k}"
 
         if not setup.success:
-            print(f"  {i:<3} {spec.name:<22} {tile:<14} {'---':>10} {'---':>10} {'---':>10} {'SKIP':<6}")
+            print(
+                f"  {i:<3} {spec.name:<22} {tile:<14} {'---':>10} {'---':>10} {'---':>10} {'SKIP':<6}"
+            )
             results.append((spec.name, False, 0.0, 0.0, 0.0))
             continue
 
         disp = setup.dispatcher
         if not disp.is_supported(M, N, K):
-            print(f"  {i:<3} {spec.name:<22} {tile:<14} {'---':>10} {'---':>10} {'---':>10} {'SKIP':<6}")
+            print(
+                f"  {i:<3} {spec.name:<22} {tile:<14} {'---':>10} {'---':>10} {'---':>10} {'SKIP':<6}"
+            )
             results.append((spec.name, False, 0.0, 0.0, 0.0))
             continue
 
         res = disp.run(A, B, M, N, K)
         if not res.success:
-            print(f"  {i:<3} {spec.name:<22} {tile:<14} {'---':>10} {'---':>10} {'---':>10} {'FAIL':<6}")
+            print(
+                f"  {i:<3} {spec.name:<22} {tile:<14} {'---':>10} {'---':>10} {'---':>10} {'FAIL':<6}"
+            )
             results.append((spec.name, False, 0.0, 0.0, 0.0))
             continue
 
         max_err = float(np.max(np.abs(res.output - C_ref)))
         ok = max_err < 1e-2
         tag = "PASS" if ok else "FAIL"
-        print(f"  {i:<3} {spec.name:<22} {tile:<14} {res.time_ms:>10.4f} {res.tflops:>10.2f} {max_err:>10.2e} {tag:<6}")
+        print(
+            f"  {i:<3} {spec.name:<22} {tile:<14} {res.time_ms:>10.4f} {res.tflops:>10.2f} {max_err:>10.2e} {tag:<6}"
+        )
         results.append((spec.name, ok, res.time_ms, res.tflops, max_err))
 
     # Step 4: Summary

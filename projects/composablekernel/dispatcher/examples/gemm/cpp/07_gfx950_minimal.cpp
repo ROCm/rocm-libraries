@@ -32,42 +32,41 @@ using Algorithm = decl::Algorithm;
 // gfx950-targeted kernel declarations
 // =============================================================================
 
-DECL_KERNEL_SET(
-    gfx950_gemm_kernels,
+DECL_KERNEL_SET(gfx950_gemm_kernels,
 
-    // fp16 128x128x32 -- bread-and-butter config, works on all CDNA
-    .add(Signature().dtype("fp16").layout("rcr"),
-         Algorithm()
-             .tile(128, 128, 32)
-             .wave(2, 2, 1)
-             .warp(32, 32, 16)
-             .pipeline("compv3")
-             .scheduler("intrawave")
-             .epilogue("cshuffle"),
-         "gfx950")
+                // fp16 128x128x32 -- bread-and-butter config, works on all CDNA
+                .add(Signature().dtype("fp16").layout("rcr"),
+                     Algorithm()
+                         .tile(128, 128, 32)
+                         .wave(2, 2, 1)
+                         .warp(32, 32, 16)
+                         .pipeline("compv3")
+                         .scheduler("intrawave")
+                         .epilogue("cshuffle"),
+                     "gfx950")
 
-        // fp16 128x128x64 -- deeper K tile using more LDS
-        // LDS usage: 128*64*2 + 128*64*2 = 32768 bytes (fits 64KB, gfx950 has 160KB)
-        .add(Signature().dtype("fp16").layout("rcr"),
-             Algorithm()
-                 .tile(128, 128, 64)
-                 .wave(2, 2, 1)
-                 .warp(32, 32, 16)
-                 .pipeline("compv3")
-                 .scheduler("intrawave")
-                 .epilogue("cshuffle"),
-             "gfx950")
+                    // fp16 128x128x64 -- deeper K tile using more LDS
+                    // LDS usage: 128*64*2 + 128*64*2 = 32768 bytes (fits 64KB, gfx950 has 160KB)
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(128, 128, 64)
+                             .wave(2, 2, 1)
+                             .warp(32, 32, 16)
+                             .pipeline("compv3")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx950")
 
-        // fp16 64x64x32 -- small-tile variant for small problems
-        .add(Signature().dtype("fp16").layout("rcr"),
-             Algorithm()
-                 .tile(64, 64, 32)
-                 .wave(2, 2, 1)
-                 .warp(16, 16, 32)
-                 .pipeline("compv3")
-                 .scheduler("intrawave")
-                 .epilogue("cshuffle"),
-             "gfx950"));
+                    // fp16 64x64x32 -- small-tile variant for small problems
+                    .add(Signature().dtype("fp16").layout("rcr"),
+                         Algorithm()
+                             .tile(64, 64, 32)
+                             .wave(2, 2, 1)
+                             .warp(16, 16, 32)
+                             .pipeline("compv3")
+                             .scheduler("intrawave")
+                             .epilogue("cshuffle"),
+                         "gfx950"));
 
 // =============================================================================
 // MAIN
@@ -165,8 +164,7 @@ int main(int argc, char* argv[])
 
     float time_ms = dispatcher.run(a_dev.get(), b_dev.get(), c_dev.get(), problem, nullptr);
     std::cout << "  Time:   " << std::fixed << std::setprecision(4) << time_ms << " ms\n";
-    std::cout << "  TFLOPS: " << std::setprecision(2) << calculate_tflops(M, N, K, time_ms)
-              << "\n";
+    std::cout << "  TFLOPS: " << std::setprecision(2) << calculate_tflops(M, N, K, time_ms) << "\n";
 
     // =========================================================================
     // Verify

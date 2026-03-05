@@ -34,6 +34,7 @@ from grouped_conv_utils import (  # noqa: E402
 # VALID CONFIG FIXTURES
 # =============================================================================
 
+
 def make_valid_grouped_conv_config():
     """Return a valid grouped conv config dict for gfx942."""
     return {
@@ -213,42 +214,50 @@ class TestAutoCorrectGroupedConvConfig(unittest.TestCase):
 class TestGetGroupedConvDefaultConfig(unittest.TestCase):
     """Tests for get_grouped_conv_default_config."""
 
-    def test_returns_dict(self):
-        """Should return a dict."""
+    def test_returns_config(self):
+        """Should return a GroupedConvKernelConfig (or dict via to_dict)."""
         config = get_grouped_conv_default_config("2d_fwd")
-        self.assertIsInstance(config, dict)
+        # Accepts both dataclass and dict
+        d = config.to_dict() if hasattr(config, "to_dict") else config
+        self.assertIsInstance(d, dict)
 
     def test_has_tile_config(self):
         """Returned config has tile_config key."""
         config = get_grouped_conv_default_config("2d_fwd")
-        self.assertIn("tile_config", config)
-        self.assertIsInstance(config["tile_config"], dict)
+        d = config.to_dict() if hasattr(config, "to_dict") else config
+        self.assertIn("tile_config", d)
+        self.assertIsInstance(d["tile_config"], dict)
 
     def test_has_trait_config(self):
         """Returned config has trait_config key."""
         config = get_grouped_conv_default_config("2d_fwd")
-        self.assertIn("trait_config", config)
-        self.assertIsInstance(config["trait_config"], dict)
+        d = config.to_dict() if hasattr(config, "to_dict") else config
+        self.assertIn("trait_config", d)
+        self.assertIsInstance(d["trait_config"], dict)
 
     def test_has_variant(self):
-        """Returned config has variant key."""
+        """Returned config has variant."""
         config = get_grouped_conv_default_config("2d_fwd")
-        self.assertIn("variant", config)
+        d = config.to_dict() if hasattr(config, "to_dict") else config
+        self.assertIn("variant", d)
 
     def test_has_ndim_spatial(self):
-        """Returned config has ndim_spatial key."""
+        """Returned config has ndim_spatial."""
         config = get_grouped_conv_default_config("2d_fwd")
-        self.assertIn("ndim_spatial", config)
+        d = config.to_dict() if hasattr(config, "to_dict") else config
+        self.assertIn("ndim_spatial", d)
 
     def test_has_arch(self):
-        """Returned config has arch key."""
+        """Returned config has arch."""
         config = get_grouped_conv_default_config("2d_fwd")
-        self.assertIn("arch", config)
+        d = config.to_dict() if hasattr(config, "to_dict") else config
+        self.assertIn("arch", d)
 
     def test_has_layout(self):
-        """Returned config has layout key."""
+        """Returned config has layout."""
         config = get_grouped_conv_default_config("2d_fwd")
-        self.assertIn("layout", config)
+        d = config.to_dict() if hasattr(config, "to_dict") else config
+        self.assertIn("layout", d)
 
 
 # =============================================================================
