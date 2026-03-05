@@ -91,7 +91,7 @@ void preloadCustomKernels(SolutionCache& cache)
             params.tailLoops = true;
             params.workgroupMapping = workgroupMapping;
 
-            mxfp4Kernel.swizzleB = true;
+            mxfp4Kernel.swizzleA = true;
 
             // 32xN kernels
             params.workgroupTile    = {32, 128, 256};
@@ -431,7 +431,7 @@ void preloadCustomKernels(SolutionCache& cache)
                     getCoPath() / "rr_custom_kernels.co"));
 
             // No B pre-shuffle
-            mxfp4Kernel.swizzleB    = false;
+            mxfp4Kernel.swizzleA    = false;
             params.workgroupTile    = {256, 256, 256};
             cache.addKernel(
                 mxfp4Kernel,
@@ -508,26 +508,28 @@ struct __attribute__((packed)) F4GemmKernelArgs
     p3          _p22;
     int         log2_k_split;
 
+    // AITER kernel computes D[N,M] = B^T * A instead of C[M,N] = A^T * B
+    // So we swap A<->B pointers/scales and M<->N dimensions
     F4GemmKernelArgs(const RocblasltContractionProblem& prob)
         : ptr_D(prob.D)
         , ptr_C(nullptr)
-        , ptr_A(const_cast<void*>(prob.A))
-        , ptr_B(const_cast<void*>(prob.B))
+        , ptr_A(const_cast<void*>(prob.B)) // Swapped: kernel's A = hipBLASLt's B
+        , ptr_B(const_cast<void*>(prob.A)) // Swapped: kernel's B = hipBLASLt's A
         , alpha(*static_cast<const float*>(prob.alpha))
         , beta(*static_cast<const float*>(prob.beta))
         , stride_D0(0)
         , stride_D1(0)
         , stride_C0(static_cast<uint32_t>(prob.col_stride_c))
         , stride_C1(0)
-        , stride_A0(static_cast<uint32_t>(prob.col_stride_a))
+        , stride_A0(static_cast<uint32_t>(prob.col_stride_b)) // Swapped
         , stride_A1(0)
-        , stride_B0(static_cast<uint32_t>(prob.col_stride_b))
+        , stride_B0(static_cast<uint32_t>(prob.col_stride_a)) // Swapped
         , stride_B1(0)
-        , M(static_cast<uint32_t>(prob.m))
-        , N(static_cast<uint32_t>(prob.n))
+        , M(static_cast<uint32_t>(prob.n)) // Swapped: kernel's M = hipBLASLt's N
+        , N(static_cast<uint32_t>(prob.m)) // Swapped: kernel's N = hipBLASLt's M
         , K(static_cast<uint32_t>(prob.k))
-        , ptr_ScaleA(prob.scaleA)
-        , ptr_ScaleB(prob.scaleB)
+        , ptr_ScaleA(prob.scaleB) // Swapped
+        , ptr_ScaleB(prob.scaleA) // Swapped
         , stride_ScaleA0(static_cast<uint32_t>(prob.k / 32))
         , stride_ScaleA1(0)
         , stride_ScaleB0(static_cast<uint32_t>(prob.k / 32))
@@ -563,8 +565,8 @@ rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
     uint32_t tilesN = (args.N + tileN - 1) / tileN;
 
     dim3 grid;
-    grid.x = tilesN;
-    grid.y = tilesM;
+    grid.x = tilesN * blockSize; // Total threads in X
+    grid.y = tilesM; // Workgroups in Y
     grid.z = 1;
 
     dim3 block{blockSize, 1, 1};
@@ -585,7 +587,7 @@ rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
                   << " error: " << hipGetErrorString(error) << std::endl;
         return rocblaslt_status_internal_error;
     }
-    if(hipError_t error = hipModuleLaunchKernel(function,
+    if(hipError_t error = hipExtModuleLaunchKernel(function,
                                                    grid.x,
                                                    grid.y,
                                                    grid.z,
@@ -595,7 +597,9 @@ rocblaslt_status runCustomKernel(std::shared_ptr<GemmKernel>        gemm,
                                                    0, // sharedMem
                                                    prob.stream, // stream
                                                    nullptr,
-                                                   (void**)&hipLaunchParams
+                                                   (void**)&hipLaunchParams,
+                                                   nullptr, // event
+                                                   nullptr // event
                                                    ))
     {
         std::cerr << "hipExtModuleLaunchKernel in runCustomKernel failed: "
