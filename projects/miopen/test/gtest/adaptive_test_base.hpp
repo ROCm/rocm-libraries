@@ -229,14 +229,6 @@ private:
                       << std::endl;
         }
 
-        /*
-        if(current_REF == TestReference::naiveGPU)
-        {
-            // TODO: in future implementations, this will probably mean that all data is on GPU
-            // therefore copy to cpu is needed.
-        }
-        */
-
         while(current_REF != TestReference::naiveCPU)
         {
             current_REF = GetNextREF(current_REF);
@@ -349,7 +341,7 @@ private:
     std::unordered_map<std::string, TVerify> failure_errors;
     ErrorAnalysisInfo info;
 
-    const int verify_block_size = 256;
+    const int verify_block_size = 1024;
 
 public:
     inline static ChecksResult* res_dev = nullptr;
@@ -376,6 +368,11 @@ protected:
     /**
      * Use EXPECT_* instead of ASSERT_* in verifying function so that on failure execution can
      * continue and perform additional work after falure
+     * Data that will be verified needs to be correct for selected UUT or REF, therefore each test
+     * should implement method that will give correct data in Verify() method, this is improtant
+     * because in case of ATF == AfterTestFailure::moveOn the reference can be changed automatically
+     * by the base class and on the next call of the Verify method results from the update reference
+     * should be present
      *
      * Return value is pair where:
      * first [bool] is false if some verifying failed, true otherwise
@@ -385,14 +382,65 @@ protected:
     virtual std::pair<bool, std::unordered_map<std::string, TVerify>> Verify() = 0;
 
     template <typename UUT_Type, typename REF_Type = UUT_Type>
-    std::pair<ChecksResult, TVerify> VerifyOnGPU(miopen::Allocator::ManageDataPtr& uut_dev,
-                                                 miopen::Allocator::ManageDataPtr& ref_dev,
-                                                 size_t sz)
+    std::pair<ChecksResult, TVerify> VerifyOnCPU(std::vector<UUT_Type>& uut,
+                                                 std::vector<REF_Type>& ref)
     {
-        // This condition is based on the assumtion that verification will be performed in double
-        // only for FP32 and FP64 outputs
-        // static_assert((!std::is_same_v<T, float> && !std::is_same_v<T, double>) &&
-        //               std::is_same_v<TVerify, float>);
+        bool all_zeros_uut = true, all_zeros_ref = true, all_finite_and_not_nan_uut = true,
+             all_finite_and_not_nan_ref = true;
+        if constexpr(VER == VerifyOption::validateAndMAE ||
+                     VER == VerifyOption::validateAndMismatch ||
+                     VER == VerifyOption::validateAndRMS)
+        {
+            all_zeros_uut = miopen::range_zero(uut);
+            all_zeros_ref = miopen::range_zero(ref);
+            all_finite_and_not_nan_uut =
+                (miopen::find_idx(uut, miopen::not_finite) == static_cast<int64_t>(-1));
+            all_finite_and_not_nan_ref =
+                (miopen::find_idx(ref, miopen::not_finite) == static_cast<int64_t>(-1));
+        }
+
+        TVerify error = static_cast<TVerify>(0);
+
+        if constexpr(VER == VerifyOption::noValidateAndMAE || VER == VerifyOption::validateAndMAE)
+        {
+            error = miopen::max_diff_v2(uut, ref);
+        }
+        else if constexpr(VER == VerifyOption::noValidateAndRMS ||
+                          VER == VerifyOption::validateAndRMS)
+        {
+            error = miopen::rms_range(uut, ref);
+        }
+        else
+        {
+            // static_assert(std::is_same_v<UUT_type, REF_Type>);
+            if constexpr(std::is_integral_v<UUT_Type>)
+            {
+                error =
+                    (miopen::mismatch_idx(uut, ref, [](UUT_Type v1, UUT_Type v2) { v1 == v2; }) >=
+                     miopen::range_distance(uut))
+                        ? static_cast<TVerify>(0)
+                        : static_cast<TVerify>(1);
+            }
+            else
+            {
+                error = (miopen::mismatch_idx(uut, ref, miopen::float_equal) >=
+                         miopen::range_distance(uut))
+                            ? static_cast<TVerify>(0)
+                            : static_cast<TVerify>(1);
+            }
+        }
+
+        return std::make_pair(ChecksResult{all_zeros_ref,
+                                           all_zeros_uut,
+                                           all_finite_and_not_nan_ref,
+                                           all_finite_and_not_nan_uut},
+                              error);
+    }
+
+    template <typename UUT_Type, typename REF_Type = UUT_Type>
+    std::pair<ChecksResult, TVerify>
+    VerifyOnGPU(const void* uut_dev, const void* ref_dev, size_t sz)
+    {
         auto&& handle = get_handle();
 
         size_t block_cnt = (sz / 2 + verify_block_size - 1) / verify_block_size;
@@ -411,7 +459,7 @@ protected:
         std::string algo     = "Verify_GPU";
         std::string net_conf = "";
         std::string param    = "-DBLOCK_SZ=" + std::to_string(verify_block_size) + fp_type_verify;
-        std::string file     = "VerifyGPU.cpp";
+        std::string file     = "MIOpenVerifyGPU.cpp";
         std::string kernel_name = "VerifyGPUKernel";
 
         if constexpr(VER == VerifyOption::noValidateAndMAE ||
@@ -485,20 +533,12 @@ protected:
                 kernel = handle.AddKernel(algo, net_conf, file, kernel_name, vld, vgd, param);
             }
 
-            // handle.EnableProfiling();
-            // handle.ResetKernelTime();
-
-            kernel(uut_dev.get(), ref_dev.get(), sz, res_dev, rms_dev, max_dev);
+            kernel(uut_dev, ref_dev, sz, res_dev, rms_dev, max_dev);
 
             hipDeviceSynchronize();
 
-            // std::cout << "gpu sq diff: " << *rms_dev;
-
             TVerify max = std::max({*max_dev, std::numeric_limits<TVerify>::min()});
-            // std::cout << " max: " << max;
-            // std::cout << " sz: " << sz << std::endl;
-            // std::cout << handle.GetKernelTime() << std::endl;
-            error = std::sqrt(*rms_dev) / (std::sqrt(sz) * max);
+            error       = std::sqrt(*rms_dev) / (std::sqrt(sz) * max);
         }
         else if constexpr(VER == VerifyOption::noValidateAndMAE ||
                           VER == VerifyOption::validateAndMAE)
@@ -522,7 +562,7 @@ protected:
                 kernel = handle.AddKernel(algo, net_conf, file, kernel_name, vld, vgd, param);
             }
 
-            kernel(uut_dev.get(), ref_dev.get(), sz, res_dev, mae_dev);
+            kernel(uut_dev, ref_dev, sz, res_dev, mae_dev);
 
             hipDeviceSynchronize();
 
@@ -549,7 +589,7 @@ protected:
                 kernel = handle.AddKernel(algo, net_conf, file, kernel_name, vld, vgd, param);
             }
 
-            kernel(uut_dev.get(), ref_dev.get(), sz, res_dev, mismatch_dev);
+            kernel(uut_dev, ref_dev, sz, res_dev, mismatch_dev);
 
             hipDeviceSynchronize();
 
@@ -558,20 +598,6 @@ protected:
 
         return std::make_pair(*res_dev, error);
     }
-
-    /**
-     * Since there is an option to choose between different implementations that will be UUT/REF, we
-     * need to use single pointer/reference to UUT/REF data, these methods are for that.
-     *
-     * GetREFData is called after every execution of the reference implementation, it is not
-     * constexpr as the reference can be changed throughout the test execution (when ATF ==
-     * AfterTestFailure::moveOn)
-     *
-     * SetUUTData is called once at the start of the test, it is constexpr because the UUT is set at
-     * the beginning and cannot be changed throughout the test texecution
-     */
-    // virtual void GetREFDataDev()           = 0;
-    // virtual void constexpr GetUUTDataDev() = 0;
 
     void RunAdaptiveTest()
     {

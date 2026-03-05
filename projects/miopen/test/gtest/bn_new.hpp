@@ -145,6 +145,91 @@ protected:
         test::adaptive::TearDownSharedVerifyData<XDataType, TVerify, UUT, REF, ATF, VER>();
     }
 
+    std::vector<const void*> GetREFDataDev()
+    {
+        if(this->current_REF == test::adaptive::TestReference::naiveCPU)
+        {
+            if(api_type == BNApiType::testBNAPIV3)
+            {
+                return {output_ref_dev.get(),
+                        saveMean_ref_dev.get(),
+                        saveVariance_ref_dev.get(),
+                        nextRunMean_ref_dev.get(),
+                        nextRunVariance_ref_dev.get()};
+            }
+            else
+            {
+                return {output_ref_dev.get(),
+                        saveMean_ref_dev.get(),
+                        saveVariance_ref_dev.get(),
+                        runMean_ref_dev.get(),
+                        runVariance_ref_dev.get()};
+            }
+        }
+        else
+        {
+            return {};
+        }
+    }
+
+    std::vector<const void*> constexpr GetUUTDataDev()
+    {
+        if constexpr(UUT == test::adaptive::UnitUnderTest::naiveGPU)
+        {
+            if(api_type == BNApiType::testBNAPIV3)
+            {
+                return {bn_fwd_train_test_data.out_dev.get(),
+                        bn_fwd_train_test_data.saveMean_dev.get(),
+                        bn_fwd_train_test_data.saveVariance_dev.get(),
+                        bn_fwd_train_test_data.nextRunMean_dev.get(),
+                        bn_fwd_train_test_data.nextRunVariance_dev.get()};
+            }
+            else
+            {
+                return {bn_fwd_train_test_data.out_dev.get(),
+                        bn_fwd_train_test_data.saveMean_dev.get(),
+                        bn_fwd_train_test_data.saveVariance_dev.get(),
+                        bn_fwd_train_test_data.runMean_dev.get(),
+                        bn_fwd_train_test_data.runVariance_dev.get()};
+            }
+        }
+        else
+        {
+            return {};
+        }
+    }
+
+    template <typename... Args>
+    std::tuple<std::vector<Args>&...> GetREFDataHost()
+    {
+        return {bn_fwd_train_test_data.out_ref.data,
+                bn_fwd_train_test_data.saveMean_ref.data,
+                bn_fwd_train_test_data.saveVariance_ref.data,
+                bn_fwd_train_test_data.runMean_ref.data,
+                bn_fwd_train_test_data.runVariance_ref.data};
+    }
+
+    template <typename... Args>
+    std::tuple<std::vector<Args>&...> constexpr GetUUTDataHost()
+    {
+        if(api_type == BNApiType::testBNAPIV3)
+        {
+            return {bn_fwd_train_test_data.output.data,
+                    bn_fwd_train_test_data.saveMean.data,
+                    bn_fwd_train_test_data.saveVariance.data,
+                    bn_fwd_train_test_data.nextRunMean.data,
+                    bn_fwd_train_test_data.nextRunVariance.data};
+        }
+        else
+        {
+            return {bn_fwd_train_test_data.output.data,
+                    bn_fwd_train_test_data.saveMean.data,
+                    bn_fwd_train_test_data.saveVariance.data,
+                    bn_fwd_train_test_data.runMean.data,
+                    bn_fwd_train_test_data.runVariance.data};
+        }
+    }
+
     void SetUp() override
     {
         std::tie(bn_config, tensor_layout, bn_mode, api_type, bn_fwd_train_test_data.activ_mode) =
@@ -302,7 +387,6 @@ protected:
         //         handle.Read<RunSaveDataType>(bn_fwd_train_test_data.nextRunVariance_dev,
         //                                      bn_fwd_train_test_data.runVariance_ref.data.size());
         // }
-
         return res;
     }
 
@@ -320,18 +404,7 @@ protected:
                             bn_fwd_train_test_data.out_ref.data);
 
         output_ref_dev = handle.Write(bn_fwd_train_test_data.out_ref.data);
-        // // auto&& handle  = get_handle();
-        // auto output_data =
-        //     handle.Read<AccDataType>(output_ref_dev, bn_fwd_train_test_data.out_ref.data.size());
 
-        // for(int i = 0; i < output_data.size(); i++)
-        // {
-        //     if(output_data[i] != bn_fwd_train_test_data.out_ref.data[i])
-        //     {
-        //         std::cout << "ERROR: " << output_data[i] << " "
-        //                   << bn_fwd_train_test_data.out_ref.data[i] << std::endl;
-        //     }
-        // }
         saveMean_ref_dev     = handle.Write(bn_fwd_train_test_data.saveMean_ref.data);
         saveVariance_ref_dev = handle.Write(bn_fwd_train_test_data.saveVariance_ref.data);
 
@@ -345,44 +418,20 @@ protected:
             runMean_ref_dev     = handle.Write(bn_fwd_train_test_data.runMean_ref.data);
             runVariance_ref_dev = handle.Write(bn_fwd_train_test_data.runVariance_ref.data);
         }
+
         return miopenStatusSuccess;
     }
 
     std::pair<bool, std::unordered_map<std::string, TVerify>> Verify() override
     {
-        // cpu
-        // 4e-3 is tolerance used by CK kernel.
-        // test::CompareTensor<YDataType>(
-        //     bn_fwd_train_test_data.output, bn_fwd_train_test_data.out_ref, 4e-3);
-        // test::CompareTensor<RunSaveDataType>(
-        //     bn_fwd_train_test_data.saveMean, bn_fwd_train_test_data.saveMean_ref, 4e-3);
-        //  test::CompareTensor<RunSaveDataType>(
-        //     bn_fwd_train_test_data.saveVariance, bn_fwd_train_test_data.saveVariance_ref, 4e-3);
-        // // For V3 API, compare next buffers; for V1/V2, compare runMean/runVariance
-        // if(api_type == BNApiType::testBNAPIV3)
-        // {
-        //     test::CompareTensor<RunSaveDataType>(
-        //         bn_fwd_train_test_data.nextRunMean, bn_fwd_train_test_data.runMean_ref, 4e-3);
-        //
-        //         test::CompareTensor<RunSaveDataType>(bn_fwd_train_test_data.nextRunVariance,
-        //                                              bn_fwd_train_test_data.runVariance_ref,
-        //                                              4e-3);
-        // }
-        // else
-        // {
-        //      test::CompareTensor<RunSaveDataType>(
-        //         bn_fwd_train_test_data.runMean, bn_fwd_train_test_data.runMean_ref, 4e-3);
-        //     test::CompareTensor<RunSaveDataType>(
-        //         bn_fwd_train_test_data.runVariance, bn_fwd_train_test_data.runVariance_ref,
-        //         4e-3);
-        // }
+        auto uut_data_host = GetUUTDataDev();
+        auto ref_data_host = GetREFDataDev();
 
-        std::pair<bool, std::unordered_map<std::string, TVerify>> res = {false, {}};
+        std::pair<bool, std::unordered_map<std::string, TVerify>> res = {true, {}};
 
         auto [res_out, error_out] = this->template VerifyOnGPU<YDataType, AccDataType>(
-            bn_fwd_train_test_data.out_dev,
-            output_ref_dev,
-            bn_fwd_train_test_data.out_ref.data.size());
+            uut_data_host[0], ref_data_host[0], bn_fwd_train_test_data.out_ref.data.size());
+
         EXPECT_FALSE(res_out.all_zeros_uut);
         EXPECT_FALSE(res_out.all_zeros_ref);
         EXPECT_TRUE(res_out.all_finite_and_non_nan_uut);
@@ -391,110 +440,116 @@ protected:
 
         if(error_out < 4e-3)
         {
-            res.first = true;
+            res.first = false;
             res.second.insert({"output", error_out});
         }
 
-        // auto [res_saveMean, error_saveMean] =
-        //     this->VerifyOnGPU(bn_fwd_train_test_data.saveMean_dev,
-        //                       saveMean_ref_dev,
-        //                       bn_fwd_train_test_data.saveMean_ref.data.size());
-        // EXPECT_FALSE(res_saveMean.all_zeros_uut);
-        // EXPECT_FALSE(res_saveMean.all_zeros_ref);
-        // EXPECT_TRUE(res_saveMean.all_finite_and_non_nan_uut);
-        // EXPECT_TRUE(res_saveMean.all_finite_and_non_nan_ref);
-        // EXPECT_TRUE(error_saveMean < 4e-3);
+        auto [res_saveMean, error_saveMean] =
+            this->template VerifyOnGPU<RunSaveDataType, AccDataType>(
+                uut_data_host[1],
+                ref_data_host[1],
+                bn_fwd_train_test_data.saveMean_ref.data.size());
+        EXPECT_FALSE(res_saveMean.all_zeros_uut);
+        EXPECT_FALSE(res_saveMean.all_zeros_ref);
+        EXPECT_TRUE(res_saveMean.all_finite_and_non_nan_uut);
+        EXPECT_TRUE(res_saveMean.all_finite_and_non_nan_ref);
+        EXPECT_TRUE(error_saveMean < 4e-3);
 
-        // if(error_saveMean < 4e-3)
-        // {
-        //     res.first = true;
-        //     res.second.insert({"saveMean", error_saveMean});
-        // }
+        if(error_saveMean < 4e-3)
+        {
+            res.first = false;
+            res.second.insert({"saveMean", error_saveMean});
+        }
 
-        // auto [res_saveVariance, error_saveVariance] =
-        //     this->VerifyOnGPU(bn_fwd_train_test_data.saveVariance_dev,
-        //                       saveVariance_ref_dev,
-        //                       bn_fwd_train_test_data.saveVariance_ref.data.size());
-        // EXPECT_FALSE(res_saveVariance.all_zeros_uut);
-        // EXPECT_FALSE(res_saveVariance.all_zeros_ref);
-        // EXPECT_TRUE(res_saveVariance.all_finite_and_non_nan_uut);
-        // EXPECT_TRUE(res_saveVariance.all_finite_and_non_nan_ref);
-        // EXPECT_TRUE(error_saveVariance < 4e-3);
+        auto [res_saveVariance, error_saveVariance] =
+            this->template VerifyOnGPU<RunSaveDataType, AccDataType>(
+                uut_data_host[2],
+                ref_data_host[2],
+                bn_fwd_train_test_data.saveVariance_ref.data.size());
+        EXPECT_FALSE(res_saveVariance.all_zeros_uut);
+        EXPECT_FALSE(res_saveVariance.all_zeros_ref);
+        EXPECT_TRUE(res_saveVariance.all_finite_and_non_nan_uut);
+        EXPECT_TRUE(res_saveVariance.all_finite_and_non_nan_ref);
+        EXPECT_TRUE(error_saveVariance < 4e-3);
 
-        // if(error_saveVariance < 4e-3)
-        // {
-        //     res.first = true;
-        //     res.second.insert({"saveVariance", error_saveVariance});
-        // }
+        if(error_saveVariance < 4e-3)
+        {
+            res.first = false;
+            res.second.insert({"saveVariance", error_saveVariance});
+        }
 
-        // if(api_type == BNApiType::testBNAPIV3)
-        // {
-        //     auto [res_nextRunMean, error_nextRunMean] =
-        //         this->VerifyOnGPU(bn_fwd_train_test_data.nextRunMean_dev,
-        //                           nextRunMean_ref_dev,
-        //                           bn_fwd_train_test_data.runMean_ref.data.size());
-        //     EXPECT_FALSE(res_nextRunMean.all_zeros_uut);
-        //     EXPECT_FALSE(res_nextRunMean.all_zeros_ref);
-        //     EXPECT_TRUE(res_nextRunMean.all_finite_and_non_nan_uut);
-        //     EXPECT_TRUE(res_nextRunMean.all_finite_and_non_nan_ref);
-        //     EXPECT_TRUE(error_nextRunMean < 4e-3);
+        if(api_type == BNApiType::testBNAPIV3)
+        {
+            auto [res_nextRunMean, error_nextRunMean] =
+                this->template VerifyOnGPU<RunSaveDataType, AccDataType>(
+                    uut_data_host[3],
+                    ref_data_host[3],
+                    bn_fwd_train_test_data.runMean_ref.data.size());
+            EXPECT_FALSE(res_nextRunMean.all_zeros_uut);
+            EXPECT_FALSE(res_nextRunMean.all_zeros_ref);
+            EXPECT_TRUE(res_nextRunMean.all_finite_and_non_nan_uut);
+            EXPECT_TRUE(res_nextRunMean.all_finite_and_non_nan_ref);
+            EXPECT_TRUE(error_nextRunMean < 4e-3);
 
-        //     if(error_nextRunMean < 4e-3)
-        //     {
-        //         res.first = true;
-        //         res.second.insert({"nextRunMean", error_nextRunMean});
-        //     }
+            if(error_nextRunMean < 4e-3)
+            {
+                res.first = false;
+                res.second.insert({"nextRunMean", error_nextRunMean});
+            }
 
-        //     auto [res_nextRunVariance, error_nextRunVariance] =
-        //         this->VerifyOnGPU(bn_fwd_train_test_data.nextRunVariance_dev,
-        //                           nextRunVariance_ref_dev,
-        //                           bn_fwd_train_test_data.runVariance_ref.data.size());
-        //     EXPECT_FALSE(res_nextRunVariance.all_zeros_uut);
-        //     EXPECT_FALSE(res_nextRunVariance.all_zeros_ref);
-        //     EXPECT_TRUE(res_nextRunVariance.all_finite_and_non_nan_uut);
-        //     EXPECT_TRUE(res_nextRunVariance.all_finite_and_non_nan_ref);
-        //     EXPECT_TRUE(error_nextRunVariance < 4e-3);
+            auto [res_nextRunVariance, error_nextRunVariance] =
+                this->template VerifyOnGPU<RunSaveDataType, AccDataType>(
+                    uut_data_host[4],
+                    ref_data_host[4],
+                    bn_fwd_train_test_data.runVariance_ref.data.size());
+            EXPECT_FALSE(res_nextRunVariance.all_zeros_uut);
+            EXPECT_FALSE(res_nextRunVariance.all_zeros_ref);
+            EXPECT_TRUE(res_nextRunVariance.all_finite_and_non_nan_uut);
+            EXPECT_TRUE(res_nextRunVariance.all_finite_and_non_nan_ref);
+            EXPECT_TRUE(error_nextRunVariance < 4e-3);
 
-        //     if(error_nextRunVariance < 4e-3)
-        //     {
-        //         res.first = true;
-        //         res.second.insert({"nextRunVariance", error_nextRunVariance});
-        //     }
-        // }
-        // else
-        // {
-        //     auto [res_RunMean, error_RunMean] =
-        //         this->VerifyOnGPU(bn_fwd_train_test_data.runMean_dev,
-        //                           runMean_ref_dev,
-        //                           bn_fwd_train_test_data.runMean_ref.data.size());
-        //     EXPECT_FALSE(res_RunMean.all_zeros_uut);
-        //     EXPECT_FALSE(res_RunMean.all_zeros_ref);
-        //     EXPECT_TRUE(res_RunMean.all_finite_and_non_nan_uut);
-        //     EXPECT_TRUE(res_RunMean.all_finite_and_non_nan_ref);
-        //     EXPECT_TRUE(error_RunMean < 4e-3);
+            if(error_nextRunVariance < 4e-3)
+            {
+                res.first = false;
+                res.second.insert({"nextRunVariance", error_nextRunVariance});
+            }
+        }
+        else
+        {
+            auto [res_RunMean, error_RunMean] =
+                this->template VerifyOnGPU<RunSaveDataType, AccDataType>(
+                    uut_data_host[3],
+                    ref_data_host[3],
+                    bn_fwd_train_test_data.runMean_ref.data.size());
+            EXPECT_FALSE(res_RunMean.all_zeros_uut);
+            EXPECT_FALSE(res_RunMean.all_zeros_ref);
+            EXPECT_TRUE(res_RunMean.all_finite_and_non_nan_uut);
+            EXPECT_TRUE(res_RunMean.all_finite_and_non_nan_ref);
+            EXPECT_TRUE(error_RunMean < 4e-3);
 
-        //     if(error_RunMean < 4e-3)
-        //     {
-        //         res.first = true;
-        //         res.second.insert({"runMean", error_RunMean});
-        //     }
+            if(error_RunMean < 4e-3)
+            {
+                res.first = false;
+                res.second.insert({"runMean", error_RunMean});
+            }
 
-        //     auto [res_runVariance, error_runVariance] =
-        //         this->VerifyOnGPU(bn_fwd_train_test_data.runVariance_dev,
-        //                           runVariance_ref_dev,
-        //                           bn_fwd_train_test_data.runVariance_ref.data.size());
-        //     EXPECT_FALSE(res_runVariance.all_zeros_uut);
-        //     EXPECT_FALSE(res_runVariance.all_zeros_ref);
-        //     EXPECT_TRUE(res_runVariance.all_finite_and_non_nan_uut);
-        //     EXPECT_TRUE(res_runVariance.all_finite_and_non_nan_ref);
-        //     EXPECT_TRUE(error_runVariance < 4e-3);
+            auto [res_runVariance, error_runVariance] =
+                this->template VerifyOnGPU<RunSaveDataType, AccDataType>(
+                    uut_data_host[4],
+                    ref_data_host[4],
+                    bn_fwd_train_test_data.runVariance_ref.data.size());
+            EXPECT_FALSE(res_runVariance.all_zeros_uut);
+            EXPECT_FALSE(res_runVariance.all_zeros_ref);
+            EXPECT_TRUE(res_runVariance.all_finite_and_non_nan_uut);
+            EXPECT_TRUE(res_runVariance.all_finite_and_non_nan_ref);
+            EXPECT_TRUE(error_runVariance < 4e-3);
 
-        //     if(error_runVariance < 4e-3)
-        //     {
-        //         res.first = true;
-        //         res.second.insert({"runVariance", error_runVariance});
-        //     }
-        // }
+            if(error_runVariance < 4e-3)
+            {
+                res.first = false;
+                res.second.insert({"runVariance", error_runVariance});
+            }
+        }
 
         return res;
     }

@@ -89,7 +89,7 @@ template <typename T,
           typename TVerify,
           test::adaptive::UnitUnderTest UUT    = test::adaptive::UnitUnderTest::naiveGPU,
           test::adaptive::TestReference REF    = test::adaptive::TestReference::naiveCPU,
-          test::adaptive::AfterTestFailure ATF = test::adaptive::AfterTestFailure::moveOn,
+          test::adaptive::AfterTestFailure ATF = test::adaptive::AfterTestFailure::none,
           test::adaptive::VerifyOption VER     = test::adaptive::VerifyOption::noValidateAndRMS>
 struct TensorOpsCommonNew : public test::adaptive::AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>,
                             public testing::TestWithParam<TestCase>
@@ -107,19 +107,27 @@ private:
     std::vector<T> naiveGPUData;
     std::vector<T> naiveCPUData;
 
-    constexpr auto& GetUUTData()
+    constexpr const void* GetUUTDataDev()
     {
-        if(UUT == test::adaptive::UnitUnderTest::naiveGPU)
+        if constexpr(UUT == test::adaptive::UnitUnderTest::naiveGPU)
         {
-            return uut_dev;
+            return uut_dev.get();
+        }
+        else
+        {
+            return nullptr;
         }
     }
 
-    auto& GetREFData()
+    const void* GetREFDataDev()
     {
         if(this->current_REF == test::adaptive::TestReference::naiveCPU)
         {
-            return ref_dev;
+            return ref_dev.get();
+        }
+        else
+        {
+            return nullptr;
         }
     }
 
@@ -206,7 +214,6 @@ protected:
                          testCase.offsets[2],
                          false); // it does not verify non-standard behaviour
 
-        // naiveGPUData = handle.Read<T>(uut_dev, tensorC.data.size());
         return miopenStatusSuccess;
     }
     miopenStatus_t RunOptimizedCPU() override { return miopenStatusNotImplemented; }
@@ -280,10 +287,13 @@ protected:
             tolerance = 80;
         }
 
+        auto uut_data = GetUUTDataDev();
+        auto ref_data = GetREFDataDev();
+
         double threshold = std::numeric_limits<T>::epsilon() * tolerance * 10;
 
         [[maybe_unused]] auto [res, error] =
-            this->template VerifyOnGPU<T>(uut_dev, ref_dev, input_sz);
+            this->template VerifyOnGPU<T>(uut_data, ref_data, input_sz);
 
         EXPECT_LE(error, threshold)
             << "TensorOp: " << testCase.operation << std::endl

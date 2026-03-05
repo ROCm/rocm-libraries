@@ -51,10 +51,9 @@ __device__ __forceinline__ void CalculateRMS(const FLOAT_UUT* __restrict__ uut,
     float ref1 = gid < sz ? CVT_FLOAT_REF2ACCUM(ref[gid]) : 0;
     float ref2 = (gid + blockDim.x) < sz ? CVT_FLOAT_REF2ACCUM(ref[gid + blockDim.x]) : 0;
 
-    shared_data[tid]    = powf(uut1 - ref1, 2) + powf(uut2 - ref2, 2);
+    shared_data[tid]    = (uut1 - ref1) * (uut1 - ref1) + (uut2 - ref2) * (uut2 - ref2);
     shared_max_ref[tid] = fmaxf(fabsf(ref1), fabsf(ref2));
     shared_max_uut[tid] = fmaxf(fabsf(uut1), fabsf(uut2));
-
     __syncthreads();
 
     for(int i = blockDim.x / 2; i >= warpSize; i >>= 1)
@@ -71,7 +70,6 @@ __device__ __forceinline__ void CalculateRMS(const FLOAT_UUT* __restrict__ uut,
     float local_res     = shared_data[tid];
     float local_max_ref = shared_max_ref[tid];
     float local_max_uut = shared_max_uut[tid];
-    __syncthreads();
 
 #pragma unroll
     for(int i = warpSize / 2; i != 0; i >>= 1)
@@ -108,7 +106,7 @@ __device__ __forceinline__ void CalculateRMS(const FLOAT_UUT* __restrict__ uut,
     double ref1 = gid < sz ? (CVT_FLOAT_REF2ACCUM(ref[gid])) : 0;
     double ref2 = (gid + blockDim.x) < sz ? (CVT_FLOAT_REF2ACCUM(ref[gid + blockDim.x])) : 0;
 
-    shared_data[tid]    = pow(uut1 - ref1, 2) + pow(uut2 - ref2, 2);
+    shared_data[tid]    = (uut1 - ref1) * (uut1 - ref1) + (uut2 - ref2) * (uut2 - ref2);
     shared_max_ref[tid] = fmax(fabs(ref1), fabs(ref2));
     shared_max_uut[tid] = fmax(fabs(uut1), fabs(uut2));
 
@@ -125,10 +123,9 @@ __device__ __forceinline__ void CalculateRMS(const FLOAT_UUT* __restrict__ uut,
         __syncthreads();
     }
 
-    double local_res     = shared_data[tid];
-    double local_max_ref = shared_max_ref[tid];
-    double local_max_uut = shared_max_uut[tid];
-    __syncthreads();
+    double local_res     = shared_data[tid] + shared_data[tid + warpSize];
+    double local_max_ref = fmax(shared_max_ref[tid], shared_max_ref[tid + warpSize]);
+    double local_max_uut = fmax(shared_max_uut[tid], shared_max_uut[tid + warpSize]);
 
 #pragma unroll
     for(int i = warpSize / 2; i != 0; i >>= 1)
@@ -146,71 +143,137 @@ __device__ __forceinline__ void CalculateRMS(const FLOAT_UUT* __restrict__ uut,
     }
 }
 
-// template <int BlockSize, typename T, typename TVerify>
-// __device__ void
-// CalculateMAE(const T* __restrict__ uut, const T* __restrict__ ref, size_t sz, TVerify* mae)
-// {
-//     __shared__ TVerify shared_data[BlockSize];
+template <int BlockSize>
+__device__ __forceinline__ void CalculateMAE(const FLOAT_UUT* __restrict__ uut,
+                                             const FLOAT_REF* __restrict__ ref,
+                                             size_t sz,
+                                             float* mae)
+{
+    __shared__ float shared_data[BlockSize];
 
-//     const int tid = threadIdx.x;
-//     const int gid = blockIdx.x * (blockDim.x * 2) + tid;
+    const int tid = threadIdx.x;
+    const int gid = blockIdx.x * (blockDim.x * 2) + tid;
 
-//     TVerify uut1 = gid < sz ? static_cast<TVerify>(uut[gid]) : static_cast<TVerify>(0);
-//     TVerify uut2 = (gid + blockDim.x) < sz ? static_cast<TVerify>(uut[gid + blockDim.x])
-//                                            : static_cast<TVerify>(0);
-//     TVerify ref1 = gid < sz ? static_cast<TVerify>(ref[gid]) : static_cast<TVerify>(0);
-//     TVerify ref2 = (gid + blockDim.x) < sz ? static_cast<TVerify>(ref[gid + blockDim.x])
-//                                            : static_cast<TVerify>(0);
+    float uut1 = gid < sz ? CVT_FLOAT_UUT2ACCUM(uut[gid]) : 0;
+    float uut2 = (gid + blockDim.x) < sz ? CVT_FLOAT_UUT2ACCUM(uut[gid + blockDim.x]) : 0;
+    float ref1 = gid < sz ? CVT_FLOAT_REF2ACCUM(ref[gid]) : 0;
+    float ref2 = (gid + blockDim.x) < sz ? CVT_FLOAT_REF2ACCUM(ref[gid + blockDim.x]) : 0;
 
-//     shared_data[tid] = fmaxf(fabsf(uut1 - ref1), fabsf(uut2 - ref2));
+    shared_data[tid] = fmaxf(fabsf(uut1 - ref1), fabsf(uut2 - ref2));
 
-//     __syncthreads();
+    __syncthreads();
 
-//     for(int i = blockDim.x / 2; i >= warpSize; i >>= 1)
-//     {
-//         if(tid < i)
-//         {
-//             shared_data[tid] = fmaxf(shared_data[tid], shared_data[tid + i]);
-//         }
-//         __syncthreads();
-//     }
+    for(int i = blockDim.x / 2; i >= warpSize; i >>= 1)
+    {
+        if(tid < i)
+        {
+            shared_data[tid] = fmaxf(shared_data[tid], shared_data[tid + i]);
+        }
+        __syncthreads();
+    }
 
-//     TVerify local_res = shared_data[tid];
-//     __syncthreads();
+    float local_res = shared_data[tid];
+    __syncthreads();
 
-// #pragma unroll
-//     for(int i = warpSize / 2; i != 0; i >>= 1)
-//     {
-//         local_res = fmaxf(local_res, __shfl_down(local_res, i));
-//     }
+#pragma unroll
+    for(int i = warpSize / 2; i != 0; i >>= 1)
+    {
+        local_res = fmaxf(local_res, __shfl_down(local_res, i));
+    }
 
-//     if(tid == 0)
-//     {
-//         atomicMax(mae, local_res);
-//     }
-// }
+    if(tid == 0)
+    {
+        atomicMax(mae, local_res);
+    }
+}
 
-// template <typename T, typename TVerify>
-// __device__ void
-// FindMismatch(const T* __restrict__ uut, const T* __restrict__ ref, size_t sz, TVerify* mismatch)
-// {
-//     size_t gid  = blockIdx.x * blockDim.x + threadIdx.x;
-//     size_t step = gridDim.x * blockDim.x;
+template <int BlockSize>
+__device__ __forceinline__ void CalculateMAE(const FLOAT_UUT* __restrict__ uut,
+                                             const FLOAT_REF* __restrict__ ref,
+                                             size_t sz,
+                                             double* mae)
+{
+    __shared__ double shared_data[BlockSize];
 
-//     if(gid >= sz)
-//     {
-//         return;
-//     }
+    const int tid = threadIdx.x;
+    const int gid = blockIdx.x * (blockDim.x * 2) + tid;
 
-//     while(gid < sz && *mismatch == 0.0)
-//     {
-//         if(uut[gid] != ref[gid])
-//         {
-//             *mismatch = 1.0;
-//         }
-//         gid += step;
-//     }
-// }
+    double uut1 = gid < sz ? CVT_FLOAT_UUT2ACCUM(uut[gid]) : 0;
+    double uut2 = (gid + blockDim.x) < sz ? CVT_FLOAT_UUT2ACCUM(uut[gid + blockDim.x]) : 0;
+    double ref1 = gid < sz ? CVT_FLOAT_REF2ACCUM(ref[gid]) : 0;
+    double ref2 = (gid + blockDim.x) < sz ? CVT_FLOAT_REF2ACCUM(ref[gid + blockDim.x]) : 0;
+
+    shared_data[tid] = fmax(fabs(uut1 - ref1), fabs(uut2 - ref2));
+
+    __syncthreads();
+
+    for(int i = blockDim.x / 2; i >= warpSize; i >>= 1)
+    {
+        if(tid < i)
+        {
+            shared_data[tid] = fmax(shared_data[tid], shared_data[tid + i]);
+        }
+        __syncthreads();
+    }
+
+    double local_res = shared_data[tid];
+    __syncthreads();
+
+#pragma unroll
+    for(int i = warpSize / 2; i != 0; i >>= 1)
+    {
+        local_res = fmax(local_res, __shfl_down(local_res, i));
+    }
+
+    if(tid == 0)
+    {
+        atomicMax(mae, local_res);
+    }
+}
+
+__device__ __forceinline__ void FindMismatch(const FLOAT_UUT* __restrict__ uut,
+                                             const FLOAT_REF* __restrict__ ref,
+                                             size_t sz,
+                                             FLOAT_ACCUM* mismatch)
+{
+    size_t gid  = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t step = gridDim.x * blockDim.x;
+
+    __shared__ bool mismatch_shared;
+
+    if(threadIdx.x == 0)
+    {
+        mismatch_shared = false;
+    }
+    __syncthreads();
+
+    if(gid >= sz)
+    {
+        return;
+    }
+
+    while(gid < sz)
+    {
+        // What should be min value for each type?
+        // To avoid this comparison of the float values but to calculate some absolute difference
+        // and compare it to some minimal value
+        if(uut[gid] != ref[gid])
+        {
+            mismatch_shared = true;
+        }
+        gid += step;
+    }
+
+    __syncthreads();
+
+    if(threadIdx.x == 0)
+    {
+        if(mismatch_shared)
+        {
+            *mismatch = 1.0;
+        }
+    }
+}
 
 struct ChecksResult
 {
@@ -220,12 +283,13 @@ struct ChecksResult
     bool all_finite_and_non_nan_uut;
 };
 
-extern "C" __global__ void VerifyGPUKernel(const FLOAT_UUT* __restrict__ uut,
-                                           const FLOAT_REF* __restrict__ ref,
-                                           size_t sz,
-                                           ChecksResult* res,
-                                           FLOAT_ACCUM* error,
-                                           [[maybe_unused]] FLOAT_ACCUM* max)
+extern "C" __global__
+__launch_bounds__(BLOCK_SZ) void VerifyGPUKernel(const FLOAT_UUT* __restrict__ uut,
+                                                 const FLOAT_REF* __restrict__ ref,
+                                                 size_t sz,
+                                                 ChecksResult* res,
+                                                 FLOAT_ACCUM* error,
+                                                 [[maybe_unused]] FLOAT_ACCUM* max)
 {
     if constexpr(DO_VALIDATE == 1)
     {
@@ -244,7 +308,6 @@ extern "C" __global__ void VerifyGPUKernel(const FLOAT_UUT* __restrict__ uut,
         all_valid_ref_shared = true;
         __syncthreads();
 
-        // break earlier if all shared variables have changed their values?
         while(gid < sz)
         {
             if(uut[gid] != static_cast<FLOAT_UUT>(0))
@@ -271,7 +334,6 @@ extern "C" __global__ void VerifyGPUKernel(const FLOAT_UUT* __restrict__ uut,
         }
 
         __syncthreads();
-        // avoid multiple writings?
         if(tid == 0)
         {
             if(!all_zeros_uut_shared)
@@ -302,13 +364,13 @@ extern "C" __global__ void VerifyGPUKernel(const FLOAT_UUT* __restrict__ uut,
         CalculateRMS<BLOCK_SZ>(uut, ref, sz, error, max);
     }
 
-    // if constexpr(CALCULATE_MAE == 1)
-    // {
-    //     CalculateMAE<BLOCK_SZ, FP_TYPE, FP_TYPE_VERIFY>(uut, ref, sz, error);
-    // }
+    if constexpr(CALCULATE_MAE == 1)
+    {
+        CalculateMAE<BLOCK_SZ>(uut, ref, sz, error);
+    }
 
-    // if constexpr(FIND_MISMATCH == 1)
-    // {
-    //     FindMismatch<FP_TYPE, FP_TYPE_VERIFY>(uut, ref, sz, error);
-    // }
+    if constexpr(FIND_MISMATCH == 1)
+    {
+        FindMismatch(uut, ref, sz, error);
+    }
 }
