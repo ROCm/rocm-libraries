@@ -51,11 +51,21 @@ def cpu_conv2d_fwd(inp, wei, prob):
                         s = 0.0
                         for y in range(Y):
                             for x in range(X):
-                                hi = ho * prob.stride_h - prob.pad_h + y * prob.dilation_h
-                                wi = wo * prob.stride_w - prob.pad_w + x * prob.dilation_w
+                                hi = (
+                                    ho * prob.stride_h
+                                    - prob.pad_h
+                                    + y * prob.dilation_h
+                                )
+                                wi = (
+                                    wo * prob.stride_w
+                                    - prob.pad_w
+                                    + x * prob.dilation_w
+                                )
                                 if 0 <= hi < Hi and 0 <= wi < Wi:
                                     for c in range(Cpg):
-                                        s += float(inp[n, hi, wi, g, c]) * float(wei[g, k, y, x, c])
+                                        s += float(inp[n, hi, wi, g, c]) * float(
+                                            wei[g, k, y, x, c]
+                                        )
                         out[n, ho, wo, g, k] = s
     return out
 
@@ -63,11 +73,14 @@ def cpu_conv2d_fwd(inp, wei, prob):
 def main():
     parser = argparse.ArgumentParser(description="Basic Grouped Conv Example")
     parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
-    parser.add_argument("--variant", default="forward",
-                        choices=["forward", "bwd_data", "bwd_weight"])
+    parser.add_argument(
+        "--variant", default="forward", choices=["forward", "bwd_data", "bwd_weight"]
+    )
     parser.add_argument("--ndim", type=int, default=2, choices=[2, 3])
     parser.add_argument("--arch", default=detect_gpu_arch())
-    parser.add_argument("--workers", type=int, default=0, help="Max JIT workers (0=auto)")
+    parser.add_argument(
+        "--workers", type=int, default=0, help="Max JIT workers (0=auto)"
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -81,34 +94,60 @@ def main():
 
     # Pattern 1: MINIMAL -- only variant/dtype/arch, everything else auto-filled
     config_minimal = GroupedConvKernelConfig(
-        variant=args.variant, ndim_spatial=args.ndim,
-        arch=args.arch, dtype=args.dtype,
+        variant=args.variant,
+        ndim_spatial=args.ndim,
+        arch=args.arch,
+        dtype=args.dtype,
     )
     print("\n  Pattern 1: MINIMAL (defaults auto-filled)")
     config_minimal.print_config(indent="    ")
 
     # Pattern 2: EXPLICIT tile/wave/warp -- user controls tiling strategy
     config_explicit = GroupedConvKernelConfig(
-        variant=args.variant, ndim_spatial=args.ndim,
-        arch=args.arch, dtype=args.dtype,
-        tile_m=1, tile_n=64, tile_k=64,
-        wave_m=1, wave_n=4, wave_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
-        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
+        variant=args.variant,
+        ndim_spatial=args.ndim,
+        arch=args.arch,
+        dtype=args.dtype,
+        tile_m=1,
+        tile_n=64,
+        tile_k=64,
+        wave_m=1,
+        wave_n=4,
+        wave_k=1,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        pipeline="compv3",
+        scheduler="intrawave",
+        epilogue="cshuffle",
     )
     print("\n  Pattern 2: EXPLICIT tile/wave/warp")
     config_explicit.print_config(indent="    ")
 
     # Pattern 3: FULL ConvConfigBase -- every parameter specified
     config_full = GroupedConvKernelConfig(
-        variant=args.variant, ndim_spatial=args.ndim,
-        arch=args.arch, dtype=args.dtype,
-        tile_m=1, tile_n=128, tile_k=128,
-        wave_m=2, wave_n=2, wave_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8,
-        block_per_cu=1, num_wave_groups=1, num_groups_to_merge=1,
+        variant=args.variant,
+        ndim_spatial=args.ndim,
+        arch=args.arch,
+        dtype=args.dtype,
+        tile_m=1,
+        tile_n=128,
+        tile_k=128,
+        wave_m=2,
+        wave_n=2,
+        wave_k=1,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+        pipeline="compv3",
+        scheduler="intrawave",
+        epilogue="cshuffle",
+        vector_size_a=4,
+        vector_size_b=8,
+        vector_size_c=8,
+        block_per_cu=1,
+        num_wave_groups=1,
+        num_groups_to_merge=1,
     )
     print("\n  Pattern 3: FULL (all ConvConfigBase fields)")
     config_full.print_config(indent="    ")
@@ -164,8 +203,17 @@ def main():
     # =========================================================================
     print("\n--- Step 5: GPU Execution ---")
     prob = GroupedConvProblem(
-        N=1, C=64, K=128, Hi=16, Wi=16, Y=3, X=3,
-        stride_h=1, stride_w=1, pad_h=1, pad_w=1,
+        N=1,
+        C=64,
+        K=128,
+        Hi=16,
+        Wi=16,
+        Y=3,
+        X=3,
+        stride_h=1,
+        stride_w=1,
+        pad_h=1,
+        pad_w=1,
         direction=args.variant,
     )
     prob.print_problem()
@@ -181,7 +229,9 @@ def main():
 
     print(f"  Time:   {res.time_ms:.4f} ms")
     print(f"  TFLOPS: {res.tflops:.2f}")
-    print(f"  Output: shape={res.output.shape}, range=[{res.output.min():.3f}, {res.output.max():.3f}]")
+    print(
+        f"  Output: shape={res.output.shape}, range=[{res.output.min():.3f}, {res.output.max():.3f}]"
+    )
 
     # =========================================================================
     # Step 6: CPU reference (forward 2D only)
@@ -204,9 +254,13 @@ def main():
 
     # Summary
     print("\n" + "=" * 70)
-    status = "PASS" if res.success and (verified or args.variant != "forward") else "FAIL"
+    status = (
+        "PASS" if res.success and (verified or args.variant != "forward") else "FAIL"
+    )
     print(f"  Status: {status}")
-    print(f"  {config_minimal.name} | {prob.gflops:.2f} GFLOPs | {res.tflops:.2f} TFLOPS")
+    print(
+        f"  {config_minimal.name} | {prob.gflops:.2f} GFLOPs | {res.tflops:.2f} TFLOPS"
+    )
     print(f"  JIT build time: {jit_build_s:.3f} s")
     print(f"  Registry: {len(registry)} configs (3 patterns demonstrated)")
     print("=" * 70)

@@ -50,7 +50,9 @@ def cpu_conv2d_bwd_weight(x, dy, prob):
                                     hi = ho * prob.stride_h - prob.pad_h + y
                                     wi = wo * prob.stride_w - prob.pad_w + xf
                                     if 0 <= hi < Hi and 0 <= wi < Wi:
-                                        s += float(x[n, hi, wi, g, c]) * float(dy[n, ho, wo, g, k])
+                                        s += float(x[n, hi, wi, g, c]) * float(
+                                            dy[n, ho, wo, g, k]
+                                        )
                         dw[g, k, y, xf, c] = s
     return dw
 
@@ -76,23 +78,55 @@ def main():
     reg = GroupedConvRegistry("bwd_weight_conv")
 
     # BwdWeight 2D: compv3, 128x128 tile
-    reg.add(GroupedConvKernelConfig(
-        variant="bwd_weight", ndim_spatial=2, arch=arch, dtype=args.dtype,
-        tile_m=1, tile_n=128, tile_k=128,
-        wave_m=2, wave_n=2, wave_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8, block_per_cu=1,
-    ))
+    reg.add(
+        GroupedConvKernelConfig(
+            variant="bwd_weight",
+            ndim_spatial=2,
+            arch=arch,
+            dtype=args.dtype,
+            tile_m=1,
+            tile_n=128,
+            tile_k=128,
+            wave_m=2,
+            wave_n=2,
+            wave_k=1,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="compv3",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            vector_size_a=4,
+            vector_size_b=8,
+            vector_size_c=8,
+            block_per_cu=1,
+        )
+    )
     # BwdWeight 3D: compv3, 64x64 tile
-    reg.add(GroupedConvKernelConfig(
-        variant="bwd_weight", ndim_spatial=3, arch=arch, dtype=args.dtype,
-        tile_m=1, tile_n=64, tile_k=64,
-        wave_m=1, wave_n=4, wave_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
-        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8, block_per_cu=1,
-    ))
+    reg.add(
+        GroupedConvKernelConfig(
+            variant="bwd_weight",
+            ndim_spatial=3,
+            arch=arch,
+            dtype=args.dtype,
+            tile_m=1,
+            tile_n=64,
+            tile_k=64,
+            wave_m=1,
+            wave_n=4,
+            wave_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            pipeline="compv3",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            vector_size_a=4,
+            vector_size_b=8,
+            vector_size_c=8,
+            block_per_cu=1,
+        )
+    )
     reg.print_registry()
 
     # =========================================================================
@@ -115,11 +149,12 @@ def main():
     # Step 3: BwdWeight 2D -- GPU + CPU reference
     # =========================================================================
     print("\n--- Step 3: Backward Weight 2D ---")
-    prob = GroupedConvProblem(N=1, C=32, K=32, Hi=8, Wi=8, Y=3, X=3,
-                              pad_h=1, pad_w=1, direction="bwd_weight")
+    prob = GroupedConvProblem(
+        N=1, C=32, K=32, Hi=8, Wi=8, Y=3, X=3, pad_h=1, pad_w=1, direction="bwd_weight"
+    )
     prob.print_problem()
 
-    x  = np.random.uniform(-0.5, 0.5, prob.input_shape()).astype(np_dtype)
+    x = np.random.uniform(-0.5, 0.5, prob.input_shape()).astype(np_dtype)
     dy = np.random.uniform(-0.5, 0.5, prob.output_shape()).astype(np_dtype)
 
     res = runners[("bwd_weight", 2)].run(x, dy, prob)
@@ -138,9 +173,22 @@ def main():
     ok_3d = True
     if ("bwd_weight", 3) in runners:
         print("\n--- Step 4: Backward Weight 3D ---")
-        prob3 = GroupedConvProblem(N=1, C=32, K=32, Di=6, Hi=6, Wi=6, Z=3, Y=3, X=3,
-                                   pad_d=1, pad_h=1, pad_w=1, direction="bwd_weight")
-        x3  = np.random.uniform(-0.5, 0.5, prob3.input_shape()).astype(np_dtype)
+        prob3 = GroupedConvProblem(
+            N=1,
+            C=32,
+            K=32,
+            Di=6,
+            Hi=6,
+            Wi=6,
+            Z=3,
+            Y=3,
+            X=3,
+            pad_d=1,
+            pad_h=1,
+            pad_w=1,
+            direction="bwd_weight",
+        )
+        x3 = np.random.uniform(-0.5, 0.5, prob3.input_shape()).astype(np_dtype)
         dy3 = np.random.uniform(-0.5, 0.5, prob3.output_shape()).astype(np_dtype)
         res3 = runners[("bwd_weight", 3)].run(x3, dy3, prob3)
         nz = np.count_nonzero(res3.output)

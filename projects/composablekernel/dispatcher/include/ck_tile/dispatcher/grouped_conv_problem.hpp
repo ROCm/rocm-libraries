@@ -163,7 +163,7 @@ struct GroupedConvProblem
 /// Builder pattern for Grouped Convolution problem configuration
 class GroupedConvProblemBuilder
 {
-public:
+    public:
     GroupedConvProblemBuilder() = default;
 
     GroupedConvProblemBuilder& batch(std::int64_t n)
@@ -242,7 +242,7 @@ public:
         return p;
     }
 
-private:
+    private:
     GroupedConvProblem problem_;
 };
 

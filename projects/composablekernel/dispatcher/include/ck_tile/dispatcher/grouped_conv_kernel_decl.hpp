@@ -58,9 +58,9 @@ class GroupedConvSignature
     std::string specialization_  = "default"; // Filter specialization
 
     GroupedConvSignature& dtype(const std::string& in,
-                         const std::string& wei,
-                         const std::string& out,
-                         const std::string& acc = "fp32")
+                                const std::string& wei,
+                                const std::string& out,
+                                const std::string& acc = "fp32")
     {
         dtype_in_  = in;
         dtype_wei_ = wei;
@@ -342,8 +342,8 @@ struct GroupedConvKernelDecl
     GroupedConvKernelDecl() = default;
 
     GroupedConvKernelDecl(const GroupedConvSignature& sig,
-                   const GroupedConvAlgorithm& algo,
-                   const std::string& a = "gfx942")
+                          const GroupedConvAlgorithm& algo,
+                          const std::string& a = "gfx942")
         : signature(sig), algorithm(algo), arch(a)
     {
     }
@@ -374,8 +374,9 @@ class GroupedConvKernelSet
     public:
     GroupedConvKernelSet() = default;
 
-    GroupedConvKernelSet&
-    add(const GroupedConvSignature& sig, const GroupedConvAlgorithm& algo, const std::string& arch = "gfx942")
+    GroupedConvKernelSet& add(const GroupedConvSignature& sig,
+                              const GroupedConvAlgorithm& algo,
+                              const std::string& arch = "gfx942")
     {
         decls_.emplace_back(sig, algo, arch);
         return *this;
@@ -383,11 +384,11 @@ class GroupedConvKernelSet
 
     // Simple add: dtype, layout, conv_type, tile_k, tile_c
     GroupedConvKernelSet& add(const std::string& dtype,
-                       const std::string& layout,
-                       const std::string& conv_type,
-                       int tile_k,
-                       int tile_c,
-                       const std::string& arch = "gfx942")
+                              const std::string& layout,
+                              const std::string& conv_type,
+                              int tile_k,
+                              int tile_c,
+                              const std::string& arch = "gfx942")
     {
         GroupedConvSignature sig;
         sig.dtype(dtype).layout(layout).conv_type(conv_type);
@@ -521,17 +522,23 @@ using GroupedConvKernelSetRegistry = grouped_conv_decl::GroupedConvKernelSetRegi
 #define CK_GROUPED_CONV_DECL_CAT_IMPL_(a, b) a##b
 
 // Note: __extension__ suppresses warnings about __COUNTER__ being a GCC/Clang extension
-#define DECL_GROUPED_CONV_KERNEL_SET(name, ...)                                           \
+#define DECL_GROUPED_CONV_KERNEL_SET(name, ...)                                                  \
     __extension__ static ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSetRegistrar \
-    CK_GROUPED_CONV_DECL_CAT_(_gconv_kset_reg_, __COUNTER__)(                              \
-        #name, ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSet() __VA_ARGS__.tag(#name))
+    CK_GROUPED_CONV_DECL_CAT_(_gconv_kset_reg_, __COUNTER__)(                                    \
+        #name,                                                                                   \
+        ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSet() __VA_ARGS__.tag(#name))
 
-#define DECL_GROUPED_CONV_KERNEL_ALL(dtype, layout)                                       \
-    __extension__ static ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSetRegistrar \
-    CK_GROUPED_CONV_DECL_CAT_(_gconv_kset_reg_, __COUNTER__)(#dtype "_" #layout "_all",   \
-        ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSet()                   \
-            .add(::ck_tile::dispatcher::grouped_conv_decl::GroupedConvSignature().dtype(#dtype).layout(#layout), \
-                 ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvAlgorithm(), "*"))
+#define DECL_GROUPED_CONV_KERNEL_ALL(dtype, layout)                                                \
+    __extension__ static ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSetRegistrar   \
+    CK_GROUPED_CONV_DECL_CAT_(_gconv_kset_reg_, __COUNTER__)(                                      \
+        #dtype "_" #layout "_all",                                                                 \
+        ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSet().add(                      \
+            ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvSignature().dtype(#dtype).layout( \
+                #layout),                                                                          \
+            ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvAlgorithm(),                      \
+            "*"))
 
-#define GROUPED_CONV_KERNEL_SET(name) ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSet name
-#define BEGIN_GROUPED_CONV_KERNEL_SET() ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSet()
+#define GROUPED_CONV_KERNEL_SET(name) \
+    ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSet name
+#define BEGIN_GROUPED_CONV_KERNEL_SET() \
+    ::ck_tile::dispatcher::grouped_conv_decl::GroupedConvKernelSet()

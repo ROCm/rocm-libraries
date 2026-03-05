@@ -8,25 +8,25 @@ C++ API for the CK Tile dispatcher (GEMM and Grouped Convolution).
 
 ```
 dispatcher/
-├── dispatcher.hpp          # Main include (includes all below)
-│
-├── # GEMM Headers
-├── registry.hpp            # Kernel registry (storage & lookup)
-├── problem.hpp             # GEMM problem specification
-├── kernel_key.hpp          # Kernel configuration key
-├── kernel_instance.hpp     # Kernel instance interface
-├── utils.hpp               # Utilities (timers, GPU buffers)
-│
-├── # Grouped Convolution Headers
-├── grouped_conv_config.hpp       # GroupedConvDirection, GroupedConvConfig
-├── grouped_conv_problem.hpp      # GroupedConvProblem + ProblemBuilder
-├── grouped_conv_kernel_decl.hpp  # GroupedConvKernelDecl, DECL_GROUPED_CONV_KERNEL_SET
-├── grouped_conv_registry.hpp     # Thread-safe registry with JSON export & filtering
-├── grouped_conv_utils.hpp        # Config creators, validation, benchmark utilities
-│
-└── backends/               # Backend implementations
-    ├── generated_tile_backend.hpp  # CK Tile kernels (production)
-    └── tile_backend.hpp            # Tile backend base
+|---- dispatcher.hpp          # Main include (includes all below)
+|
+|---- # GEMM Headers
+|---- registry.hpp            # Kernel registry (storage & lookup)
+|---- problem.hpp             # GEMM problem specification
+|---- kernel_key.hpp          # Kernel configuration key
+|---- kernel_instance.hpp     # Kernel instance interface
+|---- utils.hpp               # Utilities (timers, GPU buffers)
+|
+|---- # Grouped Convolution Headers
+|---- grouped_conv_config.hpp       # GroupedConvDirection, GroupedConvConfig
+|---- grouped_conv_problem.hpp      # GroupedConvProblem + ProblemBuilder
+|---- grouped_conv_kernel_decl.hpp  # GroupedConvKernelDecl, DECL_GROUPED_CONV_KERNEL_SET
+|---- grouped_conv_registry.hpp     # Thread-safe registry with JSON export & filtering
+|---- grouped_conv_utils.hpp        # Config creators, validation, benchmark utilities
+|
++---- backends/               # Backend implementations
+    |---- generated_tile_backend.hpp  # CK Tile kernels (production)
+    +---- tile_backend.hpp            # Tile backend base
 ```
 
 ## Quick Start

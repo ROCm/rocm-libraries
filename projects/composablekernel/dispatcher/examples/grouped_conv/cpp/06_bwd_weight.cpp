@@ -72,18 +72,24 @@ int main(int argc, char* argv[])
         static_cast<ck_tile::index_t>(C),
         {static_cast<ck_tile::index_t>(Y), static_cast<ck_tile::index_t>(X)},
         {static_cast<ck_tile::index_t>(Hi), static_cast<ck_tile::index_t>(Wi)},
-        {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+        {1, 1},
+        {1, 1},
+        {1, 1},
+        {1, 1}};
 
     using InLayout  = ck_tile::tensor_layout::convolution::NHWGC;
     using WeiLayout = ck_tile::tensor_layout::convolution::GKYXC;
     using OutLayout = ck_tile::tensor_layout::convolution::NHWGK;
 
-    auto in_desc  = ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
-    auto wei_desc = ck_tile::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
-    auto out_desc = ck_tile::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
+    auto in_desc =
+        ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
+    auto wei_desc =
+        ck_tile::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
+    auto out_desc =
+        ck_tile::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
 
     // X (input) and dY (gradient) are inputs; dW is output
-    ck_tile::HostTensor<InDataType>  input(in_desc);
+    ck_tile::HostTensor<InDataType> input(in_desc);
     ck_tile::HostTensor<OutDataType> dy(out_desc);
     ck_tile::HostTensor<WeiDataType> dw_gpu(wei_desc);
     ck_tile::HostTensor<WeiDataType> dw_cpu(wei_desc);
@@ -95,9 +101,9 @@ int main(int argc, char* argv[])
 
     // CPU reference
     std::cout << "\nStep 1: CPU Reference (bwd_weight)\n";
-    std::vector<ck_tile::long_index_t> strides_v   = {1, 1};
-    std::vector<ck_tile::long_index_t> dilations_v = {1, 1};
-    std::vector<ck_tile::long_index_t> left_pads_v = {1, 1};
+    std::vector<ck_tile::long_index_t> strides_v    = {1, 1};
+    std::vector<ck_tile::long_index_t> dilations_v  = {1, 1};
+    std::vector<ck_tile::long_index_t> left_pads_v  = {1, 1};
     std::vector<ck_tile::long_index_t> right_pads_v = {1, 1};
 
     ck_tile::reference_grouped_conv_bwd_weight<2, InDataType, WeiDataType, OutDataType>(
@@ -113,8 +119,8 @@ int main(int argc, char* argv[])
 
     GroupedConvDispatcher dispatcher(&registry);
 
-    auto problem = create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1,
-                                                  GroupedConvOp::BackwardWeight);
+    auto problem =
+        create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::BackwardWeight);
 
     auto* selected = dispatcher.select_kernel(problem);
     if(!selected)
@@ -133,11 +139,11 @@ int main(int argc, char* argv[])
     dw_dev.SetZero();
 
     // dispatcher.run(X, dY, dW, problem) for bwd_weight
-    float time_ms = dispatcher.run(
-        in_dev.GetDeviceBuffer(),
-        dy_dev.GetDeviceBuffer(),
-        dw_dev.GetDeviceBuffer(),
-        problem, nullptr);
+    float time_ms = dispatcher.run(in_dev.GetDeviceBuffer(),
+                                   dy_dev.GetDeviceBuffer(),
+                                   dw_dev.GetDeviceBuffer(),
+                                   problem,
+                                   nullptr);
 
     dw_dev.FromDevice(dw_gpu.data());
 
@@ -150,7 +156,7 @@ int main(int argc, char* argv[])
 
     size_t num_elements = dw_gpu.get_element_space_size();
     float max_abs = 0, max_rel = 0;
-    size_t mismatches = 0;
+    size_t mismatches    = 0;
     constexpr float rtol = 5e-2f, atol = 5e-2f;
 
     for(size_t i = 0; i < num_elements; ++i)
@@ -159,9 +165,10 @@ int main(int argc, char* argv[])
         float cv = static_cast<float>(dw_cpu.data()[i]);
         float d  = std::abs(gv - cv);
         float r  = d / (std::abs(cv) + 1e-6f);
-        max_abs = std::max(max_abs, d);
-        max_rel = std::max(max_rel, r);
-        if(d > atol + rtol * std::abs(cv)) ++mismatches;
+        max_abs  = std::max(max_abs, d);
+        max_rel  = std::max(max_rel, r);
+        if(d > atol + rtol * std::abs(cv))
+            ++mismatches;
     }
 
     bool passed = (mismatches == 0);

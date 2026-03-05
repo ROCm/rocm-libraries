@@ -28,7 +28,7 @@
 namespace ck_tile {
 namespace dispatcher {
 
-using GroupedConvSig = grouped_conv_decl::GroupedConvSignature;
+using GroupedConvSig  = grouped_conv_decl::GroupedConvSignature;
 using GroupedConvAlgo = grouped_conv_decl::GroupedConvAlgorithm;
 
 namespace grouped_conv_utils {
@@ -105,15 +105,15 @@ inline GroupedConvProblem create_grouped_conv2d_problem(int N,
                                                         int Wi,
                                                         int Y,
                                                         int X,
-                                                        int stride  = 1,
-                                                        int padding = 0,
+                                                        int stride       = 1,
+                                                        int padding      = 0,
                                                         GroupedConvOp op = GroupedConvOp::Forward)
 {
     GroupedConvProblem p;
-    p.N = N;
-    p.C = C;
-    p.K = K;
-    p.G = 1;
+    p.N              = N;
+    p.C              = C;
+    p.K              = K;
+    p.G              = 1;
     p.input_spatial  = {1, Hi, Wi};
     p.filter_spatial = {1, Y, X};
     p.stride         = {1, stride, stride};
@@ -125,23 +125,23 @@ inline GroupedConvProblem create_grouped_conv2d_problem(int N,
 }
 
 inline GroupedConvProblem create_grouped_conv3d_problem(int N,
-                                                       int C,
-                                                       int K,
-                                                       int Di,
-                                                       int Hi,
-                                                       int Wi,
-                                                       int Z,
-                                                       int Y,
-                                                       int X,
-                                                       int stride  = 1,
-                                                       int padding = 0,
-                                                       GroupedConvOp op = GroupedConvOp::Forward)
+                                                        int C,
+                                                        int K,
+                                                        int Di,
+                                                        int Hi,
+                                                        int Wi,
+                                                        int Z,
+                                                        int Y,
+                                                        int X,
+                                                        int stride       = 1,
+                                                        int padding      = 0,
+                                                        GroupedConvOp op = GroupedConvOp::Forward)
 {
     GroupedConvProblem p;
-    p.N = N;
-    p.C = C;
-    p.K = K;
-    p.G = 1;
+    p.N              = N;
+    p.C              = C;
+    p.K              = K;
+    p.G              = 1;
     p.input_spatial  = {Di, Hi, Wi};
     p.filter_spatial = {Z, Y, X};
     p.stride         = {stride, stride, stride};
@@ -152,20 +152,14 @@ inline GroupedConvProblem create_grouped_conv3d_problem(int N,
     return p;
 }
 
-inline GroupedConvProblem create_depthwise_grouped_conv2d_problem(int N,
-                                                                  int C,
-                                                                  int Hi,
-                                                                  int Wi,
-                                                                  int Y,
-                                                                  int X,
-                                                                  int stride  = 1,
-                                                                  int padding = 0)
+inline GroupedConvProblem create_depthwise_grouped_conv2d_problem(
+    int N, int C, int Hi, int Wi, int Y, int X, int stride = 1, int padding = 0)
 {
     GroupedConvProblem p;
-    p.N = N;
-    p.C = C;
-    p.K = C;
-    p.G = C;
+    p.N              = N;
+    p.C              = C;
+    p.K              = C;
+    p.G              = C;
     p.input_spatial  = {1, Hi, Wi};
     p.filter_spatial = {1, Y, X};
     p.stride         = {1, stride, stride};
@@ -180,13 +174,14 @@ inline void print_pattern_docs(std::ostream& os = std::cout)
 {
     os << "Grouped Convolution Pattern Documentation\n";
     os << "==========================================\n";
-    os << "Signature patterns: dtype, layout, conv_type (forward/bwd_data/bwd_weight), dims (2/3)\n";
+    os << "Signature patterns: dtype, layout, conv_type (forward/bwd_data/bwd_weight), dims "
+          "(2/3)\n";
     os << "Algorithm patterns: tile(M,N,K), wave(M,N,K), warp(M,N,K), pipeline, vector_sizes\n";
     os << "Arch patterns: gfx942, gfx90a, gfx950, or '*' for all\n";
 }
 
 inline void print_grouped_conv_kernel_decl(const GroupedConvKernelDecl& decl,
-                                          std::ostream& os = std::cout)
+                                           std::ostream& os = std::cout)
 {
     os << "GroupedConvKernelDecl: " << decl.name() << "\n";
     os << "  Signature: dtype=" << decl.signature.dtype_in_ << ", layout=" << decl.signature.layout_
@@ -194,9 +189,9 @@ inline void print_grouped_conv_kernel_decl(const GroupedConvKernelDecl& decl,
        << "\n";
     os << "  Algorithm: tile=" << decl.algorithm.tile_m_ << "x" << decl.algorithm.tile_n_ << "x"
        << decl.algorithm.tile_k_ << ", wave=" << decl.algorithm.wave_m_ << "x"
-       << decl.algorithm.wave_n_ << "x" << decl.algorithm.wave_k_ << ", warp="
-       << decl.algorithm.warp_m_ << "x" << decl.algorithm.warp_n_ << "x" << decl.algorithm.warp_k_
-       << ", pipeline=" << decl.algorithm.pipeline_ << "\n";
+       << decl.algorithm.wave_n_ << "x" << decl.algorithm.wave_k_
+       << ", warp=" << decl.algorithm.warp_m_ << "x" << decl.algorithm.warp_n_ << "x"
+       << decl.algorithm.warp_k_ << ", pipeline=" << decl.algorithm.pipeline_ << "\n";
     os << "  Arch: " << decl.arch << "\n";
 }
 
@@ -207,7 +202,7 @@ inline void print_grouped_conv_problem(const GroupedConvProblem& p, std::ostream
 }
 
 inline GroupedConvKernelSet build_grouped_conv2d_fwd_set(const std::string& dtype = "fp16",
-                                                        const std::string& arch  = "gfx942")
+                                                         const std::string& arch  = "gfx942")
 {
     GroupedConvKernelSet set;
     auto decl1 = create_grouped_conv2d_fwd(dtype, 128, 128, arch);
@@ -218,7 +213,7 @@ inline GroupedConvKernelSet build_grouped_conv2d_fwd_set(const std::string& dtyp
 }
 
 inline GroupedConvKernelSet build_grouped_conv2d_full_set(const std::string& dtype = "fp16",
-                                                         const std::string& arch  = "gfx942")
+                                                          const std::string& arch  = "gfx942")
 {
     GroupedConvKernelSet set;
     set.merge(build_grouped_conv2d_fwd_set(dtype, arch));
@@ -231,7 +226,7 @@ inline GroupedConvKernelSet build_grouped_conv2d_full_set(const std::string& dty
 
 struct ValidationResult
 {
-    bool passed       = false;
+    bool passed        = false;
     float max_abs_diff = 0.0f;
     float max_rel_diff = 0.0f;
     float rtol         = 1e-3f;
@@ -246,21 +241,18 @@ struct ValidationResult
 };
 
 template <typename T>
-inline ValidationResult validate_buffers(const T* result,
-                                         const T* reference,
-                                         size_t count,
-                                         float rtol = 1e-3f,
-                                         float atol = 1e-3f)
+inline ValidationResult validate_buffers(
+    const T* result, const T* reference, size_t count, float rtol = 1e-3f, float atol = 1e-3f)
 {
     ValidationResult vr;
-    vr.rtol = rtol;
-    vr.atol = atol;
+    vr.rtol   = rtol;
+    vr.atol   = atol;
     vr.passed = true;
 
     for(size_t i = 0; i < count; ++i)
     {
-        float r  = static_cast<float>(result[i]);
-        float ref = static_cast<float>(reference[i]);
+        float r        = static_cast<float>(result[i]);
+        float ref      = static_cast<float>(reference[i]);
         float abs_diff = std::abs(r - ref);
         float rel_diff = (std::abs(ref) > 1e-10f) ? (abs_diff / std::abs(ref)) : 0.0f;
 

@@ -148,9 +148,7 @@ class ValidationResultBase:
 # ============================================================================
 
 
-def validate_wave_config(
-    wave_cfg: List[int], arch: str
-) -> Tuple[bool, str]:
+def validate_wave_config(wave_cfg: List[int], arch: str) -> Tuple[bool, str]:
     """Validate a [wave_m, wave_n, wave_k] config for *arch*.
 
     Returns (is_valid, error_message). Empty string on success.
@@ -227,9 +225,7 @@ def auto_correct_wave(wave_cfg: List[int], arch: str) -> List[int]:
     return valid_waves[0] if valid_waves else [2, 2, 1]
 
 
-def auto_correct_trait(
-    pipeline: str, scheduler: str
-) -> Tuple[str, str]:
+def auto_correct_trait(pipeline: str, scheduler: str) -> Tuple[str, str]:
     """Return a corrected (pipeline, scheduler) pair.
 
     If the compute pipeline doesn't support interwave, switch to intrawave.
@@ -262,7 +258,11 @@ class Colors:
 
     @classmethod
     def _use_color(cls) -> bool:
-        return sys.platform != "win32" and hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        return (
+            sys.platform != "win32"
+            and hasattr(sys.stdout, "isatty")
+            and sys.stdout.isatty()
+        )
 
     @classmethod
     def green(cls, text: str) -> str:
@@ -302,9 +302,9 @@ class Colors:
 
 def print_phase(number: int, description: str) -> None:
     """Print a phase header (e.g. 'Phase 1: Codegen')."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Phase {number}: {description}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def print_success(message: str) -> None:

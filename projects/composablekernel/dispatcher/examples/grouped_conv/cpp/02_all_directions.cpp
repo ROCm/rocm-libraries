@@ -46,7 +46,11 @@ DECL_GROUPED_CONV_KERNEL_SET(
 DECL_GROUPED_CONV_KERNEL_SET(
     conv_bwdw_2d,
     .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("bwd_weight").dims(2),
-         GroupedConvAlgo().tile(1, 128, 128).pipeline("compv3").memory_op("atomic_add").vector_sizes(4, 8, 8),
+         GroupedConvAlgo()
+             .tile(1, 128, 128)
+             .pipeline("compv3")
+             .memory_op("atomic_add")
+             .vector_sizes(4, 8, 8),
          "gfx950"));
 
 int main(int argc, char* argv[])
@@ -79,17 +83,23 @@ int main(int argc, char* argv[])
         static_cast<ck_tile::index_t>(C),
         {static_cast<ck_tile::index_t>(Y), static_cast<ck_tile::index_t>(X)},
         {static_cast<ck_tile::index_t>(Hi), static_cast<ck_tile::index_t>(Wi)},
-        {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+        {1, 1},
+        {1, 1},
+        {1, 1},
+        {1, 1}};
 
     using InLayout  = ck_tile::tensor_layout::convolution::NHWGC;
     using WeiLayout = ck_tile::tensor_layout::convolution::GKYXC;
     using OutLayout = ck_tile::tensor_layout::convolution::NHWGK;
 
-    auto in_desc  = ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
-    auto wei_desc = ck_tile::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
-    auto out_desc = ck_tile::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
+    auto in_desc =
+        ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
+    auto wei_desc =
+        ck_tile::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
+    auto out_desc =
+        ck_tile::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
 
-    ck_tile::HostTensor<InDataType>  input(in_desc);
+    ck_tile::HostTensor<InDataType> input(in_desc);
     ck_tile::HostTensor<WeiDataType> weight(wei_desc);
     ck_tile::HostTensor<OutDataType> output(out_desc);
 
@@ -103,85 +113,104 @@ int main(int argc, char* argv[])
     input_dev.ToDevice(input.data());
     weight_dev.ToDevice(weight.data());
 
-    std::cout << "\n  " << std::left << std::setw(12) << "Direction"
-              << std::right << std::setw(10) << "Time(ms)"
-              << std::setw(10) << "TFLOPS"
-              << std::setw(14) << "NonZero"
+    std::cout << "\n  " << std::left << std::setw(12) << "Direction" << std::right << std::setw(10)
+              << "Time(ms)" << std::setw(10) << "TFLOPS" << std::setw(14) << "NonZero"
               << std::setw(10) << "Status" << "\n";
     std::cout << "  " << std::string(56, '-') << "\n";
 
     bool all_pass = true;
 
-    auto print_result = [](const char* label, float time_ms, double tflops,
-                           size_t nz, size_t total, bool ok)
-    {
-        std::cout << "  " << std::left << std::setw(12) << label
-                  << std::right << std::fixed << std::setprecision(4)
-                  << std::setw(10) << time_ms
-                  << std::setprecision(2) << std::setw(10) << tflops
-                  << std::setw(14) << (std::to_string(nz) + "/" + std::to_string(total))
-                  << std::setw(10) << (ok ? "OK" : "FAIL") << "\n";
-    };
+    auto print_result =
+        [](const char* label, float time_ms, double tflops, size_t nz, size_t total, bool ok) {
+            std::cout << "  " << std::left << std::setw(12) << label << std::right << std::fixed
+                      << std::setprecision(4) << std::setw(10) << time_ms << std::setprecision(2)
+                      << std::setw(10) << tflops << std::setw(14)
+                      << (std::to_string(nz) + "/" + std::to_string(total)) << std::setw(10)
+                      << (ok ? "OK" : "FAIL") << "\n";
+        };
 
     // Forward: run(X, W, Y)
     {
-        auto problem = create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::Forward);
+        auto problem =
+            create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::Forward);
         output_dev.SetZero();
-        float time_ms = dispatcher.run(
-            input_dev.GetDeviceBuffer(), weight_dev.GetDeviceBuffer(),
-            output_dev.GetDeviceBuffer(), problem, nullptr);
+        float time_ms = dispatcher.run(input_dev.GetDeviceBuffer(),
+                                       weight_dev.GetDeviceBuffer(),
+                                       output_dev.GetDeviceBuffer(),
+                                       problem,
+                                       nullptr);
         output_dev.FromDevice(output.data());
         size_t nz = 0;
         for(size_t i = 0; i < output.get_element_space_size(); ++i)
-            if(static_cast<float>(output.data()[i]) != 0.0f) ++nz;
+            if(static_cast<float>(output.data()[i]) != 0.0f)
+                ++nz;
         bool ok = nz > 0;
-        print_result("forward", time_ms, calculate_conv_tflops(problem, time_ms),
-                     nz, output.get_element_space_size(), ok);
-        if(!ok) all_pass = false;
+        print_result("forward",
+                     time_ms,
+                     calculate_conv_tflops(problem, time_ms),
+                     nz,
+                     output.get_element_space_size(),
+                     ok);
+        if(!ok)
+            all_pass = false;
     }
 
     // Backward Data: run(dY, W, dX)
     {
-        auto problem = create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::BackwardData);
+        auto problem =
+            create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::BackwardData);
         ck_tile::HostTensor<InDataType> dx_host(in_desc);
         dx_host.SetZero();
         ck_tile::DeviceMem dx_dev(dx_host.get_element_space_size_in_bytes());
         dx_dev.SetZero();
-        float time_ms = dispatcher.run(
-            output_dev.GetDeviceBuffer(),  // dY (from forward pass)
-            weight_dev.GetDeviceBuffer(),  // W
-            dx_dev.GetDeviceBuffer(),      // dX (output)
-            problem, nullptr);
+        float time_ms = dispatcher.run(output_dev.GetDeviceBuffer(), // dY (from forward pass)
+                                       weight_dev.GetDeviceBuffer(), // W
+                                       dx_dev.GetDeviceBuffer(),     // dX (output)
+                                       problem,
+                                       nullptr);
         dx_dev.FromDevice(dx_host.data());
         size_t nz = 0;
         for(size_t i = 0; i < dx_host.get_element_space_size(); ++i)
-            if(static_cast<float>(dx_host.data()[i]) != 0.0f) ++nz;
+            if(static_cast<float>(dx_host.data()[i]) != 0.0f)
+                ++nz;
         bool ok = nz > 0;
-        print_result("bwd_data", time_ms, calculate_conv_tflops(problem, time_ms),
-                     nz, dx_host.get_element_space_size(), ok);
-        if(!ok) all_pass = false;
+        print_result("bwd_data",
+                     time_ms,
+                     calculate_conv_tflops(problem, time_ms),
+                     nz,
+                     dx_host.get_element_space_size(),
+                     ok);
+        if(!ok)
+            all_pass = false;
     }
 
     // Backward Weight: run(X, dY, dW)
     {
-        auto problem = create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::BackwardWeight);
+        auto problem = create_grouped_conv2d_problem(
+            N, C, K, Hi, Wi, Y, X, 1, 1, GroupedConvOp::BackwardWeight);
         ck_tile::HostTensor<WeiDataType> dw_host(wei_desc);
         dw_host.SetZero();
         ck_tile::DeviceMem dw_dev(dw_host.get_element_space_size_in_bytes());
         dw_dev.SetZero();
-        float time_ms = dispatcher.run(
-            input_dev.GetDeviceBuffer(),   // X
-            output_dev.GetDeviceBuffer(),  // dY
-            dw_dev.GetDeviceBuffer(),      // dW (output)
-            problem, nullptr);
+        float time_ms = dispatcher.run(input_dev.GetDeviceBuffer(),  // X
+                                       output_dev.GetDeviceBuffer(), // dY
+                                       dw_dev.GetDeviceBuffer(),     // dW (output)
+                                       problem,
+                                       nullptr);
         dw_dev.FromDevice(dw_host.data());
         size_t nz = 0;
         for(size_t i = 0; i < dw_host.get_element_space_size(); ++i)
-            if(static_cast<float>(dw_host.data()[i]) != 0.0f) ++nz;
+            if(static_cast<float>(dw_host.data()[i]) != 0.0f)
+                ++nz;
         bool ok = nz > 0;
-        print_result("bwd_weight", time_ms, calculate_conv_tflops(problem, time_ms),
-                     nz, dw_host.get_element_space_size(), ok);
-        if(!ok) all_pass = false;
+        print_result("bwd_weight",
+                     time_ms,
+                     calculate_conv_tflops(problem, time_ms),
+                     nz,
+                     dw_host.get_element_space_size(),
+                     ok);
+        if(!ok)
+            all_pass = false;
     }
 
     utils::print_separator();

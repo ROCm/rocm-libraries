@@ -36,9 +36,9 @@ DECL_GROUPED_CONV_KERNEL_SET(
     .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
          GroupedConvAlgo().tile(1, 128, 128).pipeline("compv4").vector_sizes(4, 8, 8),
          "gfx950")
-    .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
-         GroupedConvAlgo().tile(1, 64, 64).pipeline("compv3").vector_sizes(4, 8, 8),
-         "gfx950"));
+        .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
+             GroupedConvAlgo().tile(1, 64, 64).pipeline("compv3").vector_sizes(4, 8, 8),
+             "gfx950"));
 
 std::vector<std::string> conv_heuristic(const GroupedConvProblem& problem)
 {
@@ -93,7 +93,10 @@ int main(int argc, char* argv[])
         static_cast<ck_tile::index_t>(64),
         {static_cast<ck_tile::index_t>(3), static_cast<ck_tile::index_t>(3)},
         {static_cast<ck_tile::index_t>(14), static_cast<ck_tile::index_t>(14)},
-        {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+        {1, 1},
+        {1, 1},
+        {1, 1},
+        {1, 1}};
 
     using InLayout  = ck_tile::tensor_layout::convolution::NHWGC;
     using WeiLayout = ck_tile::tensor_layout::convolution::GKYXC;
@@ -120,18 +123,23 @@ int main(int argc, char* argv[])
     out_dev.SetZero();
 
     std::cout << "  Launching kernel..." << std::endl;
-    float time_ms = dispatcher.run(
-        in_dev.GetDeviceBuffer(), wei_dev.GetDeviceBuffer(),
-        out_dev.GetDeviceBuffer(), problem, nullptr);
+    float time_ms = dispatcher.run(in_dev.GetDeviceBuffer(),
+                                   wei_dev.GetDeviceBuffer(),
+                                   out_dev.GetDeviceBuffer(),
+                                   problem,
+                                   nullptr);
 
     std::cout << "  Reading back..." << std::endl;
     out_dev.FromDevice(output.data());
     size_t nz = 0;
     for(size_t i = 0; i < output.get_element_space_size(); ++i)
-        if(static_cast<float>(output.data()[i]) != 0.0f) ++nz;
+        if(static_cast<float>(output.data()[i]) != 0.0f)
+            ++nz;
 
-    std::cout << "  Time:    " << std::fixed << std::setprecision(4) << time_ms << " ms" << std::endl;
-    std::cout << "  TFLOPS:  " << std::setprecision(2) << calculate_conv_tflops(problem, time_ms) << std::endl;
+    std::cout << "  Time:    " << std::fixed << std::setprecision(4) << time_ms << " ms"
+              << std::endl;
+    std::cout << "  TFLOPS:  " << std::setprecision(2) << calculate_conv_tflops(problem, time_ms)
+              << std::endl;
     std::cout << "  NonZero: " << nz << "/" << output.get_element_space_size() << std::endl;
 
     // Step 5: JSON export

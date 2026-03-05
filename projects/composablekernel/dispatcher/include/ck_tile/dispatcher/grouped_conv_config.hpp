@@ -186,19 +186,19 @@ enum class GemmPadding
 
 struct GroupedConvSignatureInfo
 {
-    int spatial_dim                        = 2; // 1, 2, or 3
-    GroupedConvDirection direction         = GroupedConvDirection::FORWARD;
-    std::string in_type                    = "fp16";
-    std::string wei_type                   = "fp16";
-    std::string out_type                   = "fp16";
-    std::string acc_type                   = "fp32";
-    std::string workspace_type             = "fp32"; // For two-stage algorithms
-    std::string bias_type                  = "fp16"; // For bias epilogue
-    ElementwiseOp in_element_op            = ElementwiseOp::PASS_THROUGH;
-    ElementwiseOp wei_element_op          = ElementwiseOp::PASS_THROUGH;
-    ElementwiseOp out_element_op           = ElementwiseOp::PASS_THROUGH;
-    ConvSpecialization conv_spec           = ConvSpecialization::DEFAULT;
-    int num_groups                         = 1;
+    int spatial_dim                = 2; // 1, 2, or 3
+    GroupedConvDirection direction = GroupedConvDirection::FORWARD;
+    std::string in_type            = "fp16";
+    std::string wei_type           = "fp16";
+    std::string out_type           = "fp16";
+    std::string acc_type           = "fp32";
+    std::string workspace_type     = "fp32"; // For two-stage algorithms
+    std::string bias_type          = "fp16"; // For bias epilogue
+    ElementwiseOp in_element_op    = ElementwiseOp::PASS_THROUGH;
+    ElementwiseOp wei_element_op   = ElementwiseOp::PASS_THROUGH;
+    ElementwiseOp out_element_op   = ElementwiseOp::PASS_THROUGH;
+    ConvSpecialization conv_spec   = ConvSpecialization::DEFAULT;
+    int num_groups                 = 1;
 
     // String helpers
     static const char* direction_str(GroupedConvDirection dir)
@@ -375,8 +375,8 @@ struct GroupedConvConfig
     std::string name() const
     {
         std::ostringstream oss;
-        oss << "grouped_conv_" << GroupedConvSignatureInfo::direction_str(signature.direction) << "_"
-            << signature.in_type << "_" << signature.spatial_dim << "d" << "_"
+        oss << "grouped_conv_" << GroupedConvSignatureInfo::direction_str(signature.direction)
+            << "_" << signature.in_type << "_" << signature.spatial_dim << "d" << "_"
             << GroupedConvAlgorithmInfo::pipeline_str(algorithm.pipeline) << "_" << algorithm.tile.m
             << "x" << algorithm.tile.n << "x" << algorithm.tile.k;
         return oss.str();
@@ -413,10 +413,10 @@ struct GroupedConvConfig
             << algorithm.warp.k_warp << "\n";
         oss << "    Warp Tile: " << algorithm.warp.m_warp_tile << "x" << algorithm.warp.n_warp_tile
             << "x" << algorithm.warp.k_warp_tile << "\n";
-        oss << "    Pipeline: "
-            << GroupedConvAlgorithmInfo::pipeline_str(algorithm.pipeline) << "\n";
-        oss << "    Scheduler: "
-            << GroupedConvAlgorithmInfo::scheduler_str(algorithm.scheduler) << "\n";
+        oss << "    Pipeline: " << GroupedConvAlgorithmInfo::pipeline_str(algorithm.pipeline)
+            << "\n";
+        oss << "    Scheduler: " << GroupedConvAlgorithmInfo::scheduler_str(algorithm.scheduler)
+            << "\n";
 
         oss << "  Arch:\n";
         oss << "    Target: " << arch.name << "\n";

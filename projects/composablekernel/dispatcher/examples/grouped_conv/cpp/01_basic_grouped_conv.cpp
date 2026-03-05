@@ -40,34 +40,31 @@ DECL_GROUPED_CONV_KERNEL_SET(
     basic_conv_kernels,
     // Pattern 1: AUTOFILL - only tile + pipeline, rest auto-filled
     .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
-         GroupedConvAlgo()
-             .tile(1, 128, 128)
-             .pipeline("compv4")
-             .scheduler("intrawave"),
+         GroupedConvAlgo().tile(1, 128, 128).pipeline("compv4").scheduler("intrawave"),
          "gfx950")
-    // Pattern 2: AUTOCORRECT - wave(1,1,1) invalid, corrected to (1,4,1)
-    .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
-         GroupedConvAlgo()
-             .tile(1, 64, 64)
-             .wave(1, 1, 1)
-             .warp(16, 16, 32)
-             .pipeline("compv3")
-             .scheduler("intrawave")
-             .epilogue("cshuffle")
-             .vector_sizes(4, 8, 8),
-         "gfx950")
-    // Pattern 3: FULL - all parameters explicit (validated config)
-    .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
-         GroupedConvAlgo()
-             .tile(1, 128, 128)
-             .wave(2, 2, 1)
-             .warp(32, 32, 16)
-             .pipeline("compv3")
-             .scheduler("intrawave")
-             .epilogue("cshuffle")
-             .vector_sizes(4, 8, 8)
-             .block_per_cu(1),
-         "gfx950"));
+        // Pattern 2: AUTOCORRECT - wave(1,1,1) invalid, corrected to (1,4,1)
+        .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
+             GroupedConvAlgo()
+                 .tile(1, 64, 64)
+                 .wave(1, 1, 1)
+                 .warp(16, 16, 32)
+                 .pipeline("compv3")
+                 .scheduler("intrawave")
+                 .epilogue("cshuffle")
+                 .vector_sizes(4, 8, 8),
+             "gfx950")
+        // Pattern 3: FULL - all parameters explicit (validated config)
+        .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
+             GroupedConvAlgo()
+                 .tile(1, 128, 128)
+                 .wave(2, 2, 1)
+                 .warp(32, 32, 16)
+                 .pipeline("compv3")
+                 .scheduler("intrawave")
+                 .epilogue("cshuffle")
+                 .vector_sizes(4, 8, 8)
+                 .block_per_cu(1),
+             "gfx950"));
 
 int main(int argc, char* argv[])
 {
@@ -86,11 +83,11 @@ int main(int argc, char* argv[])
     utils::print_header("Example 01: Basic Grouped Convolution");
 
     std::string gfx_arch = args.get("--arch", "gfx950");
-    int N  = args.get_int("-n", 1);
-    int G  = args.get_int("-g", 1);
-    int C  = args.get_int("-c", 64);
-    int K  = args.get_int("-k", 128);
-    int HW = args.get_int("--size", 14);
+    int N                = args.get_int("-n", 1);
+    int G                = args.get_int("-g", 1);
+    int C                = args.get_int("-c", 64);
+    int K                = args.get_int("-k", 128);
+    int HW               = args.get_int("--size", 14);
     int Y = 3, X = 3;
 
     // Step 1: Show declared kernel sets
@@ -111,7 +108,7 @@ int main(int argc, char* argv[])
     // Step 4: Build problem using CK Tile ConvParam
     std::cout << "\nStep 4: Problem\n";
     auto problem = create_grouped_conv2d_problem(N, C, K, HW, HW, Y, X, 1, 1);
-    problem.op = GroupedConvOp::Forward;
+    problem.op   = GroupedConvOp::Forward;
     print_grouped_conv_problem(problem);
 
     ck_tile::conv::ConvParam conv_param{
@@ -122,17 +119,23 @@ int main(int argc, char* argv[])
         static_cast<ck_tile::index_t>(C),
         {static_cast<ck_tile::index_t>(Y), static_cast<ck_tile::index_t>(X)},
         {static_cast<ck_tile::index_t>(HW), static_cast<ck_tile::index_t>(HW)},
-        {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+        {1, 1},
+        {1, 1},
+        {1, 1},
+        {1, 1}};
 
     using InLayout  = ck_tile::tensor_layout::convolution::NHWGC;
     using WeiLayout = ck_tile::tensor_layout::convolution::GKYXC;
     using OutLayout = ck_tile::tensor_layout::convolution::NHWGK;
 
-    auto in_desc  = ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
-    auto wei_desc = ck_tile::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
-    auto out_desc = ck_tile::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
+    auto in_desc =
+        ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
+    auto wei_desc =
+        ck_tile::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
+    auto out_desc =
+        ck_tile::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
 
-    ck_tile::HostTensor<InDataType>  input_host(in_desc);
+    ck_tile::HostTensor<InDataType> input_host(in_desc);
     ck_tile::HostTensor<WeiDataType> weight_host(wei_desc);
     ck_tile::HostTensor<OutDataType> output_host(out_desc);
 
@@ -159,11 +162,11 @@ int main(int argc, char* argv[])
     }
     std::cout << "  Selected: " << selected->name() << "\n";
 
-    float time_ms = dispatcher.run(
-        input_dev.GetDeviceBuffer(),
-        weight_dev.GetDeviceBuffer(),
-        output_dev.GetDeviceBuffer(),
-        problem, nullptr);
+    float time_ms = dispatcher.run(input_dev.GetDeviceBuffer(),
+                                   weight_dev.GetDeviceBuffer(),
+                                   output_dev.GetDeviceBuffer(),
+                                   problem,
+                                   nullptr);
 
     double tflops = calculate_conv_tflops(problem, time_ms);
     std::cout << "  Time:   " << std::fixed << std::setprecision(4) << time_ms << " ms\n";
@@ -173,13 +176,14 @@ int main(int argc, char* argv[])
     std::cout << "\nStep 6: Verify\n";
     output_dev.FromDevice(output_host.data());
 
-    size_t total   = output_host.get_element_space_size();
-    size_t nonzero = 0;
+    size_t total    = output_host.get_element_space_size();
+    size_t nonzero  = 0;
     double checksum = 0.0;
     for(size_t i = 0; i < total; ++i)
     {
         float v = static_cast<float>(output_host.data()[i]);
-        if(v != 0.0f) ++nonzero;
+        if(v != 0.0f)
+            ++nonzero;
         checksum += v;
     }
 

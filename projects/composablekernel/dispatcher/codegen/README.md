@@ -88,13 +88,13 @@ results = codegen.generate_all()
 ## Variants
 
 ### Standard
-Basic GEMM: `C = A × B`
+Basic GEMM: `C = A x B`
 
 ### PreShuffle
 Optimized weight access with LDS pre-shuffling. Best for large matrices.
 
 ### Multi-D
-Element-wise fusion: `C = op(A × B + D0 + D1 + ...)`
+Element-wise fusion: `C = op(A x B + D0 + D1 + ...)`
 
 Supported ops: `PassThrough`, `MultiDAdd`, `Relu`, `Gelu`, `Sigmoid`, `Tanh`
 
@@ -102,11 +102,11 @@ Supported ops: `PassThrough`, `MultiDAdd`, `Relu`, `Gelu`, `Sigmoid`, `Tanh`
 
 ```
 generated_kernels/
-├── gemm_fp16_rcr_compv4_..._128x128x32_....hpp          # GEMM kernels
-├── gemm_fp16_rcr_compv4_..._preshuffle.hpp
-├── gemm_fp16_rcr_compv4_..._multid_Relu_d1.hpp
-├── grouped_conv_fwd_fp16_nhwgc_..._128x128x32_....hpp   # Grouped conv kernels
-└── ...
+|---- gemm_fp16_rcr_compv4_..._128x128x32_....hpp          # GEMM kernels
+|---- gemm_fp16_rcr_compv4_..._preshuffle.hpp
+|---- gemm_fp16_rcr_compv4_..._multid_Relu_d1.hpp
+|---- grouped_conv_fwd_fp16_nhwgc_..._128x128x32_....hpp   # Grouped conv kernels
++---- ...
 ```
 
 ## Configuration Files

@@ -38,7 +38,7 @@ import ctypes
 import json
 import copy
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -150,7 +150,10 @@ class GroupedConvKernelConfig:
 
     def __post_init__(self):
         self.variant = _resolve_variant(self.variant)
-        if self.variant in BACKWARD_VARIANTS and self.pipeline not in BACKWARD_PIPELINES:
+        if (
+            self.variant in BACKWARD_VARIANTS
+            and self.pipeline not in BACKWARD_PIPELINES
+        ):
             self.pipeline = "compv3"
 
     @property
@@ -171,22 +174,32 @@ class GroupedConvKernelConfig:
 
     @property
     def name(self) -> str:
-        return (f"grouped_conv_{self.variant}_{self.dtype}_{self.ndim_spatial}d_"
-                f"{self.tile_str}_{self.pipeline}")
+        return (
+            f"grouped_conv_{self.variant}_{self.dtype}_{self.ndim_spatial}d_"
+            f"{self.tile_str}_{self.pipeline}"
+        )
 
     def to_dict(self) -> dict:
         """Convert to legacy dict format for codegen compatibility."""
         return {
             "tile_config": {
-                "tile_m": [self.tile_m], "tile_n": [self.tile_n], "tile_k": [self.tile_k],
-                "wave_m": [self.wave_m], "wave_n": [self.wave_n], "wave_k": [self.wave_k],
-                "warp_tile_m": [self.warp_tile_m], "warp_tile_n": [self.warp_tile_n],
+                "tile_m": [self.tile_m],
+                "tile_n": [self.tile_n],
+                "tile_k": [self.tile_k],
+                "wave_m": [self.wave_m],
+                "wave_n": [self.wave_n],
+                "wave_k": [self.wave_k],
+                "warp_tile_m": [self.warp_tile_m],
+                "warp_tile_n": [self.warp_tile_n],
                 "warp_tile_k": [self.warp_tile_k],
             },
             "trait_config": {
-                "pipeline": [self.pipeline], "epilogue": [self.epilogue],
+                "pipeline": [self.pipeline],
+                "epilogue": [self.epilogue],
                 "scheduler": [self.scheduler],
-                "pad_m": [self.pad_m], "pad_n": [self.pad_n], "pad_k": [self.pad_k],
+                "pad_m": [self.pad_m],
+                "pad_n": [self.pad_n],
+                "pad_k": [self.pad_k],
                 "vector_size_a": [self.vector_size_a],
                 "vector_size_b": [self.vector_size_b],
                 "vector_size_c": [self.vector_size_c],
@@ -194,8 +207,11 @@ class GroupedConvKernelConfig:
                 "num_wave_groups": [self.num_wave_groups],
                 "num_groups_to_merge": [self.num_groups_to_merge],
             },
-            "variant": self.variant, "ndim_spatial": self.ndim_spatial,
-            "arch": self.arch, "layout": self.layout, "dtype": self.dtype,
+            "variant": self.variant,
+            "ndim_spatial": self.ndim_spatial,
+            "arch": self.arch,
+            "layout": self.layout,
+            "dtype": self.dtype,
         }
 
     def to_json_obj(self) -> dict:
@@ -203,15 +219,25 @@ class GroupedConvKernelConfig:
         return {
             "name": self.name,
             "signature": {
-                "variant": self.variant, "dtype": self.dtype,
-                "ndim_spatial": self.ndim_spatial, "layout": self.layout,
+                "variant": self.variant,
+                "dtype": self.dtype,
+                "ndim_spatial": self.ndim_spatial,
+                "layout": self.layout,
             },
             "algorithm": {
-                "tile_m": self.tile_m, "tile_n": self.tile_n, "tile_k": self.tile_k,
-                "wave": self.wave_str, "warp": self.warp_str,
-                "pipeline": self.pipeline, "epilogue": self.epilogue,
+                "tile_m": self.tile_m,
+                "tile_n": self.tile_n,
+                "tile_k": self.tile_k,
+                "wave": self.wave_str,
+                "warp": self.warp_str,
+                "pipeline": self.pipeline,
+                "epilogue": self.epilogue,
                 "scheduler": self.scheduler,
-                "vector_sizes": [self.vector_size_a, self.vector_size_b, self.vector_size_c],
+                "vector_sizes": [
+                    self.vector_size_a,
+                    self.vector_size_b,
+                    self.vector_size_c,
+                ],
                 "block_per_cu": self.block_per_cu,
                 "num_wave_groups": self.num_wave_groups,
                 "num_groups_to_merge": self.num_groups_to_merge,
@@ -230,7 +256,9 @@ class GroupedConvKernelConfig:
         print(f"{indent}  Warp:     {self.warp_str}")
         print(f"{indent}  Pipeline: {self.pipeline}/{self.scheduler}/{self.epilogue}")
         print(f"{indent}  VecSizes: {self.vec_str}")
-        print(f"{indent}  BlockCU:  {self.block_per_cu}  WaveGroups: {self.num_wave_groups}  MergeGroups: {self.num_groups_to_merge}")
+        print(
+            f"{indent}  BlockCU:  {self.block_per_cu}  WaveGroups: {self.num_wave_groups}  MergeGroups: {self.num_groups_to_merge}"
+        )
 
 
 # =============================================================================
@@ -301,8 +329,18 @@ class GroupedConvProblem:
         """Total FLOPs for this convolution (any direction, same count)."""
         c_per_group = self.C // self.G
         if self.is_3d:
-            return (2.0 * self.N * self.K * self.Do * self.Ho * self.Wo
-                    * c_per_group * self.Z * self.Y * self.X)
+            return (
+                2.0
+                * self.N
+                * self.K
+                * self.Do
+                * self.Ho
+                * self.Wo
+                * c_per_group
+                * self.Z
+                * self.Y
+                * self.X
+            )
         return 2.0 * self.N * self.K * self.Ho * self.Wo * c_per_group * self.Y * self.X
 
     @property
@@ -356,13 +394,25 @@ class GroupedConvProblemC(ctypes.Structure):
     """C structure matching ConvProblemC in conv_ctypes_lib.cpp."""
 
     _fields_ = [
-        ("N", ctypes.c_int), ("G", ctypes.c_int),
-        ("C", ctypes.c_int), ("K", ctypes.c_int),
-        ("input_d", ctypes.c_int), ("input_h", ctypes.c_int), ("input_w", ctypes.c_int),
-        ("filter_z", ctypes.c_int), ("filter_y", ctypes.c_int), ("filter_x", ctypes.c_int),
-        ("stride_d", ctypes.c_int), ("stride_h", ctypes.c_int), ("stride_w", ctypes.c_int),
-        ("pad_d", ctypes.c_int), ("pad_h", ctypes.c_int), ("pad_w", ctypes.c_int),
-        ("dilation_d", ctypes.c_int), ("dilation_h", ctypes.c_int), ("dilation_w", ctypes.c_int),
+        ("N", ctypes.c_int),
+        ("G", ctypes.c_int),
+        ("C", ctypes.c_int),
+        ("K", ctypes.c_int),
+        ("input_d", ctypes.c_int),
+        ("input_h", ctypes.c_int),
+        ("input_w", ctypes.c_int),
+        ("filter_z", ctypes.c_int),
+        ("filter_y", ctypes.c_int),
+        ("filter_x", ctypes.c_int),
+        ("stride_d", ctypes.c_int),
+        ("stride_h", ctypes.c_int),
+        ("stride_w", ctypes.c_int),
+        ("pad_d", ctypes.c_int),
+        ("pad_h", ctypes.c_int),
+        ("pad_w", ctypes.c_int),
+        ("dilation_d", ctypes.c_int),
+        ("dilation_h", ctypes.c_int),
+        ("dilation_w", ctypes.c_int),
         ("direction", ctypes.c_int),
     ]
 
@@ -374,7 +424,11 @@ class GroupedConvProblemC(ctypes.Structure):
         c.filter_z, c.filter_y, c.filter_x = p.Z, p.Y, p.X
         c.stride_d, c.stride_h, c.stride_w = p.stride_d, p.stride_h, p.stride_w
         c.pad_d, c.pad_h, c.pad_w = p.pad_d, p.pad_h, p.pad_w
-        c.dilation_d, c.dilation_h, c.dilation_w = p.dilation_d, p.dilation_h, p.dilation_w
+        c.dilation_d, c.dilation_h, c.dilation_w = (
+            p.dilation_d,
+            p.dilation_h,
+            p.dilation_w,
+        )
         c.direction = DIRECTION_MAP.get(p.direction, 0)
         return c
 
@@ -433,7 +487,9 @@ class GroupedConvDispatcherLib:
         self._lib.conv_dispatcher_get_kernel_count.argtypes = []
         self._lib.conv_dispatcher_get_kernel_count.restype = ctypes.c_int
         self._lib.conv_dispatcher_get_kernel_name.argtypes = [
-            ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
         ]
         self._lib.conv_dispatcher_get_kernel_name.restype = ctypes.c_int
         self._lib.conv_dispatcher_is_supported.argtypes = [
@@ -441,8 +497,11 @@ class GroupedConvDispatcherLib:
         ]
         self._lib.conv_dispatcher_is_supported.restype = ctypes.c_int
         self._lib.conv_dispatcher_run.argtypes = [
-            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-            ctypes.POINTER(GroupedConvProblemC), ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(GroupedConvProblemC),
+            ctypes.c_void_p,
         ]
         self._lib.conv_dispatcher_run.restype = ctypes.c_float
 
@@ -497,12 +556,14 @@ class GroupedConvDispatcherLib:
         pc = GroupedConvProblemC.from_problem(problem)
         return self._lib.conv_dispatcher_is_supported(ctypes.byref(pc)) != 0
 
-    def run(self, a_ptr: int, b_ptr: int, c_ptr: int,
-            problem: GroupedConvProblem) -> float:
+    def run(
+        self, a_ptr: int, b_ptr: int, c_ptr: int, problem: GroupedConvProblem
+    ) -> float:
         """Run convolution. Returns time_ms (>0 success, <0 error)."""
         pc = GroupedConvProblemC.from_problem(problem)
-        return self._lib.conv_dispatcher_run(a_ptr, b_ptr, c_ptr,
-                                             ctypes.byref(pc), None)
+        return self._lib.conv_dispatcher_run(
+            a_ptr, b_ptr, c_ptr, ctypes.byref(pc), None
+        )
 
 
 # =============================================================================
@@ -542,12 +603,18 @@ class GpuGroupedConvRunner:
                 return
 
             self._hip = ctypes.CDLL("libamdhip64.so")
-            self._hip.hipMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
+            self._hip.hipMalloc.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p),
+                ctypes.c_size_t,
+            ]
             self._hip.hipMalloc.restype = ctypes.c_int
             self._hip.hipFree.argtypes = [ctypes.c_void_p]
             self._hip.hipFree.restype = ctypes.c_int
             self._hip.hipMemcpy.argtypes = [
-                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+                ctypes.c_size_t,
+                ctypes.c_int,
             ]
             self._hip.hipMemcpy.restype = ctypes.c_int
             self._hip.hipDeviceSynchronize.argtypes = []
@@ -571,9 +638,13 @@ class GpuGroupedConvRunner:
     def lib(self) -> Optional[GroupedConvDispatcherLib]:
         return self._dispatch_lib
 
-    def run(self, input_np: np.ndarray, weight_np: np.ndarray,
-            problem: GroupedConvProblem,
-            output_np: Optional[np.ndarray] = None) -> GroupedConvResult:
+    def run(
+        self,
+        input_np: np.ndarray,
+        weight_np: np.ndarray,
+        problem: GroupedConvProblem,
+        output_np: Optional[np.ndarray] = None,
+    ) -> GroupedConvResult:
         """Run convolution on GPU.
 
         Args:
@@ -610,8 +681,12 @@ class GpuGroupedConvRunner:
             self._hip.hipMalloc(ctypes.byref(d_c), output_size)
 
             # Host to device
-            self._hip.hipMemcpy(d_a, input_np.ctypes.data, input_np.nbytes, self.HIP_MEMCPY_H2D)
-            self._hip.hipMemcpy(d_b, weight_np.ctypes.data, weight_np.nbytes, self.HIP_MEMCPY_H2D)
+            self._hip.hipMemcpy(
+                d_a, input_np.ctypes.data, input_np.nbytes, self.HIP_MEMCPY_H2D
+            )
+            self._hip.hipMemcpy(
+                d_b, weight_np.ctypes.data, weight_np.nbytes, self.HIP_MEMCPY_H2D
+            )
             self._hip.hipDeviceSynchronize()
 
             # Launch kernel
@@ -622,7 +697,9 @@ class GpuGroupedConvRunner:
 
             if time_ms > 0:
                 # Device to host
-                self._hip.hipMemcpy(output_np.ctypes.data, d_c, output_size, self.HIP_MEMCPY_D2H)
+                self._hip.hipMemcpy(
+                    output_np.ctypes.data, d_c, output_size, self.HIP_MEMCPY_D2H
+                )
                 self._hip.hipDeviceSynchronize()
                 result.success = True
                 result.time_ms = time_ms
@@ -630,8 +707,10 @@ class GpuGroupedConvRunner:
                 result.output = output_np
             else:
                 result.error = (
-                    "unsupported" if time_ms == -3.0
-                    else "no kernel" if time_ms == -2.0
+                    "unsupported"
+                    if time_ms == -3.0
+                    else "no kernel"
+                    if time_ms == -2.0
                     else f"error (code {time_ms})"
                 )
 
@@ -675,8 +754,9 @@ class GroupedConvRegistry:
     def __len__(self) -> int:
         return len(self._kernels)
 
-    def select(self, problem: "GroupedConvProblem",
-               heuristic=None) -> Optional[GroupedConvKernelConfig]:
+    def select(
+        self, problem: "GroupedConvProblem", heuristic=None
+    ) -> Optional[GroupedConvKernelConfig]:
         """Select the best kernel for a problem.
 
         Args:
@@ -717,10 +797,13 @@ class GroupedConvRegistry:
         return reg
 
     def to_json(self, indent: int = 2) -> str:
-        return json.dumps({
-            "name": self.name,
-            "kernels": [k.to_json_obj() for k in self._kernels],
-        }, indent=indent)
+        return json.dumps(
+            {
+                "name": self.name,
+                "kernels": [k.to_json_obj() for k in self._kernels],
+            },
+            indent=indent,
+        )
 
     @classmethod
     def from_json(cls, json_str: str) -> "GroupedConvRegistry":
@@ -732,31 +815,39 @@ class GroupedConvRegistry:
             wave = algo.get("wave", "2x2x1").split("x")
             warp = algo.get("warp", "32x32x16").split("x")
             vec = algo.get("vector_sizes", [4, 8, 8])
-            reg.add(GroupedConvKernelConfig(
-                variant=sig.get("variant", "forward"),
-                ndim_spatial=sig.get("ndim_spatial", 2),
-                dtype=sig.get("dtype", "fp16"),
-                layout=sig.get("layout", "nhwgc"),
-                arch=kd.get("arch", "gfx942"),
-                tile_m=algo.get("tile_m", 1),
-                tile_n=algo.get("tile_n", 128),
-                tile_k=algo.get("tile_k", 128),
-                wave_m=int(wave[0]), wave_n=int(wave[1]), wave_k=int(wave[2]),
-                warp_tile_m=int(warp[0]), warp_tile_n=int(warp[1]), warp_tile_k=int(warp[2]),
-                pipeline=algo.get("pipeline", "compv3"),
-                epilogue=algo.get("epilogue", "cshuffle"),
-                scheduler=algo.get("scheduler", "intrawave"),
-                vector_size_a=vec[0] if len(vec) > 0 else 4,
-                vector_size_b=vec[1] if len(vec) > 1 else 8,
-                vector_size_c=vec[2] if len(vec) > 2 else 8,
-                block_per_cu=algo.get("block_per_cu", 1),
-                num_wave_groups=algo.get("num_wave_groups", 1),
-                num_groups_to_merge=algo.get("num_groups_to_merge", 1),
-            ))
+            reg.add(
+                GroupedConvKernelConfig(
+                    variant=sig.get("variant", "forward"),
+                    ndim_spatial=sig.get("ndim_spatial", 2),
+                    dtype=sig.get("dtype", "fp16"),
+                    layout=sig.get("layout", "nhwgc"),
+                    arch=kd.get("arch", "gfx942"),
+                    tile_m=algo.get("tile_m", 1),
+                    tile_n=algo.get("tile_n", 128),
+                    tile_k=algo.get("tile_k", 128),
+                    wave_m=int(wave[0]),
+                    wave_n=int(wave[1]),
+                    wave_k=int(wave[2]),
+                    warp_tile_m=int(warp[0]),
+                    warp_tile_n=int(warp[1]),
+                    warp_tile_k=int(warp[2]),
+                    pipeline=algo.get("pipeline", "compv3"),
+                    epilogue=algo.get("epilogue", "cshuffle"),
+                    scheduler=algo.get("scheduler", "intrawave"),
+                    vector_size_a=vec[0] if len(vec) > 0 else 4,
+                    vector_size_b=vec[1] if len(vec) > 1 else 8,
+                    vector_size_c=vec[2] if len(vec) > 2 else 8,
+                    block_per_cu=algo.get("block_per_cu", 1),
+                    num_wave_groups=algo.get("num_wave_groups", 1),
+                    num_groups_to_merge=algo.get("num_groups_to_merge", 1),
+                )
+            )
         return reg
 
     def build(
-        self, verbose: bool = False, max_workers: Optional[int] = None,
+        self,
+        verbose: bool = False,
+        max_workers: Optional[int] = None,
     ) -> Dict[Tuple[str, int], "GpuGroupedConvRunner"]:
         """Parallel JIT compile all kernels in this registry.
 
@@ -771,7 +862,9 @@ class GroupedConvRegistry:
             return {}
 
         libs = setup_multiple_grouped_conv_dispatchers(
-            self._kernels, verbose=verbose, max_workers=max_workers,
+            self._kernels,
+            verbose=verbose,
+            max_workers=max_workers,
         )
 
         runners: Dict[Tuple[str, int], GpuGroupedConvRunner] = {}
@@ -789,7 +882,9 @@ class GroupedConvRegistry:
     def print_registry(self, indent: str = "  "):
         print(f"{indent}Registry '{self.name}': {len(self)} kernels")
         for i, k in enumerate(self._kernels):
-            print(f"{indent}  [{i}] {k.name} (valid={validate_grouped_conv_config(k.to_dict()).is_valid})")
+            print(
+                f"{indent}  [{i}] {k.name} (valid={validate_grouped_conv_config(k.to_dict()).is_valid})"
+            )
 
 
 # =============================================================================
@@ -803,8 +898,14 @@ class GroupedConvValidationResult(ValidationResultBase):
 
     variant: str = "forward"
 
-    def __init__(self, is_valid=True, errors=None, warnings=None,
-                 suggested_fixes=None, variant="forward"):
+    def __init__(
+        self,
+        is_valid=True,
+        errors=None,
+        warnings=None,
+        suggested_fixes=None,
+        variant="forward",
+    ):
         super().__init__(
             is_valid=is_valid,
             errors=errors or [],
@@ -855,9 +956,12 @@ def _extract_trait_values(trait_config: dict) -> Tuple[str, str, str]:
     p = _first(trait_config.get("pipeline", "compv4"))
     e = _first(trait_config.get("epilogue", "cshuffle"))
     s = _first(trait_config.get("scheduler", "intrawave"))
-    if isinstance(p, list): p = p[0] if p else "compv4"
-    if isinstance(e, list): e = e[0] if e else "cshuffle"
-    if isinstance(s, list): s = s[0] if s else "intrawave"
+    if isinstance(p, list):
+        p = p[0] if p else "compv4"
+    if isinstance(e, list):
+        e = e[0] if e else "cshuffle"
+    if isinstance(s, list):
+        s = s[0] if s else "intrawave"
     return (str(p), str(e), str(s))
 
 
@@ -875,14 +979,24 @@ def validate_grouped_conv_config(config: dict) -> GroupedConvValidationResult:
     warnings: List[str] = []
     suggested_fixes: Dict[str, Any] = {}
 
-    required = ("tile_config", "trait_config", "variant", "ndim_spatial", "arch", "layout")
+    required = (
+        "tile_config",
+        "trait_config",
+        "variant",
+        "ndim_spatial",
+        "arch",
+        "layout",
+    )
     for key in required:
         if key not in config:
             errors.append(f"Missing required key: {key}")
     if errors:
         return GroupedConvValidationResult(
-            is_valid=False, errors=errors, warnings=warnings,
-            suggested_fixes=suggested_fixes, variant=config.get("variant", "forward"),
+            is_valid=False,
+            errors=errors,
+            warnings=warnings,
+            suggested_fixes=suggested_fixes,
+            variant=config.get("variant", "forward"),
         )
 
     tile_config = _get_tile_config(config)
@@ -905,12 +1019,16 @@ def validate_grouped_conv_config(config: dict) -> GroupedConvValidationResult:
         if isinstance(ndim, list):
             ndim = ndim[0] if ndim else 2
         if ndim not in VALID_NDIM_SPATIAL:
-            errors.append(f"Invalid ndim_spatial: {ndim}. Valid: {', '.join(map(str, VALID_NDIM_SPATIAL))}")
+            errors.append(
+                f"Invalid ndim_spatial: {ndim}. Valid: {', '.join(map(str, VALID_NDIM_SPATIAL))}"
+            )
             suggested_fixes["ndim_spatial"] = 2
 
     pipeline, epilogue, scheduler = _extract_trait_values(trait_config)
     if variant in BACKWARD_VARIANTS and pipeline not in BACKWARD_PIPELINES:
-        errors.append(f"Backward variant '{variant}' requires pipeline compv3 or mem, got {pipeline}")
+        errors.append(
+            f"Backward variant '{variant}' requires pipeline compv3 or mem, got {pipeline}"
+        )
         suggested_fixes["pipeline"] = "compv3"
 
     ok, msg = validate_trait_combo(pipeline, epilogue, scheduler)
@@ -936,8 +1054,11 @@ def validate_grouped_conv_config(config: dict) -> GroupedConvValidationResult:
         arch_data = get_arch_filter_data()
         acc = "int32" if dtype == "int8" else "fp32"
         dtype_key = f"{dtype}_{dtype}_{acc}"
-        valid_tiles = (arch_data["warp_tile_combos"]
-                       .get(arch, {}).get(dtype_key, [[32, 32, 16], [16, 16, 16]]))
+        valid_tiles = (
+            arch_data["warp_tile_combos"]
+            .get(arch, {})
+            .get(dtype_key, [[32, 32, 16], [16, 16, 16]])
+        )
         if valid_tiles:
             suggested_fixes["warp_tile_m"] = valid_tiles[0][0]
             suggested_fixes["warp_tile_n"] = valid_tiles[0][1]
@@ -945,15 +1066,22 @@ def validate_grouped_conv_config(config: dict) -> GroupedConvValidationResult:
 
     arch_data = get_arch_filter_data()
     if arch not in arch_data["supported_archs"]:
-        errors.append(f"Unsupported architecture: {arch}. Supported: {', '.join(arch_data['supported_archs'])}")
+        errors.append(
+            f"Unsupported architecture: {arch}. Supported: {', '.join(arch_data['supported_archs'])}"
+        )
 
     return GroupedConvValidationResult(
-        is_valid=len(errors) == 0, errors=errors, warnings=warnings,
-        suggested_fixes=suggested_fixes, variant=variant,
+        is_valid=len(errors) == 0,
+        errors=errors,
+        warnings=warnings,
+        suggested_fixes=suggested_fixes,
+        variant=variant,
     )
 
 
-def auto_correct_grouped_conv_config(config: dict) -> Tuple[dict, GroupedConvValidationResult]:
+def auto_correct_grouped_conv_config(
+    config: dict,
+) -> Tuple[dict, GroupedConvValidationResult]:
     """Auto-correct invalid grouped conv config. Returns (corrected, result)."""
     result = validate_grouped_conv_config(config)
     corrected = copy.deepcopy(config)
@@ -1173,15 +1301,21 @@ def _select_best_arch_valid_conv_config(
     """Pick nearest arch-valid config while preferring trait exact matches."""
 
     def score(c: GroupedConvKernelConfig) -> Tuple[int, int, int, int, int, int]:
-        tile_delta = abs(c.tile_m - requested.tile_m) + abs(c.tile_n - requested.tile_n) + abs(
-            c.tile_k - requested.tile_k
+        tile_delta = (
+            abs(c.tile_m - requested.tile_m)
+            + abs(c.tile_n - requested.tile_n)
+            + abs(c.tile_k - requested.tile_k)
         )
-        wave_delta = abs(c.wave_m - requested.wave_m) + abs(c.wave_n - requested.wave_n) + abs(
-            c.wave_k - requested.wave_k
+        wave_delta = (
+            abs(c.wave_m - requested.wave_m)
+            + abs(c.wave_n - requested.wave_n)
+            + abs(c.wave_k - requested.wave_k)
         )
-        warp_tile_delta = abs(c.warp_tile_m - requested.warp_tile_m) + abs(
-            c.warp_tile_n - requested.warp_tile_n
-        ) + abs(c.warp_tile_k - requested.warp_tile_k)
+        warp_tile_delta = (
+            abs(c.warp_tile_m - requested.warp_tile_m)
+            + abs(c.warp_tile_n - requested.warp_tile_n)
+            + abs(c.warp_tile_k - requested.warp_tile_k)
+        )
         return (
             0 if c.pipeline == requested.pipeline else 1,
             0 if c.scheduler == requested.scheduler else 1,
@@ -1224,14 +1358,16 @@ def _write_single_conv_dispatch_header(
         kernel_name_symbol = "CONV_BWD_WEIGHT_KERNEL_NAME"
         if config.ndim_spatial == 3:
             macros.append("#define CONV_BWDW_3D_AVAILABLE 1")
-            aliases.append("using ConvBwdWeight3dLauncher = SelectedConvBwdWeightLauncher;")
+            aliases.append(
+                "using ConvBwdWeight3dLauncher = SelectedConvBwdWeightLauncher;"
+            )
         else:
             macros.append("#define CONV_BWDW_2D_AVAILABLE 1")
 
     content = (
         "// Auto-generated single-kernel dispatch header for Python JIT\n"
         "#pragma once\n\n"
-        f"#include \"{kernel_header.name}\"\n\n"
+        f'#include "{kernel_header.name}"\n\n'
         + "\n".join(macros)
         + "\n\n"
         + "\n".join(aliases)
@@ -1444,18 +1580,24 @@ class GroupedConvCodegenRunner:
 
         return [results_map.get(i) for i in range(len(configs))]
 
+
 # =============================================================================
 # Convenience functions
 # =============================================================================
 
 
 def get_grouped_conv_default_config(
-    variant: str = "forward", ndim_spatial: int = 2,
-    arch: str = "gfx942", dtype: str = "fp16",
+    variant: str = "forward",
+    ndim_spatial: int = 2,
+    arch: str = "gfx942",
+    dtype: str = "fp16",
 ) -> GroupedConvKernelConfig:
     """Return a valid default GroupedConvKernelConfig."""
     return GroupedConvKernelConfig(
-        variant=variant, ndim_spatial=ndim_spatial, arch=arch, dtype=dtype,
+        variant=variant,
+        ndim_spatial=ndim_spatial,
+        arch=arch,
+        dtype=dtype,
     )
 
 
@@ -1491,7 +1633,9 @@ def format_grouped_conv_summary(config) -> str:
     if tile_config:
         wave = _extract_wave_config(tile_config)
         warp = _extract_warp_tile_config(tile_config)
-        lines.append(f"  Tile:    M={_first(tile_config.get('tile_m', 1))} N={_first(tile_config.get('tile_n', 128))} K={_first(tile_config.get('tile_k', 128))}")
+        lines.append(
+            f"  Tile:    M={_first(tile_config.get('tile_m', 1))} N={_first(tile_config.get('tile_n', 128))} K={_first(tile_config.get('tile_k', 128))}"
+        )
         lines.append(f"  Wave:    {wave[0]}x{wave[1]}x{wave[2]}")
         lines.append(f"  Warp:    {warp[0]}x{warp[1]}x{warp[2]}")
 
@@ -1499,7 +1643,9 @@ def format_grouped_conv_summary(config) -> str:
         pipeline = _first(trait_config.get("pipeline", "?"))
         epilogue = _first(trait_config.get("epilogue", "?"))
         scheduler = _first(trait_config.get("scheduler", "?"))
-        lines.append(f"  Traits:  pipeline={pipeline} epilogue={epilogue} scheduler={scheduler}")
+        lines.append(
+            f"  Traits:  pipeline={pipeline} epilogue={epilogue} scheduler={scheduler}"
+        )
 
     return "\n".join(lines) if lines else "(empty config)"
 
@@ -1521,8 +1667,12 @@ def setup_multiple_grouped_conv_dispatchers(
     if not configs:
         return []
 
-    codegen_script = Path(__file__).parent.parent / "codegen" / "unified_grouped_conv_codegen.py"
-    arch_valid_cache: Dict[Tuple[str, str, str, int], List[GroupedConvKernelConfig]] = {}
+    codegen_script = (
+        Path(__file__).parent.parent / "codegen" / "unified_grouped_conv_codegen.py"
+    )
+    arch_valid_cache: Dict[
+        Tuple[str, str, str, int], List[GroupedConvKernelConfig]
+    ] = {}
 
     selected_configs: List[Optional[GroupedConvKernelConfig]] = []
     for i, original in enumerate(configs):
@@ -1539,7 +1689,9 @@ def setup_multiple_grouped_conv_dispatchers(
 
             tile_cfg = corrected.get("tile_config", {})
             trait_cfg = corrected.get("trait_config", {})
-            c.variant = _resolve_variant(str(_first(corrected.get("variant", c.variant))))
+            c.variant = _resolve_variant(
+                str(_first(corrected.get("variant", c.variant)))
+            )
             c.ndim_spatial = int(_first(corrected.get("ndim_spatial", c.ndim_spatial)))
             c.arch = str(corrected.get("arch", c.arch))
             c.layout = str(corrected.get("layout", c.layout))
@@ -1600,7 +1752,9 @@ def setup_multiple_grouped_conv_dispatchers(
         input_to_unique.append(unique_index_by_key[key])
 
     runner = GroupedConvCodegenRunner(max_workers=max_workers)
-    unique_lib_paths = runner.generate_and_compile_parallel(unique_configs, verbose=verbose)
+    unique_lib_paths = runner.generate_and_compile_parallel(
+        unique_configs, verbose=verbose
+    )
 
     libs: List[Optional[GroupedConvDispatcherLib]] = []
     loaded_cache: Dict[int, Optional[GroupedConvDispatcherLib]] = {}
@@ -1613,7 +1767,9 @@ def setup_multiple_grouped_conv_dispatchers(
             libs.append(loaded_cache[unique_idx])
             continue
 
-        path = unique_lib_paths[unique_idx] if unique_idx < len(unique_lib_paths) else None
+        path = (
+            unique_lib_paths[unique_idx] if unique_idx < len(unique_lib_paths) else None
+        )
         disp: Optional[GroupedConvDispatcherLib] = None
         if path and path.exists():
             try:
@@ -1632,7 +1788,9 @@ def setup_multiple_grouped_conv_dispatchers(
 def detect_gpu_arch() -> str:
     """Detect GPU architecture using rocminfo."""
     try:
-        out = subprocess.check_output(["rocminfo"], stderr=subprocess.DEVNULL, text=True)
+        out = subprocess.check_output(
+            ["rocminfo"], stderr=subprocess.DEVNULL, text=True
+        )
         for line in out.split("\n"):
             if "gfx" in line.lower() and "name:" in line.lower():
                 for part in line.split():

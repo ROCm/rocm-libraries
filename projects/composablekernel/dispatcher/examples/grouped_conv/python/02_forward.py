@@ -48,7 +48,9 @@ def cpu_conv2d_fwd(inp, wei, prob):
                                 wi = wo * prob.stride_w - prob.pad_w + x
                                 if 0 <= hi < Hi and 0 <= wi < Wi:
                                     for c in range(C):
-                                        s += float(inp[n, hi, wi, g, c]) * float(wei[g, k, y, x, c])
+                                        s += float(inp[n, hi, wi, g, c]) * float(
+                                            wei[g, k, y, x, c]
+                                        )
                         out[n, ho, wo, g, k] = s
     return out
 
@@ -57,7 +59,9 @@ def main():
     parser = argparse.ArgumentParser(description="Forward Convolution (2D + 3D)")
     parser.add_argument("--arch", default=detect_gpu_arch())
     parser.add_argument("--dtype", default="fp16", choices=["fp16", "bf16"])
-    parser.add_argument("--workers", type=int, default=0, help="Max JIT workers (0=auto)")
+    parser.add_argument(
+        "--workers", type=int, default=0, help="Max JIT workers (0=auto)"
+    )
     args = parser.parse_args()
 
     arch = args.arch
@@ -73,23 +77,55 @@ def main():
     reg = GroupedConvRegistry("forward_conv")
 
     # Forward 2D: compv4, 128x128 tile, wave 2x2x1, warp 32x32x16
-    reg.add(GroupedConvKernelConfig(
-        variant="forward", ndim_spatial=2, arch=arch, dtype=args.dtype,
-        tile_m=1, tile_n=128, tile_k=128,
-        wave_m=2, wave_n=2, wave_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pipeline="compv4", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8, block_per_cu=1,
-    ))
+    reg.add(
+        GroupedConvKernelConfig(
+            variant="forward",
+            ndim_spatial=2,
+            arch=arch,
+            dtype=args.dtype,
+            tile_m=1,
+            tile_n=128,
+            tile_k=128,
+            wave_m=2,
+            wave_n=2,
+            wave_k=1,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="compv4",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            vector_size_a=4,
+            vector_size_b=8,
+            vector_size_c=8,
+            block_per_cu=1,
+        )
+    )
     # Forward 3D: compv3, 64x64 tile, wave 1x4x1, warp 16x16x32
-    reg.add(GroupedConvKernelConfig(
-        variant="forward", ndim_spatial=3, arch=arch, dtype=args.dtype,
-        tile_m=1, tile_n=64, tile_k=64,
-        wave_m=1, wave_n=4, wave_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
-        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8, block_per_cu=1,
-    ))
+    reg.add(
+        GroupedConvKernelConfig(
+            variant="forward",
+            ndim_spatial=3,
+            arch=arch,
+            dtype=args.dtype,
+            tile_m=1,
+            tile_n=64,
+            tile_k=64,
+            wave_m=1,
+            wave_n=4,
+            wave_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            pipeline="compv3",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            vector_size_a=4,
+            vector_size_b=8,
+            vector_size_c=8,
+            block_per_cu=1,
+        )
+    )
     reg.print_registry()
 
     # =========================================================================
@@ -116,8 +152,9 @@ def main():
     # Step 3: Forward 2D -- GPU + CPU reference
     # =========================================================================
     print("\n--- Step 3: Forward 2D ---")
-    prob_2d = GroupedConvProblem(N=1, C=64, K=64, Hi=8, Wi=8, Y=3, X=3,
-                                 pad_h=1, pad_w=1, direction="forward")
+    prob_2d = GroupedConvProblem(
+        N=1, C=64, K=64, Hi=8, Wi=8, Y=3, X=3, pad_h=1, pad_w=1, direction="forward"
+    )
     prob_2d.print_problem()
 
     x = np.random.uniform(-0.5, 0.5, prob_2d.input_shape()).astype(np_dtype)
@@ -126,7 +163,9 @@ def main():
     res = runners[("forward", 2)].run(x, w, prob_2d)
     print(f"  Time:   {res.time_ms:.4f} ms")
     print(f"  TFLOPS: {res.tflops:.2f}")
-    print(f"  Output: shape={res.output.shape}, nonzero={np.count_nonzero(res.output)}/{res.output.size}")
+    print(
+        f"  Output: shape={res.output.shape}, nonzero={np.count_nonzero(res.output)}/{res.output.size}"
+    )
 
     ref = cpu_conv2d_fwd(x, w, prob_2d)
     diff = np.abs(res.output.astype(np.float32) - ref)
@@ -139,8 +178,21 @@ def main():
     ok_3d = True
     if ("forward", 3) in runners:
         print("\n--- Step 4: Forward 3D ---")
-        prob_3d = GroupedConvProblem(N=1, C=64, K=64, Di=8, Hi=8, Wi=8, Z=3, Y=3, X=3,
-                                     pad_d=1, pad_h=1, pad_w=1, direction="forward")
+        prob_3d = GroupedConvProblem(
+            N=1,
+            C=64,
+            K=64,
+            Di=8,
+            Hi=8,
+            Wi=8,
+            Z=3,
+            Y=3,
+            X=3,
+            pad_d=1,
+            pad_h=1,
+            pad_w=1,
+            direction="forward",
+        )
         prob_3d.print_problem()
 
         x3 = np.random.uniform(-0.5, 0.5, prob_3d.input_shape()).astype(np_dtype)

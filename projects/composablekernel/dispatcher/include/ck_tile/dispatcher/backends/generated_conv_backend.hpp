@@ -39,42 +39,38 @@ inline ck_tile::conv::ConvParam make_conv_param_2d(const GroupedConvProblem& p)
          static_cast<ck_tile::index_t>(p.filter_spatial[2])},
         {static_cast<ck_tile::index_t>(p.input_spatial[1]),
          static_cast<ck_tile::index_t>(p.input_spatial[2])},
-        {static_cast<ck_tile::index_t>(p.stride[1]),
-         static_cast<ck_tile::index_t>(p.stride[2])},
+        {static_cast<ck_tile::index_t>(p.stride[1]), static_cast<ck_tile::index_t>(p.stride[2])},
         {static_cast<ck_tile::index_t>(p.dilation[1]),
          static_cast<ck_tile::index_t>(p.dilation[2])},
-        {static_cast<ck_tile::index_t>(p.padding[1]),
-         static_cast<ck_tile::index_t>(p.padding[2])},
-        {static_cast<ck_tile::index_t>(p.padding[1]),
-         static_cast<ck_tile::index_t>(p.padding[2])}};
+        {static_cast<ck_tile::index_t>(p.padding[1]), static_cast<ck_tile::index_t>(p.padding[2])},
+        {static_cast<ck_tile::index_t>(p.padding[1]), static_cast<ck_tile::index_t>(p.padding[2])}};
 }
 
 inline ck_tile::conv::ConvParam make_conv_param_3d(const GroupedConvProblem& p)
 {
-    return ck_tile::conv::ConvParam{
-        3,
-        static_cast<ck_tile::index_t>(p.G),
-        static_cast<ck_tile::index_t>(p.N),
-        static_cast<ck_tile::index_t>(p.K),
-        static_cast<ck_tile::index_t>(p.C),
-        {static_cast<ck_tile::index_t>(p.filter_spatial[0]),
-         static_cast<ck_tile::index_t>(p.filter_spatial[1]),
-         static_cast<ck_tile::index_t>(p.filter_spatial[2])},
-        {static_cast<ck_tile::index_t>(p.input_spatial[0]),
-         static_cast<ck_tile::index_t>(p.input_spatial[1]),
-         static_cast<ck_tile::index_t>(p.input_spatial[2])},
-        {static_cast<ck_tile::index_t>(p.stride[0]),
-         static_cast<ck_tile::index_t>(p.stride[1]),
-         static_cast<ck_tile::index_t>(p.stride[2])},
-        {static_cast<ck_tile::index_t>(p.dilation[0]),
-         static_cast<ck_tile::index_t>(p.dilation[1]),
-         static_cast<ck_tile::index_t>(p.dilation[2])},
-        {static_cast<ck_tile::index_t>(p.padding[0]),
-         static_cast<ck_tile::index_t>(p.padding[1]),
-         static_cast<ck_tile::index_t>(p.padding[2])},
-        {static_cast<ck_tile::index_t>(p.padding[0]),
-         static_cast<ck_tile::index_t>(p.padding[1]),
-         static_cast<ck_tile::index_t>(p.padding[2])}};
+    return ck_tile::conv::ConvParam{3,
+                                    static_cast<ck_tile::index_t>(p.G),
+                                    static_cast<ck_tile::index_t>(p.N),
+                                    static_cast<ck_tile::index_t>(p.K),
+                                    static_cast<ck_tile::index_t>(p.C),
+                                    {static_cast<ck_tile::index_t>(p.filter_spatial[0]),
+                                     static_cast<ck_tile::index_t>(p.filter_spatial[1]),
+                                     static_cast<ck_tile::index_t>(p.filter_spatial[2])},
+                                    {static_cast<ck_tile::index_t>(p.input_spatial[0]),
+                                     static_cast<ck_tile::index_t>(p.input_spatial[1]),
+                                     static_cast<ck_tile::index_t>(p.input_spatial[2])},
+                                    {static_cast<ck_tile::index_t>(p.stride[0]),
+                                     static_cast<ck_tile::index_t>(p.stride[1]),
+                                     static_cast<ck_tile::index_t>(p.stride[2])},
+                                    {static_cast<ck_tile::index_t>(p.dilation[0]),
+                                     static_cast<ck_tile::index_t>(p.dilation[1]),
+                                     static_cast<ck_tile::index_t>(p.dilation[2])},
+                                    {static_cast<ck_tile::index_t>(p.padding[0]),
+                                     static_cast<ck_tile::index_t>(p.padding[1]),
+                                     static_cast<ck_tile::index_t>(p.padding[2])},
+                                    {static_cast<ck_tile::index_t>(p.padding[0]),
+                                     static_cast<ck_tile::index_t>(p.padding[1]),
+                                     static_cast<ck_tile::index_t>(p.padding[2])}};
 }
 
 // Create a RunFn for a forward convolution launcher (2D or 3D)
@@ -82,15 +78,10 @@ template <typename LauncherType, int NDim>
 inline GroupedConvKernelInstance::RunFn make_conv_fwd_run_fn()
 {
     return [](const GroupedConvProblem& problem, void* stream) -> float {
-        auto& ctx = g_conv_dispatch_buffers;
+        auto& ctx  = g_conv_dispatch_buffers;
         auto param = (NDim == 2) ? make_conv_param_2d(problem) : make_conv_param_3d(problem);
         ck_tile::GroupedConvFwdHostArgs<> args(
-            param,
-            ctx.input_ptr,
-            ctx.weight_ptr,
-            {},
-            ctx.output_ptr,
-            1);
+            param, ctx.input_ptr, ctx.weight_ptr, {}, ctx.output_ptr, 1);
         ck_tile::stream_config sc;
         sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
         sc.time_kernel_ = true;
@@ -108,14 +99,14 @@ template <typename LauncherType, int NDim>
 inline GroupedConvKernelInstance::RunFn make_conv_bwdd_run_fn()
 {
     return [](const GroupedConvProblem& problem, void* stream) -> float {
-        auto& ctx = g_conv_dispatch_buffers;
+        auto& ctx  = g_conv_dispatch_buffers;
         auto param = (NDim == 2) ? make_conv_param_2d(problem) : make_conv_param_3d(problem);
         ck_tile::GroupedConvBwdDataHostArgs args(
             param,
             ctx.output_ptr, // in_ptr = dX (being computed)
             ctx.weight_ptr, // wei_ptr = W
             {},
-            ctx.input_ptr,  // out_ptr = dY (gradient from next layer)
+            ctx.input_ptr, // out_ptr = dY (gradient from next layer)
             1);
         ck_tile::stream_config sc;
         sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
@@ -134,15 +125,14 @@ template <typename LauncherType, int NDim>
 inline GroupedConvKernelInstance::RunFn make_conv_bwdw_run_fn()
 {
     return [](const GroupedConvProblem& problem, void* stream) -> float {
-        auto& ctx = g_conv_dispatch_buffers;
+        auto& ctx  = g_conv_dispatch_buffers;
         auto param = (NDim == 2) ? make_conv_param_2d(problem) : make_conv_param_3d(problem);
-        ck_tile::GroupedConvBwdWeightHostArgs args(
-            param,
-            ctx.input_ptr,  // in_ptr = X
-            ctx.output_ptr, // wei_ptr = dW (being computed)
-            {},
-            ctx.weight_ptr, // out_ptr = dY
-            1);
+        ck_tile::GroupedConvBwdWeightHostArgs args(param,
+                                                   ctx.input_ptr,  // in_ptr = X
+                                                   ctx.output_ptr, // wei_ptr = dW (being computed)
+                                                   {},
+                                                   ctx.weight_ptr, // out_ptr = dY
+                                                   1);
         ck_tile::stream_config sc;
         sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
         sc.time_kernel_ = true;

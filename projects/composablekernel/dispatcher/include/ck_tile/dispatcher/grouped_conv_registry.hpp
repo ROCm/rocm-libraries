@@ -75,11 +75,11 @@ struct GroupedConvKernelKey
     std::string epilogue  = "cshuffle";
 
     // ConvConfigBase parity fields
-    int vector_size_a      = 4;
-    int vector_size_b      = 8;
-    int vector_size_c      = 8;
-    int block_per_cu       = 1;
-    int num_wave_groups    = 1;
+    int vector_size_a       = 4;
+    int vector_size_b       = 8;
+    int vector_size_c       = 8;
+    int block_per_cu        = 1;
+    int num_wave_groups     = 1;
     int num_groups_to_merge = 1;
 
     // GPU architecture (for filter_by_arch)
@@ -89,18 +89,15 @@ struct GroupedConvKernelKey
     {
         return dtype_in == other.dtype_in && dtype_wei == other.dtype_wei &&
                dtype_out == other.dtype_out && layout == other.layout &&
-               ndim_spatial == other.ndim_spatial && op == other.op &&
-               tile_m == other.tile_m && tile_n == other.tile_n && tile_k == other.tile_k &&
-               wave_m == other.wave_m && wave_n == other.wave_n && wave_k == other.wave_k &&
-               warp_m == other.warp_m && warp_n == other.warp_n && warp_k == other.warp_k &&
-               pipeline == other.pipeline && scheduler == other.scheduler &&
-               epilogue == other.epilogue &&
+               ndim_spatial == other.ndim_spatial && op == other.op && tile_m == other.tile_m &&
+               tile_n == other.tile_n && tile_k == other.tile_k && wave_m == other.wave_m &&
+               wave_n == other.wave_n && wave_k == other.wave_k && warp_m == other.warp_m &&
+               warp_n == other.warp_n && warp_k == other.warp_k && pipeline == other.pipeline &&
+               scheduler == other.scheduler && epilogue == other.epilogue &&
                vector_size_a == other.vector_size_a && vector_size_b == other.vector_size_b &&
-               vector_size_c == other.vector_size_c &&
-               block_per_cu == other.block_per_cu &&
+               vector_size_c == other.vector_size_c && block_per_cu == other.block_per_cu &&
                num_wave_groups == other.num_wave_groups &&
-               num_groups_to_merge == other.num_groups_to_merge &&
-               arch == other.arch;
+               num_groups_to_merge == other.num_groups_to_merge && arch == other.arch;
     }
 
     std::string to_string() const
@@ -114,9 +111,8 @@ struct GroupedConvKernelKey
         }
         return "grouped_conv_" + op_str + "_" + dtype_in + "_" + std::to_string(ndim_spatial) +
                "d_" + std::to_string(tile_m) + "x" + std::to_string(tile_n) + "x" +
-               std::to_string(tile_k) + "_" +
-               std::to_string(wave_m) + "x" + std::to_string(wave_n) + "x" +
-               std::to_string(wave_k) + "_" +
+               std::to_string(tile_k) + "_" + std::to_string(wave_m) + "x" +
+               std::to_string(wave_n) + "x" + std::to_string(wave_k) + "_" +
                std::to_string(warp_m) + "x" + std::to_string(warp_n) + "x" +
                std::to_string(warp_k) + "_" + pipeline;
     }
@@ -187,9 +183,15 @@ class GroupedConvKernelInstance
 // GroupedConvRegistry - Stores and manages grouped convolution kernels
 // =============================================================================
 
-class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConvKernelKey, GroupedConvKernelInstance, GroupedConvKernelKeyHash>
+class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry,
+                                                GroupedConvKernelKey,
+                                                GroupedConvKernelInstance,
+                                                GroupedConvKernelKeyHash>
 {
-    using Base = BaseRegistry<GroupedConvRegistry, GroupedConvKernelKey, GroupedConvKernelInstance, GroupedConvKernelKeyHash>;
+    using Base = BaseRegistry<GroupedConvRegistry,
+                              GroupedConvKernelKey,
+                              GroupedConvKernelInstance,
+                              GroupedConvKernelKeyHash>;
 
     public:
     GroupedConvRegistry() = default;
@@ -206,46 +208,46 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConv
     {
         // Build all instances first, then register under a single lock hold
         // so readers never see a half-registered set.
-        std::vector<std::pair<GroupedConvKernelKey, std::shared_ptr<GroupedConvKernelInstance>>> batch;
+        std::vector<std::pair<GroupedConvKernelKey, std::shared_ptr<GroupedConvKernelInstance>>>
+            batch;
         batch.reserve(kernel_set.declarations().size());
 
         for(const auto& decl : kernel_set.declarations())
         {
             GroupedConvKernelKey key;
-            key.dtype_in     = decl.signature.dtype_in_;
-            key.dtype_wei    = decl.signature.dtype_wei_;
-            key.dtype_out    = decl.signature.dtype_out_;
-            key.layout       = decl.signature.layout_;
-            key.ndim_spatial = decl.signature.num_dims_;
-            key.op           = (decl.signature.conv_op_ == "forward")
-                                   ? GroupedConvOp::Forward
-                                   : (decl.signature.conv_op_ == "bwd_data")
-                                         ? GroupedConvOp::BackwardData
-                                         : GroupedConvOp::BackwardWeight;
-            key.tile_m       = decl.algorithm.tile_m_;
-            key.tile_n       = decl.algorithm.tile_n_;
-            key.tile_k       = decl.algorithm.tile_k_;
-            key.wave_m       = decl.algorithm.wave_m_;
-            key.wave_n       = decl.algorithm.wave_n_;
-            key.wave_k       = decl.algorithm.wave_k_;
-            key.warp_m       = decl.algorithm.warp_m_;
-            key.warp_n       = decl.algorithm.warp_n_;
-            key.warp_k       = decl.algorithm.warp_k_;
-            key.pipeline     = decl.algorithm.pipeline_;
-            key.scheduler    = decl.algorithm.scheduler_;
-            key.epilogue     = decl.algorithm.epilogue_;
-            key.vector_size_a      = decl.algorithm.vector_a_;
-            key.vector_size_b      = decl.algorithm.vector_b_;
-            key.vector_size_c      = decl.algorithm.vector_c_;
-            key.block_per_cu       = decl.algorithm.block_per_cu_;
-            key.num_wave_groups    = decl.algorithm.num_wave_groups_;
+            key.dtype_in        = decl.signature.dtype_in_;
+            key.dtype_wei       = decl.signature.dtype_wei_;
+            key.dtype_out       = decl.signature.dtype_out_;
+            key.layout          = decl.signature.layout_;
+            key.ndim_spatial    = decl.signature.num_dims_;
+            key.op              = (decl.signature.conv_op_ == "forward") ? GroupedConvOp::Forward
+                                  : (decl.signature.conv_op_ == "bwd_data") ? GroupedConvOp::BackwardData
+                                                                            : GroupedConvOp::BackwardWeight;
+            key.tile_m          = decl.algorithm.tile_m_;
+            key.tile_n          = decl.algorithm.tile_n_;
+            key.tile_k          = decl.algorithm.tile_k_;
+            key.wave_m          = decl.algorithm.wave_m_;
+            key.wave_n          = decl.algorithm.wave_n_;
+            key.wave_k          = decl.algorithm.wave_k_;
+            key.warp_m          = decl.algorithm.warp_m_;
+            key.warp_n          = decl.algorithm.warp_n_;
+            key.warp_k          = decl.algorithm.warp_k_;
+            key.pipeline        = decl.algorithm.pipeline_;
+            key.scheduler       = decl.algorithm.scheduler_;
+            key.epilogue        = decl.algorithm.epilogue_;
+            key.vector_size_a   = decl.algorithm.vector_a_;
+            key.vector_size_b   = decl.algorithm.vector_b_;
+            key.vector_size_c   = decl.algorithm.vector_c_;
+            key.block_per_cu    = decl.algorithm.block_per_cu_;
+            key.num_wave_groups = decl.algorithm.num_wave_groups_;
             key.num_groups_to_merge = decl.algorithm.num_groups_to_merge_;
-            key.arch         = decl.arch;
+            key.arch                = decl.arch;
 
-            batch.emplace_back(key, std::make_shared<GroupedConvKernelInstance>(
-                key, decl.name(),
-                [](const GroupedConvProblem&, void*) -> float { return 0.0f; }
-            ));
+            batch.emplace_back(key,
+                               std::make_shared<GroupedConvKernelInstance>(
+                                   key, decl.name(), [](const GroupedConvProblem&, void*) -> float {
+                                       return 0.0f;
+                                   }));
         }
 
         std::lock_guard<std::mutex> lock(mutex());
@@ -256,7 +258,7 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConv
             if(it == entries().end() || it->second.priority <= priority)
             {
                 entries_mut()[key] = typename Base::Entry{std::move(instance), priority};
-                any_registered = true;
+                any_registered     = true;
             }
         }
         return any_registered;
@@ -267,7 +269,7 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConv
     {
         std::lock_guard<std::mutex> lock(mutex());
         const GroupedConvKernelInstance* best = nullptr;
-        Priority best_priority               = Priority::Low;
+        Priority best_priority                = Priority::Low;
 
         for(const auto& [key, entry] : entries())
         {
@@ -477,12 +479,15 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConv
         json << "        \"tile_m\": " << key.tile_m << ",\n";
         json << "        \"tile_n\": " << key.tile_n << ",\n";
         json << "        \"tile_k\": " << key.tile_k << ",\n";
-        json << "        \"wave\": \"" << key.wave_m << "x" << key.wave_n << "x" << key.wave_k << "\",\n";
-        json << "        \"warp\": \"" << key.warp_m << "x" << key.warp_n << "x" << key.warp_k << "\",\n";
+        json << "        \"wave\": \"" << key.wave_m << "x" << key.wave_n << "x" << key.wave_k
+             << "\",\n";
+        json << "        \"warp\": \"" << key.warp_m << "x" << key.warp_n << "x" << key.warp_k
+             << "\",\n";
         json << "        \"pipeline\": \"" << json_escape(key.pipeline) << "\",\n";
         json << "        \"scheduler\": \"" << json_escape(key.scheduler) << "\",\n";
         json << "        \"epilogue\": \"" << json_escape(key.epilogue) << "\",\n";
-        json << "        \"vector_sizes\": [" << key.vector_size_a << "," << key.vector_size_b << "," << key.vector_size_c << "],\n";
+        json << "        \"vector_sizes\": [" << key.vector_size_a << "," << key.vector_size_b
+             << "," << key.vector_size_c << "],\n";
         json << "        \"block_per_cu\": " << key.block_per_cu << ",\n";
         json << "        \"num_wave_groups\": " << key.num_wave_groups << ",\n";
         json << "        \"num_groups_to_merge\": " << key.num_groups_to_merge << "\n";
@@ -507,8 +512,7 @@ class GroupedConvDispatcher
         Heuristic
     };
 
-    using HeuristicFunction =
-        std::function<std::vector<std::string>(const GroupedConvProblem&)>;
+    using HeuristicFunction = std::function<std::vector<std::string>(const GroupedConvProblem&)>;
 
     explicit GroupedConvDispatcher(GroupedConvRegistry* registry)
         : registry_(registry), strategy_(SelectionStrategy::PriorityBased)
@@ -533,7 +537,7 @@ class GroupedConvDispatcher
         if(!kernel)
         {
             throw NoKernelFound("No suitable grouped convolution kernel found for problem: " +
-                                     problem.to_string());
+                                problem.to_string());
         }
         return kernel->run(problem, stream);
     }
@@ -550,9 +554,8 @@ class GroupedConvDispatcher
         const auto* kernel = select_kernel(problem);
         if(!kernel)
         {
-            throw NoKernelFound(
-                "No suitable grouped convolution kernel found for problem: " +
-                problem.to_string());
+            throw NoKernelFound("No suitable grouped convolution kernel found for problem: " +
+                                problem.to_string());
         }
         g_conv_dispatch_buffers.input_ptr  = input_ptr;
         g_conv_dispatch_buffers.weight_ptr = weight_ptr;

@@ -6,13 +6,13 @@ This directory contains language bindings for the CK Tile Dispatcher.
 
 ```
 bindings/
-├── ctypes/              # Python ctypes bindings (C API)
-│   ├── gemm_ctypes_lib.cpp      # GEMM dispatcher C API
-│   ├── conv_ctypes_lib.cpp      # Grouped conv dispatcher C API (fwd + bwd_data)
-│   ├── conv_bwdw_ctypes_lib.cpp # Grouped conv backward weight C API
-│   ├── gpu_helper.cpp           # CLI helper for Python
-│   └── CMakeLists.txt
-└── README.md
+|---- ctypes/              # Python ctypes bindings (C API)
+|   |---- gemm_ctypes_lib.cpp      # GEMM dispatcher C API
+|   |---- conv_ctypes_lib.cpp      # Grouped conv dispatcher C API (fwd + bwd_data)
+|   |---- conv_bwdw_ctypes_lib.cpp # Grouped conv backward weight C API
+|   |---- gpu_helper.cpp           # CLI helper for Python
+|   +---- CMakeLists.txt
++---- README.md
 ```
 
 ## ctypes Bindings

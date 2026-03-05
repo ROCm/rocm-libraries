@@ -41,9 +41,9 @@ DECL_GROUPED_CONV_KERNEL_SET(
     .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
          GroupedConvAlgo().tile(1, 128, 128).pipeline("compv4").vector_sizes(4, 8, 8),
          "gfx950")
-    .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
-         GroupedConvAlgo().tile(1, 64, 64).pipeline("compv3").vector_sizes(4, 8, 8),
-         "gfx950"));
+        .add(GroupedConvSig().dtype("fp16").layout("nhwgc").conv_type("forward").dims(2),
+             GroupedConvAlgo().tile(1, 64, 64).pipeline("compv3").vector_sizes(4, 8, 8),
+             "gfx950"));
 
 int main(int argc, char* argv[])
 {
@@ -71,13 +71,13 @@ int main(int argc, char* argv[])
     int Hi = args.get_int("--size", 14);
     int Wi = Hi;
     int Y = 3, X = 3;
-    int warmup = args.get_int("--warmup", 3);
-    int repeat = args.get_int("--repeat", 10);
-    bool verify = !args.has("--no-verify");
+    int warmup           = args.get_int("--warmup", 3);
+    int repeat           = args.get_int("--repeat", 10);
+    bool verify          = !args.has("--no-verify");
     std::string gfx_arch = args.get("--arch", "gfx950");
 
-    std::cout << "\nProblem: N=" << N << " G=" << G << " C=" << C << " K=" << K
-              << " Hi=" << Hi << " Wi=" << Wi << " Y=" << Y << " X=" << X << "\n";
+    std::cout << "\nProblem: N=" << N << " G=" << G << " C=" << C << " K=" << K << " Hi=" << Hi
+              << " Wi=" << Wi << " Y=" << Y << " X=" << X << "\n";
     std::cout << "Benchmark: warmup=" << warmup << " repeat=" << repeat << "\n";
 
     // Step 1: Setup tensors using CK Tile descriptors
@@ -91,17 +91,23 @@ int main(int argc, char* argv[])
         static_cast<ck_tile::index_t>(C),
         {static_cast<ck_tile::index_t>(Y), static_cast<ck_tile::index_t>(X)},
         {static_cast<ck_tile::index_t>(Hi), static_cast<ck_tile::index_t>(Wi)},
-        {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+        {1, 1},
+        {1, 1},
+        {1, 1},
+        {1, 1}};
 
     using InLayout  = ck_tile::tensor_layout::convolution::NHWGC;
     using WeiLayout = ck_tile::tensor_layout::convolution::GKYXC;
     using OutLayout = ck_tile::tensor_layout::convolution::NHWGK;
 
-    auto in_desc  = ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
-    auto wei_desc = ck_tile::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
-    auto out_desc = ck_tile::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
+    auto in_desc =
+        ck_tile::conv::make_input_host_tensor_descriptor_g_n_c_wis_packed<InLayout>(conv_param);
+    auto wei_desc =
+        ck_tile::conv::make_weight_host_tensor_descriptor_g_k_c_xs_packed<WeiLayout>(conv_param);
+    auto out_desc =
+        ck_tile::conv::make_output_host_tensor_descriptor_g_n_k_wos_packed<OutLayout>(conv_param);
 
-    ck_tile::HostTensor<InDataType>  input(in_desc);
+    ck_tile::HostTensor<InDataType> input(in_desc);
     ck_tile::HostTensor<WeiDataType> weight(wei_desc);
     ck_tile::HostTensor<OutDataType> output_gpu(out_desc);
     ck_tile::HostTensor<OutDataType> output_cpu(out_desc);
@@ -120,9 +126,9 @@ int main(int argc, char* argv[])
     {
         std::cout << "\nStep 2: CPU Reference\n";
 
-        std::vector<ck_tile::long_index_t> strides_v   = {1, 1};
-        std::vector<ck_tile::long_index_t> dilations_v = {1, 1};
-        std::vector<ck_tile::long_index_t> left_pads_v = {1, 1};
+        std::vector<ck_tile::long_index_t> strides_v    = {1, 1};
+        std::vector<ck_tile::long_index_t> dilations_v  = {1, 1};
+        std::vector<ck_tile::long_index_t> left_pads_v  = {1, 1};
         std::vector<ck_tile::long_index_t> right_pads_v = {1, 1};
 
         ck_tile::reference_grouped_conv_fwd<2, InDataType, WeiDataType, OutDataType>(
@@ -130,7 +136,8 @@ int main(int argc, char* argv[])
 
         std::cout << "  CPU ref[0..7]: ";
         for(int i = 0; i < std::min(8, static_cast<int>(output_cpu.get_element_space_size())); ++i)
-            std::cout << std::fixed << std::setprecision(4) << static_cast<float>(output_cpu.data()[i]) << " ";
+            std::cout << std::fixed << std::setprecision(4)
+                      << static_cast<float>(output_cpu.data()[i]) << " ";
         std::cout << "\n";
     }
 
@@ -145,7 +152,7 @@ int main(int argc, char* argv[])
     GroupedConvDispatcher dispatcher(&registry);
 
     auto problem = create_grouped_conv2d_problem(N, C, K, Hi, Wi, Y, X, 1, 1);
-    problem.op = GroupedConvOp::Forward;
+    problem.op   = GroupedConvOp::Forward;
 
     auto* selected = dispatcher.select_kernel(problem);
     if(!selected)
@@ -163,34 +170,36 @@ int main(int argc, char* argv[])
     weight_dev.ToDevice(weight.data());
     output_dev.SetZero();
 
-    float elapsed_ms = dispatcher.run(
-        input_dev.GetDeviceBuffer(),
-        weight_dev.GetDeviceBuffer(),
-        output_dev.GetDeviceBuffer(),
-        problem, nullptr);
+    float elapsed_ms = dispatcher.run(input_dev.GetDeviceBuffer(),
+                                      weight_dev.GetDeviceBuffer(),
+                                      output_dev.GetDeviceBuffer(),
+                                      problem,
+                                      nullptr);
 
     output_dev.FromDevice(output_gpu.data());
 
     size_t total = output_gpu.get_element_space_size();
     std::cout << "  GPU out[0..7]: ";
     for(int i = 0; i < std::min(8, static_cast<int>(total)); ++i)
-        std::cout << std::fixed << std::setprecision(4) << static_cast<float>(output_gpu.data()[i]) << " ";
+        std::cout << std::fixed << std::setprecision(4) << static_cast<float>(output_gpu.data()[i])
+                  << " ";
     std::cout << "\n";
 
     size_t nonzero_gpu = 0;
-    double gpu_sum = 0.0;
+    double gpu_sum     = 0.0;
     for(size_t i = 0; i < total; ++i)
     {
         float v = static_cast<float>(output_gpu.data()[i]);
-        if(v != 0.0f) ++nonzero_gpu;
+        if(v != 0.0f)
+            ++nonzero_gpu;
         gpu_sum += v;
     }
     std::cout << "  GPU checksum:  " << std::fixed << std::setprecision(6) << gpu_sum << "\n";
     std::cout << "  GPU non-zero:  " << nonzero_gpu << "/" << total
               << (nonzero_gpu > 0 ? " (kernel produced output)" : " WARNING: all zeros!") << "\n";
 
-    int Ho = static_cast<int>(problem.Ho());
-    int Wo = static_cast<int>(problem.Wo());
+    int Ho        = static_cast<int>(problem.Ho());
+    int Wo        = static_cast<int>(problem.Wo());
     double flops  = 2.0 * G * N * K * C * Y * X * Ho * Wo;
     double tflops = flops / (elapsed_ms * 1e9);
 
@@ -206,11 +215,11 @@ int main(int argc, char* argv[])
         constexpr float rtol = 1e-2f;
         constexpr float atol = 1e-2f;
 
-        float max_diff = 0.0f;
-        float max_rel  = 0.0f;
+        float max_diff      = 0.0f;
+        float max_rel       = 0.0f;
         size_t max_diff_idx = 0;
         size_t num_elements = output_gpu.get_element_space_size();
-        size_t mismatches = 0;
+        size_t mismatches   = 0;
 
         for(size_t i = 0; i < num_elements; ++i)
         {
@@ -219,9 +228,14 @@ int main(int argc, char* argv[])
             float diff    = std::abs(gpu_val - cpu_val);
             float tol     = atol + rtol * std::abs(cpu_val);
             float rel     = diff / (std::abs(cpu_val) + 1e-6f);
-            if(diff > max_diff) { max_diff = diff; max_diff_idx = i; }
+            if(diff > max_diff)
+            {
+                max_diff     = diff;
+                max_diff_idx = i;
+            }
             max_rel = std::max(max_rel, rel);
-            if(diff > tol) ++mismatches;
+            if(diff > tol)
+                ++mismatches;
         }
 
         passed = (mismatches == 0);
@@ -241,7 +255,8 @@ int main(int argc, char* argv[])
     utils::print_separator();
     std::cout << "BENCHMARK & VALIDATION:\n";
     std::cout << "  GPU kernel:     " << (selected ? selected->name() : "none") << "\n";
-    std::cout << "  Performance:    " << std::fixed << std::setprecision(2) << tflops << " TFLOPS\n";
+    std::cout << "  Performance:    " << std::fixed << std::setprecision(2) << tflops
+              << " TFLOPS\n";
     std::cout << "  CPU reference:  reference_grouped_conv_fwd<2>()\n";
     std::cout << "  Validation:     " << (passed ? "PASS" : "FAIL") << "\n";
     utils::print_separator();

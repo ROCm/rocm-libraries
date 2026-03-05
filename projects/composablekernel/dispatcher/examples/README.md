@@ -58,11 +58,11 @@ python3 examples/gemm/python/08_heuristics.py
 
 ```
 examples/
-├── gemm/
-│   ├── cpp/           # 6 C++ GEMM examples
-│   └── python/        # 11 Python GEMM examples
-│
-└── README.md
+|---- gemm/
+|   |---- cpp/           # 6 C++ GEMM examples
+|   +---- python/        # 11 Python GEMM examples
+|
++---- README.md
 ```
 
 ---

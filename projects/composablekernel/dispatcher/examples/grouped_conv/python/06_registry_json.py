@@ -55,47 +55,137 @@ def main():
     print("\n--- Step 1: Declare Kernels + Build Registry ---")
     reg = GroupedConvRegistry("conv_tiles")
 
-    reg.add(GroupedConvKernelConfig(
-        variant="forward", ndim_spatial=2, arch=arch, dtype=args.dtype,
-        tile_m=1, tile_n=256, tile_k=256,
-        wave_m=2, wave_n=2, wave_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8,
-        block_per_cu=1, num_wave_groups=1, num_groups_to_merge=1,
-    ))
-    reg.add(GroupedConvKernelConfig(
-        variant="forward", ndim_spatial=2, arch=arch, dtype=args.dtype,
-        tile_m=1, tile_n=128, tile_k=128,
-        wave_m=2, wave_n=2, wave_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pipeline="compv4", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8,
-        block_per_cu=1, num_wave_groups=1, num_groups_to_merge=1,
-    ))
-    reg.add(GroupedConvKernelConfig(
-        variant="forward", ndim_spatial=2, arch=arch, dtype=args.dtype,
-        tile_m=1, tile_n=64, tile_k=64,
-        wave_m=1, wave_n=4, wave_k=1,
-        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
-        pipeline="compv3", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8,
-        block_per_cu=1, num_wave_groups=1, num_groups_to_merge=1,
-    ))
+    reg.add(
+        GroupedConvKernelConfig(
+            variant="forward",
+            ndim_spatial=2,
+            arch=arch,
+            dtype=args.dtype,
+            tile_m=1,
+            tile_n=256,
+            tile_k=256,
+            wave_m=2,
+            wave_n=2,
+            wave_k=1,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="compv3",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            vector_size_a=4,
+            vector_size_b=8,
+            vector_size_c=8,
+            block_per_cu=1,
+            num_wave_groups=1,
+            num_groups_to_merge=1,
+        )
+    )
+    reg.add(
+        GroupedConvKernelConfig(
+            variant="forward",
+            ndim_spatial=2,
+            arch=arch,
+            dtype=args.dtype,
+            tile_m=1,
+            tile_n=128,
+            tile_k=128,
+            wave_m=2,
+            wave_n=2,
+            wave_k=1,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="compv4",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            vector_size_a=4,
+            vector_size_b=8,
+            vector_size_c=8,
+            block_per_cu=1,
+            num_wave_groups=1,
+            num_groups_to_merge=1,
+        )
+    )
+    reg.add(
+        GroupedConvKernelConfig(
+            variant="forward",
+            ndim_spatial=2,
+            arch=arch,
+            dtype=args.dtype,
+            tile_m=1,
+            tile_n=64,
+            tile_k=64,
+            wave_m=1,
+            wave_n=4,
+            wave_k=1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            pipeline="compv3",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            vector_size_a=4,
+            vector_size_b=8,
+            vector_size_c=8,
+            block_per_cu=1,
+            num_wave_groups=1,
+            num_groups_to_merge=1,
+        )
+    )
     reg.print_registry()
 
     # Step 2: Heuristic kernel selection
     print("\n--- Step 2: Heuristic Kernel Selection ---")
     problems = [
-        ("small_7x7",    GroupedConvProblem(N=1, C=512, K=512, Hi=7, Wi=7, Y=3, X=3,
-                                            pad_h=1, pad_w=1, direction="forward")),
-        ("medium_14x14", GroupedConvProblem(N=1, C=256, K=256, Hi=14, Wi=14, Y=3, X=3,
-                                             pad_h=1, pad_w=1, direction="forward")),
-        ("large_56x56",  GroupedConvProblem(N=1, C=64, K=128, Hi=56, Wi=56, Y=3, X=3,
-                                             pad_h=1, pad_w=1, direction="forward")),
+        (
+            "small_7x7",
+            GroupedConvProblem(
+                N=1,
+                C=512,
+                K=512,
+                Hi=7,
+                Wi=7,
+                Y=3,
+                X=3,
+                pad_h=1,
+                pad_w=1,
+                direction="forward",
+            ),
+        ),
+        (
+            "medium_14x14",
+            GroupedConvProblem(
+                N=1,
+                C=256,
+                K=256,
+                Hi=14,
+                Wi=14,
+                Y=3,
+                X=3,
+                pad_h=1,
+                pad_w=1,
+                direction="forward",
+            ),
+        ),
+        (
+            "large_56x56",
+            GroupedConvProblem(
+                N=1,
+                C=64,
+                K=128,
+                Hi=56,
+                Wi=56,
+                Y=3,
+                X=3,
+                pad_h=1,
+                pad_w=1,
+                direction="forward",
+            ),
+        ),
     ]
     print(f"  {'Problem':<16} {'Spatial':>8} {'Selected Kernel':<50}")
-    print(f"  {'-'*74}")
+    print(f"  {'-' * 74}")
     for label, prob in problems:
         selected = reg.select(prob, heuristic=conv_heuristic)
         spatial = prob.Ho * prob.Wo
@@ -110,23 +200,40 @@ def main():
     print(f"  Imported: {len(imported)} kernels")
     orig = reg.kernels[0]
     imp = imported.kernels[0]
-    rt_ok = (orig.vector_size_a == imp.vector_size_a and
-             orig.block_per_cu == imp.block_per_cu and
-             orig.tile_n == imp.tile_n)
+    rt_ok = (
+        orig.vector_size_a == imp.vector_size_a
+        and orig.block_per_cu == imp.block_per_cu
+        and orig.tile_n == imp.tile_n
+    )
     print(f"  Full fields round-trip: {'OK' if rt_ok else 'FAIL'}")
 
     # Step 4: JIT build + GPU execution
     print("\n--- Step 4: JIT Build + GPU Execution ---")
     workers = args.workers if args.workers > 0 else None
     jit_reg = GroupedConvRegistry("jit_conv")
-    jit_reg.add(GroupedConvKernelConfig(
-        variant="forward", ndim_spatial=2, arch=arch, dtype=args.dtype,
-        tile_m=1, tile_n=128, tile_k=128,
-        wave_m=2, wave_n=2, wave_k=1,
-        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
-        pipeline="compv4", scheduler="intrawave", epilogue="cshuffle",
-        vector_size_a=4, vector_size_b=8, vector_size_c=8,
-    ))
+    jit_reg.add(
+        GroupedConvKernelConfig(
+            variant="forward",
+            ndim_spatial=2,
+            arch=arch,
+            dtype=args.dtype,
+            tile_m=1,
+            tile_n=128,
+            tile_k=128,
+            wave_m=2,
+            wave_n=2,
+            wave_k=1,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+            pipeline="compv4",
+            scheduler="intrawave",
+            epilogue="cshuffle",
+            vector_size_a=4,
+            vector_size_b=8,
+            vector_size_c=8,
+        )
+    )
     t0 = time.perf_counter()
     runners = jit_reg.build(verbose=False, max_workers=workers)
     jit_s = time.perf_counter() - t0
@@ -138,8 +245,9 @@ def main():
     print(f"  JIT build: {jit_s:.3f} s")
     print(f"  Library:   {runner.library_path}")
 
-    prob = GroupedConvProblem(N=1, C=128, K=128, Hi=16, Wi=16, Y=3, X=3,
-                              pad_h=1, pad_w=1, direction="forward")
+    prob = GroupedConvProblem(
+        N=1, C=128, K=128, Hi=16, Wi=16, Y=3, X=3, pad_h=1, pad_w=1, direction="forward"
+    )
     np_dtype = np.float16 if args.dtype in ["fp16", "bf16"] else np.float32
     inp = np.random.uniform(-0.3, 0.3, prob.input_shape()).astype(np_dtype)
     wei = np.random.uniform(-0.3, 0.3, prob.weight_shape()).astype(np_dtype)
@@ -154,7 +262,7 @@ def main():
     gpu_ok = res.success
     print("\n" + "=" * 70)
     print(f"  Registry:   {len(reg)} kernels (3 tile configs)")
-    print(f"  Heuristic:  spatial-based selection demonstrated")
+    print("  Heuristic:  spatial-based selection demonstrated")
     print(f"  JSON:       round-trip {'OK' if rt_ok else 'FAIL'}")
     print(f"  GPU:        {'OK' if gpu_ok else 'FAIL'}")
     print(f"  Status:     {'PASS' if gpu_ok and rt_ok else 'FAIL'}")

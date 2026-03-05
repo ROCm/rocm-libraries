@@ -101,7 +101,7 @@ class BaseRegistry
     [[nodiscard]] std::string get_name() const
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        return name_;  // return by value to avoid dangling reference
+        return name_; // return by value to avoid dangling reference
     }
 
     void set_name(const std::string& name)
@@ -140,7 +140,9 @@ class BaseRegistry
 
     protected:
     [[nodiscard]] const std::unordered_map<KeyType, Entry, KeyHash>& entries() const
-    { return entries_; }
+    {
+        return entries_;
+    }
 
     [[nodiscard]] std::unordered_map<KeyType, Entry, KeyHash>& entries_mut() { return entries_; }
 

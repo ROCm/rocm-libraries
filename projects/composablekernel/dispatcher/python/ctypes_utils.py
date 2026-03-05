@@ -1044,7 +1044,10 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
     Used by setup_multiple_gemm_dispatchers for per-config parallel codegen.
     Returns (success, header_path_or_None, error_msg).
     """
-    import subprocess, json, tempfile, os
+    import subprocess
+    import json
+    import tempfile
+    import os
     from pathlib import Path
 
     try:
@@ -1057,13 +1060,20 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
             config_file = f.name
 
         cmd = [
-            args["python"], str(args["codegen_script"]),
-            "--output-dir", str(out_dir),
-            "--datatype", args["dtype"],
-            "--layout", args["layout"],
-            "--gpu-target", args["gpu_target"],
-            "--config", config_file,
-            "--variants", "standard",
+            args["python"],
+            str(args["codegen_script"]),
+            "--output-dir",
+            str(out_dir),
+            "--datatype",
+            args["dtype"],
+            "--layout",
+            args["layout"],
+            "--gpu-target",
+            args["gpu_target"],
+            "--config",
+            config_file,
+            "--variants",
+            "standard",
         ]
 
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -1192,14 +1202,20 @@ def _select_best_arch_valid_gemm_header(
         tile = meta["tile"]
         wave = meta["wave"]
         warp = meta["warp"]
-        tile_delta = abs(tile[0] - config.tile_m) + abs(tile[1] - config.tile_n) + abs(
-            tile[2] - config.tile_k
+        tile_delta = (
+            abs(tile[0] - config.tile_m)
+            + abs(tile[1] - config.tile_n)
+            + abs(tile[2] - config.tile_k)
         )
-        wave_delta = abs(wave[0] - config.wave_m) + abs(wave[1] - config.wave_n) + abs(
-            wave[2] - config.wave_k
+        wave_delta = (
+            abs(wave[0] - config.wave_m)
+            + abs(wave[1] - config.wave_n)
+            + abs(wave[2] - config.wave_k)
         )
-        warp_delta = abs(warp[0] - config.warp_m) + abs(warp[1] - config.warp_n) + abs(
-            warp[2] - config.warp_k
+        warp_delta = (
+            abs(warp[0] - config.warp_m)
+            + abs(warp[1] - config.warp_n)
+            + abs(warp[2] - config.warp_k)
         )
         score = (
             0 if meta["pipeline"] == config.pipeline else 1,
@@ -2040,7 +2056,8 @@ class CodegenRunner:
         static_lib = build_dir / "libck_tile_dispatcher.a"
 
         if not ctypes_source.exists() or not static_lib.exists():
-            if verbose: print("  Required source or static library missing for parallel build.")
+            if verbose:
+                print("  Required source or static library missing for parallel build.")
             return [None] * len(configs_and_headers)
 
         args_list = []
@@ -2050,30 +2067,53 @@ class CodegenRunner:
             obj_file = lib_path.with_suffix(".o")
 
             compile_cmd = [
-                "/opt/rocm/bin/hipcc", "-c", "-fPIC", "-O3",
-                f"-I{root / 'include'}", f"-I{ck_root / 'include'}", f"-I{ck_root}",
+                "/opt/rocm/bin/hipcc",
+                "-c",
+                "-fPIC",
+                "-O3",
+                f"-I{root / 'include'}",
+                f"-I{ck_root / 'include'}",
+                f"-I{ck_root}",
                 f"-I{root / 'build/generated_kernels'}",
-                "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f"-include{kernel_header}",
-                "-D__HIP_PLATFORM_AMD__", f"--offload-arch={config.gfx_arch}",
-                f'-DGFX_ARCH="{config.gfx_arch}"', "-mllvm", "-enable-noalias-to-md-conversion=0",
-                "-Wno-undefined-func-template", "-Wno-float-equal",
-                str(ctypes_source), "-o", str(obj_file),
+                "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
+                f"-include{kernel_header}",
+                "-D__HIP_PLATFORM_AMD__",
+                f"--offload-arch={config.gfx_arch}",
+                f'-DGFX_ARCH="{config.gfx_arch}"',
+                "-mllvm",
+                "-enable-noalias-to-md-conversion=0",
+                "-Wno-undefined-func-template",
+                "-Wno-float-equal",
+                str(ctypes_source),
+                "-o",
+                str(obj_file),
             ]
 
             link_cmd = [
-                "/opt/rocm/bin/hipcc", "-shared", "-fPIC", f"--offload-arch={config.gfx_arch}",
-                "--hip-link", str(obj_file), str(static_lib), "-o", str(lib_path),
+                "/opt/rocm/bin/hipcc",
+                "-shared",
+                "-fPIC",
+                f"--offload-arch={config.gfx_arch}",
+                "--hip-link",
+                str(obj_file),
+                str(static_lib),
+                "-o",
+                str(lib_path),
             ]
 
-            args_list.append({
-                "compile_cmd": compile_cmd,
-                "link_cmd": link_cmd,
-                "lib_path": str(lib_path),
-                "config_name": f"{config.dtype_a}_{config.layout}_{config.tile_str}"
-            })
+            args_list.append(
+                {
+                    "compile_cmd": compile_cmd,
+                    "link_cmd": link_cmd,
+                    "lib_path": str(lib_path),
+                    "config_name": f"{config.dtype_a}_{config.layout}_{config.tile_str}",
+                }
+            )
 
         if verbose:
-            print(f"Building {len(args_list)} libraries in parallel (workers={self.max_workers})...")
+            print(
+                f"Building {len(args_list)} libraries in parallel (workers={self.max_workers})..."
+            )
 
         results_map = {}
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
@@ -2087,7 +2127,9 @@ class CodegenRunner:
                 results_map[idx] = Path(lib_path) if success else None
                 if verbose:
                     status = "OK" if success else f"FAIL ({err})"
-                    print(f"  {status} {Path(lib_path).name if success else args_list[idx]['config_name']}")
+                    print(
+                        f"  {status} {Path(lib_path).name if success else args_list[idx]['config_name']}"
+                    )
 
         if verbose:
             elapsed = time.time() - start_time
@@ -2248,7 +2290,9 @@ class Registry:
         self._lib = lib
 
     def build(
-        self, verbose: bool = False, max_workers: Optional[int] = None,
+        self,
+        verbose: bool = False,
+        max_workers: Optional[int] = None,
     ) -> List["GemmSetupResult"]:
         """Parallel JIT compile all kernels in this registry.
 
@@ -2261,7 +2305,9 @@ class Registry:
         if not self._kernels:
             return []
         return setup_multiple_gemm_dispatchers(
-            self._kernels, registry_name=self._name, verbose=verbose,
+            self._kernels,
+            registry_name=self._name,
+            verbose=verbose,
             max_workers=max_workers,
         )
 
@@ -2588,13 +2634,23 @@ def setup_multiple_gemm_dispatchers(
 
         tile_config_json = {
             "tile_config": {
-                "tile_m": [c.tile_m], "tile_n": [c.tile_n], "tile_k": [c.tile_k],
-                "warp_m": [c.wave_m], "warp_n": [c.wave_n], "warp_k": [c.wave_k],
-                "warp_tile_m": [c.warp_m], "warp_tile_n": [c.warp_n], "warp_tile_k": [c.warp_k],
+                "tile_m": [c.tile_m],
+                "tile_n": [c.tile_n],
+                "tile_k": [c.tile_k],
+                "warp_m": [c.wave_m],
+                "warp_n": [c.wave_n],
+                "warp_k": [c.wave_k],
+                "warp_tile_m": [c.warp_m],
+                "warp_tile_n": [c.warp_n],
+                "warp_tile_k": [c.warp_k],
             },
             "trait_config": {
-                "pipeline": [c.pipeline], "epilogue": [c.epilogue], "scheduler": [c.scheduler],
-                "pad_m": [c.pad_m], "pad_n": [c.pad_n], "pad_k": [c.pad_k],
+                "pipeline": [c.pipeline],
+                "epilogue": [c.epilogue],
+                "scheduler": [c.scheduler],
+                "pad_m": [c.pad_m],
+                "pad_n": [c.pad_n],
+                "pad_k": [c.pad_k],
                 "persistent": [False],
             },
         }
@@ -2604,19 +2660,23 @@ def setup_multiple_gemm_dispatchers(
             f"_*_{tile_str}_{wave_str}_{warp_str}.hpp"
         )
 
-        codegen_args.append({
-            "python": sys.executable,
-            "codegen_script": str(codegen_script),
-            "output_dir": str(output_dir),
-            "dtype": c.dtype_a,
-            "layout": c.layout,
-            "gpu_target": c.gfx_arch,
-            "tile_config_json": tile_config_json,
-            "hpp_glob_pattern": hpp_pattern,
-        })
+        codegen_args.append(
+            {
+                "python": sys.executable,
+                "codegen_script": str(codegen_script),
+                "output_dir": str(output_dir),
+                "dtype": c.dtype_a,
+                "layout": c.layout,
+                "gpu_target": c.gfx_arch,
+                "tile_config_json": tile_config_json,
+                "hpp_glob_pattern": hpp_pattern,
+            }
+        )
 
     if verbose:
-        print(f"Generating {len(codegen_args)} kernel headers in parallel (workers={max_workers})...")
+        print(
+            f"Generating {len(codegen_args)} kernel headers in parallel (workers={max_workers})..."
+        )
 
     headers: List[Optional[Path]] = [None] * len(valid_configs)
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -2631,7 +2691,9 @@ def setup_multiple_gemm_dispatchers(
                 headers[idx] = Path(hdr_str)
                 results[idx].kernel_header = Path(hdr_str)
                 if verbose:
-                    print(f"  OK [{idx}] {valid_configs[idx].tile_str}: {Path(hdr_str).name}")
+                    print(
+                        f"  OK [{idx}] {valid_configs[idx].tile_str}: {Path(hdr_str).name}"
+                    )
             else:
                 results[idx].error = f"Codegen: {err}"
                 if verbose:
@@ -2650,8 +2712,10 @@ def setup_multiple_gemm_dispatchers(
             c = valid_configs[i]
             key = (c.gfx_arch, c.dtype_a, c.layout, c.variant)
             if key not in catalog_cache:
-                catalog_dir = output_dir / "_arch_valid_catalog" / (
-                    f"{c.gfx_arch}_{c.dtype_a}_{c.layout}_{c.variant}"
+                catalog_dir = (
+                    output_dir
+                    / "_arch_valid_catalog"
+                    / (f"{c.gfx_arch}_{c.dtype_a}_{c.layout}_{c.variant}")
                 )
                 ok, catalog_headers, err = _generate_arch_valid_gemm_headers(
                     python_exe=sys.executable,
@@ -2695,9 +2759,7 @@ def setup_multiple_gemm_dispatchers(
             results[i].config = valid_configs[i]
 
             if verbose:
-                print(
-                    f"  INFO [{i}] mapped to arch-valid header: {chosen.name}"
-                )
+                print(f"  INFO [{i}] mapped to arch-valid header: {chosen.name}")
 
     # -- Step 3: Parallel hipcc compilation -------------------------------
     root = get_dispatcher_root()
@@ -2709,7 +2771,9 @@ def setup_multiple_gemm_dispatchers(
     if not ctypes_source.exists() or not static_lib.exists():
         for i in range(len(valid_configs)):
             if results[i].error == "":
-                results[i].error = "Missing ctypes source or static library for compilation"
+                results[
+                    i
+                ].error = "Missing ctypes source or static library for compilation"
         return results
 
     compile_jobs = []
@@ -2719,34 +2783,59 @@ def setup_multiple_gemm_dispatchers(
         if hdr is None:
             continue
 
-        lib_name = f"libdispatcher_gemm_{c.dtype_a}_{c.layout}_{c.tile_str}_{c.pipeline}.so"
+        lib_name = (
+            f"libdispatcher_gemm_{c.dtype_a}_{c.layout}_{c.tile_str}_{c.pipeline}.so"
+        )
         lib_path = build_dir / "examples" / lib_name
         obj_file = lib_path.with_suffix(".o")
 
         compile_cmd = [
-            "/opt/rocm/bin/hipcc", "-c", "-fPIC", "-O3",
-            f"-I{root / 'include'}", f"-I{ck_root / 'include'}", f"-I{ck_root}",
+            "/opt/rocm/bin/hipcc",
+            "-c",
+            "-fPIC",
+            "-O3",
+            f"-I{root / 'include'}",
+            f"-I{ck_root / 'include'}",
+            f"-I{ck_root}",
             f"-I{str(output_dir)}",
-            "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f"-include{hdr}",
-            "-D__HIP_PLATFORM_AMD__", f"--offload-arch={c.gfx_arch}",
+            "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
+            f"-include{hdr}",
+            "-D__HIP_PLATFORM_AMD__",
+            f"--offload-arch={c.gfx_arch}",
             f'-DGFX_ARCH="{c.gfx_arch}"',
-            "-mllvm", "-enable-noalias-to-md-conversion=0",
-            "-Wno-undefined-func-template", "-Wno-float-equal",
-            str(ctypes_source), "-o", str(obj_file),
+            "-mllvm",
+            "-enable-noalias-to-md-conversion=0",
+            "-Wno-undefined-func-template",
+            "-Wno-float-equal",
+            str(ctypes_source),
+            "-o",
+            str(obj_file),
         ]
         link_cmd = [
-            "/opt/rocm/bin/hipcc", "-shared", "-fPIC",
-            f"--offload-arch={c.gfx_arch}", "--hip-link",
-            str(obj_file), str(static_lib), "-o", str(lib_path),
+            "/opt/rocm/bin/hipcc",
+            "-shared",
+            "-fPIC",
+            f"--offload-arch={c.gfx_arch}",
+            "--hip-link",
+            str(obj_file),
+            str(static_lib),
+            "-o",
+            str(lib_path),
         ]
 
         compile_index_map[len(compile_jobs)] = i
-        compile_jobs.append({
-            "compile_cmd": compile_cmd, "link_cmd": link_cmd, "lib_path": str(lib_path),
-        })
+        compile_jobs.append(
+            {
+                "compile_cmd": compile_cmd,
+                "link_cmd": link_cmd,
+                "lib_path": str(lib_path),
+            }
+        )
 
     if verbose and compile_jobs:
-        print(f"Compiling {len(compile_jobs)} libraries in parallel (workers={max_workers})...")
+        print(
+            f"Compiling {len(compile_jobs)} libraries in parallel (workers={max_workers})..."
+        )
 
     lib_paths: Dict[int, Optional[Path]] = {}
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
