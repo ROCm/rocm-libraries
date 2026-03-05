@@ -907,14 +907,14 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrain(Tref 
         if(usePingPongBuffers)
         {
             // copy data from current running mean/var to previous running mean/var
-            hipMemcpy(prevRunMean.GetDevicePtr(),
-                      runMean.GetDevicePtr(),
-                      runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
-                      hipMemcpyDeviceToDevice);
-            hipMemcpy(prevRunVariance.GetDevicePtr(),
-                      runVariance.GetDevicePtr(),
-                      runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
-                      hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunMean.GetDevicePtr(),
+                            runMean.GetDevicePtr(),
+                            runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunVariance.GetDevicePtr(),
+                            runVariance.GetDevicePtr(),
+                            runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
             // not required, but just in case for consistency
             prevRunMean.CopyFromDeviceToHost(GetStream());
             prevRunVariance.CopyFromDeviceToHost(GetStream());
@@ -993,14 +993,14 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrain(Tref 
         if(usePingPongBuffers)
         {
             // copy data from current running mean/var to previous running mean/var
-            hipMemcpy(prevRunMean.GetDevicePtr(),
-                      runMean.GetDevicePtr(),
-                      runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
-                      hipMemcpyDeviceToDevice);
-            hipMemcpy(prevRunVariance.GetDevicePtr(),
-                      runVariance.GetDevicePtr(),
-                      runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
-                      hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunMean.GetDevicePtr(),
+                            runMean.GetDevicePtr(),
+                            runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunVariance.GetDevicePtr(),
+                            runVariance.GetDevicePtr(),
+                            runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
             // not required, but just in case for consistency
             prevRunMean.CopyFromDeviceToHost(GetStream());
             prevRunVariance.CopyFromDeviceToHost(GetStream());
