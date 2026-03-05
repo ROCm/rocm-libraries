@@ -69,3 +69,6 @@ coverage:
       rocSOLVER:
         flags: [rocSOLVER]
         target: 80%
+      race-emulator:
+        flags: [race-emulator]
+        target: 80%

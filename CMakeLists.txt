@@ -28,6 +28,7 @@ set(ROCM_LIBS_ENABLE_COMPONENTS "all"
 set(SUPPORTED_COMPONENTS
     # shared
     mxdatagenerator
+    race-emulator
     rocroller
     origami
     # projects
@@ -89,6 +90,14 @@ if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT mxdatagenerator
         PREFIX_PATH shared
         EXPECT_TARGET roc::mxDataGenerator
+    )
+endif()
+
+if("race-emulator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT race-emulator
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::race-emulator
     )
 endif()
 

@@ -24,3 +24,8 @@ target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-libra
 if(HIPBLASLT_ENABLE_ROCROLLER)
     add_subdirectory(rocroller)
 endif()
+
+if(HIPBLASLT_ENABLE_RACE_EMULATOR)
+    target_link_libraries(hipblaslt PRIVATE roc::race-emulator)
+    target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_HAS_RACE_EMULATOR)
+endif()

@@ -57,6 +57,18 @@ endif()
 
 enable_testing()
 
+if(HIPBLASLT_ENABLE_RACE_EMULATOR)
+    add_executable(race-emulator-integration-test
+        "${CMAKE_CURRENT_SOURCE_DIR}/RaceEmulatorIntegration_test.cpp"
+    )
+    target_link_libraries(race-emulator-integration-test
+        PRIVATE
+            roc::race-emulator
+            GTest::gtest_main
+    )
+    gtest_discover_tests(race-emulator-integration-test TIMEOUT 30)
+endif()
+
 #################################################
 #        Tests for cpu-gemm-driver              #
 #################################################

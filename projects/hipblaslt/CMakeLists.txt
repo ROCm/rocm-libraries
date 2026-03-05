@@ -84,6 +84,15 @@ if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
+    # Enable race-emulator if its source is available (monorepo or sparse
+    # checkout). Defaults to OFF when the directory is absent (standalone
+    # builds). Can be explicitly disabled with -DHIPBLASLT_ENABLE_RACE_EMULATOR=OFF.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/race-emulator/CMakeLists.txt")
+        option(HIPBLASLT_ENABLE_RACE_EMULATOR "Enable race condition detection for GPU assembly." ON)
+    else()
+        set(HIPBLASLT_ENABLE_RACE_EMULATOR OFF)
+    endif()
+    message(STATUS "HIPBLASLT_ENABLE_RACE_EMULATOR: ${HIPBLASLT_ENABLE_RACE_EMULATOR}")
 endif()
 
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
@@ -249,6 +258,12 @@ if(NOT ROCM_LIBS_SUPERBUILD)
         block(SCOPE_FOR VARIABLES)
             set(ORIGAMI_ENABLE_INSTALL OFF)
             add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+        endblock()
+    endif()
+
+    if(HIPBLASLT_ENABLE_RACE_EMULATOR)
+        block(SCOPE_FOR VARIABLES)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/race-emulator" race-emulator)
         endblock()
     endif()
 endif()

@@ -29,6 +29,7 @@ subtree_to_project_map = {
     "projects/rocwmma": "rocwmma",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
+    "shared/race-emulator": "blas",
     "shared/rocroller": "blas",
     "shared/tensile": "blas",
 }
