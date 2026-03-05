@@ -4774,9 +4774,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Enabled lrvwTile>1 for UseF32XEmulation except for UseCustomMainLoopSchedule (TODO: enable for CMS)
     # TODO: implement extra logic to swap vgprs after local read to suport lrvwTile > 1 for umBytes >= 4 + MIInputPerThread > 1
     #       (except for UseF32XEmulation)
-    forceLrvwTile1 = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
+    forceLrvwTile1A = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
       (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1 and (not kernel["UseF32XEmulation"]))
-    if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1:
+    if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1A:
       self.states.lrvwTileA = kernel["VectorWidthA"]
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.lrvwTileMXSA = kernel["VectorWidthA"]
@@ -4785,8 +4785,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.lrvwTileMXSA = 1
 
-    forceLrvwTile1 = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1)
-    if not kernel["UnrollMajorLDSB"] and not forceLrvwTile1:
+    forceLrvwTile1B = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and \
+      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1 and (not kernel["UseF32XEmulation"]))
+    if not kernel["UnrollMajorLDSB"] and not forceLrvwTile1B:
       self.states.lrvwTileB = kernel["VectorWidthB"]
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.lrvwTileMXSB = kernel["VectorWidthB"]
