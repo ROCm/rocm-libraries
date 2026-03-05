@@ -23,7 +23,6 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include <hipcub/thread/thread_operators.hpp>
 #include <hipcub/warp/warp_reduce.hpp>
 
 #ifndef DEFAULT_N

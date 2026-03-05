@@ -27,7 +27,6 @@
 #include "test_utils_types.hpp"
 
 #include <hipcub/device/device_memcpy.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include <gtest/gtest-typed-test.h>
 #include <gtest/gtest.h>

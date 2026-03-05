@@ -187,8 +187,8 @@ void add_benchmarks(size_t                                        max_length,
     using custom_double2 = benchmark_utils::custom_type<double, double>;
 
     std::vector<benchmark::internal::Benchmark*> bs = {
-        CREATE_BENCHMARKS(hipcub::Sum),
-        CREATE_BENCHMARK(long long, custom_double2, hipcub::Sum),
+        CREATE_BENCHMARKS(benchmark_utils::plus),
+        CREATE_BENCHMARK(long long, custom_double2, benchmark_utils::plus),
         CREATE_BENCHMARKS(benchmark_utils::minimum),
 #ifdef HIPCUB_ROCPRIM_API
         CREATE_BENCHMARK(long long, custom_double2, benchmark_utils::minimum),

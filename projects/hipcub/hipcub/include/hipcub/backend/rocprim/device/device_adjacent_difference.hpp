@@ -32,7 +32,6 @@
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
 
-#include <hipcub/thread/thread_operators.hpp>
 #include <rocprim/device/device_adjacent_difference.hpp> // IWYU pragma: export
 
 #include _HIPCUB_STD_INCLUDE(functional)

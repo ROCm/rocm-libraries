@@ -24,7 +24,6 @@
 
 // HIP API
 #include <hipcub/device/device_select.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;

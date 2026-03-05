@@ -24,7 +24,6 @@
 
 // hipcub API
 #include <hipcub/device/device_reduce.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include "test_utils_data_generation.hpp"
 

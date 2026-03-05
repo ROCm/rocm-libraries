@@ -25,7 +25,6 @@
 
 #include <hipcub/agent/single_pass_scan_operators.hpp>
 #include <hipcub/config.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include <hip/hip_runtime.h>
 

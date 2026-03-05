@@ -24,7 +24,6 @@
 
 // hipcub API
 #include <hipcub/block/block_scan.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 // Params for tests
 template<class T,
