@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 set(COMMON_CLIENT_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TypedId.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaResultReporter.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorListener.hpp"
