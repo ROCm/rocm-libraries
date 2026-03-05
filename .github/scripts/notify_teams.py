@@ -8,7 +8,7 @@ notifications to Microsoft Teams via webhook.
 Usage:
     python notify_teams.py \
         --project miopen \
-        --failure-type build \
+        --failure-stage build \
         --platform linux \
         --log-path TheRock/build/logs \
         --webhook-url "$WEBHOOK_URL" \
@@ -54,9 +54,9 @@ class ErrorExtractor:
     MAX_CONTEXT_LINES = 10
     MAX_OUTPUT_LINES = 7
 
-    def __init__(self, log_path: str, failure_type: str):
+    def __init__(self, log_path: str, failure_stage: str):
         self.log_path = Path(log_path)
-        self.failure_type = failure_type
+        self.failure_stage = failure_stage
 
     def extract(self) -> Tuple[str, str]:
         """
@@ -71,7 +71,7 @@ class ErrorExtractor:
             return self._extract_from_file()
         return (
             "Error details not found in logs. Check the GitHub Actions run for full output.",
-            f"{self.failure_type.title()} Failure",
+            f"{self.failure_stage.title()} Failure",
         )
 
     def _extract_from_directory(self) -> Tuple[str, str]:
@@ -124,7 +124,7 @@ class ErrorExtractor:
         """Extract errors from a single log file"""
         error_log = ""
 
-        if self.failure_type == "test" and self.log_path.exists():
+        if self.failure_stage == "test" and self.log_path.exists():
             # For test logs, read from the file directly
             try:
                 with open(self.log_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -197,7 +197,7 @@ class ErrorExtractor:
         """Categorize the error based on patterns in the log"""
         patterns = (
             self.TEST_ERROR_PATTERNS
-            if self.failure_type == "test"
+            if self.failure_stage == "test"
             else self.BUILD_ERROR_PATTERNS
         )
 
@@ -206,7 +206,7 @@ class ErrorExtractor:
                 return issue_type
 
         # Default issue type
-        return f"{self.failure_type.title()} Failure"
+        return f"{self.failure_stage.title()} Failure"
 
     def _limit_output(self, error_log: str) -> str:
         """Limit error output to MAX_OUTPUT_LINES"""
@@ -225,7 +225,7 @@ class TeamsNotifier:
         self,
         project: str,
         platform: str,
-        failure_type: str,
+        failure_stage: str,
         run_url: str,
         error_context: str,
         issue_type: str,
@@ -250,7 +250,7 @@ class TeamsNotifier:
         message = self._format_message(
             project,
             platform,
-            failure_type,
+            failure_stage,
             run_url,
             error_context,
             issue_type,
@@ -298,7 +298,7 @@ class TeamsNotifier:
         self,
         project: str,
         platform: str,
-        failure_type: str,
+        failure_stage: str,
         run_url: str,
         error_context: str,
         issue_type: str,
@@ -310,7 +310,7 @@ class TeamsNotifier:
 
         # Platform name capitalization
         platform_name = platform.title()
-        failure_label = f"{failure_type.title()} Failure"
+        failure_label = f"{failure_stage.title()} Failure"
 
         # Build PR info section
         pr_info = ""
@@ -351,7 +351,7 @@ def main():
         "--project", required=True, help="Project name (e.g., miopen, rocblas)"
     )
     parser.add_argument(
-        "--failure-type",
+        "--failure-stage",
         required=True,
         choices=["build", "test"],
         help="Type of failure (build or test)",
@@ -387,7 +387,7 @@ def main():
     args = parser.parse_args()
 
     # Extract error context
-    extractor = ErrorExtractor(args.log_path, args.failure_type)
+    extractor = ErrorExtractor(args.log_path, args.failure_stage)
     error_context, issue_type = extractor.extract()
 
     # Send notification
@@ -395,7 +395,7 @@ def main():
     success = notifier.send_notification(
         project=args.project,
         platform=args.platform,
-        failure_type=args.failure_type,
+        failure_stage=args.failure_stage,
         run_url=args.run_url,
         error_context=error_context,
         issue_type=issue_type,
