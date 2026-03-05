@@ -1,4 +1,0 @@
-# Preserve original line endings for files that already have CRLF in develop branch
-shared/origami/include/origami/types.hpp -text
-shared/origami/tests/include/common.hpp -text
-shared/origami/tests/test_gemm.cpp -text
