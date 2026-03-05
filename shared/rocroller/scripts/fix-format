@@ -11,8 +11,8 @@ import sys
 from io import StringIO
 from pathlib import Path
 
-from pylint.lint import Run
-from pylint.reporters.text import TextReporter
+import pylint.lint
+import pylint.reporters.text
 
 try:
     from tqdm.auto import tqdm
@@ -117,8 +117,8 @@ def fix_cpp(dir: Path):
 
 def lint_python(dir: Path):
     pylint_output = StringIO()
-    reporter = TextReporter(pylint_output)
-    Run(
+    reporter = pylint.reporters.text.TextReporter(pylint_output)
+    pylint.lint.Run(
         [str(x) for x in get_py_files(dir)] + ["--disable=C"],
         reporter=reporter,
         exit=False,
