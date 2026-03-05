@@ -29,21 +29,21 @@ function(get_cu_count cu_count_arg)
 
         execute_process(
             COMMAND ${CMAKE_HIP_COMPILER} -x hip ${CPP_FILE_PATH} -o ${CPP_EXE_PATH}
-            RESULT_VARIABLE compile_result
+            RESULT_VARIABLE compile_exit_code
         )
         
-        if (NOT compile_result EQUAL 0)
+        if (NOT compile_exit_code EQUAL 0)
             message(FATAL_ERROR "Compilation of ${CPP_FILE_PATH} failed.\n")
         endif()
 
         execute_process(
             COMMAND ${CPP_EXE_PATH}
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_VARIABLE standard_error
-            RESULT_VARIABLE queried_cu_count
+            RESULT_VARIABLE queried_cu_count_exit_code
+            OUTPUT_VARIABLE queried_cu_count
         )
 
-        if (standard_error)
+        if (NOT queried_cu_count_exit_code EQUAL 0)
             message(STATUS "Error information from attempting to query HIP device and properties:\n"
                             "${standard_error}")
         endif()
@@ -52,7 +52,7 @@ function(get_cu_count cu_count_arg)
         # Delete the generated cu_count executable
         file(REMOVE "${CPP_EXE_PATH}")
 
-        if(queried_cu_count EQUAL 0)
+        if((queried_cu_count EQUAL 0) OR (NOT queried_cu_count_exit_code EQUAL 0))
             message(WARNING "Unable to query the number of Compute Units. \
                     Please use the CU_COUNT CLI option to pass in the \
                     number of Compute Units for your target device; otherwise, \
