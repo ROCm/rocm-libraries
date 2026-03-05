@@ -5,7 +5,6 @@
 
 #include "descriptors/BackendDescriptor.hpp"
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
-#include "descriptors/MatmulOperationDescriptor.hpp"
 #include "hipdnn_backend.h"
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
@@ -57,28 +56,6 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
     desc->setAttribute(
         HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
-
-    desc->finalize();
-    return wrapper;
-}
-
-// Creates a finalized MatmulOperationDescriptor with A, B, C tensors and compute type.
-inline std::unique_ptr<HipdnnBackendDescriptor>
-    createFinalizedMatmulOp(HipdnnBackendDescriptor* aDesc,
-                            HipdnnBackendDescriptor* bDesc,
-                            HipdnnBackendDescriptor* cDesc,
-                            hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
-{
-    auto wrapper = createDescriptor<MatmulOperationDescriptor>();
-    auto desc = wrapper->asDescriptor<MatmulOperationDescriptor>();
-
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &aDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &bDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &cDesc);
-    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     desc->finalize();
     return wrapper;

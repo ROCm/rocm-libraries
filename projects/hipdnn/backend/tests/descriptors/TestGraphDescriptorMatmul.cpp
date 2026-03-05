@@ -4,6 +4,7 @@
 #include "DescriptorTestUtils.hpp"
 #include "TensorDescriptorTestUtils.hpp"
 #include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/MatmulOperationDescriptor.hpp"
 #include "descriptors/TensorDescriptor.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockHandle.hpp"
@@ -24,6 +25,32 @@ using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
+
+namespace
+{
+
+inline std::unique_ptr<HipdnnBackendDescriptor>
+    createFinalizedMatmulOp(HipdnnBackendDescriptor* aDesc,
+                            HipdnnBackendDescriptor* bDesc,
+                            HipdnnBackendDescriptor* cDesc,
+                            hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+{
+    auto wrapper = createDescriptor<MatmulOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<MatmulOperationDescriptor>();
+
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &aDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &bDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &cDesc);
+    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    desc->finalize();
+    return wrapper;
+}
+
+} // namespace
 
 class TestGraphDescriptorMatmul : public ::testing::Test
 {

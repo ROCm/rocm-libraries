@@ -11,6 +11,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/MatmulConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -18,6 +19,7 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
 using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
@@ -32,24 +34,6 @@ public:
     using Graph::build_operation_graph_via_descriptors;
     using Graph::get_raw_graph_descriptor;
 };
-
-// -- Test constants for MatmulGraphRoundTrip --
-
-constexpr int64_t K_TENSOR_A_UID = 10;
-constexpr int64_t K_TENSOR_B_UID = 20;
-constexpr int64_t K_TENSOR_C_UID = 30;
-
-// A: (batch=2, M=3, K=4)
-constexpr std::array<int64_t, 3> K_TENSOR_A_DIMS = {2, 3, 4};
-constexpr std::array<int64_t, 3> K_TENSOR_A_STRIDES = {12, 4, 1};
-
-// B: (batch=2, K=4, N=5)
-constexpr std::array<int64_t, 3> K_TENSOR_B_DIMS = {2, 4, 5};
-constexpr std::array<int64_t, 3> K_TENSOR_B_STRIDES = {20, 5, 1};
-
-// C should be inferred to (batch=2, M=3, N=5)
-constexpr std::array<int64_t, 3> K_EXPECTED_C_DIMS = {2, 3, 5};
-constexpr std::array<int64_t, 3> K_EXPECTED_C_STRIDES = {15, 5, 1};
 
 // -- Test constants for AutoAssignedUidsPreservedInRoundTrip --
 
@@ -105,18 +89,18 @@ TEST_F(IntegrationMatmulDescriptorLowering, MatmulGraphRoundTrip)
         .set_compute_data_type(DataType::FLOAT);
 
     auto a = std::make_shared<TensorAttributes>();
-    a->set_uid(K_TENSOR_A_UID).set_name("A").set_data_type(DataType::FLOAT);
-    a->set_dim(toVec(K_TENSOR_A_DIMS)).set_stride(toVec(K_TENSOR_A_STRIDES));
+    a->set_uid(K_MATMUL_TENSOR_A_UID).set_name("A").set_data_type(DataType::FLOAT);
+    a->set_dim(toVec(K_MATMUL_TENSOR_A_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_A_STRIDES));
 
     auto b = std::make_shared<TensorAttributes>();
-    b->set_uid(K_TENSOR_B_UID).set_name("B").set_data_type(DataType::FLOAT);
-    b->set_dim(toVec(K_TENSOR_B_DIMS)).set_stride(toVec(K_TENSOR_B_STRIDES));
+    b->set_uid(K_MATMUL_TENSOR_B_UID).set_name("B").set_data_type(DataType::FLOAT);
+    b->set_dim(toVec(K_MATMUL_TENSOR_B_DIMS)).set_stride(toVec(K_MATMUL_TENSOR_B_STRIDES));
 
     MatmulAttributes matmulAttrs;
     matmulAttrs.set_name("matmul_op");
 
     auto c = graph->matmul(a, b, matmulAttrs);
-    c->set_uid(K_TENSOR_C_UID).set_output(true).set_name("C");
+    c->set_uid(K_MATMUL_TENSOR_C_UID).set_output(true).set_name("C");
 
     // -- Validate and lower --
     auto result = graph->validate();
@@ -160,30 +144,30 @@ TEST_F(IntegrationMatmulDescriptorLowering, MatmulGraphRoundTrip)
     }
 
     // Verify A tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_A_UID), 0u);
-    auto* aT = tensorMap[K_TENSOR_A_UID];
+    ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_A_UID), 0u);
+    auto* aT = tensorMap[K_MATMUL_TENSOR_A_UID];
     EXPECT_EQ(aT->name, "A");
     EXPECT_EQ(aT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(aT->dims, toVec(K_TENSOR_A_DIMS));
-    EXPECT_EQ(aT->strides, toVec(K_TENSOR_A_STRIDES));
+    EXPECT_EQ(aT->dims, toVec(K_MATMUL_TENSOR_A_DIMS));
+    EXPECT_EQ(aT->strides, toVec(K_MATMUL_TENSOR_A_STRIDES));
     EXPECT_FALSE(aT->virtual_);
 
     // Verify B tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_B_UID), 0u);
-    auto* bT = tensorMap[K_TENSOR_B_UID];
+    ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_B_UID), 0u);
+    auto* bT = tensorMap[K_MATMUL_TENSOR_B_UID];
     EXPECT_EQ(bT->name, "B");
     EXPECT_EQ(bT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(bT->dims, toVec(K_TENSOR_B_DIMS));
-    EXPECT_EQ(bT->strides, toVec(K_TENSOR_B_STRIDES));
+    EXPECT_EQ(bT->dims, toVec(K_MATMUL_TENSOR_B_DIMS));
+    EXPECT_EQ(bT->strides, toVec(K_MATMUL_TENSOR_B_STRIDES));
     EXPECT_FALSE(bT->virtual_);
 
-    // Verify C tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_C_UID), 0u);
-    auto* cT = tensorMap[K_TENSOR_C_UID];
+    // Verify C tensor (dims/strides inferred by frontend to match shared constants)
+    ASSERT_NE(tensorMap.count(K_MATMUL_TENSOR_C_UID), 0u);
+    auto* cT = tensorMap[K_MATMUL_TENSOR_C_UID];
     EXPECT_EQ(cT->name, "C");
     EXPECT_EQ(cT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(cT->dims, toVec(K_EXPECTED_C_DIMS));
-    EXPECT_EQ(cT->strides, toVec(K_EXPECTED_C_STRIDES));
+    EXPECT_EQ(cT->dims, toVec(K_MATMUL_TENSOR_C_DIMS));
+    EXPECT_EQ(cT->strides, toVec(K_MATMUL_TENSOR_C_STRIDES));
     EXPECT_FALSE(cT->virtual_);
 
     // -- Verify matmul operation node --
@@ -195,9 +179,9 @@ TEST_F(IntegrationMatmulDescriptorLowering, MatmulGraphRoundTrip)
     auto* matmul = node->attributes.AsMatmulAttributes();
     ASSERT_NE(matmul, nullptr);
 
-    EXPECT_EQ(matmul->a_tensor_uid, K_TENSOR_A_UID);
-    EXPECT_EQ(matmul->b_tensor_uid, K_TENSOR_B_UID);
-    EXPECT_EQ(matmul->c_tensor_uid, K_TENSOR_C_UID);
+    EXPECT_EQ(matmul->a_tensor_uid, K_MATMUL_TENSOR_A_UID);
+    EXPECT_EQ(matmul->b_tensor_uid, K_MATMUL_TENSOR_B_UID);
+    EXPECT_EQ(matmul->c_tensor_uid, K_MATMUL_TENSOR_C_UID);
 }
 
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved

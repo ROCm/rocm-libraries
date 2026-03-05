@@ -16,6 +16,7 @@
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
+#include <initializer_list>
 #include <memory>
 #include <vector>
 
@@ -38,28 +39,39 @@ public:
         return _wrapper->asDescriptor<MatmulOperationDescriptor>();
     }
 
-    void setTensors() const
+    void setAllAttributesExcept(
+        std::initializer_list<hipdnnBackendAttributeName_t> exclusions = {}) const
     {
         auto desc = getDescriptor();
-        desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc);
-        desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_bDesc);
-        desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_cDesc);
-    }
+        auto shouldSet = [&](hipdnnBackendAttributeName_t attr) {
+            for(auto ex : exclusions)
+            {
+                if(ex == attr)
+                    return false;
+            }
+            return true;
+        };
 
-    void setRequiredAttributes() const
-    {
-        setTensors();
-        auto computeType = HIPDNN_DATA_FLOAT;
-        getDescriptor()->setAttribute(
-            HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        if(shouldSet(HIPDNN_ATTR_OPERATION_MATMUL_A))
+            desc->setAttribute(
+                HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc);
+        if(shouldSet(HIPDNN_ATTR_OPERATION_MATMUL_B))
+            desc->setAttribute(
+                HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_bDesc);
+        if(shouldSet(HIPDNN_ATTR_OPERATION_MATMUL_C))
+            desc->setAttribute(
+                HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_cDesc);
+        if(shouldSet(HIPDNN_ATTR_MATMUL_COMP_TYPE))
+        {
+            auto computeType = HIPDNN_DATA_FLOAT;
+            desc->setAttribute(
+                HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        }
     }
 
     void makeFinalized() const
     {
-        setRequiredAttributes();
+        setAllAttributesExcept();
         getDescriptor()->finalize();
     }
 
@@ -103,47 +115,32 @@ TEST_F(TestMatmulOperationDescriptor, CreateDescriptor)
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeWithRequiredAttributes)
 {
-    setRequiredAttributes();
+    setAllAttributesExcept();
     ASSERT_NO_THROW(getDescriptor()->finalize());
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeFailsWithoutATensor)
 {
-    auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_bDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_cDesc);
-    auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_A});
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeFailsWithoutBTensor)
 {
-    auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_cDesc);
-    auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_B});
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeFailsWithoutCTensor)
 {
-    auto desc = getDescriptor();
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_bDesc);
-    auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_C});
+    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
-    setTensors();
+    setAllAttributesExcept({HIPDNN_ATTR_MATMUL_COMP_TYPE});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -294,7 +291,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorDescriptor)
 TEST_F(TestMatmulOperationDescriptor, GetAttributeComputeType)
 {
     auto desc = getDescriptor();
-    setRequiredAttributes();
+    setAllAttributesExcept();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
@@ -315,7 +312,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeComputeType)
 TEST_F(TestMatmulOperationDescriptor, GetAttributeFailsBeforeFinalize)
 {
     auto desc = getDescriptor();
-    setRequiredAttributes();
+    setAllAttributesExcept();
 
     HipdnnBackendDescriptor* dummy = nullptr;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -429,7 +426,7 @@ TEST_F(TestMatmulOperationDescriptor, FinalizePreservesTensorReferences)
 
 TEST_F(TestMatmulOperationDescriptor, ToStringContainsExpectedInfo)
 {
-    setRequiredAttributes();
+    setAllAttributesExcept();
     auto desc = getDescriptor();
 
     std::string str = desc->toString();
@@ -458,7 +455,7 @@ TEST_F(TestMatmulOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 
 TEST_F(TestMatmulOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
-    setRequiredAttributes();
+    setAllAttributesExcept();
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
@@ -479,7 +476,7 @@ TEST_F(TestMatmulOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
 TEST_F(TestMatmulOperationDescriptor, BuildNodeWithHalfComputeType)
 {
-    setRequiredAttributes();
+    setAllAttributesExcept();
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
