@@ -329,7 +329,7 @@ class TeamsNotifier:
 
         # Build the text message with proper markdown (no escaping needed for Power Automate)
         text = (
-            f"❌{platform_name} {failure_label}❌\n\n"
+            f"{platform_name} {failure_label}\n\n"
             f"{pr_info}\n\n"
             f"{job_info}\n\n"
             f"**Issue Type:** {issue_type}\n\n"
