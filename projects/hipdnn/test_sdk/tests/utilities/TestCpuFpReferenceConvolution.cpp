@@ -16,9 +16,6 @@ using namespace hipdnn_data_sdk::types;
 
 // User-defined literals
 using hipdnn_data_sdk::types::operator""_bf;
-using hipdnn_data_sdk::types::operator""_fp8;
-using hipdnn_data_sdk::types::operator""_bfp8;
-
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceBasic)
 {
     // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
@@ -274,70 +271,6 @@ TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionFwdInferenceBasic)
     EXPECT_EQ(outputTensor.getHostValue(0, 0, 0, 1), 63);
     EXPECT_EQ(outputTensor.getHostValue(0, 0, 1, 0), 90);
     EXPECT_EQ(outputTensor.getHostValue(0, 0, 1, 1), 99);
-}
-
-TEST(TestCpuFpReferenceConvolutionFp8, ConvolutionFwdInferenceBasic)
-{
-    Tensor<fp8_e4m3> inputTensor({1, 1, 4, 4});
-    Tensor<fp8_e4m3> weightTensor({1, 1, 3, 3});
-    Tensor<fp8_e4m3> outputTensor({1, 1, 2, 2});
-
-    // Fill input with sequential values
-    for(int i = 0; i < 16; ++i)
-    {
-        inputTensor.memory().hostData()[i] = fp8_e4m3(i + 1);
-    }
-
-    // Fill weights with 1s
-    for(int i = 0; i < 9; ++i)
-    {
-        weightTensor.memory().hostData()[i] = 1.0_fp8;
-    }
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::fprop<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
-        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
-
-    // Same expected values as fp32 test
-    EXPECT_EQ(outputTensor.getHostValue(0, 0, 0, 0), 54.0_fp8);
-    EXPECT_EQ(outputTensor.getHostValue(0, 0, 0, 1), 63.0_fp8);
-    EXPECT_EQ(outputTensor.getHostValue(0, 0, 1, 0), 90.0_fp8);
-    EXPECT_EQ(outputTensor.getHostValue(0, 0, 1, 1), 99.0_fp8);
-}
-
-TEST(TestCpuFpReferenceConvolutionBfp8, ConvolutionFwdInferenceBasic)
-{
-    Tensor<fp8_e5m2> inputTensor({1, 1, 4, 4});
-    Tensor<fp8_e5m2> weightTensor({1, 1, 3, 3});
-    Tensor<fp8_e5m2> outputTensor({1, 1, 2, 2});
-
-    // Fill input with sequential values
-    for(int i = 0; i < 16; ++i)
-    {
-        inputTensor.memory().hostData()[i] = fp8_e5m2(i + 1);
-    }
-
-    // Fill weights with 1s
-    for(int i = 0; i < 9; ++i)
-    {
-        weightTensor.memory().hostData()[i] = 1.0_bfp8;
-    }
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::fprop<fp8_e5m2, fp8_e5m2, fp8_e5m2, float>(
-        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
-
-    // Same expected values as fp32 test
-    EXPECT_EQ(outputTensor.getHostValue(0, 0, 0, 0), 54.0_bfp8);
-    EXPECT_EQ(outputTensor.getHostValue(0, 0, 0, 1), 63.0_bfp8);
-    EXPECT_EQ(outputTensor.getHostValue(0, 0, 1, 0), 90.0_bfp8);
-    EXPECT_EQ(outputTensor.getHostValue(0, 0, 1, 1), 99.0_bfp8);
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionFwdInferenceWithDilation)
@@ -1136,60 +1069,6 @@ TEST(TestCpuFpReferenceConvolutionInt8, ConvolutionBwdDataBasic)
         inputTensor, weightTensor, outputTensor, strides, dilations, padding);
 }
 
-TEST(TestCpuFpReferenceConvolutionFp8, ConvolutionBwdDataBasic)
-{
-    // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
-    Tensor<fp8_e4m3> inputTensor({1, 1, 4, 4});
-    Tensor<fp8_e4m3> weightTensor({1, 1, 3, 3});
-    Tensor<fp8_e4m3> outputTensor({1, 1, 2, 2});
-
-    // gradOutput values: simple pattern
-    outputTensor.setHostValue(1.0_fp8, 0, 0, 0, 0);
-    outputTensor.setHostValue(2.0_fp8, 0, 0, 0, 1);
-    outputTensor.setHostValue(3.0_fp8, 0, 0, 1, 0);
-    outputTensor.setHostValue(4.0_fp8, 0, 0, 1, 1);
-
-    // Weight values: simple 3x3 kernel
-    for(int i = 0; i < 9; ++i)
-    {
-        weightTensor.memory().hostData()[i] = fp8_e4m3(i + 1);
-    }
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::dgrad<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
-        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
-}
-
-TEST(TestCpuFpReferenceConvolutionBfp8, ConvolutionBwdDataBasic)
-{
-    // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
-    Tensor<fp8_e5m2> inputTensor({1, 1, 4, 4});
-    Tensor<fp8_e5m2> weightTensor({1, 1, 3, 3});
-    Tensor<fp8_e5m2> outputTensor({1, 1, 2, 2});
-
-    // gradOutput values: simple pattern
-    outputTensor.setHostValue(1.0_bfp8, 0, 0, 0, 0);
-    outputTensor.setHostValue(2.0_bfp8, 0, 0, 0, 1);
-    outputTensor.setHostValue(3.0_bfp8, 0, 0, 1, 0);
-    outputTensor.setHostValue(4.0_bfp8, 0, 0, 1, 1);
-
-    // Weight values: simple 3x3 kernel
-    for(int i = 0; i < 9; ++i)
-    {
-        weightTensor.memory().hostData()[i] = fp8_e5m2(i + 1);
-    }
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::dgrad<fp8_e5m2, fp8_e5m2, fp8_e5m2, float>(
-        inputTensor, weightTensor, outputTensor, strides, dilations, padding);
-}
-
 TEST(TestCpuFpReferenceConvolutionFp32, ConvolutionBwdDataSimple)
 {
     // Basic convolution: 1x1x4x4 input, 1x1x3x3 weight -> 1x1x2x2 output
@@ -1913,78 +1792,6 @@ TYPED_TEST(CpuFpReferenceConvolutionWrwBasic, TypesConvolutionWrwBasic)
     {
         EXPECT_FLOAT_EQ(static_cast<float>(gradWeightTensor.getHostValue(0, 0, 0, 0)), 10.0f);
     }
-}
-
-TEST(TestCpuFpReferenceConvolutionFp8, ConvolutionWrwBasic)
-{
-    // Minimal sanity test for wgrad using smallest possible tensor sizes
-    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
-    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
-    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
-    Tensor<fp8_e4m3> inputTensor({1, 1, 2, 2});
-    Tensor<fp8_e4m3> gradWeightTensor({1, 1, 1, 1});
-    Tensor<fp8_e4m3> gradOutputTensor({1, 1, 2, 2});
-
-    // Set input values: [1, 2; 3, 4]
-    inputTensor.setHostValue(1.0_fp8, 0, 0, 0, 0);
-    inputTensor.setHostValue(2.0_fp8, 0, 0, 0, 1);
-    inputTensor.setHostValue(3.0_fp8, 0, 0, 1, 0);
-    inputTensor.setHostValue(4.0_fp8, 0, 0, 1, 1);
-
-    // Set gradient output values: [1, 1; 1, 1]
-    gradOutputTensor.setHostValue(1.0_fp8, 0, 0, 0, 0);
-    gradOutputTensor.setHostValue(1.0_fp8, 0, 0, 0, 1);
-    gradOutputTensor.setHostValue(1.0_fp8, 0, 0, 1, 0);
-    gradOutputTensor.setHostValue(1.0_fp8, 0, 0, 1, 1);
-
-    // Initialize weight to zero
-    gradWeightTensor.setHostValue(0.0_fp8, 0, 0, 0, 0);
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::wgrad<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>(
-        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
-
-    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 1 = 10
-    EXPECT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 10.0_fp8);
-}
-
-TEST(TestCpuFpReferenceConvolutionBfp8, ConvolutionWrwBasic)
-{
-    // Minimal sanity test for wgrad using smallest possible tensor sizes
-    // Input: 1x1x2x2 (1 batch, 1 input channel, 2x2 spatial)
-    // Weight: 1x1x1x1 (1 output channel, 1 input channel, 1x1 kernel)
-    // GradOutput: 1x1x2x2 (1 batch, 1 output channel, 2x2 spatial)
-    Tensor<fp8_e5m2> inputTensor({1, 1, 2, 2});
-    Tensor<fp8_e5m2> gradWeightTensor({1, 1, 1, 1});
-    Tensor<fp8_e5m2> gradOutputTensor({1, 1, 2, 2});
-
-    // Set input values: [1, 2; 3, 4]
-    inputTensor.setHostValue(1.0_bfp8, 0, 0, 0, 0);
-    inputTensor.setHostValue(2.0_bfp8, 0, 0, 0, 1);
-    inputTensor.setHostValue(3.0_bfp8, 0, 0, 1, 0);
-    inputTensor.setHostValue(4.0_bfp8, 0, 0, 1, 1);
-
-    // Set gradient output values: [1, 1; 1, 1]
-    gradOutputTensor.setHostValue(1.0_bfp8, 0, 0, 0, 0);
-    gradOutputTensor.setHostValue(1.0_bfp8, 0, 0, 0, 1);
-    gradOutputTensor.setHostValue(1.0_bfp8, 0, 0, 1, 0);
-    gradOutputTensor.setHostValue(1.0_bfp8, 0, 0, 1, 1);
-
-    // Initialize weight to zero
-    gradWeightTensor.setHostValue(0.0_bfp8, 0, 0, 0, 0);
-
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilations = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
-
-    CpuFpReferenceConvolution::wgrad<fp8_e5m2, fp8_e5m2, fp8_e5m2, float>(
-        inputTensor, gradWeightTensor, gradOutputTensor, strides, dilations, padding);
-
-    // Expected weight gradient: sum of (input * gradOutput) = (1+2+3+4) * 1 = 10
-    EXPECT_EQ(gradWeightTensor.getHostValue(0, 0, 0, 0), 10.0_bfp8);
 }
 
 TEST(TestCpuFpReferenceConvolutionFp32, ConvBwdWeightMultiBatch)

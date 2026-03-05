@@ -43,7 +43,11 @@ using HipEventPtr = MIOPEN_MANAGE_PTR(hipEvent_t, hipEventDestroy);
 inline HipEventPtr make_hip_event()
 {
     hipEvent_t result = nullptr;
-    hipEventCreate(&result);
+
+    const auto status = hipEventCreate(&result);
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status, "hipEventCreate failed");
+
     return HipEventPtr{result};
 }
 

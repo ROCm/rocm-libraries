@@ -102,7 +102,7 @@ set(__clang_cxx_compile_options
     -Wno-documentation
     -Wno-deprecated-builtins
     -Wno-enum-constexpr-conversion
-    -Wno-unused-value
+    -Wunused-value
     -Wno-unused-parameter
     -Wno-missing-noreturn
     -Wno-tautological-constant-out-of-range-compare
