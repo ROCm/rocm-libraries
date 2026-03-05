@@ -23,11 +23,10 @@
 #include "common_test_header.hpp"
 
 // required rocprim headers
-#include <hipcub/config.hpp>
 #include <hipcub/block/block_adjacent_difference.hpp>
 #include <hipcub/block/block_load.hpp>
 #include <hipcub/block/block_store.hpp>
-#include <hipcub/thread/thread_operators.hpp>
+#include <hipcub/config.hpp>
 
 template<
     class T,

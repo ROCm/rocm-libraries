@@ -22,7 +22,6 @@
 
 #include "common_test_header.hpp"
 
-#include <hipcub/thread/thread_operators.hpp>
 #include <hipcub/warp/warp_reduce.hpp>
 #include <type_traits>
 

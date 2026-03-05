@@ -31,7 +31,6 @@
 // HIP API
 #include <hipcub/device/device_reduce.hpp>
 #include <hipcub/device/device_scan.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include _HIPCUB_STD_INCLUDE(functional)
 
@@ -353,7 +352,7 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks = {
-        CREATE_BENCHMARKS(hipcub::Sum),
+        CREATE_BENCHMARKS(benchmark_utils::plus),
         CREATE_BENCHMARKS(benchmark_utils::minimum),
     };
 

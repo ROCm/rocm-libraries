@@ -31,7 +31,6 @@
 
 #include "../../../config.hpp"
 
-#include "../thread/thread_operators.hpp"
 #include "../util_mdspan.hpp"
 
 #include <rocprim/device/device_transform.hpp> // IWYU pragma: export

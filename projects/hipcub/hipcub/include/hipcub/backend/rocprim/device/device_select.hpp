@@ -33,8 +33,6 @@
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
 
-#include "../thread/thread_operators.hpp"
-
 #include <rocprim/device/device_select.hpp> // IWYU pragma: export
 
 #include _HIPCUB_STD_INCLUDE(functional)

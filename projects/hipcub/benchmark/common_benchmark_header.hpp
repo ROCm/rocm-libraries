@@ -42,7 +42,6 @@
 #include <hip/hip_runtime.h>
 
 #include <hipcub/libcxx.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include _HIPCUB_LIBCXX_INCLUDE(cmath)
 #include _HIPCUB_STD_INCLUDE(limits)

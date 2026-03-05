@@ -32,7 +32,7 @@
 
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
-#include "../thread/thread_operators.hpp" // for Equality
+#include "../thread/thread_operators.hpp"
 
 #include <cub/device/device_scan.cuh> // IWYU pragma: export
 

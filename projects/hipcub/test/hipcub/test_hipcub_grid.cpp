@@ -30,7 +30,6 @@
 #include "common_test_header.hpp"
 
 #include <hipcub/block/block_reduce.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include <hipcub/grid/grid_even_share.hpp>
 #include <hipcub/grid/grid_queue.hpp>

@@ -31,7 +31,6 @@
 
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
-#include "../thread/thread_operators.hpp" // for Difference
 
 #include <cub/device/device_adjacent_difference.cuh> // IWYU pragma: export
 
