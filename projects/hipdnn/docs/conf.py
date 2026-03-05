@@ -4,15 +4,38 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-import subprocess
+import re
 
 from rocm_docs import ROCmDocs
 
+'''
+html_theme is usually unchanged (rocm_docs_theme).
+flavor defines the site header display, select the flavor for the corresponding portals
+flavor options: rocm, rocm-docs-home, rocm-blogs, rocm-ds, instinct, ai-developer-hub, local, generic
+'''
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "generic",
+    "header_title": "hipDNN (Beta) 1.0.0",
+    "header_link": "https://rocm.docs.amd.com/projects/hipdnn/en/latest/",
+    "nav_secondary_items": {
+        "GitHub": "https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn",
+        "Community": "https://github.com/ROCm/rocm-libraries/discussions",
+        "Blogs": "https://rocm.blogs.amd.com/",
+        "ROCm Developer Hub": "https://www.amd.com/en/developer/resources/rocm-hub.html",
+        "Instinct™ Docs": "https://instinct.docs.amd.com/",
+        "Infinity Hub": "https://www.amd.com/en/developer/resources/infinity-hub.html",
+        "Support": "https://github.com/ROCm/rocm-libraries/issues/new/choose",
+    },
+    "link_main_doc": False,
+
+}
+
 name = "hipDNN (Beta)"
-version_number = "1.0.0"
+version_number = "0.1.0"
 
 # for PDF output on Read the Docs
-project = f"{name} Documentation"
+project = f"{name}"
 author = "Advanced Micro Devices, Inc."
 copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
@@ -20,7 +43,7 @@ release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 
-docs_core = ROCmDocs(f"{name} {version_number} Documentation")
+docs_core = ROCmDocs(f"{name} {version_number} socumentation")
 docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
 docs_core.setup()
 

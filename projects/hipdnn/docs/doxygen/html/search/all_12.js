@@ -53,5 +53,5 @@ var searchData=
   ['tt_20fusedbninfdrelubnbwd_20tt_20a_50',['&lt;a href=&quot;./batchnorm/FusedBnInfDReluBnBwd.cpp&quot; &gt;**&lt;tt&gt;FusedBnInfDReluBnBwd&lt;/tt&gt;**&lt;/a&gt;',['../md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README.html#autotoc_md7',1,'']]],
   ['tt_20fusedconvfpropactiv_20tt_20a_51',['&lt;a href=&quot;./convolution/FusedConvFpropActiv.cpp&quot; &gt;**&lt;tt&gt;FusedConvFpropActiv&lt;/tt&gt;**&lt;/a&gt;',['../md__2home_2matwilli_2rocm-libraries_2projects_2hipdnn_2samples_2README.html#autotoc_md11',1,'']]],
   ['types_2ehpp_52',['Types.hpp',['../Types_8hpp.html',1,'']]],
-  ['typical_20workflow_53',['Typical Workflow',['../frontend_2include_2hipdnn__frontend_2Graph_8hpp.html#graph_workflow',1,'']]]
+  ['typical_20workflow_53',['Typical Workflow',['../Graph_8hpp.html#graph_workflow',1,'']]]
 ];

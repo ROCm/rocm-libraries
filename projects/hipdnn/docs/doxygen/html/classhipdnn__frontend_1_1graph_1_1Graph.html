@@ -84,7 +84,7 @@ $(function() {
 <p>The main class for building and executing hipDNN computational graphs.  
  <a href="classhipdnn__frontend_1_1graph_1_1Graph.html#details">More...</a></p>
 
-<p><code>#include &lt;<a class="el" href="frontend_2include_2hipdnn__frontend_2Graph_8hpp_source.html">Graph.hpp</a>&gt;</code></p>
+<p><code>#include &lt;<a class="el" href="frontend__graph_8hpp_source.html">frontend_graph.hpp</a>&gt;</code></p>
 <div class="dynheader">
 Inheritance diagram for hipdnn_frontend::graph::Graph:</div>
 <div class="dyncontent">
@@ -2065,7 +2065,7 @@ Additional Inherited Members</h2></td></tr>
 <div class="line">             .set_stride({50176, 784, 28, 1})</div>
 <div class="line">             .set_data_type(<a class="code hl_enumvalue" href="namespacehipdnn__frontend.html#a0499cc891957b0c5c0bda1ff07cb7beca87e955627b59c274ec4cbdd3a130f9bb">DataType::HALF</a>)</div>
 <div class="line">             .set_uid(0));</div>
-<div class="ttc" id="aclasshipdnn__frontend_1_1graph_1_1Graph_html_a43a2785c764c003010b456b59bffac8f"><div class="ttname"><a href="classhipdnn__frontend_1_1graph_1_1Graph.html#a43a2785c764c003010b456b59bffac8f">hipdnn_frontend::graph::Graph::tensor</a></div><div class="ttdeci">static std::shared_ptr&lt; TensorAttributes &gt; tensor(const TensorAttributes &amp;tensor)</div><div class="ttdoc">Create a new tensor from existing tensor attributes.</div><div class="ttdef"><b>Definition</b> Graph.hpp:1850</div></div>
+<div class="ttc" id="aclasshipdnn__frontend_1_1graph_1_1Graph_html_a43a2785c764c003010b456b59bffac8f"><div class="ttname"><a href="classhipdnn__frontend_1_1graph_1_1Graph.html#a43a2785c764c003010b456b59bffac8f">hipdnn_frontend::graph::Graph::tensor</a></div><div class="ttdeci">static std::shared_ptr&lt; TensorAttributes &gt; tensor(const TensorAttributes &amp;tensor)</div><div class="ttdoc">Create a new tensor from existing tensor attributes.</div><div class="ttdef"><b>Definition</b> frontend_graph.hpp:1850</div></div>
 <div class="ttc" id="aclasshipdnn__frontend_1_1graph_1_1TensorAttributes_html"><div class="ttname"><a href="classhipdnn__frontend_1_1graph_1_1TensorAttributes.html">hipdnn_frontend::graph::TensorAttributes</a></div><div class="ttdoc">Describes the properties and configuration of a tensor.</div><div class="ttdef"><b>Definition</b> TensorAttributes.hpp:60</div></div>
 <div class="ttc" id="anamespacehipdnn__frontend_html_a0499cc891957b0c5c0bda1ff07cb7beca87e955627b59c274ec4cbdd3a130f9bb"><div class="ttname"><a href="namespacehipdnn__frontend.html#a0499cc891957b0c5c0bda1ff07cb7beca87e955627b59c274ec4cbdd3a130f9bb">hipdnn_frontend::DataType::HALF</a></div><div class="ttdeci">@ HALF</div><div class="ttdoc">16-bit floating point (fp16, IEEE 754)</div></div>
 </div><!-- fragment --><dl class="section see"><dt>See also</dt><dd><a class="el" href="classhipdnn__frontend_1_1graph_1_1Graph.html#af1db8fac05e3d7749b6949f7dcd5eadf" title="Create a new tensor with similar properties to an existing tensor.">tensor_like()</a> for creating a <a class="el" href="classhipdnn__frontend_1_1graph_1_1Graph.html#a43a2785c764c003010b456b59bffac8f" title="Create a new tensor from existing tensor attributes.">tensor</a> with cleared UID and custom name </dd></dl>
@@ -2119,7 +2119,7 @@ Additional Inherited Members</h2></td></tr>
 <div class="fragment"><div class="line"><span class="comment">// Create a tensor similar to x but with a different UID</span></div>
 <div class="line"><span class="keyword">auto</span> y = <a class="code hl_function" href="classhipdnn__frontend_1_1graph_1_1Graph.html#af1db8fac05e3d7749b6949f7dcd5eadf">Graph::tensor_like</a>(x, <span class="stringliteral">&quot;output&quot;</span>);</div>
 <div class="line">y-&gt;set_uid(2);</div>
-<div class="ttc" id="aclasshipdnn__frontend_1_1graph_1_1Graph_html_af1db8fac05e3d7749b6949f7dcd5eadf"><div class="ttname"><a href="classhipdnn__frontend_1_1graph_1_1Graph.html#af1db8fac05e3d7749b6949f7dcd5eadf">hipdnn_frontend::graph::Graph::tensor_like</a></div><div class="ttdeci">static std::shared_ptr&lt; TensorAttributes &gt; tensor_like(const std::shared_ptr&lt; TensorAttributes &gt; &amp;tensor, const std::string &amp;name=&quot;&quot;)</div><div class="ttdoc">Create a new tensor with similar properties to an existing tensor.</div><div class="ttdef"><b>Definition</b> Graph.hpp:1819</div></div>
+<div class="ttc" id="aclasshipdnn__frontend_1_1graph_1_1Graph_html_af1db8fac05e3d7749b6949f7dcd5eadf"><div class="ttname"><a href="classhipdnn__frontend_1_1graph_1_1Graph.html#af1db8fac05e3d7749b6949f7dcd5eadf">hipdnn_frontend::graph::Graph::tensor_like</a></div><div class="ttdeci">static std::shared_ptr&lt; TensorAttributes &gt; tensor_like(const std::shared_ptr&lt; TensorAttributes &gt; &amp;tensor, const std::string &amp;name=&quot;&quot;)</div><div class="ttdoc">Create a new tensor with similar properties to an existing tensor.</div><div class="ttdef"><b>Definition</b> frontend_graph.hpp:1819</div></div>
 </div><!-- fragment --><dl class="section see"><dt>See also</dt><dd><a class="el" href="classhipdnn__frontend_1_1graph_1_1Graph.html#a43a2785c764c003010b456b59bffac8f" title="Create a new tensor from existing tensor attributes.">tensor()</a> for creating a <a class="el" href="classhipdnn__frontend_1_1graph_1_1Graph.html#a43a2785c764c003010b456b59bffac8f" title="Create a new tensor from existing tensor attributes.">tensor</a> with all properties preserved </dd></dl>
 
 </div>
@@ -2289,7 +2289,7 @@ Additional Inherited Members</h2></td></tr>
 </div>
 </div>
 <hr/>The documentation for this class was generated from the following file:<ul>
-<li>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/<a class="el" href="frontend_2include_2hipdnn__frontend_2Graph_8hpp_source.html">Graph.hpp</a></li>
+<li>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/<a class="el" href="frontend__graph_8hpp_source.html">frontend_graph.hpp</a></li>
 </ul>
 </div><!-- contents -->
 <!-- start footer part -->

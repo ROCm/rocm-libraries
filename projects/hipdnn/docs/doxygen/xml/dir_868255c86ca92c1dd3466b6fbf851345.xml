@@ -7,7 +7,7 @@
     <innerdir refid="dir_4f96cbf74334c95ca4185f25bf5ca526">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob</innerdir>
     <innerdir refid="dir_e150018ec2dc0b06885a1a3be39fac5e">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node</innerdir>
     <innerfile refid="Error_8hpp">Error.hpp</innerfile>
-    <innerfile refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp">Graph.hpp</innerfile>
+    <innerfile refid="frontend__graph_8hpp">frontend_graph.hpp</innerfile>
     <innerfile refid="Handle_8hpp">Handle.hpp</innerfile>
     <innerfile refid="Logging_8hpp">Logging.hpp</innerfile>
     <innerfile refid="Types_8hpp">Types.hpp</innerfile>

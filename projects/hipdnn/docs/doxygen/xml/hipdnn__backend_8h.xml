@@ -13,9 +13,9 @@
     <includes refid="HipdnnBackendPluginLoadingMode_8h" local="yes">HipdnnBackendPluginLoadingMode.h</includes>
     <includes refid="HipdnnBackendPluginUnloadingMode_8h" local="yes">HipdnnBackendPluginUnloadingMode.h</includes>
     <includes refid="HipdnnStatus_8h" local="yes">HipdnnStatus.h</includes>
-    <includedby refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</includedby>
     <includedby refid="Utilities_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp</includedby>
     <includedby refid="HipdnnBackendInterface_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/HipdnnBackendInterface.hpp</includedby>
+    <includedby refid="frontend__graph_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp</includedby>
     <includedby refid="Helpers_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</includedby>
     <incdepgraph>
       <node id="4">
@@ -93,18 +93,16 @@
         <link refid="hipdnn__backend_8h"/>
         <childnode refid="2" relation="include">
         </childnode>
-        <childnode refid="15" relation="include">
-        </childnode>
         <childnode refid="29" relation="include">
         </childnode>
-        <childnode refid="14" relation="include">
+        <childnode refid="17" relation="include">
+        </childnode>
+        <childnode refid="15" relation="include">
         </childnode>
       </node>
-      <node id="3">
+      <node id="4">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend.hpp</label>
         <link refid="hipdnn__frontend_8hpp"/>
-        <childnode refid="4" relation="include">
-        </childnode>
         <childnode refid="5" relation="include">
         </childnode>
         <childnode refid="6" relation="include">
@@ -125,23 +123,19 @@
         </childnode>
         <childnode refid="14" relation="include">
         </childnode>
-      </node>
-      <node id="2">
-        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
-        <childnode refid="3" relation="include">
+        <childnode refid="15" relation="include">
         </childnode>
       </node>
-      <node id="16">
+      <node id="3">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp</label>
         <link refid="Handle_8hpp"/>
-        <childnode refid="3" relation="include">
+        <childnode refid="4" relation="include">
         </childnode>
       </node>
-      <node id="15">
+      <node id="2">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp</label>
         <link refid="Utilities_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="3" relation="include">
         </childnode>
         <childnode refid="16" relation="include">
         </childnode>
@@ -173,7 +167,7 @@
       <node id="30">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/BackendWrapper.hpp</label>
         <link refid="BackendWrapper_8hpp"/>
-        <childnode refid="17" relation="include">
+        <childnode refid="16" relation="include">
         </childnode>
       </node>
       <node id="29">
@@ -182,14 +176,18 @@
         <childnode refid="30" relation="include">
         </childnode>
       </node>
-      <node id="17">
+      <node id="16">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
         <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+      <node id="17">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp</label>
+        <link refid="frontend__graph_8hpp"/>
       </node>
       <node id="18">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>
         <link refid="Knob_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="19">
@@ -201,100 +199,98 @@
       <node id="20">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
         <link refid="BatchnormBackwardNode_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="21">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNode.hpp</label>
         <link refid="BatchnormInferenceNode_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="22">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp</label>
         <link refid="BatchnormInferenceNodeVarianceExt_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="23">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormNode.hpp</label>
         <link refid="BatchnormNode_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="24">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
         <link refid="ConvolutionDgradNode_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="25">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionFpropNode.hpp</label>
         <link refid="ConvolutionFpropNode_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="26">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionWgradNode.hpp</label>
         <link refid="ConvolutionWgradNode_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="27">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/PointwiseNode.hpp</label>
         <link refid="PointwiseNode_8hpp"/>
-        <childnode refid="2" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
       </node>
       <node id="28">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/TopologicalSortingUtils.hpp</label>
         <link refid="TopologicalSortingUtils_8hpp"/>
       </node>
-      <node id="4">
+      <node id="5">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</label>
         <link refid="BnBackward_8cpp"/>
       </node>
-      <node id="5">
+      <node id="6">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnInference.cpp</label>
         <link refid="BnInference_8cpp"/>
       </node>
-      <node id="6">
+      <node id="7">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnTraining.cpp</label>
         <link refid="BnTraining_8cpp"/>
       </node>
-      <node id="7">
+      <node id="8">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnInfDReluBnBwd.cpp</label>
         <link refid="FusedBnInfDReluBnBwd_8cpp"/>
       </node>
-      <node id="8">
+      <node id="9">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/FusedBnTrainingActiv.cpp</label>
         <link refid="FusedBnTrainingActiv_8cpp"/>
       </node>
-      <node id="9">
+      <node id="10">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvDgrad.cpp</label>
         <link refid="ConvDgrad_8cpp"/>
       </node>
-      <node id="10">
+      <node id="11">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvFprop.cpp</label>
         <link refid="ConvFprop_8cpp"/>
       </node>
-      <node id="11">
+      <node id="12">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/ConvWgrad.cpp</label>
         <link refid="ConvWgrad_8cpp"/>
       </node>
-      <node id="12">
+      <node id="13">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropActiv.cpp</label>
         <link refid="FusedConvFpropActiv_8cpp"/>
       </node>
-      <node id="13">
+      <node id="14">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</label>
         <link refid="FusedConvFpropBiasActiv_8cpp"/>
       </node>
-      <node id="14">
+      <node id="15">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</label>
         <link refid="Helpers_8hpp"/>
-        <childnode refid="4" relation="include">
-        </childnode>
         <childnode refid="5" relation="include">
         </childnode>
         <childnode refid="6" relation="include">
@@ -312,6 +308,8 @@
         <childnode refid="12" relation="include">
         </childnode>
         <childnode refid="13" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
         </childnode>
       </node>
     </invincdepgraph>

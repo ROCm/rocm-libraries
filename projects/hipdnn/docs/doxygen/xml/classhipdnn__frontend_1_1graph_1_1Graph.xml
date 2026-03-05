@@ -3,7 +3,7 @@
   <compounddef id="classhipdnn__frontend_1_1graph_1_1Graph" kind="class" language="C++" prot="public">
     <compoundname>hipdnn_frontend::graph::Graph</compoundname>
     <basecompoundref refid="classhipdnn__frontend_1_1graph_1_1INode" prot="public" virt="non-virtual">hipdnn_frontend::graph::INode</basecompoundref>
-    <includes refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">Graph.hpp</includes>
+    <includes refid="frontend__graph_8hpp" local="no">frontend_graph.hpp</includes>
     <sectiondef kind="private-attrib">
       <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0b7fbfe6ef429497effb626a8756e840" prot="private" static="no" mutable="no">
         <type>std::unique_ptr&lt; detail::ScopedHipdnnBackendDescriptor &gt;</type>
@@ -17,7 +17,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="120" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="120" bodyend="-1"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="120" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="120" bodyend="-1"/>
       </memberdef>
       <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab579229fcd20e59d982fb1a81d48ab38" prot="private" static="no" mutable="no">
         <type>std::unique_ptr&lt; detail::ScopedHipdnnBackendDescriptor &gt;</type>
@@ -31,7 +31,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="121" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="121" bodyend="-1"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="121" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="121" bodyend="-1"/>
       </memberdef>
       <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Graph_1af205b763205a79ae75c2eb0eda236882" prot="private" static="no" mutable="no">
         <type>std::unique_ptr&lt; detail::ScopedHipdnnBackendDescriptor &gt;</type>
@@ -45,7 +45,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="122" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="122" bodyend="-1"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="122" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="122" bodyend="-1"/>
       </memberdef>
       <memberdef kind="variable" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae2af81621c5463b711c276a2b8e93909" prot="private" static="no" mutable="no">
         <type>std::optional&lt; int64_t &gt;</type>
@@ -59,7 +59,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="124" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="124" bodyend="-1"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="124" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="124" bodyend="-1"/>
       </memberdef>
     </sectiondef>
     <sectiondef kind="private-static-func">
@@ -75,7 +75,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="126" column="26" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="126" bodyend="141"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="126" column="26" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="126" bodyend="141"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a207efaf48993bbcc9436ee2f6b466452" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -93,7 +93,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="151" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="151" bodyend="156"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="151" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="151" bodyend="156"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a52c4ab4333630302ad46fc1ed0513291" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::unordered_set&lt; int64_t &gt;</type>
@@ -111,7 +111,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="300" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="300" bodyend="311"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="300" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="300" bodyend="311"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a195f28eb0e60b09a818efcbb23433bce" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>int64_t</type>
@@ -133,7 +133,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="313" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="313" bodyend="322"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="313" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="313" bodyend="322"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab23089c246e20947cf11a4793d5ea896" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>void</type>
@@ -155,7 +155,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="324" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="324" bodyend="342"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="324" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="324" bodyend="342"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a70ba163814ed2b93a6c1928465be3622" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -173,7 +173,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="344" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="344" bodyend="371"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="344" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="344" bodyend="371"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a236ba5f7feaedd607941e58954333b15" prot="private" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -191,7 +191,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="373" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="373" bodyend="403"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="373" column="18" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="373" bodyend="403"/>
       </memberdef>
     </sectiondef>
     <sectiondef kind="private-func">
@@ -207,7 +207,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="143" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="143" bodyend="149"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="143" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="143" bodyend="149"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1af5885e03491a2f285685fa56d1d9d12f" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -225,7 +225,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="158" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="158" bodyend="216"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="158" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="158" bodyend="216"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a02d9f2a3579af574e962f351cf3eb0db" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -255,7 +255,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="222" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="222" bodyend="242"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="222" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="222" bodyend="242"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a7017e97cc8517bbaa515db4bbb190dae" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type>detail::GraphStructure</type>
@@ -273,7 +273,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="244" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="244" bodyend="267"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="244" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="244" bodyend="267"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a36c06bf5a65828a4cb362edf8273cc74" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type>std::unordered_map&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;, size_t &gt;</type>
@@ -287,7 +287,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="269" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="269" bodyend="284"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="269" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="269" bodyend="284"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a299d72a3ba989a78df6f9c290c77ca43" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>void</type>
@@ -305,7 +305,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="286" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="286" bodyend="297"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="286" column="10" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="286" bodyend="297"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae9a3ce41d84ec034578be9d39612471c" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type>std::pair&lt; std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;, std::unordered_set&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt; &gt;</type>
@@ -319,7 +319,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="407" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="407" bodyend="428"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="407" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="407" bodyend="428"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a6803a1e01627a2d85b3f2bb0f50af893" prot="private" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type>flatbuffers::DetachedBuffer</type>
@@ -333,7 +333,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="430" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="430" bodyend="467"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="430" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="430" bodyend="467"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab4cea4c928237dc8c67956a474096446" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -351,7 +351,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="469" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="469" bodyend="624"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="469" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="469" bodyend="624"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a2ea63953b586d5478da64f0f6ed8dc6d" prot="private" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -369,7 +369,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="627" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="627" bodyend="637"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="627" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="627" bodyend="637"/>
       </memberdef>
     </sectiondef>
     <sectiondef kind="public-func">
@@ -386,7 +386,7 @@
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="644" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="644" bodyend="648"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="644" column="5" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="644" bodyend="648"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a194507ac8529fded4c3605df4b92f345" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -410,7 +410,7 @@ Validates that:<itemizedlist>
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="660" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="660" bodyend="682"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="660" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="660" bodyend="682"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aa6451c50d3def1073e1dcf590d2de0c7" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -424,7 +424,7 @@ Validates that:<itemizedlist>
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="684" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="684" bodyend="690"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="684" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="684" bodyend="690"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a6e7da48e88e0b1240b3a19c8973dade8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -439,7 +439,7 @@ Validates that:<itemizedlist>
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="694" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="694" bodyend="700"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="694" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="694" bodyend="700"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1adb3a21e87f07dd38b4bf3fbc4a0ffff1" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type>std::unordered_map&lt; int64_t, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
@@ -456,7 +456,7 @@ Validates that:<itemizedlist>
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="705" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="705" bodyend="721"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="705" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="705" bodyend="721"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab50df0a8755717cea0216fd87c965008" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type>std::unordered_map&lt; std::string, std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt; &gt;</type>
@@ -473,7 +473,7 @@ Validates that:<itemizedlist>
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="726" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="726" bodyend="742"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="726" column="24" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="726" bodyend="742"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ad33b5c23a6f7c6c32e4b431a540d29bd" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -487,7 +487,7 @@ Validates that:<itemizedlist>
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="744" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="744" bodyend="773"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="744" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="744" bodyend="773"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0cc5646c43045e90b1a1171c3e494e5f" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>flatbuffers::DetachedBuffer</type>
@@ -501,7 +501,7 @@ Validates that:<itemizedlist>
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="775" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="775" bodyend="780"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="775" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="775" bodyend="780"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a69540a5c9d7cd4120f622bc0734f6acc" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -532,7 +532,7 @@ This is typically called internally by <ref refid="classhipdnn__frontend_1_1grap
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="790" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="790" bodyend="817"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="790" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="790" bodyend="817"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac0c194feadee590aa3a67d35a4435a55" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -577,7 +577,7 @@ This is typically called internally by <ref refid="classhipdnn__frontend_1_1grap
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="828" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="828" bodyend="845"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="828" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="828" bodyend="845"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a019ad6c23ead1a0ece0fbeff746674c8" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -599,7 +599,7 @@ This is typically called internally by <ref refid="classhipdnn__frontend_1_1grap
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="848" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="848" bodyend="860"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="848" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="848" bodyend="860"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aefb4b99190d3776fd75d5ea455fb5c6d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -643,7 +643,7 @@ This is typically called internally by <ref refid="classhipdnn__frontend_1_1grap
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="869" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="869" bodyend="881"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="869" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="869" bodyend="881"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a1cf5c8da156a2d55738eb612aebc030d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -675,7 +675,7 @@ Creates execution plans by querying the backend for available engines and select
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="892" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="892" bodyend="920"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="892" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="892" bodyend="920"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a94b04cc1dcc1fd90fafd0dfb0a47b1c9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -721,7 +721,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="934" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="934" bodyend="1023"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="934" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="934" bodyend="1023"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a1fdbfd3ceaa56c6e81d450c01df057b2" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -735,7 +735,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1025" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1025" bodyend="1037"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1025" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1025" bodyend="1037"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1abeebf34d4b5918dc57448ec9794df180" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -754,7 +754,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1041" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1041" bodyend="1046"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1041" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1041" bodyend="1046"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0945c7cc33ff100496c406a98688e56b" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>flatbuffers::DetachedBuffer</type>
@@ -769,7 +769,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1050" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1050" bodyend="1054"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1050" column="33" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1050" bodyend="1054"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a3191cc363d3fdda39005836e7577f3db" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -788,7 +788,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1057" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1057" bodyend="1073"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1057" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1057" bodyend="1073"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1af9438cc2f144815eb525e79a60a1d65d" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -807,7 +807,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1076" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1076" bodyend="1080"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1076" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1076" bodyend="1080"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a591cf37a983e8a17f9078035820d91b2" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -826,7 +826,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1084" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1084" bodyend="1087"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1084" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1084" bodyend="1087"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a2baaf08f28555a64b1ebd08f3a46651a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -845,7 +845,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1090" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1090" bodyend="1093"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1090" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1090" bodyend="1093"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac9703ececeadb6c02482edf690bf5cfe" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -864,7 +864,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1096" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1096" bodyend="1099"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1096" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1096" bodyend="1099"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae2440994aea7c4aa8a8f4671f73cacd1" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -883,7 +883,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1103" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1103" bodyend="1109"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1103" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1103" bodyend="1109"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a7695482b19ef02b7c4d55d60dce2c494" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::vector&lt; uint8_t &gt;</type>
@@ -898,7 +898,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1113" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1113" bodyend="1118"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1113" column="17" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1113" bodyend="1118"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aafcb1412361c33708809efa525bcd85a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -921,7 +921,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1121" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1121" bodyend="1125"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1121" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1121" bodyend="1125"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aa7cd3b8456acd58f62b7dbac125d45d2" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -941,7 +941,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1135" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1135" bodyend="1145"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1135" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1135" bodyend="1145"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1aaa2cdbd15ead9796e35f3ffaad65c2a6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>nlohmann::json</type>
@@ -956,7 +956,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1149" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1149" bodyend="1156"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1149" column="20" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1149" bodyend="1156"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a06fa0fc056d4194f87182fe0b2318d3a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -975,7 +975,7 @@ This method allows fine-grained control over engine selection and configuration 
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1159" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1159" bodyend="1180"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1159" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1159" bodyend="1180"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0b59602678812f5587472768a2602b90" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -993,7 +993,7 @@ Called internally by <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1189" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1189" bodyend="1206"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1189" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1189" bodyend="1206"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876fac245b98150d5467f6a9c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -1074,7 +1074,7 @@ This is the main method to prepare a graph for execution. It performs:<orderedli
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1230" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1230" bodyend="1250"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1230" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1230" bodyend="1250"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a135440c5353fb4c0a6352b9c904e32b6" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -1105,7 +1105,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1260" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1260" bodyend="1272"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1260" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1260" bodyend="1272"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a8185b8809f07f29d292197938938af49" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -1165,7 +1165,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1289" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1289" bodyend="1308"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1289" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1289" bodyend="1308"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a1cd777a6e355ed42bbf3c269e075745e" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="structhipdnn__frontend_1_1Error" kindref="compound">Error</ref></type>
@@ -1226,7 +1226,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1326" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1326" bodyend="1384"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1326" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1326" bodyend="1384"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ade399645bdf2719f4e53d7a643295555" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type>const std::string &amp;</type>
@@ -1240,7 +1240,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1386" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1386" bodyend="1389"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1386" column="23" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1386" bodyend="1389"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac7fc31ba9ecbb443ec4c02e7273fe5fd" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
@@ -1254,7 +1254,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1391" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1391" bodyend="1394"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1391" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1391" bodyend="1394"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae0eee428f2f092002f70149bd7536335" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
@@ -1268,7 +1268,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1395" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1395" bodyend="1398"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1395" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1395" bodyend="1398"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a5a8483f53e470f580335e38fb3fe73f2" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="namespacehipdnn__frontend_1a0499cc891957b0c5c0bda1ff07cb7bec" kindref="member">DataType</ref></type>
@@ -1282,7 +1282,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1399" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1399" bodyend="1402"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1399" column="14" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1399" bodyend="1402"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1afe276c96a52851d4a03574df09c01e80" prot="public" static="no" const="yes" explicit="no" inline="yes" virt="non-virtual">
         <type>std::optional&lt; int64_t &gt;</type>
@@ -1296,7 +1296,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1405" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1405" bodyend="1409"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1405" column="19" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1405" bodyend="1409"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a2d633fef077697c10fb8601ac0c08efb" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
@@ -1314,7 +1314,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1412" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1412" bodyend="1416"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1412" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1412" bodyend="1416"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac1c880e39d3a30e16ea9498f54e890e5" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
@@ -1332,7 +1332,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1417" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1417" bodyend="1421"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1417" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1417" bodyend="1421"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1acdf46d97b6a4fabe2a9b951662f6e489" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
@@ -1350,7 +1350,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1423" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1423" bodyend="1427"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1423" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1423" bodyend="1427"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a779e5b15446c7eed507ded141281a8a9" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
@@ -1368,7 +1368,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1428" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1428" bodyend="1432"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1428" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1428" bodyend="1432"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a53b90f93b423b437e5fb2930c9552d3a" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::array&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;, 5 &gt;</type>
@@ -1398,7 +1398,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1435" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1435" bodyend="1474"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1435" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1435" bodyend="1474"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a081126ff1a5611bc9b5e171fd2bcd746" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::array&lt; std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;, 3 &gt;</type>
@@ -1428,7 +1428,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1477" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1477" bodyend="1502"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1477" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1477" bodyend="1502"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1adfa2b22fd6304c33e3e55aafc54484f3" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1466,7 +1466,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1505" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1505" bodyend="1530"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1505" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1505" bodyend="1530"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a0146db8d659518a0c8e282ae5a328f07" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1508,7 +1508,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1533" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1533" bodyend="1561"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1533" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1533" bodyend="1561"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ac42175d3f70a59e48eda3ce0f82d31c7" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1530,7 +1530,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1563" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1563" bodyend="1584"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1563" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1563" bodyend="1584"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1afb8e47cc282318abcb6eaf54f969d433" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1556,7 +1556,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1586" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1586" bodyend="1613"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1586" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1586" bodyend="1613"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a860fb9f516dc309a276a57510f185813" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1586,7 +1586,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1615" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1615" bodyend="1648"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1615" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1615" bodyend="1648"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1af2d1c9e476330a0b02e57e21b1100d42" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1612,7 +1612,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1650" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1650" bodyend="1677"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1650" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1650" bodyend="1677"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ab3d9547d6b1e6d3318275825b200acba" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1638,7 +1638,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1680" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1680" bodyend="1708"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1680" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1680" bodyend="1708"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ad618ae897d2130313ecb423c04a3edc1" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1664,7 +1664,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1711" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1711" bodyend="1739"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1711" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1711" bodyend="1739"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a4e849e0638bd68c3bd6013f7f01710d6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1690,7 +1690,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1742" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1742" bodyend="1770"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1742" column="21" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1742" bodyend="1770"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1ae435a3046e88e5dbf6b58c19c43d5b7c" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
@@ -1708,7 +1708,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1773" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1773" bodyend="1778"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1773" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1773" bodyend="1778"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a45a6648108862ac2352b4d49e9bdd9e6" prot="public" static="no" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type><ref refid="classhipdnn__frontend_1_1graph_1_1Graph" kindref="compound">Graph</ref> &amp;</type>
@@ -1726,7 +1726,7 @@ Call this after <ref refid="classhipdnn__frontend_1_1graph_1_1Graph_1a431fd4c876
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1781" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1781" bodyend="1796"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1781" column="11" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1781" bodyend="1796"/>
       </memberdef>
     </sectiondef>
     <sectiondef kind="public-static-func">
@@ -1779,7 +1779,7 @@ Creates a new <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" ki
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1819" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1819" bodyend="1828"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1819" column="9" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1819" bodyend="1828"/>
       </memberdef>
       <memberdef kind="function" id="classhipdnn__frontend_1_1graph_1_1Graph_1a43a2785c764c003010b456b59bffac8f" prot="public" static="yes" const="no" explicit="no" inline="yes" virt="non-virtual">
         <type>std::shared_ptr&lt; <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" kindref="compound">TensorAttributes</ref> &gt;</type>
@@ -1820,7 +1820,7 @@ Creates a new <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" ki
         </detaileddescription>
         <inbodydescription>
         </inbodydescription>
-        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="1850" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="1850" bodyend="1855"/>
+        <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="1850" column="28" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="1850" bodyend="1855"/>
       </memberdef>
     </sectiondef>
     <briefdescription>
@@ -1870,7 +1870,7 @@ Creates a new <ref refid="classhipdnn__frontend_1_1graph_1_1TensorAttributes" ki
         </childnode>
       </node>
     </collaborationgraph>
-    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" line="117" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp" bodystart="118" bodyend="1856"/>
+    <location file="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" line="117" column="1" bodyfile="/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp" bodystart="118" bodyend="1856"/>
     <listofallmembers>
       <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1ab579229fcd20e59d982fb1a81d48ab38" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>_engineConfigDesc</name></member>
       <member refid="classhipdnn__frontend_1_1graph_1_1Graph_1af205b763205a79ae75c2eb0eda236882" prot="private" virt="non-virtual"><scope>hipdnn_frontend::graph::Graph</scope><name>_executionPlanDesc</name></member>

@@ -86,12 +86,6 @@
         <childnode refid="35" relation="include">
         </childnode>
       </node>
-      <node id="19">
-        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
-        <childnode refid="3" relation="include">
-        </childnode>
-      </node>
       <node id="16">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp</label>
         <link refid="Handle_8hpp"/>
@@ -125,11 +119,11 @@
       <node id="37">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Utilities.hpp</label>
         <link refid="Utilities_8hpp"/>
-        <childnode refid="19" relation="include">
-        </childnode>
         <childnode refid="16" relation="include">
         </childnode>
         <childnode refid="38" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
         </childnode>
         <childnode refid="39" relation="include">
         </childnode>
@@ -233,11 +227,11 @@
       <node id="43">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/GraphAttributes.hpp</label>
         <link refid="GraphAttributes_8hpp"/>
-        <childnode refid="19" relation="include">
-        </childnode>
         <childnode refid="17" relation="include">
         </childnode>
         <childnode refid="36" relation="include">
+        </childnode>
+        <childnode refid="19" relation="include">
         </childnode>
         <childnode refid="22" relation="include">
         </childnode>
@@ -303,6 +297,10 @@
       <node id="38">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
         <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+      <node id="19">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp</label>
+        <link refid="frontend__graph_8hpp"/>
       </node>
       <node id="39">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>

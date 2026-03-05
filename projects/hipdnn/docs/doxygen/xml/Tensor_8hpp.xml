@@ -363,12 +363,6 @@
         </childnode>
       </node>
       <node id="5">
-        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
-        <childnode refid="6" relation="include">
-        </childnode>
-      </node>
-      <node id="18">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/Handle.hpp</label>
         <link refid="Handle_8hpp"/>
         <childnode refid="6" relation="include">
@@ -406,14 +400,18 @@
         <childnode refid="30" relation="include">
         </childnode>
       </node>
-      <node id="19">
+      <node id="18">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/backend/ScopedHipdnnBackendDescriptor.hpp</label>
         <link refid="ScopedHipdnnBackendDescriptor_8hpp"/>
+      </node>
+      <node id="19">
+        <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/frontend_graph.hpp</label>
+        <link refid="frontend__graph_8hpp"/>
       </node>
       <node id="20">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/knob/Knob.hpp</label>
         <link refid="Knob_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="21">
@@ -425,49 +423,49 @@
       <node id="22">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
         <link refid="BatchnormBackwardNode_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="23">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNode.hpp</label>
         <link refid="BatchnormInferenceNode_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="24">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp</label>
         <link refid="BatchnormInferenceNodeVarianceExt_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="25">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/BatchnormNode.hpp</label>
         <link refid="BatchnormNode_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="26">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
         <link refid="ConvolutionDgradNode_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="27">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionFpropNode.hpp</label>
         <link refid="ConvolutionFpropNode_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="28">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/ConvolutionWgradNode.hpp</label>
         <link refid="ConvolutionWgradNode_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="29">
         <label>/home/matwilli/rocm-libraries/projects/hipdnn/frontend/include/hipdnn_frontend/node/PointwiseNode.hpp</label>
         <link refid="PointwiseNode_8hpp"/>
-        <childnode refid="5" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
       </node>
       <node id="30">

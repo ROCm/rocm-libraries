@@ -10,7 +10,7 @@
     <innerfile refid="ConvolutionBwdAttributes_8hpp">ConvolutionBwdAttributes.hpp</innerfile>
     <innerfile refid="ConvolutionFwdAttributes_8hpp">ConvolutionFwdAttributes.hpp</innerfile>
     <innerfile refid="ConvolutionWrwAttributes_8hpp">ConvolutionWrwAttributes.hpp</innerfile>
-    <innerfile refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2Graph_8hpp">Graph.hpp</innerfile>
+    <innerfile refid="Graph_8hpp">Graph.hpp</innerfile>
     <innerfile refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2PointwiseAttributes_8hpp">PointwiseAttributes.hpp</innerfile>
     <innerfile refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2TensorAttributes_8hpp">TensorAttributes.hpp</innerfile>
     <briefdescription>

@@ -71,9 +71,45 @@ subtrees:
     subtrees:
     - entries:
       - file: reference/frontend-api/frontend-api.rst
-        title: Frontend C++ API 
+        title: Frontend C++
+        subtrees:
+        - entries:
+          - file: reference/frontend-api/frontend-graph.rst
+            title: Graph
+          - file: reference/frontend-api/frontend-utilities.rst
+            title: Utilities
+          - file: reference/frontend-api/frontend-types.rst
+            title: Types
+          - file: reference/frontend-api/frontend-handle.rst
+            title: Handle
+          - file: reference/frontend-api/frontend-logging.rst
+            title: Logging
+          - file: reference/frontend-api/frontend-error.rst
+            title: Error
       - file: reference/backend-api/backend-api.rst
-        title: Backend C++ API
+        title: Backend C
+        subtrees:
+        - entries:
+          - file: reference/backend-api/backend-attribute.rst
+            title: Attribute
+          - file: reference/backend-api/backend-attribute-type.rst
+            title: Attribute type
+          - file: reference/backend-api/backend-callback-type.rst
+            title: Callback type
+          - file: reference/backend-api/backend-descriptor-type.rst
+            title: Descriptor type 
+          - file: reference/backend-api/backend-heuristic-type.rst
+            title: Heuristic type
+          - file: reference/backend-api/backend-limits.rst
+            title: Limits
+          - file: reference/backend-api/backend-status.rst
+            title: Status
+          - file: reference/backend-api/backend-flatbuffer.rst
+            title: FlatBuffer data
+          - file: reference/backend-api/backend-plugin-loading.rst
+            title: Plugin loading mode
+          - file: reference/backend-api/backend-plugin-unloading.rst
+            title: Plugin unloading mode
   - file: reference/naming-guidelines.rst
     title: Coding style and naming guidelines
   - file: reference/glossary.rst

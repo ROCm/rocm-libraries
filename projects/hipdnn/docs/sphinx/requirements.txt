@@ -76,7 +76,7 @@ importlib-metadata==8.7.1
     #   myst-nb
 ipykernel==7.2.0
     # via myst-nb
-ipython==9.10.0
+ipython==9.11.0
     # via
     #   ipykernel
     #   myst-nb
@@ -260,7 +260,7 @@ sqlalchemy==2.0.48
     # via jupyter-cache
 stack-data==0.6.3
     # via ipython
-tabulate==0.9.0
+tabulate==0.10.0
     # via jupyter-cache
 tornado==6.5.4
     # via

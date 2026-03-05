@@ -3,7 +3,7 @@
   <compounddef id="hipdnn__frontend_8hpp" kind="file" language="C++">
     <compoundname>hipdnn_frontend.hpp</compoundname>
     <includes refid="Error_8hpp" local="no">hipdnn_frontend/Error.hpp</includes>
-    <includes refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" local="no">hipdnn_frontend/Graph.hpp</includes>
+    <includes local="no">hipdnn_frontend/Graph.hpp</includes>
     <includes refid="Handle_8hpp" local="no">hipdnn_frontend/Handle.hpp</includes>
     <includes refid="Types_8hpp" local="no">hipdnn_frontend/Types.hpp</includes>
     <includedby refid="BnBackward_8cpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/samples/batchnorm/BnBackward.cpp</includedby>
@@ -18,82 +18,78 @@
     <includedby refid="FusedConvFpropBiasActiv_8cpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/samples/convolution/FusedConvFpropBiasActiv.cpp</includedby>
     <includedby refid="Helpers_8hpp" local="no">/home/matwilli/rocm-libraries/projects/hipdnn/samples/utils/Helpers.hpp</includedby>
     <incdepgraph>
-      <node id="23">
+      <node id="32">
         <label>HipdnnBackendAttributeName.h</label>
         <link refid="HipdnnBackendAttributeName_8h"/>
       </node>
-      <node id="24">
+      <node id="33">
         <label>HipdnnBackendAttributeType.h</label>
         <link refid="HipdnnBackendAttributeType_8h"/>
       </node>
-      <node id="25">
+      <node id="34">
         <label>HipdnnBackendCallbackTypes.h</label>
         <link refid="HipdnnBackendCallbackTypes_8h"/>
       </node>
-      <node id="26">
+      <node id="35">
         <label>HipdnnBackendDescriptorType.h</label>
         <link refid="HipdnnBackendDescriptorType_8h"/>
-      </node>
-      <node id="17">
-        <label>HipdnnBackendFlatbufferData.h</label>
-        <link refid="HipdnnBackendFlatbufferData_8h"/>
-        <childnode refid="18" relation="include">
-        </childnode>
-        <childnode refid="19" relation="include">
-        </childnode>
       </node>
       <node id="4">
         <label>HipdnnBackendHeuristicType.h</label>
         <link refid="HipdnnBackendHeuristicType_8h"/>
       </node>
-      <node id="27">
+      <node id="36">
         <label>HipdnnBackendLimits.h</label>
         <link refid="HipdnnBackendLimits_8h"/>
       </node>
-      <node id="28">
+      <node id="37">
         <label>HipdnnBackendPluginLoadingMode.h</label>
         <link refid="HipdnnBackendPluginLoadingMode_8h"/>
       </node>
-      <node id="29">
+      <node id="38">
         <label>HipdnnBackendPluginUnloadingMode.h</label>
         <link refid="HipdnnBackendPluginUnloadingMode_8h"/>
       </node>
-      <node id="30">
+      <node id="39">
         <label>HipdnnStatus.h</label>
         <link refid="HipdnnStatus_8h"/>
       </node>
-      <node id="20">
+      <node id="29">
         <label>hipdnn_backend.h</label>
         <link refid="hipdnn__backend_8h"/>
-        <childnode refid="21" relation="include">
+        <childnode refid="30" relation="include">
         </childnode>
-        <childnode refid="22" relation="include">
+        <childnode refid="31" relation="include">
         </childnode>
-        <childnode refid="23" relation="include">
+        <childnode refid="32" relation="include">
         </childnode>
-        <childnode refid="24" relation="include">
+        <childnode refid="33" relation="include">
         </childnode>
-        <childnode refid="25" relation="include">
+        <childnode refid="34" relation="include">
         </childnode>
-        <childnode refid="26" relation="include">
+        <childnode refid="35" relation="include">
         </childnode>
         <childnode refid="4" relation="include">
         </childnode>
-        <childnode refid="27" relation="include">
+        <childnode refid="36" relation="include">
         </childnode>
-        <childnode refid="28" relation="include">
+        <childnode refid="37" relation="include">
         </childnode>
-        <childnode refid="29" relation="include">
+        <childnode refid="38" relation="include">
         </childnode>
-        <childnode refid="30" relation="include">
+        <childnode refid="39" relation="include">
         </childnode>
       </node>
-      <node id="47">
+      <node id="45">
         <label>CallbackSink.hpp</label>
         <link refid="CallbackSink_8hpp"/>
-        <childnode refid="48" relation="include">
+        <childnode refid="46" relation="include">
         </childnode>
-        <childnode refid="49" relation="include">
+        <childnode refid="47" relation="include">
+        </childnode>
+        <childnode refid="50" relation="include">
+        </childnode>
+        <childnode refid="51" relation="include">
         </childnode>
         <childnode refid="52" relation="include">
         </childnode>
@@ -103,96 +99,78 @@
         </childnode>
         <childnode refid="55" relation="include">
         </childnode>
-        <childnode refid="56" relation="include">
-        </childnode>
-        <childnode refid="57" relation="include">
-        </childnode>
         <childnode refid="14" relation="include">
         </childnode>
       </node>
-      <node id="48">
+      <node id="46">
         <label>CallbackTypes.h</label>
         <link refid="CallbackTypes_8h"/>
       </node>
-      <node id="46">
+      <node id="44">
         <label>hipdnn_data_sdk/logging/Logger.hpp</label>
         <link refid="Logger_8hpp"/>
-        <childnode refid="47" relation="include">
-        </childnode>
-        <childnode refid="48" relation="include">
-        </childnode>
-        <childnode refid="58" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="53" relation="include">
-        </childnode>
-        <childnode refid="54" relation="include">
-        </childnode>
-        <childnode refid="59" relation="include">
-        </childnode>
-        <childnode refid="60" relation="include">
-        </childnode>
-        <childnode refid="61" relation="include">
-        </childnode>
-      </node>
-      <node id="49">
-        <label>LoggingUtils.hpp</label>
-        <link refid="LoggingUtils_8hpp"/>
-        <childnode refid="50" relation="include">
-        </childnode>
-        <childnode refid="51" relation="include">
-        </childnode>
-        <childnode refid="42" relation="include">
-        </childnode>
-        <childnode refid="14" relation="include">
-        </childnode>
-      </node>
-      <node id="62">
-        <label>hipdnn_data_sdk/utilities/Allocators.hpp</label>
-        <link refid="Allocators_8hpp"/>
-        <childnode refid="63" relation="include">
-        </childnode>
-        <childnode refid="45" relation="include">
-        </childnode>
-        <childnode refid="64" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="65" relation="include">
-        </childnode>
-        <childnode refid="40" relation="include">
-        </childnode>
-      </node>
-      <node id="105">
-        <label>hipdnn_data_sdk/utilities/FlatbufferUtils.hpp</label>
-        <link refid="FlatbufferUtils_8hpp"/>
-        <childnode refid="36" relation="include">
-        </childnode>
-        <childnode refid="38" relation="include">
-        </childnode>
-        <childnode refid="66" relation="include">
-        </childnode>
-        <childnode refid="14" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="44">
-        <label>hipdnn_data_sdk/utilities/MigratableMemory.hpp</label>
-        <link refid="MigratableMemory_8hpp"/>
         <childnode refid="45" relation="include">
         </childnode>
         <childnode refid="46" relation="include">
         </childnode>
+        <childnode refid="56" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="51" relation="include">
+        </childnode>
+        <childnode refid="52" relation="include">
+        </childnode>
+        <childnode refid="57" relation="include">
+        </childnode>
+        <childnode refid="58" relation="include">
+        </childnode>
+        <childnode refid="59" relation="include">
+        </childnode>
+      </node>
+      <node id="47">
+        <label>LoggingUtils.hpp</label>
+        <link refid="LoggingUtils_8hpp"/>
+        <childnode refid="48" relation="include">
+        </childnode>
+        <childnode refid="49" relation="include">
+        </childnode>
+        <childnode refid="40" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+      </node>
+      <node id="60">
+        <label>hipdnn_data_sdk/utilities/Allocators.hpp</label>
+        <link refid="Allocators_8hpp"/>
+        <childnode refid="61" relation="include">
+        </childnode>
+        <childnode refid="43" relation="include">
+        </childnode>
         <childnode refid="62" relation="include">
         </childnode>
-        <childnode refid="34" relation="include">
+        <childnode refid="18" relation="include">
         </childnode>
-        <childnode refid="66" relation="include">
+        <childnode refid="63" relation="include">
+        </childnode>
+        <childnode refid="27" relation="include">
         </childnode>
       </node>
       <node id="42">
+        <label>hipdnn_data_sdk/utilities/MigratableMemory.hpp</label>
+        <link refid="MigratableMemory_8hpp"/>
+        <childnode refid="43" relation="include">
+        </childnode>
+        <childnode refid="44" relation="include">
+        </childnode>
+        <childnode refid="60" relation="include">
+        </childnode>
+        <childnode refid="18" relation="include">
+        </childnode>
+        <childnode refid="64" relation="include">
+        </childnode>
+      </node>
+      <node id="40">
         <label>hipdnn_data_sdk/utilities/PlatformUtils.hpp</label>
         <link refid="PlatformUtils_8hpp"/>
         <childnode refid="14" relation="include">
@@ -206,192 +184,82 @@
         <childnode refid="8" relation="include">
         </childnode>
       </node>
-      <node id="67">
+      <node id="65">
         <label>hipdnn_data_sdk/utilities/ShapeUtilities.hpp</label>
         <link refid="ShapeUtilities_8hpp"/>
-        <childnode refid="50" relation="include">
+        <childnode refid="48" relation="include">
         </childnode>
-        <childnode refid="46" relation="include">
-        </childnode>
-        <childnode refid="68" relation="include">
-        </childnode>
-        <childnode refid="71" relation="include">
-        </childnode>
-        <childnode refid="72" relation="include">
+        <childnode refid="44" relation="include">
         </childnode>
         <childnode refid="66" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="68">
-        <label>hipdnn_data_sdk/utilities/StringUtil.hpp</label>
-        <link refid="StringUtil_8hpp"/>
-        <childnode refid="50" relation="include">
         </childnode>
         <childnode refid="69" relation="include">
         </childnode>
         <childnode refid="70" relation="include">
         </childnode>
-        <childnode refid="14" relation="include">
+        <childnode refid="64" relation="include">
         </childnode>
-        <childnode refid="41" relation="include">
+        <childnode refid="28" relation="include">
         </childnode>
       </node>
-      <node id="43">
+      <node id="66">
+        <label>hipdnn_data_sdk/utilities/StringUtil.hpp</label>
+        <link refid="StringUtil_8hpp"/>
+        <childnode refid="48" relation="include">
+        </childnode>
+        <childnode refid="67" relation="include">
+        </childnode>
+        <childnode refid="68" relation="include">
+        </childnode>
+        <childnode refid="14" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+      </node>
+      <node id="41">
         <label>hipdnn_data_sdk/utilities/Tensor.hpp</label>
         <link refid="Tensor_8hpp"/>
         <childnode refid="6" relation="include">
         </childnode>
-        <childnode refid="44" relation="include">
+        <childnode refid="42" relation="include">
         </childnode>
-        <childnode refid="67" relation="include">
-        </childnode>
-        <childnode refid="73" relation="include">
-        </childnode>
-        <childnode refid="75" relation="include">
-        </childnode>
-        <childnode refid="58" relation="include">
+        <childnode refid="65" relation="include">
         </childnode>
         <childnode refid="71" relation="include">
         </childnode>
-        <childnode refid="77" relation="include">
+        <childnode refid="73" relation="include">
         </childnode>
-        <childnode refid="78" relation="include">
+        <childnode refid="56" relation="include">
         </childnode>
-        <childnode refid="41" relation="include">
+        <childnode refid="69" relation="include">
+        </childnode>
+        <childnode refid="75" relation="include">
+        </childnode>
+        <childnode refid="76" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
         </childnode>
       </node>
-      <node id="73">
+      <node id="71">
         <label>hipdnn_data_sdk/utilities/UtilsBfp16.hpp</label>
         <link refid="UtilsBfp16_8hpp"/>
         <childnode refid="12" relation="include">
         </childnode>
-        <childnode refid="74" relation="include">
+        <childnode refid="72" relation="include">
         </childnode>
-        <childnode refid="46" relation="include">
+        <childnode refid="44" relation="include">
         </childnode>
         <childnode refid="14" relation="include">
         </childnode>
       </node>
-      <node id="75">
+      <node id="73">
         <label>hipdnn_data_sdk/utilities/UtilsFp16.hpp</label>
         <link refid="UtilsFp16_8hpp"/>
-        <childnode refid="76" relation="include">
+        <childnode refid="74" relation="include">
         </childnode>
-        <childnode refid="46" relation="include">
+        <childnode refid="44" relation="include">
         </childnode>
         <childnode refid="14" relation="include">
-        </childnode>
-      </node>
-      <node id="123">
-        <label>hipdnn_data_sdk/utilities/json/BatchnormAttributes.hpp</label>
-        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormAttributes_8hpp"/>
-        <childnode refid="85" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-      </node>
-      <node id="128">
-        <label>hipdnn_data_sdk/utilities/json/BatchnormBackwardAttributes.hpp</label>
-        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormBackwardAttributes_8hpp"/>
-        <childnode refid="112" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-      </node>
-      <node id="129">
-        <label>hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributes.hpp</label>
-        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributes_8hpp"/>
-        <childnode refid="87" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-      </node>
-      <node id="130">
-        <label>hipdnn_data_sdk/utilities/json/BatchnormInferenceAttributesVarianceExt.hpp</label>
-        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2BatchnormInferenceAttributesVarianceExt_8hpp"/>
-        <childnode refid="89" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-      </node>
-      <node id="124">
-        <label>hipdnn_data_sdk/utilities/json/Common.hpp</label>
-        <link refid="Common_8hpp"/>
-        <childnode refid="125" relation="include">
-        </childnode>
-        <childnode refid="6" relation="include">
-        </childnode>
-        <childnode refid="126" relation="include">
-        </childnode>
-        <childnode refid="127" relation="include">
-        </childnode>
-      </node>
-      <node id="131">
-        <label>hipdnn_data_sdk/utilities/json/ConvolutionBwdAttributes.hpp</label>
-        <link refid="ConvolutionBwdAttributes_8hpp"/>
-        <childnode refid="91" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-      </node>
-      <node id="132">
-        <label>hipdnn_data_sdk/utilities/json/ConvolutionFwdAttributes.hpp</label>
-        <link refid="ConvolutionFwdAttributes_8hpp"/>
-        <childnode refid="5" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-      </node>
-      <node id="133">
-        <label>hipdnn_data_sdk/utilities/json/ConvolutionWrwAttributes.hpp</label>
-        <link refid="ConvolutionWrwAttributes_8hpp"/>
-        <childnode refid="94" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-      </node>
-      <node id="122">
-        <label>hipdnn_data_sdk/utilities/json/Graph.hpp</label>
-        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2Graph_8hpp"/>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="123" relation="include">
-        </childnode>
-        <childnode refid="128" relation="include">
-        </childnode>
-        <childnode refid="129" relation="include">
-        </childnode>
-        <childnode refid="130" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-        <childnode refid="131" relation="include">
-        </childnode>
-        <childnode refid="132" relation="include">
-        </childnode>
-        <childnode refid="133" relation="include">
-        </childnode>
-        <childnode refid="134" relation="include">
-        </childnode>
-        <childnode refid="135" relation="include">
-        </childnode>
-      </node>
-      <node id="134">
-        <label>hipdnn_data_sdk/utilities/json/PointwiseAttributes.hpp</label>
-        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2PointwiseAttributes_8hpp"/>
-        <childnode refid="8" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
-        </childnode>
-      </node>
-      <node id="135">
-        <label>hipdnn_data_sdk/utilities/json/TensorAttributes.hpp</label>
-        <link refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2TensorAttributes_8hpp"/>
-        <childnode refid="38" relation="include">
-        </childnode>
-        <childnode refid="124" relation="include">
         </childnode>
       </node>
       <node id="1">
@@ -401,7 +269,7 @@
         </childnode>
         <childnode refid="16" relation="include">
         </childnode>
-        <childnode refid="137" relation="include">
+        <childnode refid="17" relation="include">
         </childnode>
         <childnode refid="3" relation="include">
         </childnode>
@@ -414,92 +282,26 @@
         <childnode refid="14" relation="include">
         </childnode>
       </node>
-      <node id="16">
-        <label>hipdnn_frontend/Graph.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp"/>
-        <childnode refid="17" relation="include">
-        </childnode>
-        <childnode refid="20" relation="include">
-        </childnode>
-        <childnode refid="7" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="82" relation="include">
-        </childnode>
-        <childnode refid="86" relation="include">
-        </childnode>
-        <childnode refid="88" relation="include">
-        </childnode>
-        <childnode refid="90" relation="include">
-        </childnode>
-        <childnode refid="92" relation="include">
-        </childnode>
-        <childnode refid="93" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-        <childnode refid="95" relation="include">
-        </childnode>
-        <childnode refid="97" relation="include">
-        </childnode>
-        <childnode refid="81" relation="include">
-        </childnode>
-        <childnode refid="98" relation="include">
-        </childnode>
-        <childnode refid="99" relation="include">
-        </childnode>
-        <childnode refid="100" relation="include">
-        </childnode>
-        <childnode refid="101" relation="include">
-        </childnode>
-        <childnode refid="109" relation="include">
-        </childnode>
-        <childnode refid="113" relation="include">
-        </childnode>
-        <childnode refid="114" relation="include">
-        </childnode>
-        <childnode refid="115" relation="include">
-        </childnode>
-        <childnode refid="116" relation="include">
-        </childnode>
-        <childnode refid="117" relation="include">
-        </childnode>
-        <childnode refid="118" relation="include">
-        </childnode>
-        <childnode refid="119" relation="include">
-        </childnode>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="120" relation="include">
-        </childnode>
-        <childnode refid="121" relation="include">
-        </childnode>
-        <childnode refid="122" relation="include">
-        </childnode>
-        <childnode refid="136" relation="include">
-        </childnode>
-      </node>
-      <node id="137">
+      <node id="17">
         <label>hipdnn_frontend/Handle.hpp</label>
         <link refid="Handle_8hpp"/>
-        <childnode refid="34" relation="include">
+        <childnode refid="18" relation="include">
         </childnode>
         <childnode refid="2" relation="include">
         </childnode>
-        <childnode refid="31" relation="include">
+        <childnode refid="19" relation="include">
         </childnode>
-        <childnode refid="81" relation="include">
+        <childnode refid="79" relation="include">
         </childnode>
       </node>
-      <node id="79">
+      <node id="77">
         <label>hipdnn_frontend/Logging.hpp</label>
         <link refid="Logging_8hpp"/>
-        <childnode refid="48" relation="include">
-        </childnode>
-        <childnode refid="80" relation="include">
-        </childnode>
         <childnode refid="46" relation="include">
+        </childnode>
+        <childnode refid="78" relation="include">
+        </childnode>
+        <childnode refid="44" relation="include">
         </childnode>
       </node>
       <node id="3">
@@ -530,214 +332,48 @@
         <childnode refid="15" relation="include">
         </childnode>
       </node>
-      <node id="31">
+      <node id="19">
         <label>hipdnn_frontend/Utilities.hpp</label>
         <link refid="Utilities_8hpp"/>
-        <childnode refid="32" relation="include">
-        </childnode>
         <childnode refid="20" relation="include">
         </childnode>
-        <childnode refid="42" relation="include">
+        <childnode refid="29" relation="include">
         </childnode>
-        <childnode refid="43" relation="include">
-        </childnode>
-        <childnode refid="71" relation="include">
+        <childnode refid="40" relation="include">
         </childnode>
         <childnode refid="41" relation="include">
+        </childnode>
+        <childnode refid="69" relation="include">
+        </childnode>
+        <childnode refid="28" relation="include">
+        </childnode>
+        <childnode refid="77" relation="include">
         </childnode>
         <childnode refid="79" relation="include">
         </childnode>
-        <childnode refid="81" relation="include">
-        </childnode>
       </node>
-      <node id="83">
-        <label>Attributes.hpp</label>
-        <link refid="Attributes_8hpp"/>
-        <childnode refid="33" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="3" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="14" relation="include">
-        </childnode>
-        <childnode refid="84" relation="include">
-        </childnode>
-      </node>
-      <node id="82">
-        <label>hipdnn_frontend/attributes/BatchnormAttributes.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormAttributes_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="85" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="111">
-        <label>hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormBackwardAttributes_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="112" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="86">
-        <label>hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormInferenceAttributes_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="87" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-      </node>
-      <node id="88">
-        <label>hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2BatchnormInferenceAttributesVarianceExt_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="89" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-      </node>
-      <node id="90">
-        <label>hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp</label>
-        <link refid="ConvolutionDgradAttributes_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="91" relation="include">
-        </childnode>
-        <childnode refid="3" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="92">
-        <label>hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp</label>
-        <link refid="ConvolutionFpropAttributes_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="5" relation="include">
-        </childnode>
-        <childnode refid="3" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="93">
-        <label>hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp</label>
-        <link refid="ConvolutionWgradAttributes_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="94" relation="include">
-        </childnode>
-        <childnode refid="3" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="33">
+      <node id="21">
         <label>GraphAttributes.hpp</label>
         <link refid="GraphAttributes_8hpp"/>
         <childnode refid="3" relation="include">
         </childnode>
-        <childnode refid="34" relation="include">
+        <childnode refid="18" relation="include">
         </childnode>
         <childnode refid="14" relation="include">
         </childnode>
-        <childnode refid="35" relation="include">
+        <childnode refid="22" relation="include">
         </childnode>
       </node>
-      <node id="95">
-        <label>hipdnn_frontend/attributes/MatmulAttributes.hpp</label>
-        <link refid="MatmulAttributes_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="96" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="97">
-        <label>hipdnn_frontend/attributes/PointwiseAttributes.hpp</label>
-        <link refid="frontend_2include_2hipdnn__frontend_2attributes_2PointwiseAttributes_8hpp"/>
-        <childnode refid="83" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="8" relation="include">
-        </childnode>
-        <childnode refid="3" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="39" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-      </node>
-      <node id="32">
+      <node id="20">
         <label>attributes/TensorAttributes.hpp</label>
         <link refid="frontend_2include_2hipdnn__frontend_2attributes_2TensorAttributes_8hpp"/>
-        <childnode refid="33" relation="include">
+        <childnode refid="21" relation="include">
         </childnode>
-        <childnode refid="36" relation="include">
+        <childnode refid="23" relation="include">
         </childnode>
-        <childnode refid="37" relation="include">
+        <childnode refid="24" relation="include">
         </childnode>
-        <childnode refid="38" relation="include">
+        <childnode refid="25" relation="include">
         </childnode>
         <childnode refid="9" relation="include">
         </childnode>
@@ -745,459 +381,159 @@
         </childnode>
         <childnode refid="3" relation="include">
         </childnode>
-        <childnode refid="39" relation="include">
+        <childnode refid="26" relation="include">
         </childnode>
         <childnode refid="14" relation="include">
         </childnode>
-        <childnode refid="40" relation="include">
+        <childnode refid="27" relation="include">
         </childnode>
         <childnode refid="15" relation="include">
         </childnode>
-        <childnode refid="41" relation="include">
+        <childnode refid="28" relation="include">
         </childnode>
       </node>
-      <node id="101">
-        <label>hipdnn_frontend/knob/Knob.hpp</label>
-        <link refid="Knob_8hpp"/>
-        <childnode refid="17" relation="include">
-        </childnode>
-        <childnode refid="102" relation="include">
-        </childnode>
-        <childnode refid="103" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="104" relation="include">
-        </childnode>
-        <childnode refid="106" relation="include">
-        </childnode>
-        <childnode refid="105" relation="include">
-        </childnode>
-        <childnode refid="68" relation="include">
-        </childnode>
-        <childnode refid="50" relation="include">
-        </childnode>
-        <childnode refid="107" relation="include">
-        </childnode>
-        <childnode refid="52" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="39" relation="include">
-        </childnode>
-        <childnode refid="70" relation="include">
-        </childnode>
-        <childnode refid="14" relation="include">
-        </childnode>
-        <childnode refid="108" relation="include">
-        </childnode>
-        <childnode refid="15" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="102">
-        <label>hipdnn_frontend/knob/KnobConstraint.hpp</label>
-        <link refid="KnobConstraint_8hpp"/>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="3" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="103" relation="include">
-        </childnode>
-      </node>
-      <node id="103">
-        <label>hipdnn_frontend/knob/KnobSetting.hpp</label>
-        <link refid="KnobSetting_8hpp"/>
-        <childnode refid="14" relation="include">
-        </childnode>
-        <childnode refid="104" relation="include">
-        </childnode>
-        <childnode refid="7" relation="include">
-        </childnode>
-        <childnode refid="105" relation="include">
-        </childnode>
-      </node>
-      <node id="109">
-        <label>hipdnn_frontend/node/BatchnormBackwardNode.hpp</label>
-        <link refid="BatchnormBackwardNode_8hpp"/>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="67" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="111" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-      </node>
-      <node id="113">
-        <label>hipdnn_frontend/node/BatchnormInferenceNode.hpp</label>
-        <link refid="BatchnormInferenceNode_8hpp"/>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="86" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-      </node>
-      <node id="114">
-        <label>hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp</label>
-        <link refid="BatchnormInferenceNodeVarianceExt_8hpp"/>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="88" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-      </node>
-      <node id="115">
-        <label>hipdnn_frontend/node/BatchnormNode.hpp</label>
-        <link refid="BatchnormNode_8hpp"/>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="67" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="82" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-      </node>
-      <node id="116">
-        <label>hipdnn_frontend/node/ConvolutionDgradNode.hpp</label>
-        <link refid="ConvolutionDgradNode_8hpp"/>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="50" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="67" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="90" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-        <childnode refid="71" relation="include">
-        </childnode>
-      </node>
-      <node id="117">
-        <label>hipdnn_frontend/node/ConvolutionFpropNode.hpp</label>
-        <link refid="ConvolutionFpropNode_8hpp"/>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="67" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="92" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-      </node>
-      <node id="118">
-        <label>hipdnn_frontend/node/ConvolutionWgradNode.hpp</label>
-        <link refid="ConvolutionWgradNode_8hpp"/>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="50" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="67" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="93" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-        <childnode refid="71" relation="include">
-        </childnode>
-      </node>
-      <node id="110">
-        <label>Node.hpp</label>
-        <link refid="Node_8hpp"/>
-        <childnode refid="52" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-        <childnode refid="32" relation="include">
-        </childnode>
-        <childnode refid="34" relation="include">
-        </childnode>
-        <childnode refid="35" relation="include">
-        </childnode>
-        <childnode refid="108" relation="include">
-        </childnode>
-        <childnode refid="41" relation="include">
-        </childnode>
-      </node>
-      <node id="120">
-        <label>hipdnn_frontend/node/PointwiseNode.hpp</label>
-        <link refid="PointwiseNode_8hpp"/>
-        <childnode refid="110" relation="include">
-        </childnode>
-        <childnode refid="37" relation="include">
-        </childnode>
-        <childnode refid="67" relation="include">
-        </childnode>
-        <childnode refid="2" relation="include">
-        </childnode>
-        <childnode refid="31" relation="include">
-        </childnode>
-        <childnode refid="33" relation="include">
-        </childnode>
-        <childnode refid="97" relation="include">
-        </childnode>
-      </node>
-      <node id="50">
+      <node id="48">
         <label>algorithm</label>
       </node>
-      <node id="51">
+      <node id="49">
         <label>array</label>
       </node>
       <node id="11">
         <label>bitset</label>
       </node>
-      <node id="107">
-        <label>cstdint</label>
-      </node>
-      <node id="63">
+      <node id="61">
         <label>cstdlib</label>
       </node>
-      <node id="69">
+      <node id="67">
         <label>cstring</label>
       </node>
-      <node id="125">
-        <label>flatbuffers/flatbuffer_builder.h</label>
-      </node>
-      <node id="36">
+      <node id="23">
         <label>flatbuffers/flatbuffers.h</label>
       </node>
-      <node id="52">
+      <node id="50">
         <label>functional</label>
       </node>
-      <node id="74">
+      <node id="72">
         <label>hip/hip_bfloat16.h</label>
       </node>
-      <node id="76">
+      <node id="74">
         <label>hip/hip_fp16.h</label>
       </node>
-      <node id="45">
+      <node id="43">
         <label>hip/hip_runtime.h</label>
       </node>
-      <node id="21">
+      <node id="30">
         <label>hip/hip_runtime_api.h</label>
       </node>
-      <node id="22">
+      <node id="31">
         <label>hipdnn_backend_export.h</label>
-      </node>
-      <node id="85">
-        <label>hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h</label>
-      </node>
-      <node id="112">
-        <label>hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h</label>
-      </node>
-      <node id="87">
-        <label>hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_generated.h</label>
-      </node>
-      <node id="89">
-        <label>hipdnn_data_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h</label>
-      </node>
-      <node id="91">
-        <label>hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h</label>
       </node>
       <node id="5">
         <label>hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h</label>
       </node>
-      <node id="94">
-        <label>hipdnn_data_sdk/data_objects/convolution_wrw_attributes_generated.h</label>
-      </node>
       <node id="6">
         <label>hipdnn_data_sdk/data_objects/data_types_generated.h</label>
       </node>
-      <node id="104">
-        <label>hipdnn_data_sdk/data_objects/engine_config_generated.h</label>
-      </node>
-      <node id="37">
+      <node id="24">
         <label>hipdnn_data_sdk/data_objects/graph_generated.h</label>
       </node>
       <node id="7">
         <label>hipdnn_data_sdk/data_objects/knob_value_generated.h</label>
       </node>
-      <node id="96">
-        <label>hipdnn_data_sdk/data_objects/matmul_attributes_generated.h</label>
-      </node>
       <node id="8">
         <label>hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h</label>
       </node>
-      <node id="38">
+      <node id="25">
         <label>hipdnn_data_sdk/data_objects/tensor_attributes_generated.h</label>
       </node>
-      <node id="106">
-        <label>hipdnn_data_sdk/flatbuffer_utilities/KnobWrapper.hpp</label>
-      </node>
-      <node id="80">
+      <node id="78">
         <label>hipdnn_data_sdk/logging/LogLevel.hpp</label>
       </node>
       <node id="9">
         <label>hipdnn_data_sdk/types.hpp</label>
       </node>
-      <node id="136">
-        <label>hipdnn_data_sdk/utilities/EngineNames.hpp</label>
+      <node id="16">
+        <label>hipdnn_frontend/Graph.hpp</label>
       </node>
-      <node id="81">
+      <node id="79">
         <label>hipdnn_frontend/detail/BackendWrapper.hpp</label>
       </node>
-      <node id="98">
-        <label>hipdnn_frontend/detail/CreateBackendDescriptor.hpp</label>
-      </node>
-      <node id="99">
-        <label>hipdnn_frontend/detail/GraphDetail.hpp</label>
-      </node>
-      <node id="100">
-        <label>hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp</label>
-      </node>
-      <node id="119">
-        <label>hipdnn_frontend/node/MatmulNode.hpp</label>
-      </node>
-      <node id="121">
-        <label>hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp</label>
-      </node>
-      <node id="58">
+      <node id="56">
         <label>iostream</label>
       </node>
-      <node id="64">
+      <node id="62">
         <label>limits</label>
       </node>
-      <node id="34">
+      <node id="18">
         <label>memory</label>
       </node>
-      <node id="53">
+      <node id="51">
         <label>mutex</label>
       </node>
-      <node id="65">
+      <node id="63">
         <label>new</label>
       </node>
-      <node id="126">
-        <label>nlohmann/detail/macro_scope.hpp</label>
-      </node>
-      <node id="127">
-        <label>nlohmann/json.hpp</label>
-      </node>
-      <node id="71">
+      <node id="69">
         <label>numeric</label>
       </node>
-      <node id="39">
+      <node id="26">
         <label>optional</label>
       </node>
       <node id="12">
         <label>ostream</label>
       </node>
-      <node id="77">
+      <node id="75">
         <label>random</label>
       </node>
-      <node id="72">
+      <node id="70">
         <label>ranges</label>
       </node>
       <node id="13">
         <label>set</label>
       </node>
-      <node id="54">
+      <node id="52">
         <label>spdlog/async.h</label>
       </node>
-      <node id="55">
+      <node id="53">
         <label>spdlog/details/null_mutex.h</label>
       </node>
-      <node id="56">
+      <node id="54">
         <label>spdlog/details/synchronous_factory.h</label>
       </node>
-      <node id="57">
+      <node id="55">
         <label>spdlog/sinks/base_sink.h</label>
       </node>
-      <node id="59">
+      <node id="57">
         <label>spdlog/sinks/basic_file_sink.h</label>
       </node>
-      <node id="60">
+      <node id="58">
         <label>spdlog/sinks/stdout_color_sinks.h</label>
       </node>
-      <node id="61">
+      <node id="59">
         <label>spdlog/spdlog.h</label>
       </node>
-      <node id="70">
+      <node id="68">
         <label>sstream</label>
       </node>
-      <node id="18">
-        <label>stddef.h</label>
-      </node>
-      <node id="66">
+      <node id="64">
         <label>stdexcept</label>
-      </node>
-      <node id="19">
-        <label>stdint.h</label>
       </node>
       <node id="14">
         <label>string</label>
       </node>
-      <node id="40">
+      <node id="27">
         <label>type_traits</label>
       </node>
-      <node id="78">
+      <node id="76">
         <label>typeindex</label>
       </node>
-      <node id="35">
+      <node id="22">
         <label>unordered_map</label>
-      </node>
-      <node id="108">
-        <label>unordered_set</label>
-      </node>
-      <node id="84">
-        <label>utility</label>
       </node>
       <node id="15">
         <label>variant</label>
       </node>
-      <node id="41">
+      <node id="28">
         <label>vector</label>
       </node>
     </incdepgraph>
@@ -1341,7 +677,7 @@
 <codeline lineno="51"><highlight class="normal"></highlight><highlight class="preprocessor">#pragma<sp/>once</highlight><highlight class="normal"></highlight></codeline>
 <codeline lineno="52"><highlight class="normal"></highlight></codeline>
 <codeline lineno="53"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Error_8hpp" kindref="compound">hipdnn_frontend/Error.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
-<codeline lineno="54"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" kindref="compound">hipdnn_frontend/Graph.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
+<codeline lineno="54"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;hipdnn_frontend/Graph.hpp&gt;</highlight><highlight class="normal"></highlight></codeline>
 <codeline lineno="55"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Handle_8hpp" kindref="compound">hipdnn_frontend/Handle.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
 <codeline lineno="56"><highlight class="normal"></highlight><highlight class="preprocessor">#include<sp/>&lt;<ref refid="Types_8hpp" kindref="compound">hipdnn_frontend/Types.hpp</ref>&gt;</highlight><highlight class="normal"></highlight></codeline>
     </programlisting>

@@ -1786,6 +1786,8 @@
   </compound>
   <compound refid="ConvolutionWrwAttributes_8hpp" kind="file"><name>ConvolutionWrwAttributes.hpp</name>
   </compound>
+  <compound refid="Graph_8hpp" kind="file"><name>Graph.hpp</name>
+  </compound>
   <compound refid="MigratableMemory_8hpp" kind="file"><name>MigratableMemory.hpp</name>
   </compound>
   <compound refid="PlatformUtils_8hpp" kind="file"><name>PlatformUtils.hpp</name>
@@ -1883,9 +1885,7 @@
     <member refid="Error_8hpp_1ac54a25d4ab7c2fa2391210b3a5fdeb3f" kind="define"><name>HIPDNN_RETURN_IF_GE</name></member>
     <member refid="Error_8hpp_1a196dfd19098ab00086ecc01bd3ba1546" kind="define"><name>HIPDNN_RETURN_IF_LE</name></member>
   </compound>
-  <compound refid="data__sdk_2include_2hipdnn__data__sdk_2utilities_2json_2Graph_8hpp" kind="file"><name>Graph.hpp</name>
-  </compound>
-  <compound refid="frontend_2include_2hipdnn__frontend_2Graph_8hpp" kind="file"><name>Graph.hpp</name>
+  <compound refid="frontend__graph_8hpp" kind="file"><name>frontend_graph.hpp</name>
   </compound>
   <compound refid="Handle_8hpp" kind="file"><name>Handle.hpp</name>
   </compound>
