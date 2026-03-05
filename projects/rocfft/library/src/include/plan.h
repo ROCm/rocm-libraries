@@ -467,6 +467,78 @@ private:
                   const std::vector<size_t>&     inputAntecedents,
                   std::vector<size_t>&           outputItems);
 
+    // RAII struct to 'lease' a temp buffer from a multimap of per-device
+    // buffers.  When this struct is destroyed, the buffer is returned to
+    // the map for reuse.
+    struct TempBufferLease
+    {
+        TempBufferLease(
+            std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>>& _tempBuffers,
+            int                                                                    local_comm_rank,
+            rocfft_location_t                                                      _location,
+            size_t                                                                 byte_size)
+            : location(_location)
+            , tempBuffers(&_tempBuffers)
+        {
+            // no need to allocate anything for non-local ranks
+            if(local_comm_rank != location.comm_rank)
+            {
+                // instead allocate a placeholder that remembers which
+                // rank this was for, to aid debugging
+                buf = std::make_shared<InternalTempBuffer>(location.comm_rank);
+                return;
+            }
+
+            // return an existing buffer that's big enough, if one exists
+            auto i = tempBuffers->lower_bound(location);
+            if(i != tempBuffers->upper_bound(location))
+            {
+                // found a buffer, ensure it's big enough
+                i->second->set_size_bytes(byte_size);
+
+                // leasing out this temp buffer, remove it from the map
+                buf = i->second;
+                tempBuffers->erase(i);
+                return;
+            }
+            // no buffer was found, allocate a new one
+            buf = std::make_shared<InternalTempBuffer>(local_comm_rank);
+            buf->set_size_bytes(byte_size);
+        }
+        ~TempBufferLease()
+        {
+            // return the buffer to the map
+            if(buf)
+                tempBuffers->emplace(std::make_pair(location, std::move(buf)));
+        }
+        // allow moves, disallow copies
+        TempBufferLease(TempBufferLease&& other)
+            : location(other.location)
+            , tempBuffers(other.tempBuffers)
+            , buf(std::move(other.buf))
+        {
+        }
+        TempBufferLease& operator=(TempBufferLease&& other)
+        {
+            location    = other.location;
+            tempBuffers = other.tempBuffers;
+            buf         = std::move(other.buf);
+            return *this;
+        }
+        TempBufferLease(const TempBufferLease& other) = delete;
+        TempBufferLease& operator=(const TempBufferLease& other) = delete;
+
+        std::shared_ptr<InternalTempBuffer> data()
+        {
+            return buf;
+        }
+
+    private:
+        rocfft_location_t                                                      location;
+        std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>>* tempBuffers;
+        std::shared_ptr<InternalTempBuffer>                                    buf;
+    };
+
     /**
      * @brief Creates and returns the metadata configuring the single-device
      * execution plan item used for tackling the plan's task. If the plan's
