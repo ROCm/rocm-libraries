@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "../../../shared/device_properties.h"
@@ -838,6 +839,15 @@ struct rocfft_location_t
     bool operator==(const rocfft_location_t& other) const
     {
         return comm_rank == other.comm_rank && device == other.device;
+    }
+
+    std::string str() const
+    {
+        std::string ret = "comm rank ";
+        ret += std::to_string(comm_rank);
+        ret += " device ";
+        ret += std::to_string(device);
+        return ret;
     }
 
     int comm_rank = 0;
