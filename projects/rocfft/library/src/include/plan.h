@@ -382,32 +382,38 @@ private:
     /**
      * @brief Creates the plan items required to gather the input data buffer(s) of a
      * multi-device transform into the input buffer of the (single-device) execution
-     * plan (abiding by the input data layout set for that execution plan).
+     * plan (observing the input data layout set for that execution plan).
      * 
-     * @param[in] execution_plan single-device execution plan.
+     * @param[in] exec_plan_metadata single-device execution plan's metadata.
+     * @param[in] exec_plan_location location of the single-device execution plan.
      * @param[in] antecedents indices of the plan items that must complete before
      * the gather steps may be initiated.
      * @return An `std::vector<size_t>` of indices of the created plan items. When these
      * items complete, the execution plan's input buffer is set for computing the desired
      * transform.
      */
-    std::vector<size_t> CreateInputGatheringItems(const ExecPlan&            execution_plan,
-                                                  const std::vector<size_t>& antecedents = {});
+    std::vector<size_t>
+        CreateInputGatheringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
+                                          const rocfft_location_t&   exec_plan_location,
+                                          const std::vector<size_t>& antecedents = {});
 
     /**
      * @brief Creates the plan items required to scatter the output buffer of the (single-device)
      * execution plan (observing the output data layout set for that execution plan) into the
      * output data buffer(s) of a multi-device transform.
      * 
-     * @param[in] execution_plan single-device execution plan.
+     * @param[in] exec_plan_metadata single-device execution plan's metadata.
+     * @param[in] exec_plan_location location of the single-device execution plan.
      * @param[in] antecedents indices of the plan items that must complete before
      * the scatter steps may be initiated. 
      * @return An `std::vector<size_t>` of indices of the created plan items. When these items
      * complete, the user's output buffers are set with the corresponding portions of the
      * transform's results.
      */
-    std::vector<size_t> CreateOutputScatteringItems(const ExecPlan&            execution_plan,
-                                                    const std::vector<size_t>& antecedents);
+    std::vector<size_t>
+        CreateOutputScatteringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
+                                            const rocfft_location_t&   exec_plan_location,
+                                            const std::vector<size_t>& antecedents);
 
     // Transpose the input field to the output field by adding work items
     // to the plan.  Antecedents are provided as a vector of item
@@ -540,20 +546,33 @@ private:
     };
 
     /**
-     * @brief Creates and returns the metadata configuring the single-device
-     * execution plan item used for tackling the plan's task. If the plan's
-     * task cannot be handled by a single-device execution item operating on
-     * the current device, the returned object parameterizes an execution plan
-     * item configured to
-     * - read (resp. write) directly from (resp. into) the user's input (resp.
-     *   output) data buffer, if that data is undistribued and expected on the
-     *   current device at execution. If not, default packed layouts for in-place
-     *   operations are set on input and output;
+     * @brief Creates and returns the metadata configuring the single-device execution
+     * plan item used for tackling the plan's task. If the plan's task cannot be handled
+     * by a single-device execution plan on the given location, the returned object
+     * parameterizes an execution plan configured to
      * 
-     * - operate in-place, unless the above made that impossible or if the
-     *   plan's configuration does not guarantee that it is safe to do so.
+     * - read (resp. write) directly from (resp. into) the user's input (resp. output)
+     *   data buffer, if that data is undistribued and expected on the given location at
+     *   execution. If not, default packed layouts for in-place operations are set on
+     *   input and output (possibly requiring temporary, leased I/O);
+     * 
+     * - operate in-place, unless the above made that impossible or if the plan's
+     *   configuration does not guarantee that it is safe to do so.
+     * 
+     * If the returned configuration is such that reading (resp. writing) directly from
+     * (resp. to) a user-provided input (resp. output) data buffer cannot or should not
+     * be done, leased temporary buffers of appropriate sizes are created instead and
+     * appended to the given `leased_io`.
+     * 
+     * @param[inout] leased_io vector of leased temporary buffers. If a temporary buffer
+     * needs to be leased for the input and/or output of the single-device execution plan
+     * that the returned object configures, that leased buffer is created and appended to
+     * this vector.
+     * @param[in] exec_plan_location location where the single-device execution plan
+     * configured by the returned object is meant to reside.
      */
-    NodeMetaData get_single_dev_exec_plan_metadata() const;
+    NodeMetaData get_single_dev_exec_plan_metadata(std::vector<TempBufferLease>& leased_io,
+                                                   const rocfft_location_t& exec_plan_location);
 };
 
 bool PlanPowX(ExecPlan& execPlan);

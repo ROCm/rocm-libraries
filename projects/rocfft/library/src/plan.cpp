@@ -709,7 +709,9 @@ static void set_bluestein_strides(const rocfft_plan_t* plan, NodeMetaData& planD
     planData.oDistBlue = outDistBlue;
 }
 
-NodeMetaData rocfft_plan_t::get_single_dev_exec_plan_metadata() const
+NodeMetaData
+    rocfft_plan_t::get_single_dev_exec_plan_metadata(std::vector<TempBufferLease>& leased_io,
+                                                     const rocfft_location_t& exec_plan_location)
 {
     NodeMetaData root_plan(nullptr);
     root_plan.dimension    = desc.rank();
@@ -725,7 +727,8 @@ NodeMetaData rocfft_plan_t::get_single_dev_exec_plan_metadata() const
                           && (root_plan.outArrayType != rocfft_array_type_real);
     // root plan's data layouts and placement may be different than the calling plan's
     std::unique_ptr<data_layout_t> root_plan_input_layout, root_plan_output_layout;
-    if(desc.has_undistributed_io_on_current_location())
+    if(desc.has_undistributed_io_on_current_location()
+       && desc.get_current_location() == exec_plan_location)
     {
         // "true" single-device usage (no I/O field used or glorified version using
         // lone bricks for some reason): use the calling plan's own parameters
@@ -733,15 +736,15 @@ NodeMetaData rocfft_plan_t::get_single_dev_exec_plan_metadata() const
             = std::make_unique<data_layout_t>(desc.undistributed_layout_for(io_data_label::INPUT));
         root_plan_output_layout
             = std::make_unique<data_layout_t>(desc.undistributed_layout_for(io_data_label::OUTPUT));
-        root_plan.placement = placement;
+        root_plan.placement    = placement;
+        root_plan.input_buffer = BufferPtr::user_input(0, desc.get_local_comm_rank());
+        if(root_plan.placement == rocfft_placement_inplace)
+            root_plan.output_buffer = root_plan.input_buffer;
+        else
+            root_plan.output_buffer = BufferPtr::user_output(0, desc.get_local_comm_rank());
     }
     else
     {
-        // The root plan parameters define the single-device execution plan
-        // being used in a gather-scatter path. That single-device execution
-        // plan always operates on the current device.
-        const auto current_loc = desc.get_current_location();
-
         // Single-device plan can always operate out-of-place, but that may trigger
         // undesirable additional costs such as extra temporary buffer required for
         // output results (and/or unfriendly gather/scatter extra steps in case of
@@ -749,20 +752,28 @@ NodeMetaData rocfft_plan_t::get_single_dev_exec_plan_metadata() const
         // in-place operations are used instead.
         for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
         {
+            auto& root_plan_io_buffer
+                = io == io_data_label::INPUT ? root_plan.input_buffer : root_plan.output_buffer;
             auto& root_plan_io_layout
                 = io == io_data_label::INPUT ? root_plan_input_layout : root_plan_output_layout;
             if(root_plan_io_layout)
                 continue; // layout already set
             const auto io_loc = desc.expected_undistributed_location_for(io);
-            if(io_loc && *io_loc == current_loc)
+            if(io_loc && *io_loc == exec_plan_location)
             {
                 // The execution plan can access the user's undistributed data directly
+                root_plan_io_buffer = io == io_data_label::INPUT
+                                          ? BufferPtr::user_input(0, desc.get_local_comm_rank())
+                                          : BufferPtr::user_output(0, desc.get_local_comm_rank());
                 root_plan_io_layout
                     = std::make_unique<data_layout_t>(desc.undistributed_layout_for(io));
                 // other io layout to be set for the execution plan:
                 auto&      root_plan_other_io_layout = other(io) == io_data_label::INPUT
                                                            ? root_plan_input_layout
                                                            : root_plan_output_layout;
+                auto&      root_plan_other_io_buffer = other(io) == io_data_label::INPUT
+                                                           ? root_plan.input_buffer
+                                                           : root_plan.output_buffer;
                 const auto other_lengths             = other(io) == io_data_label::INPUT
                                                            ? desc.input_layout.lengths()
                                                            : desc.output_layout.lengths();
@@ -782,6 +793,7 @@ NodeMetaData rocfft_plan_t::get_single_dev_exec_plan_metadata() const
                     // execution plan may and can operate in-place.
                     root_plan_other_io_layout = std::make_unique<data_layout_t>(std::move(*tmp));
                     root_plan.placement       = rocfft_placement_inplace;
+                    root_plan_other_io_buffer = root_plan_io_buffer;
                 }
                 else
                 {
@@ -791,6 +803,16 @@ NodeMetaData rocfft_plan_t::get_single_dev_exec_plan_metadata() const
                     root_plan_other_io_layout = std::make_unique<data_layout_t>(
                         data_layout_t::default_full_layout(other_lengths, desc.batch()));
                     root_plan.placement = rocfft_placement_notinplace;
+                    const auto tmp_size
+                        = root_plan_other_io_layout->buffer_element_count()
+                          * element_size(precision,
+                                         other(io) == io_data_label::INPUT ? desc.inArrayType
+                                                                           : desc.outArrayType);
+                    leased_io.emplace_back(tempBuffers,
+                                           desc.get_local_comm_rank(),
+                                           desc.get_current_location(),
+                                           tmp_size);
+                    root_plan_other_io_buffer = BufferPtr::temp(leased_io.back().data());
                 }
             }
         }
@@ -812,15 +834,25 @@ NodeMetaData rocfft_plan_t::get_single_dev_exec_plan_metadata() const
                 desc.output_layout.lengths(),
                 desc.output_layout.batch(),
                 transformType == rocfft_transform_type_real_inverse));
+
+        const auto tmp_size = std::max(root_plan_input_layout->buffer_element_count()
+                                           * element_size(precision, desc.inArrayType),
+                                       root_plan_output_layout->buffer_element_count()
+                                           * element_size(precision, desc.outArrayType));
+        leased_io.emplace_back(
+            tempBuffers, desc.get_local_comm_rank(), desc.get_current_location(), tmp_size);
+        root_plan.input_buffer = root_plan.output_buffer = BufferPtr::temp(leased_io.back().data());
     }
-    // I/O layouts should both set at this point
+    // I/O should both be fully defined at this point
     for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
     {
-        const auto& root_plan_io_layout
-            = io == io_data_label::INPUT ? root_plan_input_layout : root_plan_output_layout;
-        if(!root_plan_io_layout)
+        const auto& io_is_defined = io == io_data_label::INPUT
+                                        ? (root_plan_input_layout && root_plan.input_buffer)
+                                        : (root_plan_output_layout && root_plan.output_buffer);
+        if(!io_is_defined)
             throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " failed to define the " + to_str(io)
-                                   + " layout of the single-device execution plan item");
+                                   + " layout and/or the corresponding buffer for the "
+                                     "single-device execution plan item");
     }
 
     root_plan.length       = root_plan_input_layout->lengths();
@@ -1616,6 +1648,8 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
             execPlan.rootPlan->loadOps = loadOps;
         if(storeOps)
             execPlan.rootPlan->storeOps = storeOps;
+        execPlan.inputPtr  = rootPlanData.input_buffer;
+        execPlan.outputPtr = rootPlanData.output_buffer;
 
         // only allocate kernels, twiddles, etc if plan will run on this rank
         if(local_comm_rank != location.comm_rank)
@@ -1661,20 +1695,21 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
     }
 }
 
-std::vector<size_t> rocfft_plan_t::CreateInputGatheringItems(const ExecPlan& execution_plan,
-                                                             const std::vector<size_t>& antecedents)
+std::vector<size_t>
+    rocfft_plan_t::CreateInputGatheringItemsIfNeeded(const NodeMetaData&        exec_plan_metadata,
+                                                     const rocfft_location_t&   exec_plan_location,
+                                                     const std::vector<size_t>& antecedents)
 {
-    std::vector<size_t> gather_plan_items;
-    if(execution_plan.inputPtr.ptr_type() == BufferPtr::PtrType::PTR_USER_IN)
+    std::vector<size_t> gather_plan_items; // to be returned;
+
+    const auto in_loc = desc.expected_undistributed_location_for(io_data_label::INPUT);
+    if(in_loc && *in_loc == exec_plan_location
+       && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PtrType::PTR_USER_IN
+           || (placement == rocfft_placement_inplace
+               && exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PTR_USER_OUT)))
     {
         // no need to gather, input data is readily available to the single-device execution plan
         return gather_plan_items;
-    }
-    if(!execution_plan.inputPtr)
-    {
-        throw std::invalid_argument(
-            ROCFFT_CURRENT_FUNCTION
-            + " requires the given single-device execution plan's input pointer to be defined");
     }
 
     const auto& input_bricks    = desc.inFields[0].bricks;
@@ -1682,13 +1717,13 @@ std::vector<size_t> rocfft_plan_t::CreateInputGatheringItems(const ExecPlan& exe
     const auto  input_buffers   = GatherUserBuffers(BufferPtr::user_input, input_bricks);
     const auto  input_elem_size = element_size(precision, desc.inArrayType);
     // data layout to be observed by the final results of the data-gathering steps
-    const auto single_dev_input_layout = execution_plan.rootPlan->layout_for(io_data_label::INPUT);
+    const auto single_dev_input_layout = exec_plan_metadata.layout_for(io_data_label::INPUT);
 
     // Create node that captures data-gathering steps
     std::unique_ptr<CommGather> gather_node;
     if(std::all_of(input_bricks.begin(), input_bricks.end(), [&](const rocfft_brick_t& ibrick) {
            return ibrick.layout.is_continuous_in(single_dev_input_layout)
-                  && (execution_plan.inputPtr.ptr_type() == BufferPtr::PtrType::PTR_TEMP
+                  && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PtrType::PTR_TEMP
                       || ibrick.layout.is_contiguous());
        }))
     {
@@ -1696,8 +1731,8 @@ std::vector<size_t> rocfft_plan_t::CreateInputGatheringItems(const ExecPlan& exe
         gather_node              = std::make_unique<CommGather>(local_comm_rank,
                                                    precision,
                                                    desc.inArrayType,
-                                                   execution_plan.location,
-                                                   execution_plan.inputPtr);
+                                                   exec_plan_location,
+                                                   exec_plan_metadata.input_buffer);
         gather_node->description = "Gather input data of " + std::to_string(input_bricks.size())
                                    + " bricks directly into single-device plan's input buffer";
         for(size_t b_idx = 0; b_idx < input_bricks.size(); ++b_idx)
@@ -1721,12 +1756,12 @@ std::vector<size_t> rocfft_plan_t::CreateInputGatheringItems(const ExecPlan& exe
             single_dev_input_layout.lengths(), single_dev_input_layout.batch());
         TempBufferLease packing_temp_buffer(tempBuffers,
                                             local_comm_rank,
-                                            execution_plan.location,
+                                            exec_plan_location,
                                             packed_layout.logical_count() * input_elem_size);
         gather_node = std::make_unique<CommGather>(local_comm_rank,
                                                    precision,
                                                    desc.inArrayType,
-                                                   execution_plan.location,
+                                                   exec_plan_location,
                                                    BufferPtr::temp(packing_temp_buffer.data()));
 
         gather_node->description = "Gather contiguously-packed input data chunks for "
@@ -1794,14 +1829,14 @@ std::vector<size_t> rocfft_plan_t::CreateInputGatheringItems(const ExecPlan& exe
                   + "'s contiguous data chunk into single-device plan's input buffer";
             gather_plan_items.push_back(
                 AddMultiPlanItem(transpose_brick(local_comm_rank,
-                                                 execution_plan.location,
+                                                 exec_plan_location,
                                                  ibrick.layout.lengths_and_batches(),
                                                  precision,
                                                  desc.inArrayType,
                                                  BufferPtr::temp(packing_temp_buffer.data()),
                                                  packed_offset,
                                                  ibrick.layout.contiguous_strides_and_distances(),
-                                                 execution_plan.inputPtr,
+                                                 exec_plan_metadata.input_buffer,
                                                  ibrick.layout.offset_in(single_dev_input_layout),
                                                  single_dev_input_layout.strides_and_distances(),
                                                  std::move(description)),
@@ -1813,20 +1848,20 @@ std::vector<size_t> rocfft_plan_t::CreateInputGatheringItems(const ExecPlan& exe
 }
 
 std::vector<size_t>
-    rocfft_plan_t::CreateOutputScatteringItems(const ExecPlan&            execution_plan,
-                                               const std::vector<size_t>& antecedents)
+    rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(const NodeMetaData&      exec_plan_metadata,
+                                                       const rocfft_location_t& exec_plan_location,
+                                                       const std::vector<size_t>& antecedents)
 {
-    std::vector<size_t> scatter_plan_items;
-    if(execution_plan.outputPtr.ptr_type() == BufferPtr::PtrType::PTR_USER_OUT)
+    std::vector<size_t> scatter_plan_items; // to be returned;
+
+    const auto out_loc = desc.expected_undistributed_location_for(io_data_label::INPUT);
+    if(out_loc && *out_loc == exec_plan_location
+       && (exec_plan_metadata.output_buffer.ptr_type() == BufferPtr::PtrType::PTR_USER_OUT
+           || (placement == rocfft_placement_inplace
+               && exec_plan_metadata.output_buffer.ptr_type() == BufferPtr::PTR_USER_IN)))
     {
-        // no need to scatter, output data is written directly the single-device execution plan
+        // no need to scatter, output data is written directly by the single-device execution plan
         return scatter_plan_items;
-    }
-    if(!execution_plan.outputPtr)
-    {
-        throw std::invalid_argument(
-            ROCFFT_CURRENT_FUNCTION
-            + " requires the given single-device execution plan's output pointer to be defined");
     }
 
     const auto& output_bricks    = desc.outFields[0].bricks;
@@ -1834,8 +1869,7 @@ std::vector<size_t>
     const auto  output_buffers   = GatherUserBuffers(BufferPtr::user_output, output_bricks);
     const auto  output_elem_size = element_size(precision, desc.outArrayType);
     // data layout of the results to be scattered
-    const auto single_dev_output_layout
-        = execution_plan.rootPlan->layout_for(io_data_label::OUTPUT);
+    const auto single_dev_output_layout = exec_plan_metadata.layout_for(io_data_label::OUTPUT);
 
     // Create node that captures data-scattering steps
     std::unique_ptr<CommScatter> scatter_node;
@@ -1847,7 +1881,7 @@ std::vector<size_t>
         // All outputs are continuous chunks of the execution plan's output buffer and the
         // chunks may be transferred directly
         scatter_node = std::make_unique<CommScatter>(
-            precision, desc.outArrayType, execution_plan.location, execution_plan.outputPtr);
+            precision, desc.outArrayType, exec_plan_location, exec_plan_metadata.output_buffer);
         scatter_node->description = "Scatter single-device plan's output buffer directly to "
                                     + std::to_string(output_bricks.size()) + " bricks";
         for(size_t b_idx = 0; b_idx < output_bricks.size(); ++b_idx)
@@ -1872,11 +1906,11 @@ std::vector<size_t>
             single_dev_output_layout.lengths(), single_dev_output_layout.batch());
         TempBufferLease packing_temp_buffer(tempBuffers,
                                             local_comm_rank,
-                                            execution_plan.location,
+                                            exec_plan_location,
                                             packed_layout.logical_count() * output_elem_size);
         scatter_node              = std::make_unique<CommScatter>(precision,
                                                      desc.outArrayType,
-                                                     execution_plan.location,
+                                                     exec_plan_location,
                                                      BufferPtr::temp(packing_temp_buffer.data()));
         scatter_node->description = "Scatter contiguously-packed output data chunks for "
                                     + std::to_string(output_bricks.size()) + " bricks";
@@ -1898,11 +1932,11 @@ std::vector<size_t>
 
             const auto packIdx = AddMultiPlanItem(
                 transpose_brick(local_comm_rank,
-                                execution_plan.location,
+                                exec_plan_location,
                                 obrick.layout.lengths_and_batches(),
                                 precision,
                                 desc.outArrayType,
-                                execution_plan.outputPtr,
+                                exec_plan_metadata.output_buffer,
                                 obrick.layout.offset_in(single_dev_output_layout),
                                 single_dev_output_layout.strides_and_distances(),
                                 BufferPtr::temp(packing_temp_buffer.data()),
@@ -1974,68 +2008,30 @@ void rocfft_plan_t::MakeSingleDevPlanWithGatherScatterIfNeeded()
     // device access is not enabled.
     const auto exec_plan_location = rocfft_location_t::rank0_current_device();
     const bool plan_is_single_dev = desc.has_undistributed_io_on_current_location();
-    auto       exec_plan_metadata = get_single_dev_exec_plan_metadata();
-    auto       exec_item          = BuildSingleDevicePlan(exec_plan_metadata,
+    std::vector<TempBufferLease> leased_exec_plan_io;
+    auto                         exec_plan_metadata
+        = get_single_dev_exec_plan_metadata(leased_exec_plan_io, exec_plan_location);
+    if(plan_is_single_dev && !leased_exec_plan_io.empty())
+    {
+        throw std::logic_error("Leased temporary I/O buffers were unexpectedly created for a "
+                               "single-device plan configuration.");
+    }
+
+    std::vector<size_t> gather_items;
+    if(!plan_is_single_dev)
+        gather_items = CreateInputGatheringItemsIfNeeded(exec_plan_metadata, exec_plan_location);
+    auto exec_item             = BuildSingleDevicePlan(exec_plan_metadata,
                                            desc.get_local_comm_rank(),
                                            exec_plan_location,
                                            transformType,
                                            desc.loadOps,
                                            desc.storeOps,
                                            !plan_is_single_dev);
-    exec_item->description        = "Single-device FFT execution plan";
-    if(plan_is_single_dev)
-    {
-        AddMultiPlanItem(std::move(exec_item), {} /* no antecedent */);
-        return;
-    }
-    // Determine the input (resp. output) buffer of the single-device execution
-    // plan, infer the output (resp. input) buffer from its placement.
-    // Note: the execution plan's input buffer is the final destination of the
-    // gather items (if any); the execution plan's output buffer if the source
-    // of the scatter items (if any).
-    std::vector<TempBufferLease> exec_plan_leased_buffers;
-    exec_item->inputPtr = exec_item->outputPtr = BufferPtr(); // reset
-    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
-    {
-        const auto io_loc = desc.expected_undistributed_location_for(io);
-        if(io_loc && *io_loc == exec_plan_location
-           && desc.undistributed_layout_for(io) == exec_item->rootPlan->layout_for(io))
-        {
-            if(io == io_data_label::INPUT)
-                exec_item->inputPtr = BufferPtr::user_input(0, desc.get_local_comm_rank());
-            else
-                exec_item->outputPtr = BufferPtr::user_output(0, desc.get_local_comm_rank());
-        }
-    }
-    // Set whatever is not set yet as a temporary buffer and/or as allowed by the
-    // root plan's placement
-    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
-    {
-        auto& exec_io = io == io_data_label::INPUT ? exec_item->inputPtr : exec_item->outputPtr;
-        auto& other_exec_io
-            = other(io) == io_data_label::INPUT ? exec_item->inputPtr : exec_item->outputPtr;
-        if(exec_io)
-            continue; // already set
-        if(other_exec_io && exec_item->rootPlan->placement == rocfft_placement_inplace)
-            exec_io = other_exec_io;
-        else
-        {
-            exec_plan_leased_buffers.emplace_back(
-                tempBuffers,
-                desc.get_local_comm_rank(),
-                exec_plan_location,
-                exec_item->rootPlan->expected_buffer_size_for(io));
-            exec_io = BufferPtr::temp(exec_plan_leased_buffers.back().data());
-        }
-    }
-
-    // Save raw pointer before moving into multi-plan
-    auto exec_item_raw = exec_item.get();
-    // Gather user's input data buffers into execution plan's inputPtr buffer
-    auto gather_item_indices = CreateInputGatheringItems(*exec_item);
-    auto exec_item_index     = AddMultiPlanItem(std::move(exec_item), gather_item_indices);
-    // Scatter execution plan's outputPtr buffer into user's output data buffers
-    CreateOutputScatteringItems(*exec_item_raw, {exec_item_index});
+    exec_item->description     = "Single-device FFT execution plan";
+    const auto exec_item_index = AddMultiPlanItem(std::move(exec_item), gather_items);
+    if(!plan_is_single_dev)
+        CreateOutputScatteringItemsIfNeeded(
+            exec_plan_metadata, exec_plan_location, {exec_item_index});
 }
 
 // Transform (complex-complex FFT) one dimension of a brick, by
@@ -2087,21 +2083,20 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
                                  : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
-    rootPlanData.precision    = plan.precision;
-    rootPlanData.inArrayType  = rocfft_array_type_complex_interleaved;
-    rootPlanData.outArrayType = rocfft_array_type_complex_interleaved;
-    rootPlanData.deviceProp   = get_curr_device_prop();
+    rootPlanData.precision     = plan.precision;
+    rootPlanData.inArrayType   = rocfft_array_type_complex_interleaved;
+    rootPlanData.outArrayType  = rocfft_array_type_complex_interleaved;
+    rootPlanData.deviceProp    = get_curr_device_prop();
+    rootPlanData.input_buffer  = input;
+    rootPlanData.output_buffer = output;
 
-    auto singlePlan       = BuildSingleDevicePlan(rootPlanData,
+    auto singlePlan = BuildSingleDevicePlan(rootPlanData,
                                             plan.desc.get_local_comm_rank(),
                                             location,
                                             plan.transformType,
                                             loadOps,
                                             storeOps,
                                             true);
-    singlePlan->mgpuPlan  = true;
-    singlePlan->inputPtr  = input;
-    singlePlan->outputPtr = output;
     return plan.AddMultiPlanItem(std::move(singlePlan), antecedents);
 }
 
