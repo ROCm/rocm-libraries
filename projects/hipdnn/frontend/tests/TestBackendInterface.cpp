@@ -9,6 +9,7 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;
+using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 
 namespace
@@ -42,5 +43,6 @@ TEST(TestBackendInterface, TryToUseBackendInterfaceNullptr)
 
 TEST(TestBackendInterface, VersionEqualsVersionString)
 {
-    EXPECT_EQ(hipdnnBackend()->version(), Version(hipdnnBackend()->versionString))
+    EXPECT_EQ(hipdnnBackend()->version(),
+              Version{std::string_view(hipdnnBackend()->versionString())});
 }
