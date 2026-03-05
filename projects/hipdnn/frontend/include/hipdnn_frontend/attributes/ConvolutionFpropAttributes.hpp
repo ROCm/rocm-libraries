@@ -30,6 +30,11 @@ namespace hipdnn_frontend::graph
  * operation: y = conv(x, w). The operation computes the convolution of input tensor
  * x with filter tensor w.
  *
+ * **Tensor Shapes:**
+ * - **x** (input): `(N, C, H, W)` or `(N, C, D, H, W)` — batch, channels, spatial dims
+ * - **w** (weights): `(K, C/groups, R, S)` or `(K, C/groups, T, R, S)` — output channels, input channels per group, kernel spatial dims
+ * - **y** (output): `(N, K, H_out, W_out)` or `(N, K, D_out, H_out, W_out)` — batch, output channels, output spatial dims
+ *
  * @code{.cpp}
  * // Create a 2D convolution with 3x3 kernel, padding=1, stride=1
  * auto y = graph.conv_fprop(x, w, ConvFpropAttributes()
@@ -294,5 +299,5 @@ public:
         return attr;
     }
 };
-typedef ConvFpropAttributes Conv_fprop_attributes; ///< @brief cuDNN compatibility alias
+typedef ConvFpropAttributes Conv_fprop_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

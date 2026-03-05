@@ -45,7 +45,7 @@ private:
     friend class MatmulBuilder;
 };
 
-class MIOPEN_INTERNALS_EXPORT MatmulBuilder
+class MatmulBuilder
 {
 
 private:
@@ -60,7 +60,7 @@ public:
         return *this;
     }
 
-    Matmul build() const;
+    MIOPEN_INTERNALS_EXPORT Matmul build() const;
 };
 
 class MIOPEN_INTERNALS_EXPORT BackendMatmulDescriptor : public BackendDescriptor
@@ -167,7 +167,7 @@ public:
     OperationMatmul build();
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationMatmulDescriptor : public BackendDescriptor
+class BackendOperationMatmulDescriptor : public BackendDescriptor
 {
 private:
     OperationMatmulBuilder mBuilder;
