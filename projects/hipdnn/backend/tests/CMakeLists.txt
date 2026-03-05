@@ -38,6 +38,7 @@ add_executable(
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
     descriptors/TestMatmulOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorMatmul.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
