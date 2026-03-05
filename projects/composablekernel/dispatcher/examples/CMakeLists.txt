@@ -452,6 +452,9 @@ add_declarative_gpu_example(grouped_conv_01_basic         grouped_conv/cpp/01_ba
 add_declarative_gpu_example(grouped_conv_02_all_dirs      grouped_conv/cpp/02_all_directions.cpp)
 add_declarative_gpu_example(grouped_conv_03_bench_val     grouped_conv/cpp/03_benchmark_validation.cpp)
 add_declarative_gpu_example(grouped_conv_04_registry_json grouped_conv/cpp/04_registry_json.cpp)
+add_declarative_gpu_example(grouped_conv_05_bwd_data      grouped_conv/cpp/05_bwd_data.cpp)
+add_declarative_gpu_example(grouped_conv_06_bwd_weight    grouped_conv/cpp/06_bwd_weight.cpp)
+add_declarative_gpu_example(grouped_conv_07_benchmark     grouped_conv/cpp/07_multi_tile_benchmark.cpp)
 
 # =============================================================================
 # Grouped Convolution Python Library - Multi-Kernel (fwd/bwdd/bwdw × 2D/3D)

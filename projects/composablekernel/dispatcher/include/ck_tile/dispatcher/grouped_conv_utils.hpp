@@ -298,6 +298,11 @@ inline float calc_tflops(double flops, float time_ms)
     return static_cast<float>(flops / (time_ms * 1e9));
 }
 
+inline double calculate_conv_tflops(const GroupedConvProblem& problem, double time_ms)
+{
+    return problem.get_flops() / (time_ms * 1e9);
+}
+
 } // namespace grouped_conv_utils
 
 namespace examples {

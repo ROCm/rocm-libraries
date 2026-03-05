@@ -29,26 +29,58 @@ namespace ck_tile {
 namespace dispatcher {
 
 // =============================================================================
+// Thread-local buffer context for GroupedConvDispatcher::run()
+// The generated conv backend RunFn reads these to get buffer pointers.
+// =============================================================================
+
+struct ConvDispatchBuffers
+{
+    const void* input_ptr  = nullptr;
+    const void* weight_ptr = nullptr;
+    void* output_ptr       = nullptr;
+};
+
+inline thread_local ConvDispatchBuffers g_conv_dispatch_buffers;
+
+// =============================================================================
 // GroupedConvKernelKey - Unique identifier for a grouped convolution kernel
 // =============================================================================
 
 struct GroupedConvKernelKey
 {
+    // Signature fields
     std::string dtype_in;
     std::string dtype_wei;
     std::string dtype_out;
-    std::string layout; // e.g., "nhwgc_gkyxc_nhwgk"
-    int ndim_spatial;   // 1, 2, or 3
-    GroupedConvOp op;
+    std::string layout;   // e.g., "nhwgc"
+    int ndim_spatial = 2; // 1, 2, or 3
+    GroupedConvOp op = GroupedConvOp::Forward;
 
     // Tile configuration
-    int tile_m;
-    int tile_n;
-    int tile_k;
+    int tile_m = 1;
+    int tile_n = 128;
+    int tile_k = 128;
+
+    // Wave/warp configuration
+    int wave_m = 2;
+    int wave_n = 2;
+    int wave_k = 1;
+    int warp_m = 32;
+    int warp_n = 32;
+    int warp_k = 16;
 
     // Pipeline
-    std::string pipeline;
-    std::string scheduler;
+    std::string pipeline  = "compv3";
+    std::string scheduler = "intrawave";
+    std::string epilogue  = "cshuffle";
+
+    // ConvConfigBase parity fields
+    int vector_size_a      = 4;
+    int vector_size_b      = 8;
+    int vector_size_c      = 8;
+    int block_per_cu       = 1;
+    int num_wave_groups    = 1;
+    int num_groups_to_merge = 1;
 
     // GPU architecture (for filter_by_arch)
     std::string arch = "gfx942";
@@ -57,9 +89,18 @@ struct GroupedConvKernelKey
     {
         return dtype_in == other.dtype_in && dtype_wei == other.dtype_wei &&
                dtype_out == other.dtype_out && layout == other.layout &&
-               ndim_spatial == other.ndim_spatial && op == other.op && tile_m == other.tile_m &&
-               tile_n == other.tile_n && tile_k == other.tile_k && pipeline == other.pipeline &&
-               scheduler == other.scheduler && arch == other.arch;
+               ndim_spatial == other.ndim_spatial && op == other.op &&
+               tile_m == other.tile_m && tile_n == other.tile_n && tile_k == other.tile_k &&
+               wave_m == other.wave_m && wave_n == other.wave_n && wave_k == other.wave_k &&
+               warp_m == other.warp_m && warp_n == other.warp_n && warp_k == other.warp_k &&
+               pipeline == other.pipeline && scheduler == other.scheduler &&
+               epilogue == other.epilogue &&
+               vector_size_a == other.vector_size_a && vector_size_b == other.vector_size_b &&
+               vector_size_c == other.vector_size_c &&
+               block_per_cu == other.block_per_cu &&
+               num_wave_groups == other.num_wave_groups &&
+               num_groups_to_merge == other.num_groups_to_merge &&
+               arch == other.arch;
     }
 
     std::string to_string() const
@@ -73,7 +114,11 @@ struct GroupedConvKernelKey
         }
         return "grouped_conv_" + op_str + "_" + dtype_in + "_" + std::to_string(ndim_spatial) +
                "d_" + std::to_string(tile_m) + "x" + std::to_string(tile_n) + "x" +
-               std::to_string(tile_k);
+               std::to_string(tile_k) + "_" +
+               std::to_string(wave_m) + "x" + std::to_string(wave_n) + "x" +
+               std::to_string(wave_k) + "_" +
+               std::to_string(warp_m) + "x" + std::to_string(warp_n) + "x" +
+               std::to_string(warp_k) + "_" + pipeline;
     }
 };
 
@@ -88,7 +133,12 @@ struct GroupedConvKernelKeyHash
         h ^= std::hash<int>{}(key.tile_m) << 4;
         h ^= std::hash<int>{}(key.tile_n) << 5;
         h ^= std::hash<int>{}(key.tile_k) << 6;
-        h ^= std::hash<std::string>{}(key.arch) << 7;
+        h ^= std::hash<int>{}(key.wave_m) << 7;
+        h ^= std::hash<int>{}(key.wave_n) << 8;
+        h ^= std::hash<int>{}(key.warp_m) << 9;
+        h ^= std::hash<int>{}(key.warp_n) << 10;
+        h ^= std::hash<std::string>{}(key.pipeline) << 11;
+        h ^= std::hash<std::string>{}(key.arch) << 12;
         return h;
     }
 };
@@ -175,8 +225,21 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConv
             key.tile_m       = decl.algorithm.tile_m_;
             key.tile_n       = decl.algorithm.tile_n_;
             key.tile_k       = decl.algorithm.tile_k_;
+            key.wave_m       = decl.algorithm.wave_m_;
+            key.wave_n       = decl.algorithm.wave_n_;
+            key.wave_k       = decl.algorithm.wave_k_;
+            key.warp_m       = decl.algorithm.warp_m_;
+            key.warp_n       = decl.algorithm.warp_n_;
+            key.warp_k       = decl.algorithm.warp_k_;
             key.pipeline     = decl.algorithm.pipeline_;
             key.scheduler    = decl.algorithm.scheduler_;
+            key.epilogue     = decl.algorithm.epilogue_;
+            key.vector_size_a      = decl.algorithm.vector_a_;
+            key.vector_size_b      = decl.algorithm.vector_b_;
+            key.vector_size_c      = decl.algorithm.vector_c_;
+            key.block_per_cu       = decl.algorithm.block_per_cu_;
+            key.num_wave_groups    = decl.algorithm.num_wave_groups_;
+            key.num_groups_to_merge = decl.algorithm.num_groups_to_merge_;
             key.arch         = decl.arch;
 
             batch.emplace_back(key, std::make_shared<GroupedConvKernelInstance>(
@@ -236,12 +299,16 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConv
     /// Export registry to JSON string
     std::string export_json(bool include_statistics = false) const
     {
+        // Note: get_name() acquires the mutex internally, so we must NOT hold
+        // the registry mutex here (std::mutex is not recursive).
+        std::string reg_name = get_name();
+
         std::lock_guard<std::mutex> lock(mutex());
         std::ostringstream json;
 
         json << "{\n";
         json << "  \"metadata\": {\n";
-        json << "    \"registry_name\": \"" << json_escape(get_name()) << "\",\n";
+        json << "    \"registry_name\": \"" << json_escape(reg_name) << "\",\n";
         json << "    \"total_kernels\": " << entries().size() << "\n";
         json << "  }";
 
@@ -410,8 +477,15 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConv
         json << "        \"tile_m\": " << key.tile_m << ",\n";
         json << "        \"tile_n\": " << key.tile_n << ",\n";
         json << "        \"tile_k\": " << key.tile_k << ",\n";
+        json << "        \"wave\": \"" << key.wave_m << "x" << key.wave_n << "x" << key.wave_k << "\",\n";
+        json << "        \"warp\": \"" << key.warp_m << "x" << key.warp_n << "x" << key.warp_k << "\",\n";
         json << "        \"pipeline\": \"" << json_escape(key.pipeline) << "\",\n";
-        json << "        \"scheduler\": \"" << json_escape(key.scheduler) << "\"\n";
+        json << "        \"scheduler\": \"" << json_escape(key.scheduler) << "\",\n";
+        json << "        \"epilogue\": \"" << json_escape(key.epilogue) << "\",\n";
+        json << "        \"vector_sizes\": [" << key.vector_size_a << "," << key.vector_size_b << "," << key.vector_size_c << "],\n";
+        json << "        \"block_per_cu\": " << key.block_per_cu << ",\n";
+        json << "        \"num_wave_groups\": " << key.num_wave_groups << ",\n";
+        json << "        \"num_groups_to_merge\": " << key.num_groups_to_merge << "\n";
         json << "      },\n";
         json << "      \"arch\": \"" << json_escape(key.arch) << "\"\n";
         json << "    }";
@@ -427,12 +501,35 @@ class GroupedConvRegistry : public BaseRegistry<GroupedConvRegistry, GroupedConv
 class GroupedConvDispatcher
 {
     public:
-    explicit GroupedConvDispatcher(GroupedConvRegistry* registry) : registry_(registry) {}
+    enum class SelectionStrategy
+    {
+        PriorityBased,
+        Heuristic
+    };
 
-    /// Run convolution with automatic kernel selection
+    using HeuristicFunction =
+        std::function<std::vector<std::string>(const GroupedConvProblem&)>;
+
+    explicit GroupedConvDispatcher(GroupedConvRegistry* registry)
+        : registry_(registry), strategy_(SelectionStrategy::PriorityBased)
+    {
+    }
+
+    void set_strategy(SelectionStrategy s) { strategy_ = s; }
+    void set_heuristic(HeuristicFunction fn) { heuristic_ = std::move(fn); }
+
+    /// Select the best kernel for a problem (does not run it)
+    const GroupedConvKernelInstance* select_kernel(const GroupedConvProblem& problem) const
+    {
+        if(strategy_ == SelectionStrategy::Heuristic)
+            return select_heuristic(problem);
+        return registry_->find(problem);
+    }
+
+    /// Run convolution with automatic kernel selection (legacy - no buffers)
     float run(const GroupedConvProblem& problem, void* stream = nullptr)
     {
-        const auto* kernel = registry_->find(problem);
+        const auto* kernel = select_kernel(problem);
         if(!kernel)
         {
             throw NoKernelFound("No suitable grouped convolution kernel found for problem: " +
@@ -441,14 +538,58 @@ class GroupedConvDispatcher
         return kernel->run(problem, stream);
     }
 
-    /// Get the kernel that would be selected for a problem
+    /// Run convolution with buffer pointers and automatic kernel selection.
+    /// Sets the thread-local buffer context before dispatching to the kernel.
+    /// Requires generated_conv_backend.hpp to be included (for set_conv_buffers).
+    float run(const void* input_ptr,
+              const void* weight_ptr,
+              void* output_ptr,
+              const GroupedConvProblem& problem,
+              void* stream = nullptr)
+    {
+        const auto* kernel = select_kernel(problem);
+        if(!kernel)
+        {
+            throw NoKernelFound(
+                "No suitable grouped convolution kernel found for problem: " +
+                problem.to_string());
+        }
+        g_conv_dispatch_buffers.input_ptr  = input_ptr;
+        g_conv_dispatch_buffers.weight_ptr = weight_ptr;
+        g_conv_dispatch_buffers.output_ptr = output_ptr;
+        return kernel->run(problem, stream);
+    }
+
+    /// Alias kept for backward compatibility
     const GroupedConvKernelInstance* select(const GroupedConvProblem& problem) const
     {
-        return registry_->find(problem);
+        return select_kernel(problem);
     }
 
     private:
+    const GroupedConvKernelInstance* select_heuristic(const GroupedConvProblem& problem) const
+    {
+        if(!heuristic_)
+            return registry_->find(problem);
+
+        auto ranked_names = heuristic_(problem);
+        auto all          = registry_->all_kernels();
+        for(const auto& name : ranked_names)
+        {
+            for(const auto* kernel : all)
+            {
+                if(kernel->name().find(name) != std::string::npos && kernel->matches(problem))
+                {
+                    return kernel;
+                }
+            }
+        }
+        return registry_->find(problem);
+    }
+
     GroupedConvRegistry* registry_;
+    SelectionStrategy strategy_;
+    HeuristicFunction heuristic_;
 };
 
 } // namespace dispatcher

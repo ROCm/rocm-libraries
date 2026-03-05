@@ -966,19 +966,106 @@ def generate_per_set_functions(source_stem: str) -> str:
 def generate_conv_registration(
     kernel_headers: List[Path], example_name: str, kernels: List[Dict]
 ) -> str:
-    """Generate Conv kernel registration code for the dispatcher registry."""
+    """Generate Conv kernel registration code for the dispatcher registry.
+
+    Creates real GroupedConvKernelInstance entries backed by the generated
+    launcher's launch() method via the conv backend RunFn factories.
+    """
     if not kernel_headers:
         return "    // No kernels to register"
 
     lines = []
-    lines.append(
-        "    (void)registry; (void)arch; // Conv uses direct launcher pattern for now"
-    )
 
-    # For conv, we provide direct access to kernel launchers
     for i, h in enumerate(kernel_headers):
-        kernel_name = h.stem
-        lines.append(f"    // Kernel {i + 1}: {kernel_name}")
+        kname = h.stem
+        ns = f"ns_{kname}"
+        launcher = f"{ns}::{kname}_Launcher"
+
+        # Determine direction and ndim from the kernel header name
+        if "_fwd_" in kname:
+            direction = "Forward"
+            conv_type_str = "forward"
+            run_fn_factory = "make_conv_fwd_run_fn"
+        elif "_bwdd_" in kname:
+            direction = "BackwardData"
+            conv_type_str = "bwd_data"
+            run_fn_factory = "make_conv_bwdd_run_fn"
+        elif "_bwdw_" in kname:
+            direction = "BackwardWeight"
+            conv_type_str = "bwd_weight"
+            run_fn_factory = "make_conv_bwdw_run_fn"
+        else:
+            direction = "Forward"
+            conv_type_str = "forward"
+            run_fn_factory = "make_conv_fwd_run_fn"
+
+        ndim = 3 if "_3d_" in kname else 2
+
+        # Parse dtype from name (e.g. grouped_conv_fwd_fp16_...)
+        dtype = "fp16"
+        for dt in ["fp16", "bf16", "fp32"]:
+            if f"_{dt}_" in kname:
+                dtype = dt
+                break
+
+        # Parse tile, wave, warp from name.
+        # Format: ..._TILExTILExTILE_WAVExWAVExWAVE_WARPxWARPxWARP_...
+        import re as _re
+        tile_m, tile_n, tile_k = 1, 128, 128
+        wave_m, wave_n, wave_k = 2, 2, 1
+        warp_m, warp_n, warp_k = 32, 32, 16
+
+        triplets = _re.findall(r"_(\d+)x(\d+)x(\d+)", kname)
+        if len(triplets) >= 1:
+            tile_m, tile_n, tile_k = int(triplets[0][0]), int(triplets[0][1]), int(triplets[0][2])
+        if len(triplets) >= 2:
+            wave_m, wave_n, wave_k = int(triplets[1][0]), int(triplets[1][1]), int(triplets[1][2])
+        if len(triplets) >= 3:
+            warp_m, warp_n, warp_k = int(triplets[2][0]), int(triplets[2][1]), int(triplets[2][2])
+
+        pipeline = "compv4" if "compv4" in kname else "compv3"
+        scheduler = "interwave" if "interwave" in kname else "intrawave"
+        epilogue = "cshuffle" if "cshuffle" in kname else "default"
+        dsb = "_dsb" in kname
+
+        # ConvConfigBase defaults
+        vec_a, vec_b, vec_c = 4, 8, 8
+        block_per_cu = 1
+        num_wave_groups = 1
+        num_groups_to_merge = 1
+
+        lines.append(f"    // Kernel {i+1}: {kname}")
+        lines.append(f"    {{")
+        lines.append(f"        ck_tile::dispatcher::GroupedConvKernelKey key_{i};")
+        lines.append(f'        key_{i}.dtype_in     = "{dtype}";')
+        lines.append(f'        key_{i}.dtype_wei    = "{dtype}";')
+        lines.append(f'        key_{i}.dtype_out    = "{dtype}";')
+        lines.append(f'        key_{i}.layout       = "nhwgc";')
+        lines.append(f"        key_{i}.ndim_spatial = {ndim};")
+        lines.append(f"        key_{i}.op           = ck_tile::dispatcher::GroupedConvOp::{direction};")
+        lines.append(f"        key_{i}.tile_m       = {tile_m};")
+        lines.append(f"        key_{i}.tile_n       = {tile_n};")
+        lines.append(f"        key_{i}.tile_k       = {tile_k};")
+        lines.append(f"        key_{i}.wave_m       = {wave_m};")
+        lines.append(f"        key_{i}.wave_n       = {wave_n};")
+        lines.append(f"        key_{i}.wave_k       = {wave_k};")
+        lines.append(f"        key_{i}.warp_m       = {warp_m};")
+        lines.append(f"        key_{i}.warp_n       = {warp_n};")
+        lines.append(f"        key_{i}.warp_k       = {warp_k};")
+        lines.append(f'        key_{i}.pipeline     = "{pipeline}";')
+        lines.append(f'        key_{i}.scheduler    = "{scheduler}";')
+        lines.append(f'        key_{i}.epilogue     = "{epilogue}";')
+        lines.append(f"        key_{i}.vector_size_a      = {vec_a};")
+        lines.append(f"        key_{i}.vector_size_b      = {vec_b};")
+        lines.append(f"        key_{i}.vector_size_c      = {vec_c};")
+        lines.append(f"        key_{i}.block_per_cu       = {block_per_cu};")
+        lines.append(f"        key_{i}.num_wave_groups    = {num_wave_groups};")
+        lines.append(f"        key_{i}.num_groups_to_merge = {num_groups_to_merge};")
+        lines.append(f'        key_{i}.arch         = arch;')
+        lines.append(f"        auto run_fn_{i} = ck_tile::dispatcher::backends::{run_fn_factory}<{launcher}, {ndim}>();")
+        lines.append(f'        auto inst_{i} = std::make_shared<ck_tile::dispatcher::GroupedConvKernelInstance>(key_{i}, "{kname}", std::move(run_fn_{i}));')
+        lines.append(f"        registry.register_kernel(key_{i}, inst_{i});")
+        lines.append(f"    }}")
 
     return "\n".join(lines)
 
@@ -1425,14 +1512,16 @@ def main():
 #include "ck_tile/dispatcher/registry.hpp"
 #include "ck_tile/dispatcher/kernel_instance.hpp"
 #include "ck_tile/dispatcher/kernel_key.hpp"
+#include "ck_tile/dispatcher/grouped_conv_registry.hpp"
+#include "ck_tile/dispatcher/backends/generated_conv_backend.hpp"
 
 namespace generated {{
 
 // Kernel launchers for direct use
 {launcher_section}
 
-// Registration function
-inline void {func_name}(ck_tile::dispatcher::Registry& registry, const std::string& arch) {{
+// Registration function (takes GroupedConvRegistry for conv kernels)
+inline void {func_name}(ck_tile::dispatcher::GroupedConvRegistry& registry, const std::string& arch) {{
 {register_body}
 }}
 
