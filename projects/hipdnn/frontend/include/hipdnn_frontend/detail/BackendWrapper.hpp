@@ -104,7 +104,7 @@ public:
 
     const char* versionString() override
     {
-        return hipdnnGetVersionString_ext();
+        return hipdnnVersionString_ext();
     }
 
     hipdnnStatus_t backendCreateAndDeserializeGraphExt(hipdnnBackendDescriptor_t* descriptor,
@@ -164,7 +164,7 @@ inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
 {
     if(!IHipdnnBackend::getInstance())
     {
-        IHipdnnBackend::setInstance(tryToUseBackendInterface(hipdnnGetVersionString_ext()));
+        IHipdnnBackend::setInstance(tryToUseBackendInterface(hipdnnVersionString_ext()));
     }
 
     return IHipdnnBackend::getInstance();

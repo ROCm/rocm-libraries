@@ -474,7 +474,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              char* type,
                                                              size_t* typeLen);
 
-// Deprecated - Use hipdnnGetVersionString_ext instead
+// Deprecated - Use hipdnnVersionString_ext instead
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
 
 /**
@@ -482,7 +482,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
  *
  * @return A string in the format "MAJOR.MINOR.PATCH.TWEAK". The returned value has a static lifetime
  */
-HIPDNN_BACKEND_EXPORT const char* hipdnnGetVersionString_ext();
+HIPDNN_BACKEND_EXPORT const char* hipdnnVersionString_ext();
 
 #ifdef __cplusplus
 }

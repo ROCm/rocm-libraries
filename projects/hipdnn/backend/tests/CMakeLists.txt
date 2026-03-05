@@ -43,6 +43,7 @@ add_executable(
     TestPlatformUtils.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
+    TestVersion.cpp
     utilities/TestEngineOrdering.cpp
 )
 
