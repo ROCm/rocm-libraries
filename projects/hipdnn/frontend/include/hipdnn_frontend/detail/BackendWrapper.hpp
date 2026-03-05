@@ -7,6 +7,7 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
 #include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
+#include <hipdnn_frontend/version.h>
 
 namespace hipdnn_frontend::detail
 {
@@ -15,12 +16,33 @@ namespace hipdnn_frontend::detail
 template <class T>
 std::shared_ptr<IHipdnnBackend> tryToUseBackendInterface(std::shared_ptr<T> backendInterface)
 {
+    using namespace hipdnn_data_sdk::utilities;
+
     const char* version;
     auto status = backendInterface->versionExt(&version);
-    // TODO: Also check for major version once frontend has versioning
+
     if(status != hipdnnStatus_t::HIPDNN_STATUS_SUCCESS)
     {
         HIPDNN_FE_LOG_ERROR("Failed to get hipdnn version. Hipdnn backend cannot be loaded");
+        return std::make_shared<detail::IncompatibleBackendWrapper>();
+    }
+
+    Version backendVersion;
+    try
+    {
+        backendVersion = Version{std::string{version}};
+    }
+    catch(const std::invalid_argument& error)
+    {
+        HIPDNN_FE_LOG_ERROR("Error parsing backend version: " + std::string{error.what()});
+        return std::make_shared<detail::IncompatibleBackendWrapper>();
+    }
+
+    if(HIPDNN_FRONTEND_VERSION_MAJOR != backendVersion.major)
+    {
+        HIPDNN_FE_LOG_ERROR("Backend major version (" + std::to_string(backendVersion.major)
+                            + ") does not match frontend major version ("
+                            + std::to_string(HIPDNN_FRONTEND_VERSION_MAJOR) + ")");
         return std::make_shared<detail::IncompatibleBackendWrapper>();
     }
 
@@ -132,6 +154,9 @@ public:
     {
         return hipdnnSetEnginePluginPaths_ext(numPaths, pluginPaths, mode);
     }
+
+private:
+    hipdnn_data_sdk::utilities::Version _version;
 };
 
 // Allow overriding the backend implementation by setting a custom backend instance.
