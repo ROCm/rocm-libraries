@@ -439,7 +439,7 @@ class GSUOn(GSU):
                     mult_MI_Dim = "*MI_N"
 
                 du = kernel["_DepthU%s"%tc]
-                duBpe = f'{int(du * tP["bpeGR"])}*{mult_MI_Dim}' if mult_MI_Dim else int(du * tP["bpeGR"])
+                duBpe = f'{int(du * tP["bpeGR"])}{mult_MI_Dim}' if mult_MI_Dim else int(du * tP["bpeGR"])
                 module.add(SAndB32(dst=sgpr(gsuSgpr), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
                 module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=duBpe, comment="GSU*DepthU*Bpe%s"%(mult_MI_Dim)))
                 module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr("GSU"), src1=hex(0x8000), comment="SCC = (GSUC == 1) ?"))
