@@ -29,31 +29,6 @@ using namespace rocRoller::KernelGraph::ControlGraph;
 
 namespace Direct2LDSTileCopyTest
 {
-    void addDirect2LDS(rocRoller::KernelGraph::KernelGraph& kgraph, DataType dt)
-    {
-        auto loadTiledNodes    = kgraph.control.getNodes<LoadTiled>().to<std::vector>();
-        auto storeLDSTileNodes = kgraph.control.getNodes<StoreLDSTile>().to<std::vector>();
-        for(auto loadGlobal : loadTiledNodes)
-        {
-            auto internalMacroTile = kgraph.mapper.get<MacroTile>(loadGlobal);
-            for(auto storeLDS : storeLDSTileNodes)
-            {
-                if(kgraph.mapper.get<MacroTile>(storeLDS) == internalMacroTile)
-                {
-                    auto direct2lds = kgraph.control.addElement(LoadTileDirect2LDS(dt));
-
-                    moveConnections(kgraph, loadGlobal, direct2lds, 0);
-                    moveConnections(kgraph, storeLDS, direct2lds, 2);
-
-                    replaceWith(kgraph, loadGlobal, direct2lds, false);
-                    replaceWith(kgraph, storeLDS, kgraph.control.addElement(NOP()), false);
-
-                    purgeNodes(kgraph, {loadGlobal, storeLDS});
-                }
-            }
-        }
-    }
-
     using DFFunc = std::function<Expression::ExpressionPtr(int)>;
     using AssignExprFactory
         = std::function<Expression::ExpressionPtr(int mactile0, DFFunc const& DF)>;
@@ -85,7 +60,7 @@ namespace Direct2LDSTileCopyTest
         auto idim0    = kgraph.coordinates.addElement(SubDimension(0, exprMN, exprK));
         auto idim1    = kgraph.coordinates.addElement(SubDimension(1, exprK, expr1u));
         auto mactile0 = kgraph.coordinates.addElement(
-            MacroTile({MN, K}, MemoryType::LDS, {subtileMN, subtileK}));
+            MacroTile({MN, K}, MemoryType::WAVE_Direct2LDS, {subtileMN, subtileK}));
 
         auto mactile1 = kgraph.coordinates.addElement(
             MacroTile({MN, K}, MemoryType::VGPR, {subtileMN, subtileK}));
@@ -116,7 +91,6 @@ namespace Direct2LDSTileCopyTest
 
         kgraph.control.addElement(Body(), {kernel}, {load});
         kgraph.control.addElement(Sequence(), {load}, {assignOp});
-        kgraph.control.addElement(Sequence(), {load}, {assignOp});
         kgraph.control.addElement(Sequence(), {assignOp}, {store});
 
         kgraph.mapper.connect<User>(load, user0);
@@ -140,10 +114,15 @@ namespace Direct2LDSTileCopyTest
         using namespace rocRoller::KernelGraph;
 
         kgraph = kgraph.transform(std::make_shared<AddLDS>(params, context));
+        {
+            auto tile0       = kgraph.coordinates.getNode<MacroTile>(mactile0);
+            tile0.memoryType = MemoryType::VGPR;
+            kgraph.coordinates.setElement(mactile0, tile0);
+        }
         kgraph = kgraph.transform(std::make_shared<AddPrefetch>(params, context));
         kgraph = kgraph.transform(std::make_shared<LowerTile>(params, context));
 
-        addDirect2LDS(kgraph, dt);
+        kgraph = kgraph.transform(std::make_shared<AddDirect2LDS>(context, params));
 
         kgraph = kgraph.transform(std::make_shared<UpdateWavefrontParameters>(params));
         kgraph = kgraph.transform(std::make_shared<AddLDSBarriers>());
@@ -192,6 +171,7 @@ namespace Direct2LDSTileCopyTest
                                     : (sizeof(T) == 2) ? "buffer_load_ushort"
                                                        : "buffer_load_dword";
         CHECK(countSubstring(code, expectedInstr) == 1);
+        CHECK(countSubstring(code, "ds_write") == 0);
 
         std::vector<char> assembledKernel = context->instructions()->assemble();
         REQUIRE(assembledKernel.size() > 0);
