@@ -13,11 +13,10 @@
 #include "universal_gemm_invoker.hpp"
 
 // Universal GEMM-specific wrapper that handles test_async flag
-// ADataType_ and BDataType_ can be tf32_t for TF32 mode - auto-detection happens internally
 template <typename GemmConfig,
-          typename ADataType_,
-          typename BDataType_ = ADataType_,
-          typename CDataType  = ADataType_,
+          typename ADataType,
+          typename BDataType = ADataType,
+          typename CDataType = ADataType,
           typename ALayout,
           typename BLayout,
           typename CLayout>
@@ -26,16 +25,8 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
                                             const BLayout b_layout = BLayout{},
                                             const CLayout c_layout = CLayout{})
 {
-    using Invoker = UniversalInvoker;
-    // ADataTypeCompute: compute type (tf32_t for TF32 mode, used for warp gemm selection)
-    // ADataTypeBuf: buffer/storage type (fp32 when tf32)
-    using ADataTypeCompute = ADataType_;
-    using BDataTypeCompute = BDataType_;
-
-    using TypeConfig   = GemmTypeConfig<ADataType_, BDataType_, CDataType>;
-    using ADataTypeBuf = typename TypeConfig::ADataType;
-    using BDataTypeBuf = typename TypeConfig::BDataType;
-    using AccDataType  = typename TypeConfig::AccDataType;
+    using Invoker     = UniversalInvoker;
+    using AccDataType = typename GemmTypeConfig<ADataType, BDataType, CDataType>::AccDataType;
 
     // Check for async input scheduler test mode
     bool test_async = arg_parser.get_int("test_async");
@@ -56,16 +47,16 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
         const ck_tile::index_t stride_B = is_b_row_major ? N : K;
         const ck_tile::index_t stride_C = is_c_row_major ? N : M;
 
-        // Allocate and initialize tensors - use mapped types for actual data
-        ck_tile::HostTensor<ADataTypeBuf> a_m_k(ck_tile::host_tensor_descriptor(
+        // Allocate and initialize tensors
+        ck_tile::HostTensor<ADataType> a_m_k(ck_tile::host_tensor_descriptor(
             M, K, stride_A, ck_tile::bool_constant<is_a_row_major>{}));
-        ck_tile::HostTensor<BDataTypeBuf> b_k_n(ck_tile::host_tensor_descriptor(
+        ck_tile::HostTensor<BDataType> b_k_n(ck_tile::host_tensor_descriptor(
             K, N, stride_B, ck_tile::bool_constant<is_b_row_major>{}));
         ck_tile::HostTensor<CDataType> c_m_n_dev_result(ck_tile::host_tensor_descriptor(
             M, N, stride_C, ck_tile::bool_constant<is_c_row_major>{}));
 
-        ck_tile::FillUniformDistributionIntegerValue<ADataTypeBuf>{-5, 5}(a_m_k);
-        ck_tile::FillUniformDistributionIntegerValue<BDataTypeBuf>{-5, 5}(b_k_n);
+        ck_tile::FillUniformDistributionIntegerValue<ADataType>{-5, 5}(a_m_k);
+        ck_tile::FillUniformDistributionIntegerValue<BDataType>{-5, 5}(b_k_n);
 
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
@@ -88,8 +79,8 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
                                       stride_C};
 
         Invoker::template test_async_input_scheduler<GemmConfig,
-                                                     ADataTypeCompute,
-                                                     BDataTypeCompute,
+                                                     ADataType,
+                                                     BDataType,
                                                      ck_tile::tuple<>,
                                                      AccDataType,
                                                      CDataType,
@@ -107,15 +98,14 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
         ck_tile::HostTensor<CDataType> c_m_n_ref(ck_tile::host_tensor_descriptor(
             M, N, stride_C, ck_tile::bool_constant<is_c_row_major>{}));
         c_m_n_ref.SetZero();
-        ck_tile::reference_gemm<ADataTypeCompute, BDataTypeCompute, AccDataType, CDataType>(
+        ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
             a_m_k, b_k_n, c_m_n_ref);
 
         // Verify results
         const float max_accumulated_value =
             *std::max_element(c_m_n_ref.mData.begin(), c_m_n_ref.mData.end());
-        const auto rtol_atol =
-            calculate_rtol_atol<ADataTypeCompute, BDataTypeCompute, AccDataType, CDataType>(
-                K, kbatch, max_accumulated_value);
+        const auto rtol_atol = calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
+            K, kbatch, max_accumulated_value);
         bool pass = do_verify(c_m_n_dev_result, c_m_n_ref, rtol_atol, "CPU");
 
         std::cout << "Async input scheduler test: " << (pass ? "PASS" : "FAIL") << std::endl;
@@ -123,15 +113,11 @@ int run_gemm_example_with_layouts_universal(ck_tile::ArgParser& arg_parser,
     }
 
     // Normal path - delegate to shared implementation
-    return run_gemm_example_with_layouts<GemmConfig,
-                                         Invoker,
-                                         ADataTypeCompute,
-                                         BDataTypeCompute,
-                                         CDataType>(arg_parser, a_layout, b_layout, c_layout);
+    return run_gemm_example_with_layouts<GemmConfig, Invoker, ADataType, BDataType, CDataType>(
+        arg_parser, a_layout, b_layout, c_layout);
 }
 
 // Universal GEMM-specific prec_type dispatcher that uses the wrapper
-// APrecType and BPrecType can be tf32_t for TF32 mode - auto-detection happens internally
 template <typename GemmConfig,
           typename APrecType,
           typename BPrecType = APrecType,
@@ -206,16 +192,6 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::bf16_t>, ck_tile::bf16_t>(
             a_layout, b_layout, arg_parser);
     }
-#ifdef CK_GFX950_SUPPORT
-    else if(data_type == "tf32")
-    {
-        // Pass tf32_t as A/B types - epilogue auto-detects and maps to float for data operations
-        return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::tf32_t>,
-                                                    ck_tile::tf32_t,
-                                                    ck_tile::tf32_t,
-                                                    float>(a_layout, b_layout, arg_parser);
-    }
-#endif
     else if(data_type == "fp8")
     {
         return run_gemm_example_prec_type_universal<GemmConfig<ck_tile::fp8_t>,

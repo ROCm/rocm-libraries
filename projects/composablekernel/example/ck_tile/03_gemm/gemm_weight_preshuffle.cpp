@@ -61,16 +61,6 @@ int run_gemm_example(ck_tile::ArgParser& arg_parser)
         return run_gemm_example_prec_type<GemmConfig<ck_tile::half_t>, ck_tile::bf16_t>(
             a_layout, b_layout, arg_parser);
     }
-#ifdef CK_GFX950_SUPPORT
-    else if(data_type == "tf32")
-    {
-        // TF32 uses 16x16x32 warp tile (3x bf16 16x16x32 MFMA emulation)
-        return run_gemm_example_prec_type<GemmConfig<ck_tile::tf32_t>,
-                                          ck_tile::tf32_t,
-                                          ck_tile::tf32_t,
-                                          float>(a_layout, b_layout, arg_parser);
-    }
-#endif
     else if(data_type == "fp8")
     {
         return run_gemm_example_prec_type<GemmConfig<ck_tile::fp8_t>,
