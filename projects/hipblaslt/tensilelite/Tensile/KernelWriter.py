@@ -4641,8 +4641,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
     self.states.tailloopInNll = kernel["TailloopInNll"]
-    # remove staggerU code for tailloopInNll (cannot support staggerU)
-    self.states.staggerUCode = not self.states.tailloopInNll
+    # remove staggerU code for the following cases
+    # - tailloopInNll (cannot support staggerU)
+    # - StreamK + MX (not enough sgpr)
+    self.states.staggerUCode = True
+    if self.states.tailloopInNll or \
+       (kernel["StreamK"] and (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"])):
+      self.states.staggerUCode = False
     self.states.tailloopInNllmaxUnit = 1
     if self.states.tailloopInNll:
       tluA = kernel["ProblemType"]["TLUA"]

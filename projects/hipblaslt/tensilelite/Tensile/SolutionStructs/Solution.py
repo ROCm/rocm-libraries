@@ -3345,14 +3345,15 @@ class Solution(collections.abc.Mapping):
     # number of minimum GR inc inst per MFMA
     # default 1
     # Set at least 2 for gfx950 + MI16 + smaller MT case
+    # Set 3 for MX (number of GRInc is doubled)
     if state["MinGRIncPerMfma"] == -1:
       state["MinGRIncPerMfma"] = 1
       if isa == (9, 5, 0):
-        if state["EnableMatrixInstruction"] and state["MatrixInstM"] == 16 and state["MatrixInstK"] == 1:
-          if numMFMA<=32:
-            state["MinGRIncPerMfma"] = 2
-          if numMFMA<=16:
+        if state["EnableMatrixInstruction"] and state["MatrixInstM"] == 16 and state["MatrixInstB"] == 1:
+          if numMFMA<=16 or (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
             state["MinGRIncPerMfma"] = 3
+          elif numMFMA<=32:
+            state["MinGRIncPerMfma"] = 2
 
     # calculate ldsPad
     state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
