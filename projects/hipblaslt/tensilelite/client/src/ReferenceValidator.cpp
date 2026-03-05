@@ -771,9 +771,6 @@ namespace TensileLite
                                                    size_t                  validationStride,
                                                    double                  threshold)
         {
-            FastPointwiseComparison<ValidType> compareValid(m_printMax > 0, threshold);
-            InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
-
             size_t elementsToCopy       = tensor.totalAllocatedElements();
             size_t elementsOffsetToCopy = 0;
             size_t elementsBeforeData   = 0;
@@ -809,7 +806,7 @@ namespace TensileLite
             ValidType const* resultData      = resultBuffer + elementsBeforeData;
             ValidType const* resultAfterData = resultData + tensor.totalAllocatedElements();
 
-            PointwiseComparison<ValidType> compareValid(m_printValids, m_printMax, m_printMax > 0, threshold);
+            FastPointwiseComparison<ValidType> compareValid(m_printMax > 0, threshold);
             InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
 
             size_t boundsCheckElements = 0;
