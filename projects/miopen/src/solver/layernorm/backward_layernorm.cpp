@@ -261,7 +261,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {
                     start = miopen::make_hip_event();
                     stop  = miopen::make_hip_event();
-                    hipEventRecord(start.get(), handle_.GetStream());
+                    (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
                 kernel(params.dy,
@@ -283,9 +283,9 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
 
                 if(handle_.IsProfilingEnabled())
                 {
-                    hipEventRecord(stop.get(), handle_.GetStream());
-                    hipEventSynchronize(stop.get());
-                    hipEventElapsedTime(&elapsed, start.get(), stop.get());
+                    (void)hipEventRecord(stop.get(), handle_.GetStream());
+                    (void)hipEventSynchronize(stop.get());
+                    (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
                     handle_.ResetKernelTime();
                     handle_.AccumKernelTime(elapsed);
                 };
@@ -308,7 +308,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {
                     start = miopen::make_hip_event();
                     stop  = miopen::make_hip_event();
-                    hipEventRecord(start.get(), handle_.GetStream());
+                    (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
                 kernel(params.dy,
@@ -324,9 +324,9 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
 
                 if(handle_.IsProfilingEnabled())
                 {
-                    hipEventRecord(stop.get(), handle_.GetStream());
-                    hipEventSynchronize(stop.get());
-                    hipEventElapsedTime(&elapsed, start.get(), stop.get());
+                    (void)hipEventRecord(stop.get(), handle_.GetStream());
+                    (void)hipEventSynchronize(stop.get());
+                    (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
                     handle_.ResetKernelTime();
                     handle_.AccumKernelTime(elapsed);
                 };

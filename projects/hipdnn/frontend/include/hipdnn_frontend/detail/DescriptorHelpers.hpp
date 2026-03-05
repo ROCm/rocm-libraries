@@ -11,6 +11,7 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace hipdnn_frontend::detail
