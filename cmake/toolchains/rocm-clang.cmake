@@ -37,7 +37,7 @@ if(NOT _ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED)
     if(CMAKE_GENERATOR)
         string(TOLOWER "${CMAKE_GENERATOR}" _generator_lower)
         if(NOT (_generator_lower MATCHES "ninja" OR _generator_lower MATCHES "makefile"))
-            message(WARNING
+            message(FATAL_ERROR
                 "\nIncompatible generator detected: '${CMAKE_GENERATOR}'\n"
                 "The ROCm Clang toolchain requires Ninja or Makefile generators.\n"
                 "Use \"cmake -G <generator>\" to select a compatible generator.\n"
