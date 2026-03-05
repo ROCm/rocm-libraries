@@ -157,7 +157,8 @@ jobs:
             --build-dir ${{ env.BUILD_DIR }} \
             --upload
 
-      - name: Notify Teams on Failure
+      - name: Notify MIOpen Teams Channel on Failure
+      # Channel name "MIOpen CI Reporting"
         if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() }}
         run: |
           python3 .github/scripts/notify_teams.py \
