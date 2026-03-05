@@ -9,7 +9,6 @@ Usage:
     python notify_teams.py \
         --project miopen \
         --failure-stage build \
-        --platform linux \
         --log-path TheRock/build/logs \
         --webhook-url "$WEBHOOK_URL" \
         --run-url "$RUN_URL" \
@@ -21,6 +20,7 @@ Usage:
 
 import argparse
 import json
+import platform
 import re
 import subprocess
 import sys
@@ -278,18 +278,11 @@ class TeamsNotifier:
             )
 
             with urllib.request.urlopen(req, timeout=30) as response:
-                response_body = response.read().decode("utf-8")
                 if response.status in [200, 202]:
-                    print(f"Successfully sent Teams notification for {project}")
-                    print(f"Response status: {response.status}")
-                    print(f"Response body: {response_body}")
-                    return True
-                else:
                     print(
-                        f"Failed to send Teams notification. Status code: {response.status}"
+                        f"Successfully sent Teams notification for {project} with response status: {response.status}"
                     )
-                    print(f"Response body: {response_body}")
-                    return False
+                    return True
         except Exception as e:
             print(f"Error sending Teams notification: {e}")
             return False
@@ -357,12 +350,6 @@ def main():
         help="Stage of failure (build or test)",
     )
     parser.add_argument(
-        "--platform",
-        required=True,
-        choices=["linux", "windows"],
-        help="Platform where the failure occurred",
-    )
-    parser.add_argument(
         "--log-path",
         required=True,
         help="Path to log file or directory containing logs",
@@ -386,6 +373,9 @@ def main():
 
     args = parser.parse_args()
 
+    # Detect platform automatically
+    detected_platform = platform.system().lower()
+
     # Extract error context
     extractor = ErrorExtractor(args.log_path, args.failure_stage)
     error_context, issue_type = extractor.extract()
@@ -394,7 +384,7 @@ def main():
     notifier = TeamsNotifier(args.webhook_url, args.dry_run)
     success = notifier.send_notification(
         project=args.project,
-        platform=args.platform,
+        platform=detected_platform,
         failure_stage=args.failure_stage,
         run_url=args.run_url,
         error_context=error_context,

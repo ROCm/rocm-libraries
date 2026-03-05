@@ -25,7 +25,6 @@ Test the notification script with these fixtures:
 python3 .github/scripts/notify_teams.py \
   --project miopen \
   --failure-stage build \
-  --platform linux \
   --log-path test/fixtures/sample_build_error.log \
   --webhook-url "test" \
   --run-url "http://example.com/run/123" \
@@ -35,7 +34,6 @@ python3 .github/scripts/notify_teams.py \
 python3 .github/scripts/notify_teams.py \
   --project miopen \
   --failure-stage test \
-  --platform linux \
   --log-path test/fixtures/sample_test_error.log \
   --webhook-url "test" \
   --run-url "http://example.com/run/123" \
