@@ -415,8 +415,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvBinWinogradRxSf2x3g1Fused final : FusionSolve
     float GetWti(const FusionContext&, const FusionDescription&) const override;
 };
 
-
-  template <uint32_t Winodata, uint32_t Winofilter>
+template <uint32_t Winodata, uint32_t Winofilter>
 struct ConvWinoFuryRxSFused final : FusionSolverBase
 {
     const std::string& SolverDbId() const override
