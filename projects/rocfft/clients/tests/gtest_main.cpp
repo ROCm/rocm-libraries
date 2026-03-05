@@ -333,7 +333,6 @@ int main(int argc, char* argv[])
     app.add_option("--ngpus", ngpus, "Number of GPUs to use per rank")
         ->default_val(-1)
         ->check(CLI::NonNegativeNumber);
-    app.add_option("--gpus", n_random_tests, "Number of extra randomized tests")->default_val(0);
     app.add_option("--test_prob", test_prob, "Probability of running individual tests")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
