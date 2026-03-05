@@ -15333,7 +15333,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VCmpXGeU32(dst=EXEC(), src0=vgpr("Serial"), src1=sgpr(tmpSgpr), comment="needs shift if serial > edge"))
         module.add(VMulLOU32(dst=vgpr(serialOffsetVgpr), src0=hex(maxKId), src1=sgpr(tmpSgpr+1), comment="ds_offset = K * offset"))
         module.add(VAddU32(dst=vgpr(offsetVgpr), src0=vgpr(offsetVgpr), src1=vgpr(serialOffsetVgpr), comment="real offset = offset + ds_offset"))
-      module.add(SMovB64(dst=EXEC(), src=-1, comment="reset mask"))
+      SMovBX_sp = SMovB32 if (kernel["WavefrontSize"] == 32) else SMovB64
+      module.add(SMovBX_sp(dst=EXEC(), src=-1, comment="reset mask"))
       outVgprNext = tmpVgpr1Res.idx
       # Shiftptr
       for g in range(gwvw):
@@ -15466,6 +15467,7 @@ class KernelWriterAssembly(KernelWriter):
                             addr0, addr1, offset=globalOffset, comment="global store bias"))
         tmpVgprN += tmpVgprNStep
         globalOffset += biasBpe
+    SMovBX = SMovB32 if (kernel["WavefrontSize"] == 32) else SMovB64
     module.add(SMovBX(dst=EXEC(), src=-1, comment="Reset exec mask"))
     return module
 
