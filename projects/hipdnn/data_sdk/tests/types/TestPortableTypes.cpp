@@ -1,12 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-/// @file PortableFloatTypes.cpp
-/// @brief Consolidated typed tests for all portable floating-point types.
+/// @file TestPortableTypes.cpp
+/// @brief Typed tests for portable floating-point types.
 ///
-/// This file uses TYPED_TEST to run common test cases across all portable types:
-/// bfloat16, half, fp8_e4m3, and fp8_e5m2. Type-specific tests that cannot be
-/// generalized remain in their individual test files.
+/// This file contains two test fixtures:
+/// - PortableFloatTypes: Common tests for all types (bfloat16, half, fp8_e4m3, fp8_e5m2)
+/// - MathFloatTypes: Arithmetic and math function tests for bfloat16 and half only
+/// Type-specific tests that cannot be generalized remain in their individual test files.
 
 #include <gtest/gtest.h>
 
@@ -129,7 +130,8 @@ struct PortableTypeTraits<fp8_e5m2>
 // NOLINTEND(readability-identifier-naming)
 
 // ============================================================================
-// Test Fixture
+// Test Fixture (bfloat16, half, fp8_e4m3, fp8_e5m2)
+// Common tests for all portable float types
 // ============================================================================
 
 template <typename T>
@@ -151,6 +153,19 @@ protected:
 
 using PortableTypes = ::testing::Types<bfloat16, half, fp8_e4m3, fp8_e5m2>;
 TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
+
+// ============================================================================
+// Math Float Types Fixture (bfloat16, half)
+// Full arithmetic operations and math functions
+// ============================================================================
+
+template <typename T>
+class MathFloatTypes : public PortableFloatTypes<T>
+{
+};
+
+using MathTypes = ::testing::Types<bfloat16, half>;
+TYPED_TEST_SUITE(MathFloatTypes, MathTypes, );
 
 // ============================================================================
 // Type Properties Tests
@@ -274,7 +289,7 @@ TYPED_TEST(PortableFloatTypes, ExplicitConversionToDouble)
 // Arithmetic Operator Tests
 // ============================================================================
 
-TYPED_TEST(PortableFloatTypes, Addition)
+TYPED_TEST(MathFloatTypes, Addition)
 {
     using T = TypeParam;
 
@@ -284,7 +299,7 @@ TYPED_TEST(PortableFloatTypes, Addition)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 3.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, Subtraction)
+TYPED_TEST(MathFloatTypes, Subtraction)
 {
     using T = TypeParam;
 
@@ -294,7 +309,7 @@ TYPED_TEST(PortableFloatTypes, Subtraction)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 2.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, Multiplication)
+TYPED_TEST(MathFloatTypes, Multiplication)
 {
     using T = TypeParam;
 
@@ -304,7 +319,7 @@ TYPED_TEST(PortableFloatTypes, Multiplication)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 8.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, Division)
+TYPED_TEST(MathFloatTypes, Division)
 {
     using T = TypeParam;
 
@@ -341,7 +356,7 @@ TYPED_TEST(PortableFloatTypes, UnaryPlus)
 // Compound Assignment Tests
 // ============================================================================
 
-TYPED_TEST(PortableFloatTypes, CompoundAddition)
+TYPED_TEST(MathFloatTypes, CompoundAddition)
 {
     using T = TypeParam;
 
@@ -350,7 +365,7 @@ TYPED_TEST(PortableFloatTypes, CompoundAddition)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 3.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, CompoundSubtraction)
+TYPED_TEST(MathFloatTypes, CompoundSubtraction)
 {
     using T = TypeParam;
 
@@ -359,7 +374,7 @@ TYPED_TEST(PortableFloatTypes, CompoundSubtraction)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 2.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, CompoundMultiplication)
+TYPED_TEST(MathFloatTypes, CompoundMultiplication)
 {
     using T = TypeParam;
 
@@ -368,7 +383,7 @@ TYPED_TEST(PortableFloatTypes, CompoundMultiplication)
     EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 8.0f));
 }
 
-TYPED_TEST(PortableFloatTypes, CompoundDivision)
+TYPED_TEST(MathFloatTypes, CompoundDivision)
 {
     using T = TypeParam;
 
@@ -381,7 +396,7 @@ TYPED_TEST(PortableFloatTypes, CompoundDivision)
 // Comparison Operator Tests
 // ============================================================================
 
-TYPED_TEST(PortableFloatTypes, Equality)
+TYPED_TEST(MathFloatTypes, Equality)
 {
     using T = TypeParam;
 
@@ -392,7 +407,7 @@ TYPED_TEST(PortableFloatTypes, Equality)
     EXPECT_FALSE(a == c);
 }
 
-TYPED_TEST(PortableFloatTypes, Inequality)
+TYPED_TEST(MathFloatTypes, Inequality)
 {
     using T = TypeParam;
 
@@ -402,7 +417,7 @@ TYPED_TEST(PortableFloatTypes, Inequality)
     EXPECT_FALSE(a != a);
 }
 
-TYPED_TEST(PortableFloatTypes, LessThan)
+TYPED_TEST(MathFloatTypes, LessThan)
 {
     using T = TypeParam;
 
@@ -413,7 +428,7 @@ TYPED_TEST(PortableFloatTypes, LessThan)
     EXPECT_FALSE(a < a);
 }
 
-TYPED_TEST(PortableFloatTypes, GreaterThan)
+TYPED_TEST(MathFloatTypes, GreaterThan)
 {
     using T = TypeParam;
 
@@ -424,7 +439,7 @@ TYPED_TEST(PortableFloatTypes, GreaterThan)
     EXPECT_FALSE(a > a);
 }
 
-TYPED_TEST(PortableFloatTypes, LessThanOrEqual)
+TYPED_TEST(MathFloatTypes, LessThanOrEqual)
 {
     using T = TypeParam;
 
@@ -436,7 +451,7 @@ TYPED_TEST(PortableFloatTypes, LessThanOrEqual)
     EXPECT_FALSE(b <= a);
 }
 
-TYPED_TEST(PortableFloatTypes, GreaterThanOrEqual)
+TYPED_TEST(MathFloatTypes, GreaterThanOrEqual)
 {
     using T = TypeParam;
 
@@ -448,7 +463,7 @@ TYPED_TEST(PortableFloatTypes, GreaterThanOrEqual)
     EXPECT_FALSE(b >= a);
 }
 
-TYPED_TEST(PortableFloatTypes, NanComparisonSemantics)
+TYPED_TEST(MathFloatTypes, NanComparisonSemantics)
 {
     using T = TypeParam;
 
@@ -543,7 +558,7 @@ TYPED_TEST(PortableFloatTypes, InfinityHandling)
 // Math Function Tests
 // ============================================================================
 
-TYPED_TEST(PortableFloatTypes, Abs)
+TYPED_TEST(MathFloatTypes, Abs)
 {
     using T = TypeParam;
 
@@ -552,7 +567,7 @@ TYPED_TEST(PortableFloatTypes, Abs)
     EXPECT_TRUE(this->nearEqual(abs(T(0.0f)), T(0.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Fabs)
+TYPED_TEST(MathFloatTypes, Fabs)
 {
     using T = TypeParam;
 
@@ -560,7 +575,7 @@ TYPED_TEST(PortableFloatTypes, Fabs)
     EXPECT_TRUE(this->nearEqual(fabs(T(4.0f)), T(4.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Max)
+TYPED_TEST(MathFloatTypes, Max)
 {
     using T = TypeParam;
 
@@ -570,7 +585,7 @@ TYPED_TEST(PortableFloatTypes, Max)
     EXPECT_TRUE(this->nearEqual(max(b, a), b));
 }
 
-TYPED_TEST(PortableFloatTypes, MaxWithNaN)
+TYPED_TEST(MathFloatTypes, MaxWithNaN)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
@@ -582,7 +597,7 @@ TYPED_TEST(PortableFloatTypes, MaxWithNaN)
     EXPECT_TRUE(isnan(max(nan, nan)));
 }
 
-TYPED_TEST(PortableFloatTypes, Min)
+TYPED_TEST(MathFloatTypes, Min)
 {
     using T = TypeParam;
 
@@ -592,7 +607,7 @@ TYPED_TEST(PortableFloatTypes, Min)
     EXPECT_TRUE(this->nearEqual(min(b, a), a));
 }
 
-TYPED_TEST(PortableFloatTypes, MinWithNaN)
+TYPED_TEST(MathFloatTypes, MinWithNaN)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
@@ -604,7 +619,7 @@ TYPED_TEST(PortableFloatTypes, MinWithNaN)
     EXPECT_TRUE(isnan(min(nan, nan)));
 }
 
-TYPED_TEST(PortableFloatTypes, Sqrt)
+TYPED_TEST(MathFloatTypes, Sqrt)
 {
     using T = TypeParam;
 
@@ -615,7 +630,7 @@ TYPED_TEST(PortableFloatTypes, Sqrt)
     EXPECT_TRUE(this->nearEqual(sqrt(b), T(4.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Exp)
+TYPED_TEST(MathFloatTypes, Exp)
 {
     using T = TypeParam;
 
@@ -623,7 +638,7 @@ TYPED_TEST(PortableFloatTypes, Exp)
     EXPECT_TRUE(this->nearEqual(exp(a), T(1.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Log)
+TYPED_TEST(MathFloatTypes, Log)
 {
     using T = TypeParam;
 
@@ -631,7 +646,7 @@ TYPED_TEST(PortableFloatTypes, Log)
     EXPECT_TRUE(this->nearEqual(log(a), T(0.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Tanh)
+TYPED_TEST(MathFloatTypes, Tanh)
 {
     using T = TypeParam;
 
@@ -639,7 +654,7 @@ TYPED_TEST(PortableFloatTypes, Tanh)
     EXPECT_TRUE(this->nearEqual(tanh(a), T(0.0f)));
 }
 
-TYPED_TEST(PortableFloatTypes, Floor)
+TYPED_TEST(MathFloatTypes, Floor)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
@@ -648,7 +663,7 @@ TYPED_TEST(PortableFloatTypes, Floor)
     EXPECT_TRUE(this->nearEqual(floor(T(-2.5f)), T(-3.0f), Traits::large_tolerance));
 }
 
-TYPED_TEST(PortableFloatTypes, Ceil)
+TYPED_TEST(MathFloatTypes, Ceil)
 {
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
@@ -657,7 +672,7 @@ TYPED_TEST(PortableFloatTypes, Ceil)
     EXPECT_TRUE(this->nearEqual(ceil(T(-2.5f)), T(-2.0f), Traits::large_tolerance));
 }
 
-TYPED_TEST(PortableFloatTypes, Round)
+TYPED_TEST(MathFloatTypes, Round)
 {
     using T = TypeParam;
 
