@@ -254,6 +254,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileB: []
 tailLoops: true
 streamK: None
 loadScale_A: BufferToVGPR
@@ -318,6 +319,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -380,6 +382,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
 swizzleScale: false
@@ -626,6 +629,19 @@ def test_gemm_options(tmp_path):
             check=True,
         )
 
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--wgs=128x2",
+                "--workgroup_size_x=256",
+            ],
+            check=True,
+        )
+
     # PreSwizzleScaleGFX950 requires pretileScale; client must assert and exit non-zero
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.run(
@@ -668,6 +684,13 @@ def test_gemm_options(tmp_path):
     assert post["mac_m"] == 1024
     assert post["mac_n"] == 2048
     assert post["mac_k"] == 4096
+
+    # setting wg size via shortcut
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--wgs=64x4"]
+    )
+    assert post["workgroup_size_x"] == 64
+    assert post["workgroup_size_y"] == 4
 
     # setting mi via shortcut
     post = run_and_load_example_yaml(
@@ -763,6 +786,12 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["k"] == 7
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
+
+    # pretileB
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--wgts=256x256x256", "--pretileB=64x128"]
+    )
+    assert post["types"]["pretileB"] == [64, 128]
 
     # setting data initialization modes
     post = run_and_load_example_problem_yaml(
