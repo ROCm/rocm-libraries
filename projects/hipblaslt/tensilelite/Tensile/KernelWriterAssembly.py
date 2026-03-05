@@ -9855,15 +9855,6 @@ class KernelWriterAssembly(KernelWriter):
         localWriteAddRound(tc)
       else:
         src0Val = getSrc0Val(tc)
-        if kernel["StoreSwapAddr"]:
-          if kernel["LocalWriteUseSgpr%s"%tc]:
-            src0Val = sgpr("Swap%s"%tc)
-          else:
-            src0Val = vgpr("LocalWriteSwapAddr%s"%tc)
-        else:
-          # Using inlined constants - TODO: always use LdsOffsetA_Blk for A/B/MXSA/MXSB?
-          src0Val = hex(kernel["LdsOffsetA_Blk"])
-
         numLwa = self.states.a.numVgprLocalWriteAddr if tP["isA"] else self.states.b.numVgprLocalWriteAddr
         localWriteSwapXOR(tc, src0Val, numLwa)
         if "MX" in tP:
@@ -9884,14 +9875,7 @@ class KernelWriterAssembly(KernelWriter):
           tPM["localWriteSwapByteOffset"] = 0 if tPM["localWriteSwapByteOffset"] else kernel["LdsOffsetA_Blk"]
           module.addComment1("(EPS=1) local write swap internal offset -> %u" % tPM["localWriteSwapByteOffset"])
         else:
-          if kernel["StoreSwapAddr"]:
-            if kernel["LocalWriteUseSgpr%s"%tc]:
-              src0Val = sgpr("Swap%s"%tc)
-            else:
-              src0Val = vgpr("LocalWriteSwapAddr%s"%tc)
-          else:
-            # Using inlined constants
-            src0Val = hex(kernel["LdsOffsetA_Blk"])
+          src0Val = getSrc0Val(tc)
           numLwa = self.states.m.numVgprLocalWriteAddr
           localWriteSwapXOR(tc, src0Val, numLwa)
     return module
