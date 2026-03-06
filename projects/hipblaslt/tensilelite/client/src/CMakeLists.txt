@@ -4,6 +4,7 @@
 set(COMMON_CLIENT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/PerformanceReporter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorListener.cpp"

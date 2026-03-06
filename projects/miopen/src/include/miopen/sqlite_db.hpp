@@ -1,5 +1,5 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -123,15 +123,14 @@ struct SQLiteSerializable
         for(auto& el : int_fields)
             ss << ",`" << el << "` INT NOT NULL";
         ss << ");";
-        ss << "CREATE UNIQUE INDEX IF NOT EXISTS "
-           << "`idx_" << Derived::table_name() << "` "
+        ss << "CREATE UNIQUE INDEX IF NOT EXISTS " << "`idx_" << Derived::table_name() << "` "
            << "ON " << Derived::table_name() << "( " << miopen::JoinStrings(str_fields, ",") << ", "
            << miopen::JoinStrings(int_fields, ",") << " );";
         return ss.str();
     }
 };
 
-class MIOPEN_INTERNALS_EXPORT SQLite
+class SQLite
 {
     class impl;
     // do we need propagate const
@@ -164,18 +163,18 @@ public:
     };
 
     using result_type = std::vector<std::unordered_map<std::string, std::string>>;
-    SQLite();
-    SQLite(const fs::path& filename_, bool is_system);
-    ~SQLite();
-    SQLite(SQLite&&) noexcept;
-    SQLite& operator=(SQLite&&) noexcept;
+    MIOPEN_INTERNALS_EXPORT SQLite();
+    MIOPEN_INTERNALS_EXPORT SQLite(const fs::path& filename_, bool is_system);
+    MIOPEN_INTERNALS_EXPORT ~SQLite();
+    MIOPEN_INTERNALS_EXPORT SQLite(SQLite&&) noexcept;
+    MIOPEN_INTERNALS_EXPORT SQLite& operator=(SQLite&&) noexcept;
     SQLite& operator=(const SQLite&) = delete;
-    bool Valid() const;
-    result_type Exec(const std::string& query) const;
-    int Changes() const;
+    MIOPEN_INTERNALS_EXPORT bool Valid() const;
+    MIOPEN_INTERNALS_EXPORT result_type Exec(const std::string& query) const;
+    MIOPEN_INTERNALS_EXPORT int Changes() const;
     int Retry(std::function<int()>) const;
     static int Retry(std::function<int()> f, fs::path filename);
-    std::string ErrorMessage() const;
+    MIOPEN_INTERNALS_EXPORT std::string ErrorMessage() const;
 };
 
 template <typename Derived>
@@ -511,7 +510,7 @@ public:
     }
 
     /// Updates record under key PROBLEM_CONFIG with data ID:VALUES in database.
-    /// Returns updated record or boost::none if insertion failed
+    /// Returns updated record or std::optional equals to nullopt_t if insertion failed
     template <class T, class V>
     inline std::optional<DbRecord>
     UpdateUnsafe(const T& problem_config, const std::string& id, const V& values)

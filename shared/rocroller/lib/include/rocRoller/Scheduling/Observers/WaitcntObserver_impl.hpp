@@ -34,39 +34,40 @@ namespace rocRoller
                 if(pair.second.size() > 0)
                 {
                     auto wqType = m_typeInQueue.at(pair.first);
+                    auto idx    = static_cast<size_t>(wqType);
 
-                    AssertFatal(wqType < rv.waitLengths.size(),
+                    AssertFatal(idx < rv.waitLengths.size(),
                                 ShowValue(static_cast<size_t>(wqType)),
                                 ShowValue(rv.waitLengths.size()),
                                 ShowValue(pair.second.size()));
 
-                    rv.waitLengths.at(wqType) = pair.second.size();
+                    rv.waitLengths.at(idx) = pair.second.size();
                 }
             }
 
             // Apply the waitcount from this instruction.
-            for(int i = 0; i < GPUWaitQueueType::Count; i++)
+            for(int i = 0; i < static_cast<int>(GPUWaitQueueType::Count); i++)
             {
-                auto wqType = GPUWaitQueueType(i);
-                auto wq     = GPUWaitQueue(wqType);
+                auto wqType = static_cast<GPUWaitQueueType>(i);
+                auto wq     = fromWaitQueueType(wqType);
 
                 auto count = rv.waitCount.getCount(wq);
 
                 if(count >= 0)
-                    rv.waitLengths.at(i) = std::min(rv.waitLengths.at(i), count);
+                    rv.waitLengths.at(wqType) = std::min(rv.waitLengths.at(wqType), count);
             }
 
             // Add contribution from this instruction
             GPUInstructionInfo info
                 = m_context.lock()->targetArchitecture().GetInstructionInfo(inst.getOpCode());
             auto whichQueues = info.getWaitQueues();
-            for(auto q : whichQueues)
+            for(auto qt : whichQueues)
             {
-                AssertFatal(q < rv.waitLengths.size(),
-                            ShowValue(static_cast<size_t>(q)),
-                            ShowValue(rv.waitLengths.size()));
+                auto idx = static_cast<size_t>(qt);
+                AssertFatal(
+                    idx < rv.waitLengths.size(), ShowValue(qt), ShowValue(rv.waitLengths.size()));
                 auto waitCount = info.getWaitCount();
-                rv.waitLengths.at(q) += waitCount == 0 ? 1 : waitCount;
+                rv.waitLengths.at(qt) += waitCount == 0 ? 1 : waitCount;
             }
 
             return rv;
