@@ -871,22 +871,11 @@ struct BlockFmhaPipelineQRKSVS
                         decltype(gemm_1)::Policy::template GetWarpGemmMWarpNWarp<Problem>();
                     using WG = remove_cvref_t<decltype(config.template at<0>())>;
 
-                    constexpr float p_range_scale = [] {
-                        // Max power of 2 representable by the type
-                        if(std::is_same_v<PDataType, ck_tile::fp8_t>)
-                            return 1.0f / 256.0f; // 6 of 127 positive values are not used
-                        else if(std::is_same_v<PDataType, ck_tile::bf8_t>)
-                            return 1.0f / 32768.0f; // 7 of 121 positive values are not used
-                        else if(std::is_same_v<PDataType, ck_tile::pk_fp4_t>)
-                            return 1.0f / 4.0f; // 1 of 8 positive values are not used
-                    }();
                     // Some p_compute values can be slightly above 1 leading to non-optimal scales
                     // because (scale_s * s[] - scale_s * validated_m) can be a tiny positive value
-                    auto p_scale_func = [](float scale) {
-                        return min(1.0f, scale) * p_range_scale;
-                    };
+                    auto scale_func = [](float scale) { return min(1.0f, scale); };
                     cast_tile_mx<kVScaleGranularity, WG::WarpGemmAttribute::Impl::kAMLane>(
-                        p_result, p_scale_result, p_compute, p_scale_func);
+                        p_result, p_scale_result, p_compute, p_compute_element_func, scale_func);
 
                     return make_tuple(p_result, p_scale_result);
                 }

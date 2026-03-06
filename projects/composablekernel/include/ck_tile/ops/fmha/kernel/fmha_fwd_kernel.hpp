@@ -2008,6 +2008,19 @@ struct FmhaFwdKernel
                                    number<FmhaPipeline::kK1 / kVScaleGranularity>{}),
                         {i_n1, 0});
 
+                    const float scale_p =
+                        ck_tile::type_convert<float>(ck_tile::numeric<PDataType>::max());
+                    const float scale_o = 1.0f / scale_p;
+
+                    auto o_acc_element_func = [&]() {
+                        if constexpr(std::is_same_v<ODataType, ck_tile::fp8_t>)
+                            return make_composes(
+                                ck_tile::saturates<ck_tile::fp8_t>{},
+                                ck_tile::scales<remove_cvref_t<decltype(scale_o)>>{scale_o});
+                        else
+                            return ck_tile::scales<remove_cvref_t<decltype(scale_o)>>{scale_o};
+                    }();
+
                     return FmhaPipeline{}(q_dram_window,
                                           identity{}, // q_element_func
                                           k_dram_window,
@@ -2020,8 +2033,9 @@ struct FmhaFwdKernel
                                           lse_dram_window,
                                           identity{}, // lse_element_func
                                           identity{}, // s_acc_element_func
-                                          identity{}, // p_compute_element_func
-                                          identity{}, // o_acc_element_func
+                                          scales<remove_cvref_t<decltype(scale_p)>>{
+                                              scale_p},       // p_compute_element_func
+                                          o_acc_element_func, // o_acc_element_func
                                           mask,
                                           position_encoding,
                                           kargs.scale_s,
