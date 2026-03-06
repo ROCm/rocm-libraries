@@ -64,7 +64,19 @@ if(o.dims().size() != 4)
         const auto numKvHeads = k.dims()[1];
         const auto seqKv = k.dims()[2];
         const auto headDimV = v.dims()[3];
-
+// ===== CROSS-TENSOR CHECKS (insert HERE) =====
+if(k.dims()[0] != batch || v.dims()[0] != batch || o.dims()[0] != batch)
+    throw std::invalid_argument("CpuFpReferenceSdpa: batch dimension mismatch");
+if(k.dims()[3] != headDim)
+    throw std::invalid_argument(
+        "CpuFpReferenceSdpa: Q head_dim (" + std::to_string(headDim)
+        + ") != K head_dim (" + std::to_string(k.dims()[3]) + ")");
+if(v.dims()[1] != numKvHeads)
+    throw std::invalid_argument("CpuFpReferenceSdpa: K and V must have same number of heads");
+if(v.dims()[2] != seqKv)
+    throw std::invalid_argument("CpuFpReferenceSdpa: K and V sequence lengths must match");
+if(o.dims()[1] != numHeads || o.dims()[2] != seqQ || o.dims()[3] != headDimV)
+    throw std::invalid_argument("CpuFpReferenceSdpa: output shape must be [B, H, Sq, Dv]");
         if(numHeads % numKvHeads != 0)
         {
             throw std::invalid_argument(
