@@ -94,7 +94,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, BlockScaleDequantizeGr
 
     BlockScaleDequantizeAttributes attrs;
     attrs.set_name("dequantize_op")
-        .set_block_size({static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE)});
+        .set_block_size(static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE));
 
     auto y = graph->block_scale_dequantize(x, scale, attrs);
     y->set_uid(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_Y_UID).set_output(true).set_name("Y");
@@ -204,7 +204,7 @@ TEST_F(IntegrationBlockScaleDequantizeDescriptorLowering, AutoAssignedUidsPreser
         .set_stride(toVec(K_BLOCK_SCALE_DEQUANTIZE_TENSOR_SCALE_STRIDES));
 
     BlockScaleDequantizeAttributes attrs;
-    attrs.set_block_size({static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE)});
+    attrs.set_block_size(static_cast<int32_t>(K_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE));
 
     auto y = graph->block_scale_dequantize(x, scale, attrs);
     y->set_output(true);

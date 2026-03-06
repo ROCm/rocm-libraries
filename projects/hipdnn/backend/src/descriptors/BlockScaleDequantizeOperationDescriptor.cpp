@@ -222,7 +222,7 @@ std::string BlockScaleDequantizeOperationDescriptor::toString() const
     str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
     str += ", y_uid=" + std::to_string(_data.y_tensor_uid);
     str += ", block_size=" + vecToString(_blockSize);
-    str += ", is_negative_scale=" + std::to_string(_data.is_negative_scale);
+    str += ", is_negative_scale=" + std::to_string(static_cast<int>(_data.is_negative_scale));
     str += ", compute_data_type=";
     str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
