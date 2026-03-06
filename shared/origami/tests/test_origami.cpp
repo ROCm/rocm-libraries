@@ -909,3 +909,144 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
     }
   }
 }
+
+TEST_CASE("Origami: config_t hash function", "[origami]") {
+  SECTION("hash works with no backend (monostate)") {
+    origami::config_t config1;
+    config1.mt        = {256, 256, 32};
+    config1.mi        = {16, 16, 16};
+    config1.occupancy = 4;
+
+    origami::config_t config2;
+    config2.mt        = {256, 256, 32};
+    config2.mi        = {16, 16, 16};
+    config2.occupancy = 4;
+
+    // Identical configs should have the same hash
+    REQUIRE(config1.hash() == config2.hash());
+
+    // Hash should be non-zero for a valid config
+    REQUIRE(config1.hash() != 0);
+  }
+
+  SECTION("hash works with tensile backend") {
+    origami::config_t config1;
+    config1.mt                    = {256, 256, 32};
+    config1.mi                    = {16, 16, 16};
+    config1.occupancy             = 4;
+    config1.tensile().depth_u        = 16;
+    config1.tensile().global_split_u = 2;
+    config1.tensile().wave_num       = 4;
+
+    origami::config_t config2;
+    config2.mt                    = {256, 256, 32};
+    config2.mi                    = {16, 16, 16};
+    config2.occupancy             = 4;
+    config2.tensile().depth_u        = 16;
+    config2.tensile().global_split_u = 2;
+    config2.tensile().wave_num       = 4;
+
+    // Identical configs with tensile params should have the same hash
+    REQUIRE(config1.hash() == config2.hash());
+  }
+
+  SECTION("different configs produce different hashes") {
+    origami::config_t config1;
+    config1.mt        = {256, 256, 32};
+    config1.mi        = {16, 16, 16};
+    config1.occupancy = 4;
+
+    origami::config_t config2;
+    config2.mt        = {128, 128, 32};  // Different tile size
+    config2.mi        = {16, 16, 16};
+    config2.occupancy = 4;
+
+    REQUIRE(config1.hash() != config2.hash());
+  }
+
+  SECTION("config with vs without tensile params produces different hashes") {
+    origami::config_t config_no_backend;
+    config_no_backend.mt        = {256, 256, 32};
+    config_no_backend.mi        = {16, 16, 16};
+    config_no_backend.occupancy = 4;
+
+    origami::config_t config_with_backend;
+    config_with_backend.mt               = {256, 256, 32};
+    config_with_backend.mi               = {16, 16, 16};
+    config_with_backend.occupancy        = 4;
+    config_with_backend.tensile().depth_u = 16;
+
+    REQUIRE(config_no_backend.hash() != config_with_backend.hash());
+  }
+
+  SECTION("different tensile params produce different hashes") {
+    origami::config_t config1;
+    config1.mt                = {256, 256, 32};
+    config1.mi                = {16, 16, 16};
+    config1.occupancy         = 4;
+    config1.tensile().depth_u = 16;
+
+    origami::config_t config2;
+    config2.mt                = {256, 256, 32};
+    config2.mi                = {16, 16, 16};
+    config2.occupancy         = 4;
+    config2.tensile().depth_u = 32;  // Different depth_u
+
+    REQUIRE(config1.hash() != config2.hash());
+  }
+}
+
+TEST_CASE("Origami: tensile_params_t hash function", "[origami]") {
+  SECTION("identical params produce same hash") {
+    origami::tensile_params_t params1;
+    params1.depth_u        = 16;
+    params1.global_split_u = 2;
+    params1.wave_num       = 4;
+
+    origami::tensile_params_t params2;
+    params2.depth_u        = 16;
+    params2.global_split_u = 2;
+    params2.wave_num       = 4;
+
+    REQUIRE(params1.hash() == params2.hash());
+  }
+
+  SECTION("different params produce different hashes") {
+    origami::tensile_params_t params1;
+    params1.depth_u = 16;
+
+    origami::tensile_params_t params2;
+    params2.depth_u = 32;
+
+    REQUIRE(params1.hash() != params2.hash());
+  }
+
+  SECTION("all fields contribute to hash") {
+    origami::tensile_params_t base_params;
+
+    // Changing each field should produce a different hash
+    origami::tensile_params_t params_depth_u = base_params;
+    params_depth_u.depth_u                   = 32;
+    REQUIRE(base_params.hash() != params_depth_u.hash());
+
+    origami::tensile_params_t params_gsu = base_params;
+    params_gsu.global_split_u            = 4;
+    REQUIRE(base_params.hash() != params_gsu.hash());
+
+    origami::tensile_params_t params_wave = base_params;
+    params_wave.wave_num                  = 8;
+    REQUIRE(base_params.hash() != params_wave.hash());
+
+    origami::tensile_params_t params_dtvgpr = base_params;
+    params_dtvgpr.direct_to_vgpr_a          = true;
+    REQUIRE(base_params.hash() != params_dtvgpr.hash());
+
+    origami::tensile_params_t params_swizzle = base_params;
+    params_swizzle.swizzle_a                 = true;
+    REQUIRE(base_params.hash() != params_swizzle.hash());
+
+    origami::tensile_params_t params_wgm_xcc = base_params;
+    params_wgm_xcc.workgroup_mapping_xcc     = 8;
+    REQUIRE(base_params.hash() != params_wgm_xcc.hash());
+  }
+}
