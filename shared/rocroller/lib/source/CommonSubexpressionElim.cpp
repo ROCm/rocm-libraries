@@ -715,28 +715,37 @@ namespace rocRoller
                 return subset;
             }
 
-            Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true,
-                                                 float             packingRatio = 1.f) const
+            Register::ValuePtr resultPlaceholder(ResultType const&    resType,
+                                                 bool                 allowSpecial = true,
+                                                 std::optional<float> packingRatio
+                                                 = std::nullopt) const
             {
-                auto packing = resType.varType.dataType == DataType::None
-                                   ? 1
-                                   : DataTypeInfo::Get(resType.varType).packing;
+                // Calculate the register count of this result
+                size_t count = resType.valueCount;
+                // If given a specific packing/unpacking ratio, multiply the value count by this ratio
+                if(packingRatio.has_value())
+                {
+                    count *= packingRatio.has_value();
+                }
+                // Otherwise, simply divide the value count by its packing
+                else
+                {
+                    auto packing = resType.varType.dataType == DataType::None
+                                       ? 1
+                                       : DataTypeInfo::Get(resType.varType).packing;
+                    count /= packing;
+                }
+
                 if(Register::IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
                     if(allowSpecial)
                         return m_context->getSCC();
                     else
-                        return Register::Value::Placeholder(m_context,
-                                                            Register::Type::Scalar,
-                                                            resType.varType,
-                                                            resType.valueCount * packingRatio
-                                                                / packing);
+                        return Register::Value::Placeholder(
+                            m_context, Register::Type::Scalar, resType.varType, count);
                 }
-                return Register::Value::Placeholder(m_context,
-                                                    resType.regType,
-                                                    resType.varType,
-                                                    resType.valueCount * packingRatio / packing);
+                return Register::Value::Placeholder(
+                    m_context, resType.regType, resType.varType, count);
             }
 
             /**

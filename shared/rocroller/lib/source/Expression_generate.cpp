@@ -110,13 +110,10 @@ namespace rocRoller
 
             using RegisterValue = std::variant<Register::ValuePtr>;
 
-            Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true,
-                                                 float             packingRatio = 1.f)
+            Register::ValuePtr resultPlaceholder(ResultType const&    resType,
+                                                 bool                 allowSpecial = true,
+                                                 std::optional<float> packingRatio = std::nullopt)
             {
-                auto packing = resType.varType.dataType == DataType::None
-                                   ? 1
-                                   : DataTypeInfo::Get(resType.varType).packing;
                 auto regType = resType.regType;
                 if(IsWriteableSpecial(regType))
                 {
@@ -125,10 +122,26 @@ namespace rocRoller
                     regType = MapSPRTypeToGPRType(regType);
                 }
 
+                // Calculate the register count of this result
+                size_t count = resType.valueCount;
+                // If given a specific packing/unpacking ratio, multiply the value count by this ratio
+                if(packingRatio.has_value())
+                {
+                    count *= packingRatio.has_value();
+                }
+                // Otherwise, simply divide the value count by its packing
+                else
+                {
+                    auto packing = resType.varType.dataType == DataType::None
+                                       ? 1
+                                       : DataTypeInfo::Get(resType.varType).packing;
+                    count /= packing;
+                }
+
                 return Register::Value::Placeholder(m_context,
                                                     regType,
                                                     resType.varType,
-                                                    resType.valueCount * packingRatio / packing,
+                                                    count,
                                                     Register::AllocationOptions::FullyContiguous());
             }
 
@@ -348,7 +361,6 @@ namespace rocRoller
                 Register::ValuePtr& rhs,
                 ResultType&         resType)
             {
-
                 auto const lhsInfo  = DataTypeInfo::Get(lhs->variableType());
                 auto const rhsInfo  = DataTypeInfo::Get(rhs->variableType());
                 auto const destInfo = DataTypeInfo::Get(resType.varType);
@@ -369,7 +381,7 @@ namespace rocRoller
 
                 if(dest == nullptr)
                 {
-                    dest = resultPlaceholder(resType, true, 1.f / destInfo.packing);
+                    dest = resultPlaceholder(resType, true);
                 }
                 else
                 {
