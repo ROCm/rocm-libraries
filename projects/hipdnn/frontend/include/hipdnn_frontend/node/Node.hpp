@@ -25,6 +25,14 @@ public:
     }
     virtual ~INode() = default;
 
+    // Disable copy operations
+    INode(const INode&) = delete;
+    INode& operator=(const INode&) = delete;
+
+    // Enable move operations
+    INode(INode&&) = default;
+    INode& operator=(INode&&) = default;
+
     virtual Error pre_validate_node() const // NOLINT(readability-identifier-naming)
     {
         return {};

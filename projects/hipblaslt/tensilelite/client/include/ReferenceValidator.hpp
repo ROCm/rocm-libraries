@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@
 
 #include "RunListener.hpp"
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
@@ -41,7 +41,6 @@ namespace TensileLite
 {
     namespace Client
     {
-        namespace po = boost::program_options;
 
         class ReferenceValidator : public RunListener
         {
@@ -105,7 +104,8 @@ namespace TensileLite
                               void const*             resPtr,
                               size_t                  maxElements,
                               bool                    isgpu,
-                              size_t                  validationStride);
+                              size_t                  validationStride,
+                              double                  threshold);
 
             template <typename ValidType>
             bool checkResultsTyped(TensorDescriptor const& tensor,
@@ -113,7 +113,8 @@ namespace TensileLite
                                    ValidType const*        result,
                                    size_t                  maxElement,
                                    bool                    isgpu,
-                                   size_t                  validationStride);
+                                   size_t                  validationStride,
+                                   double                  threshold);
 
             void printTensors(ContractionProblemGemm const& problem,
                               ContractionInputs const&      reference,

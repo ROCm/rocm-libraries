@@ -15,15 +15,15 @@ open it (via xdg-open), pass '-x'.
 """
 
 import argparse
-import pathlib
 import re
 import subprocess
+from pathlib import Path
 
 import yaml
 from dot_diff import diff_dots
 
 
-def extract_normalised_asm(path: pathlib.Path, keep_trailing_comments: bool = False):
+def extract_normalised_asm(path: Path, keep_trailing_comments: bool = False):
     """Extract normalized ASM from assembly file."""
     source = path.read_text()
 
@@ -52,7 +52,7 @@ def extract_normalised_asm(path: pathlib.Path, keep_trailing_comments: bool = Fa
     return "\n".join(asm)
 
 
-def extract_asm_dot(path: pathlib.Path):
+def extract_asm_dot(path: Path):
     """Extract .kernel_graph meta data from assembly file."""
     source = path.read_text()
     beginMatch = re.search(r"^---$", source, re.MULTILINE)
@@ -76,7 +76,7 @@ def extract_asm_dot(path: pathlib.Path):
     return try_get(".name"), try_get(".kernel_graph_dot"), try_get(".kernel_graph")
 
 
-def extract_log_dots(path: pathlib.Path):
+def extract_log_dots(path: Path):
     source = path.read_text()
     source_clean = ""
     prev_end = 0
@@ -94,14 +94,14 @@ def extract_log_dots(path: pathlib.Path):
     return dots, source_clean
 
 
-def write_dot(dot: str, fname: pathlib.Path):
+def write_dot(dot: str, fname: Path):
     out_fname = fname.with_suffix(".dot")
     out_fname.write_text(dot)
     print(f"Wrote {out_fname}")
     return out_fname
 
 
-def render_dot(fname: pathlib.Path, dot: str):
+def render_dot(fname: Path, dot: str):
     """Render graph."""
     with fname.open("w") as out:
         subprocess.run(["dot", "-Tpdf"], input=dot.encode(), stdout=out)
@@ -118,7 +118,7 @@ def open_code(fname):
 
 def process_dot(
     dot: str,
-    out_path: pathlib.Path,
+    out_path: Path,
     code_open: bool,
     dot_only: bool,
     xdg_open: bool,
@@ -133,14 +133,14 @@ def process_dot(
             open_dot(rendered_fname)
 
 
-def process_serialized_graph(graph: dict, out_path: pathlib.Path):
+def process_serialized_graph(graph: dict, out_path: Path):
     with out_path.with_suffix(".yaml").open("w") as f:
         yaml.dump(graph, f, default_flow_style=None, Dumper=yaml.CSafeDumper)
         print(f"Wrote {f.name}")
 
 
-def process_normalized_asm(path: pathlib.Path, keep_trailing_comments: bool = True):
-    asm = pathlib.Path(path.stem + "_normalized.s")
+def process_normalized_asm(path: Path, keep_trailing_comments: bool = True):
+    asm = Path(path.stem + "_normalized.s")
     asm.write_text(extract_normalised_asm(path, keep_trailing_comments))
     print(f"Wrote {asm}")
 
@@ -184,11 +184,11 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    path = pathlib.Path(args.fname)
+    path = Path(args.fname)
 
     foutput = path
     if args.output is not None:
-        foutput = pathlib.Path(args.output)
+        foutput = Path(args.output)
 
     if path.suffix == ".s":
         _, dot, graph = extract_asm_dot(path)
@@ -207,14 +207,14 @@ if __name__ == "__main__":
     elif path.suffix == ".log":
         dots, source_clean = extract_log_dots(path)
 
-        foutput_clean = pathlib.Path(str(foutput) + "_clean.log")
+        foutput_clean = Path(str(foutput) + "_clean.log")
         foutput_clean.write_text(source_clean)
 
         if not args.omit_diff:
             dots = diff_dots(dots)
         for i, dot in enumerate(dots):
             serial_str = f"_{i:04d}"
-            foutput_serial = pathlib.Path(str(foutput) + serial_str)
+            foutput_serial = Path(str(foutput) + serial_str)
             process_dot(
                 dot,
                 foutput_serial,
