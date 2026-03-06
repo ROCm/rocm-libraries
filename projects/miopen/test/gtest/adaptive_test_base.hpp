@@ -37,6 +37,12 @@
 
 namespace test::adaptive {
 
+#define HIP_CHECK(exp)                                                                 \
+    if((exp) != hipSuccess)                                                            \
+    {                                                                                  \
+        MIOPEN_LOG_E(#exp "failed at line: " << __LINE__ << " in file: " << __FILE__); \
+    }
+
 /*! @enum class UnitUnderTest
  * Enum values for selecting unit under test (UUT).
  * There is no option to choose Naive CPU implementation as UUT because that is 'the most trusted'
@@ -535,7 +541,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, rms_dev, max_dev);
 
-            [[maybe_unused]] auto status = hipDeviceSynchronize();
+            HIP_CHECK(hipDeviceSynchronize());
 
             TVerify max = std::max({*max_dev, std::numeric_limits<TVerify>::min()});
             error       = std::sqrt(*rms_dev) / (std::sqrt(sz) * max);
@@ -564,7 +570,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, mae_dev);
 
-            [[maybe_unused]] auto status = hipDeviceSynchronize();
+            HIP_CHECK(hipDeviceSynchronize());
 
             error = *mae_dev;
         }
@@ -591,7 +597,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, mismatch_dev);
 
-            [[maybe_unused]] auto status = hipDeviceSynchronize();
+            HIP_CHECK(hipDeviceSynchronize());
 
             error = *mismatch_dev;
         }
@@ -639,21 +645,24 @@ template <typename T,
           VerifyOption VER>
 static void SetUpSharedVerifyData()
 {
-    hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev,
-                     sizeof(*AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev));
+    HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev,
+                               sizeof(*AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev)));
     if constexpr(VER == VerifyOption::noValidateAndRMS || VER == VerifyOption::validateAndRMS)
     {
-        hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::rms_dev, sizeof(TVerify));
-        hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::max_dev, sizeof(TVerify));
+        HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::rms_dev,
+                                   sizeof(TVerify)));
+        HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::max_dev,
+                                   sizeof(TVerify)));
     }
     else if constexpr(VER == VerifyOption::noValidateAndMAE || VER == VerifyOption::validateAndMAE)
     {
-        hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mae_dev, sizeof(TVerify));
+        HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mae_dev,
+                                   sizeof(TVerify)));
     }
     else
     {
-        hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mismatch_dev,
-                         sizeof(TVerify));
+        HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mismatch_dev,
+                                   sizeof(TVerify)));
     }
 }
 
@@ -665,19 +674,19 @@ template <typename T,
           VerifyOption VER>
 static void TearDownSharedVerifyData()
 {
-    hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev);
+    HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev));
     if constexpr(VER == VerifyOption::noValidateAndRMS || VER == VerifyOption::validateAndRMS)
     {
-        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::rms_dev);
-        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::max_dev);
+        HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::rms_dev));
+        HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::max_dev));
     }
     else if constexpr(VER == VerifyOption::noValidateAndMAE || VER == VerifyOption::validateAndMAE)
     {
-        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mae_dev);
+        HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mae_dev));
     }
     else
     {
-        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mismatch_dev);
+        HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mismatch_dev));
     }
 }
 
