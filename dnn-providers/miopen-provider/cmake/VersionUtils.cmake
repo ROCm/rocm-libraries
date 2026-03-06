@@ -54,28 +54,12 @@ function(miopen_provider_generate_version_header COMPONENT_NAME TARGET_NAME)
     miopen_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
     configure_file(
         "${_version_dir}/version.h.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/include/${COMPONENT_NAME}/version.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/include/version.h"
         @ONLY
     )
 
-    # Add generated include directory for build interface
+    # Add generated include directory
     target_include_directories(
-        ${TARGET_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+        ${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/include
     )
 endfunction()
-
-# # Function to read component version for minimum requirement
-# function(miopen_provider_get_component_version COMPONENT_NAME OUTPUT_VAR)
-#     # Determine path to data_sdk/version.json relative to this file location
-#     # This makes it resilient to where the macro is called from
-#     miopen_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
-
-#     if(EXISTS "${_version_dir}/requirements.json")
-#         file(READ "${_version_dir}/requirements.json" _${COMPONENT_NAME}_version_json)
-#         string(JSON _version_value GET ${_${COMPONENT_NAME}_version_json} "${COMPONENT_NAME}_version")
-#         # Propagate OUTPUT_VAR to parent scope
-#         set(${OUTPUT_VAR} ${_version_value} PARENT_SCOPE)
-#     else()
-#         message(FATAL_ERROR "Could not find requirements file at ${_${COMPONENT_NAME}_version_json}")
-#     endif()
-# endfunction()

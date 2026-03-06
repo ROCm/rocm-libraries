@@ -211,13 +211,6 @@ set_target_properties(miopen_plugin PROPERTIES
 # Generate version header
 miopen_provider_generate_version_header(miopen_provider miopen_plugin_impl)
 
-# Install generated version header
-install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/include/miopen_provider/version.h"
-    DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/miopen_provider
-    COMPONENT Development
-)
-
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
