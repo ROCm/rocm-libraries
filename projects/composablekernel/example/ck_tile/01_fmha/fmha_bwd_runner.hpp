@@ -416,9 +416,10 @@ bwd_result fmha_bwd_run(mode_enum mode,
               << "/" << seqlen_ks[0] << ", d:" << hdim_q << "/" << hdim_v << ", scale:" << scale
               << ", bias:" << bias << ", dbias:" << use_dbias << ", p_drop:" << p_drop
               << ", s_randval:" << s_randval << ", deterministic:" << deterministic
-              << (deterministic ? std::string(", workspace:") +
-                                      std::to_string(workspace_size_in_megabytes) + "MiB"
-                                : "")
+              << (deterministic
+                      ? std::string(", workspace:") + std::to_string(workspace_size_in_megabytes) +
+                            "MiB|" + std::to_string(nsplits) + "splits"
+                      : "")
               << ", mask:" << mask << std::flush;
 
     auto fmha_args = [&]() {
