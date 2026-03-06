@@ -1132,15 +1132,19 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
       const size_t sharing_group = std::max(mn_on_xcd / mn_sharing_period, static_cast<size_t>(1));
       spatial_reuse *= static_cast<double>(sharing_group - 1) / static_cast<double>(mn_on_xcd - 1);
     }
-  } else if (grid.k > 1) {
-    // Contiguous dispatch: l2_tiles.m × l2_tiles.n is the bounding box, but
-    // tiles may not fill the full rectangle (e.g., slab boundary crossing).
-    // Deflate by the actual fill ratio: how many MN tiles per K-split vs the rectangle.
+  }
+
+  // Rectangular fill deflation: l2_tiles.m × l2_tiles.n is the bounding box,
+  // but tiles may not fill the full rectangle (slab boundary, round-robin scatter).
+  // Deflate spatial by the actual fill ratio.
+  {
     const size_t rectangular_mn = l2_tiles.m * l2_tiles.n;
     const size_t tiles_on_xcd = std::min(cus_per_xcd, tiles_per_xcd);
-    const size_t actual_mn_per_k = tiles_on_xcd / std::max(l2_tiles.k, static_cast<size_t>(1));
-    if (actual_mn_per_k < rectangular_mn) {
-      spatial_reuse *= static_cast<double>(actual_mn_per_k) / static_cast<double>(rectangular_mn);
+    const size_t kb = std::max(l2_tiles.k * l2_tiles.b, static_cast<size_t>(1));
+    const size_t actual_mn_per_kb = tiles_on_xcd / kb;
+    if (rectangular_mn > 1 && actual_mn_per_kb < rectangular_mn) {
+      double deflate_factor = static_cast<double>(actual_mn_per_kb) / rectangular_mn;
+      spatial_reuse *= deflate_factor;
     }
   }
 
@@ -1152,25 +1156,60 @@ std::pair<double, double> estimate_cache_hit_rates(const problem_t& problem,
     l2_warmup = l2_cold_floor + (1.0 - l2_cold_floor) * k_iters_sq / (k_iters_sq + l2_depth_sq);
   }
 
-  // Pollution penalty:
-  // When both operands are temporal and imbalanced, the larger operand 
-  // evicts the smaller operand's cached data, if l2 capacity is not enough.
-  double pollution_rate = 1.0;
-  if (l2_total_bytes > l2_cap && a_temporal && b_temporal) {
-    if (total_conc > 0) {
-      constexpr double pollution_penalty = 0.7;
-      double balance = std::min(a_conc, b_conc) / total_conc;
-      pollution_rate = pollution_penalty + (1.0 - pollution_penalty) * balance;
-    }
-  }
-
   // L2 capacity:
   // If the concurrent load is greater than the L2 capacity, the hit rate is reduced.
   double l2_residency = (concurrent_load > 0) ? std::min(l2_cap / concurrent_load, 1.0) : 1.0;
 
+  // Pollution penalty:
+  // Only applies when the concurrent working set exceeds L2 (residency < 1)
+  // AND both operands are temporal.
+  double pollution_rate = 1.0;
+  if (l2_residency < 1.0 && a_temporal && b_temporal) {
+    if (total_conc > 0) {
+      constexpr double pollution_penalty = 0.7;
+      double imbalance = 1.0 - std::min(a_conc, b_conc) / std::max(a_conc, b_conc);
+      pollution_rate = 1.0 - (1.0 - pollution_penalty) * imbalance;
+    }
+  }
+
+  // Depth pressure (split-K only): larger MT_K loads more data per iteration,
+  // increasing L2 pressure. Only matters with K-splits where multiple independent
+  // streams compete for L2 space.
+  double depth_penalty = 1.0;
+  {
+    const double depth_ref = cl / std::max(a_bytes, b_bytes);
+    if(context.splitting_factor > 1 && config.mt.k > depth_ref)
+      depth_penalty = 0.9;
+  }
+
   // L2 hit rate
-  double l2_rate = pollution_rate * l2_warmup * l2_residency * spatial_reuse;
-  l2_rate = (l2_total_bytes > 0) ? clamp01(l2_rate) : 0.0;
+  double l2_rate = pollution_rate * l2_warmup * l2_residency * spatial_reuse * depth_penalty;
+
+  // Request amplification (batched GEMMs only):
+  // When the per-iteration working set fits in L2, intra-tile multi-wavefront
+  // L1 misses all hit L2 (nothing evicts them), lifting the effective rate
+  // toward ~0.8 regardless of spatial sharing.
+  bool enable_batched_amp = (problem.batch > 1);
+  if (enable_batched_amp && concurrent_load < l2_cap) {
+    constexpr double amp_ceiling = 0.9;
+    const double headroom = 1.0 - concurrent_load / l2_cap;
+    const double amp_boost = headroom * headroom;
+    l2_rate += amp_boost * std::max(amp_ceiling - l2_rate, 0.0);
+  }
+
+  // Request amplification (small-tile split-K GEMMs only):
+  // When the per-iteration working set fits in L2, intra-tile multi-wavefront
+  // L1 misses all hit L2 (nothing evicts them), lifting the effective rate by
+  // ~0.25 regardless of spatial sharing.
+  bool enable_split_k_amp = (l2_tiles.k > 1 && l2_tiles.m * l2_tiles.n < 5);
+  if (enable_split_k_amp && concurrent_load < l2_cap) {
+    constexpr double amp_ceiling = 0.4;
+    const double headroom = 1.0 - concurrent_load / l2_cap;
+    const double amp_boost = headroom;
+    l2_rate += amp_boost * std::max(amp_ceiling - l2_rate, 0.0);
+  }
+
+  l2_rate = clamp01(l2_rate);
 
   if (debug) {
     OLOG_DEBUG("MallTiles: " << mall_tiles.k << " " << mall_tiles.m << " " << mall_tiles.n << " " << mall_tiles.b);
@@ -1520,7 +1559,7 @@ double compute_tile_latency(const problem_t& problem,
   }
   double L_tile_single =
       std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
-  L_tile_single *= (splitting_factor > 1) ? 1.0 : heuristic.main_loop_efficiency;
+  L_tile_single *= (splitting_factor > 4) ? 1.0 : heuristic.main_loop_efficiency;
   L_tile_single *= effective_tile_penalty;
   L_tile_single += L_cvt;
 
@@ -1596,7 +1635,7 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   
   // Constants
   const size_t compute_bytes = 4; // workspace partials stored as f32
-  constexpr double kernel_launch_overhead = 5000.0;
+  constexpr double kernel_launch_overhead = 12000.0;
   constexpr size_t threads_per_wg = 256;
   constexpr size_t wavefront_size = 64;
 
