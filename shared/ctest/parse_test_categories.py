@@ -98,7 +98,9 @@ def main():
         timeouts = execution_settings.get("category_timeouts", {})
         timeout_multiplier = execution_settings.get("timeout_multiplier", 1)
         env_dict = execution_settings.get("environment", {}) or {}
-        env_string = ";".join(f"{k}={v}" for k, v in env_dict.items()) if env_dict else None
+        env_string = (
+            ";".join(f"{k}={v}" for k, v in env_dict.items()) if env_dict else None
+        )
         exclude_gpu_config = config.get("exclude_gpu", {})
 
         # Detect OS
