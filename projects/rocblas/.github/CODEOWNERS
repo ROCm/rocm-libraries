@@ -1,10 +1,10 @@
 # Default code owners
-* @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD @rkamd @yoichiyoshida @babakpst
-# pattern overrides should also be reviewed by core rocBLAS: @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD @rkamd
+* @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD @yoichiyoshida @babakpst
+# pattern overrides should also be reviewed by core rocBLAS: @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD 
 # Documentation files
-docs/ @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD @rkamd
-*.md @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD @rkamd
-*.rst @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD @rkamd
-.readthedocs.yaml @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD @rkamd
+docs/ @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD
+*.md @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD
+*.rst @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD
+.readthedocs.yaml @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD
 # Header directory for Doxygen documentation
-library/include/* @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD @rkamd
+library/include/* @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @bragadeesh @NaveenElumalaiAMD

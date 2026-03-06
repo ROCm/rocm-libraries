@@ -27,7 +27,7 @@
 #define GUARD_MIOPEN_DRIVER_HPP
 
 #include <half/half.hpp>
-#include "random.hpp"
+#include "../driver/random.hpp"
 
 #include "InputFlags.hpp"
 #include <algorithm>
@@ -132,7 +132,7 @@ struct GPUMem
     }
     int FromGPU(hipStream_t q, void* p)
     {
-        hipDeviceSynchronize();
+        (void)hipDeviceSynchronize();
         _q = q;
         return static_cast<int>(hipMemcpy(p, buf, GetSize(), hipMemcpyDeviceToHost));
     }
@@ -407,6 +407,7 @@ inline std::string ParseBaseArg(int argc, char* argv[])
     // List of valid base arguments
     static const std::vector<std::string> valid_args = {"conv",
                                                         "convfp16",
+                                                        "convfp32",
                                                         "convint8",
                                                         "convbfp16",
                                                         "CBAInfer",
@@ -517,7 +518,7 @@ public:
         miopenCreate(&handle);
 #elif MIOPEN_BACKEND_HIP
         hipStream_t s;
-        hipStreamCreate(&s);
+        (void)hipStreamCreate(&s);
         miopenCreateWithStream(&handle, s);
 #endif
 
@@ -544,6 +545,8 @@ public:
     virtual int VerifyForward()                          = 0;
     virtual int RunBackwardGPU()                         = 0;
     virtual int VerifyBackward()                         = 0;
+
+    std::string name;
 
 protected:
     template <typename Tgpu>

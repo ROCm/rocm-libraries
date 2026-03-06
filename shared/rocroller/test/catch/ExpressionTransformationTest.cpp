@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
@@ -239,6 +216,12 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     {
         CHECK_THAT(simplify(reinterpret(DataType::Int32, v)), IdenticalTo(v));
         CHECK_THAT(simplify(reinterpret(DataType::UInt64, v3)), IdenticalTo(v3));
+    }
+
+    SECTION("conditional")
+    {
+        auto expr = conditional(b > zero, v2, v2 + v);
+        CHECK_THAT(simplify(expr), IdenticalTo(v2));
     }
 }
 
@@ -661,6 +644,20 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
         CHECK_THAT(convertPropagation(convert(Int32, (r64[0] / r64[1]))),
                    IdenticalTo(convert(Int32, convert(Int32, (r64[0] / r64[1])))));
     }
+
+    SECTION("Other expressions")
+    {
+        CHECK_THAT(Expression::convertPropagation(Expression::convert(Int32, -r64[0])),
+                   IdenticalTo(Expression::convert(Int32, -Expression::convert(Int32, r64[0]))));
+
+        CHECK_THAT(
+            convertPropagation(convert(
+                Int32,
+                Expression::concat({r64[0], r64[1]}, {DataType::None, PointerType::Buffer}))),
+            IdenticalTo(convert(Int32,
+                                Expression::concat({convert(Int32, r64[0]), convert(Int32, r64[1])},
+                                                   {DataType::None, PointerType::Buffer}))));
+    }
 }
 
 TEST_CASE("Nested Reinterpret simplification", "[expression][expression-transformation]")
@@ -737,7 +734,7 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 
     auto argExpr = [&]() {
         auto arg = context->kernel()->arguments().at(0);
-        CHECK_THAT(arg.expression, IdenticalTo(ex1));
+        CHECK_THAT(arg.getExpression(), IdenticalTo(ex1));
 
         auto argPtr = std::make_shared<AssemblyKernelArgument>(arg);
         return std::make_shared<Expression::Expression>(argPtr);
@@ -757,7 +754,7 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
 
     auto arg2Expr = [&]() {
         auto arg = context->kernel()->arguments().at(1);
-        CHECK_THAT(arg.expression, IdenticalTo(arg1e));
+        CHECK_THAT(arg.getExpression(), IdenticalTo(arg1e));
 
         auto argPtr = std::make_shared<AssemblyKernelArgument>(arg);
         return std::make_shared<Expression::Expression>(argPtr);
@@ -1513,6 +1510,23 @@ TEST_CASE("BitfieldCombine expression and lowering", "[expression][expression-tr
 
         CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
+
+    SECTION("Lowering with width=32 (full width)")
+    {
+        auto const fullWidth   = 32u;
+        auto const srcOffset32 = 0u;
+        auto const dstOffset32 = 0u;
+
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset32, dstOffset32, fullWidth});
+
+        // When width=32, srcMask should be 0xFFFFFFFF (all bits)
+        // and dstMask should be 0x00000000 (clear all bits)
+        auto expected = (Expression::literal(Raw32(0xFFFFFFFFu)) & srcExpr)
+                        | (Expression::literal(Raw32(0x00000000u)) & dstExpr);
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
 }
 
 TEST_CASE("Code gen with ConvertPropagation", "[expression][expression-transformation][codegen]")
@@ -1540,7 +1554,7 @@ TEST_CASE("Code gen with ConvertPropagation", "[expression][expression-transform
 
     std::string expected;
     if(DataTypeInfo::Get(dstDatatype).isSigned)
-        expected = R"(        
+        expected = R"(
             v_add_i32 v4, v0, v2
         )";
     else

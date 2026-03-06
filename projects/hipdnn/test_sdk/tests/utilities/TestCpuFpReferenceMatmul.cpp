@@ -3,12 +3,9 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -23,8 +20,9 @@
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_data_sdk::flatbuffer_utilities;
 using namespace hipdnn_sdk_test_utils;
+using namespace hipdnn_data_sdk::types;
 
 namespace
 {
@@ -76,7 +74,8 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
         auto& graph = std::get<0>(graphTuple);
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_plugin_sdk::GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrap(flatbufferGraph.data(),
+                                                                      flatbufferGraph.size());
         EXPECT_TRUE(CpuFpReferenceMatmul::isApplicable(graphWrap.getNode(0)));
     }
 
@@ -96,7 +95,8 @@ TEST_F(TestCpuFpReferenceMatmul, IsApplicable)
         auto& graph = std::get<0>(graphTuple);
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_plugin_sdk::GraphWrapper graphWrap(flatbufferGraph.data(), flatbufferGraph.size());
+        hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper graphWrap(flatbufferGraph.data(),
+                                                                      flatbufferGraph.size());
         EXPECT_FALSE(CpuFpReferenceMatmul::isApplicable(graphWrap.getNode(0)));
     }
 }
@@ -198,9 +198,7 @@ struct TypePair
 
 using Types = ::testing::Types<TypePair<float, float, float, float>,
                                TypePair<half, half, half, float>,
-                               TypePair<hip_bfloat16, hip_bfloat16, hip_bfloat16, float>,
-                               TypePair<hip_fp8_e4m3, hip_fp8_e4m3, hip_fp8_e4m3, float>,
-                               TypePair<hip_fp8_e5m2, hip_fp8_e5m2, hip_fp8_e5m2, float>,
+                               TypePair<bfloat16, bfloat16, bfloat16, float>,
                                TypePair<float, half, float, float>>;
 
 template <class T>

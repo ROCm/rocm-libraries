@@ -36,6 +36,9 @@
 #include <miopen/solver/ck_utility_common.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
+#ifdef CK_EXPERIMENTAL_BUILDER
+#include <miopen/ck_builder/factories/grouped_convolution_forward.hpp>
+#endif
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_GROUP_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
@@ -64,9 +67,15 @@ using DeviceOpGFwd = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleA
     ck::tensor_operation::element_wise::PassThrough,
     ComputeType>;
 
+#ifdef CK_EXPERIMENTAL_BUILDER
+template <typename DataType, typename ComputeType = DataType>
+using DeviceOpGFwdPtrs = miopen::conv::ck_builder::instance::DeviceOperationInstanceFactory<
+    DeviceOpGFwd<DataType, ComputeType>>;
+#else
 template <typename DataType, typename ComputeType = DataType>
 using DeviceOpGFwdPtrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
     DeviceOpGFwd<DataType, ComputeType>>;
+#endif
 
 namespace {
 struct CKArgs
@@ -95,17 +104,17 @@ struct CKArgs
         out_strides = {K, Ho * Wo * G * K, 1, Wo * G * K, G * K};
         wei_strides = {K * Y * X * C, Y * X * C, 1, X * C, C};
         strides     = {ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                   ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                       ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
         dilation    = {ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
-                    ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
+                       ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
         lPadding    = {ProblemInterpreter::GetInputLeftPadH(problem),
-                    ProblemInterpreter::GetInputLeftPadW(problem)};
+                       ProblemInterpreter::GetInputLeftPadW(problem)};
         rPadding    = {ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                       ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
 
-    CKArgs(const CKArgs&) = default;
-    CKArgs(CKArgs&&)      = default;
+    CKArgs(const CKArgs&)            = default;
+    CKArgs(CKArgs&&)                 = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>

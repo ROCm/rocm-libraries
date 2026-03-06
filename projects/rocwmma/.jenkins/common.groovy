@@ -49,6 +49,7 @@ def runTestCommand (platform, project)
     def command = """#!/usr/bin/env bash
                 set -x
                 cd ${project.paths.project_build_prefix}
+                export ROCWMMA_INCLUDE_PATH=\$(readlink -f ./library/include)
                 cd ${project.testDirectory}
                 ${testCommand} ${testCommandExclude}
             """

@@ -56,7 +56,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto bnY
         = graph->batchnorm_inference(x, savedMean, savedInvVariance, scale, bias, bnInfAttributes);
     bnY->set_name("bn_y");
-    bnY->set_data_type(intermediateType);
 
     // Step 2: Activation Backward (ReLU backward)
     auto activBwdAttributes = graph::PointwiseAttributes();
@@ -65,7 +64,6 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
     auto dxDrelu = graph->pointwise(bnY, dy, activBwdAttributes);
     dxDrelu->set_name("dx_drelu");
-    dxDrelu->set_data_type(intermediateType);
 
     // Step 3: Batchnorm Backward
     auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
@@ -169,11 +167,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         // Issue is due to the reference not splitting the input / output datatypes.
         const auto inputTol = 4e-2f;
 
-        auto dxValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
-            static_cast<InputType>(inputTol), static_cast<InputType>(inputTol));
+        auto dxValidator
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(inputTol, inputTol);
         auto dscaleDbiasValidator
-            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
-                static_cast<IntermediateType>(inputTol), static_cast<IntermediateType>(inputTol));
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(inputTol,
+                                                                                     inputTol);
 
         bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
         bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);
@@ -212,15 +210,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    auto backend = hipdnnBackend();
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(backend->destroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

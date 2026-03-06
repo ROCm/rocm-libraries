@@ -15,7 +15,9 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 #include <nlohmann/json.hpp>
+#endif
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
@@ -134,6 +136,7 @@ void graph_bindings(nb::module_& m)
         .def("tensor", &graph::Graph::tensor, nb::rv_policy::reference)
         .def_static(
             "tensor_like", &graph::Graph::tensor_like, nb::arg("tensor"), nb::arg("name") = "")
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
         .def(
             "to_json",
             [](graph::Graph& g) {
@@ -149,5 +152,7 @@ void graph_bindings(nb::module_& m)
                 return g.deserialize(j);
             },
             nb::arg("json_string"),
-            "Deserialize a graph from a JSON string");
+            "Deserialize a graph from a JSON string")
+#endif
+        ;
 }

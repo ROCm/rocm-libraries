@@ -5,13 +5,19 @@ add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
-if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
+# SDK dependencies - use targets directly in superbuild, find_package otherwise
+if(NOT TARGET hipdnn_test_sdk)
     find_package(hipdnn_test_sdk CONFIG REQUIRED)
+endif()
+
+if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
 
 add_executable(
     hipblaslt_plugin_tests
+    engines/plans/TestHipblasltMatmulPlan.cpp
+    engines/plans/TestHipblasltMatmulPlanBuilder.cpp
     engines/TestHipblasltEngine.cpp
     main.cpp
     TestHipblasltEngineManager.cpp
@@ -19,6 +25,8 @@ add_executable(
     TestHipblasltHandleFactory.cpp
     TestHipblasltHipdnnEnginePluginHandle.cpp
     TestHipblasltHipdnnPluginExecutionContext.cpp
+    TestHipblasltMatmulDesc.cpp
+    TestHipblasltMatrixLayout.cpp
     TestHipblasltPluginApi.cpp
     TestHipblasltUtils.cpp
 )

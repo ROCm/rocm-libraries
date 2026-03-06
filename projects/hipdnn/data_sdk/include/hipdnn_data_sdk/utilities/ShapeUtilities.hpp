@@ -6,7 +6,6 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <numeric>
-#include <ranges>
 #include <stdexcept>
 #include <vector>
 
@@ -47,9 +46,24 @@ inline bool areDimensionsBroadcastCompatible(const std::vector<int64_t>& inputDi
     return true;
 }
 
-// Sets a default stride ordering based off the provided stride order.
-// Ex. dim = {1,2,3,4} stride_order = {3, 0, 2, 1} for NHWC
-// returns {24, 1, 8, 2}
+/**
+ * @brief Computes strides from dimensions and a stride ordering
+ *
+ * Generates strides for a tensor based on the provided dimensions and stride order.
+ * The stride order specifies the memory layout priority (lower values = tighter packing).
+ *
+ * @param dim Dimension sizes. The expected ordering depends on the operation type:
+ *            convolution/batchnorm use (N, C, H, W) or (N, C, D, H, W),
+ *            matmul uses (...batch, M, K) or (...batch, K, N).
+ * @param strideOrder Priority of each dimension in memory (lower = tighter packing).
+ *                    Use TensorLayout constants for common layouts.
+ * @return Strides corresponding to the requested memory layout
+ *
+ * @code{.cpp}
+ * // Example for convolution input: {N=1, C=2, H=3, W=4}
+ * auto nhwcStrides = generateStrides({1,2,3,4}, {3, 0, 2, 1}); // {24, 1, 8, 2}
+ * @endcode
+ */
 inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
                                             const std::vector<int64_t>& strideOrder)
 {
@@ -153,7 +167,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
             if(strides[i] > strides[posFirstMin])
             {
                 // C is smaller than at least one of D, H, or W. Assume N...WC memory
-                // layout and force C to the end of the list before stable_sort() so
+                // layout and force C to the end of the list before sort with stable tiebreakers so
                 // that it's handled properly in case of duplicate minimum stride lengths.
                 indices.erase(indices.begin() + 1);
                 indices.push_back(1);
@@ -163,14 +177,35 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     }
 
     // Sort indices by their corresponding stride values (descending; aligns with NC...W layout)
-    std::stable_sort(
-        indices.begin(), indices.end(), [&stridesAreUnique, &strides](size_t a, size_t b) mutable {
-            if(strides[a] == strides[b])
-            {
-                stridesAreUnique = false;
-            }
-            return strides[a] > strides[b];
-        });
+    // Use std::sort with a stable tie-breaker instead of std::stable_sort, which uses
+    // deprecated std::get_temporary_buffer in libstdc++ causing clang-tidy errors.
+    struct SortItem
+    {
+        size_t index; // The dimension index value
+        size_t originalPos; // Position before sorting (for stability tie-breaking)
+    };
+
+    std::vector<SortItem> sortItems(numDims);
+    for(size_t i = 0; i < numDims; ++i)
+    {
+        sortItems[i] = {indices[i], i};
+    }
+
+    std::sort(sortItems.begin(),
+              sortItems.end(),
+              [&strides, &stridesAreUnique](const SortItem& a, const SortItem& b) {
+                  if(strides[a.index] == strides[b.index])
+                  {
+                      stridesAreUnique = false;
+                      return a.originalPos < b.originalPos; // stable tie-breaker
+                  }
+                  return strides[a.index] > strides[b.index]; // descending by stride
+              });
+
+    for(size_t i = 0; i < numDims; ++i)
+    {
+        indices[i] = sortItems[i].index;
+    }
 
     // Assign order based on sorted stride indices from longest strides to shortest.
     for(size_t i = 0; i < numDims; ++i)
@@ -180,10 +215,9 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
 
     if(!stridesAreUnique)
     {
-        HIPDNN_LOG_WARN("extractStrideOrder(): Stride lengths {} are not unique, the deduced "
-                        "stride order {} may not be correct",
-                        vecToString(strides),
-                        vecToString(strideOrder));
+        HIPDNN_SDK_LOG_WARN("extractStrideOrder(): Stride lengths "
+                            << vecToString(strides) << " are not unique, the deduced stride order "
+                            << vecToString(strideOrder) << " may not be correct.");
     }
 
     return strideOrder;
@@ -290,8 +324,18 @@ static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
     }
 }
 
-// Constructs a full tensor indices vector from batch, channel, and spatial components. spatialOffset allows
-// skipping initial elements in the spatialIndices vector for convenience.
+/**
+ * @brief Constructs a full tensor indices vector from batch, channel, and spatial components
+ *
+ * Builds an index vector following NCHW ordering: batch at position 0, channel at position 1,
+ * followed by spatial dimensions (H, W for 4D tensors; D, H, W for 5D tensors).
+ *
+ * @param batchIdx Batch index (position 0 in result)
+ * @param channelIdx Channel index (position 1 in result)
+ * @param spatialIndices Spatial dimension indices (positions 2+ in result)
+ * @param spatialOffset Number of elements to skip at the start of spatialIndices
+ * @return Combined index vector in NCHW/NCDHW order
+ */
 static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
                                                       int64_t channelIdx,
                                                       const std::vector<int64_t>& spatialIndices,
