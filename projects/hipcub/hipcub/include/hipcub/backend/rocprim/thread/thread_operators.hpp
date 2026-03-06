@@ -44,8 +44,8 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Equality
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to<T> instead.") Equality
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
@@ -54,8 +54,8 @@ struct Equality
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Inequality
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to<T> instead.") Inequality
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
@@ -64,9 +64,9 @@ struct Inequality
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
+//! deprecated [Since 5.0]
 template<class EqualityOp>
-struct InequalityWrapper
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to<T> instead.") InequalityWrapper
 {
     EqualityOp op;
 
@@ -80,8 +80,8 @@ struct InequalityWrapper
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Sum
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::plus<T> instead.") Sum
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
@@ -90,8 +90,8 @@ struct Sum
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Difference
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::minus<T> instead") Difference
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
@@ -100,8 +100,8 @@ struct Difference
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Division
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::divides<T> instead") Division
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
@@ -110,26 +110,24 @@ struct Division
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Max
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum<T> instead.") Max
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
         operator()(T&& t, U&& u) const
     {
-        // TODO: change to use hip::std::max after libhipcxx is ready
         return (((u) > (t)) ? (u) : (t));
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Min
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum<T> instead.") Min
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
         operator()(T&& t, U&& u) const
     {
-        // TODO: change to use hip::std::min after libhipcxx is ready
         return (((u) < (t)) ? (u) : (t));
     }
 };
