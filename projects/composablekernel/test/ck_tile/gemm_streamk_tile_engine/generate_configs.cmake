@@ -39,20 +39,26 @@ function(get_cu_count cu_count_arg)
         execute_process(
             COMMAND ${CPP_EXE_PATH}
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE queried_cu_count_exit_code
+            ERROR_VARIABLE standard_error
             OUTPUT_VARIABLE queried_cu_count
+            RESULT_VARIABLE queried_cu_count_exit_code
         )
 
-        if (NOT queried_cu_count_exit_code EQUAL 0)
+        if (standard_error)
             message(STATUS "Error information from attempting to query HIP device and properties:\n"
                             "${standard_error}")
+        endif()
+
+        if (NOT queried_cu_count_exit_code EQUAL 0)
+            message(STATUS "Failed to run ${CPP_EXE_PATH} to query the device's CU count")
+
         endif()
         
 
         # Delete the generated cu_count executable
         file(REMOVE "${CPP_EXE_PATH}")
 
-        if((queried_cu_count EQUAL 0) OR (NOT queried_cu_count_exit_code EQUAL 0))
+        if((queried_cu_count STREQUAL "0") OR (NOT queried_cu_count_exit_code EQUAL 0))
             message(WARNING "Unable to query the number of Compute Units. \
                     Please use the CU_COUNT CLI option to pass in the \
                     number of Compute Units for your target device; otherwise, \
