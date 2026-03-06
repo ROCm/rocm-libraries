@@ -24,6 +24,12 @@ The ``-c`` option builds all clients, including the unit tests:
 
     python rmake.py -c
 
+:doc:`CMake build options <./rocThrust-install-with-cmake>` can be passed to the ``rmake.py`` script using the ``--cmake-darg`` option:
+
+.. code:: shell 
+
+    python rmake.py -ci --cmake-darg THRUST_HOST_SYSTEM=OMP --cmake-darg THRUST_DEVICE_SYSTEM=OMP
+
 To see a complete list of ``rmake.py`` options, run:
 
 .. code-block:: shell
