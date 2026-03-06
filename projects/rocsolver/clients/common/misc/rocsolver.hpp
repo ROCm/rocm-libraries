@@ -89,6 +89,7 @@ rocblas_status rocsolver_zlatrd_forsytrd(rocblas_handle handle,
                                          rocblas_double_complex* tau,
                                          rocblas_double_complex* W,
                                          rocblas_int ldw);
+
 rocblas_status rocsolver_sgemm(rocblas_handle handle,
                                rocblas_operation transA,
                                rocblas_operation transB,

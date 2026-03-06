@@ -34,6 +34,7 @@
 
 #include "../auxiliary/rocauxiliary_lacgv.hpp"
 #include "../auxiliary/rocauxiliary_larfg.hpp"
+#include "../auxiliary/rocauxiliary_latrd.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
@@ -42,75 +43,6 @@ ROCSOLVER_BEGIN_NAMESPACE
 /**************************************************************************************/
 /***************** Kernels/Device functions *******************************************/
 /**************************************************************************************/
-
-template <int MAX_THDS, typename T, typename I, typename U>
-ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
-    latrd_forsytrd_dot_scale_axpy(const I n,
-                                  U AA,
-                                  const rocblas_stride shiftA,
-                                  const rocblas_stride strideA,
-                                  T* WW,
-                                  const rocblas_stride shiftW,
-                                  const rocblas_stride strideW,
-                                  T* tauA,
-                                  const rocblas_stride strideP)
-{
-    I bid = blockIdx.z;
-    I tid = threadIdx.x;
-
-    // select batch instance
-    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
-    T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
-
-    // shared variables
-    __shared__ T sval[MAX_THDS / WarpSize];
-    __shared__ T sh_A[MAX_THDS];
-    __shared__ T sh_W[MAX_THDS];
-
-    // dot
-    T norm2 = 0;
-    for(I i = tid; i < n; i += MAX_THDS)
-    {
-        T tempA = A[i];
-        T tempW = W[i];
-        if(i < MAX_THDS)
-        {
-            sh_A[i] = tempA;
-            sh_W[i] = tempW;
-        }
-
-        norm2 += tempA * conj(tempW);
-    }
-
-    // reduce squared entries to find squared norm of x
-    norm2 += shift_left(norm2, 1);
-    norm2 += shift_left(norm2, 2);
-    norm2 += shift_left(norm2, 4);
-    norm2 += shift_left(norm2, 8);
-    norm2 += shift_left(norm2, 16);
-    if(warpSize > 32)
-        norm2 += shift_left(norm2, 32);
-    if(tid % warpSize == 0)
-        sval[tid / warpSize] = norm2;
-    __syncthreads();
-    if(tid == 0)
-    {
-        for(I k = 1; k < MAX_THDS / warpSize; k++)
-            norm2 += sval[k];
-        sval[0] = -0.5 * tau[0] * norm2;
-    }
-    __syncthreads();
-
-    // axpy
-    for(I i = tid; i < n; i += MAX_THDS)
-    {
-        if(i < MAX_THDS)
-            W[i] = sh_W[i] + sval[0] * sh_A[i];
-        else
-            W[i] = W[i] + sval[0] * A[i];
-    }
-}
 
 /***** Kernel to reduce results inter-groups *****/
 /*************************************************/
@@ -866,40 +798,6 @@ void latrd_get_config_for_updates(const rocblas_int n,
     *dc = 0;
 }
 
-template <typename T, typename S, typename U>
-rocblas_status rocsolver_latrd_forsytrd_argCheck(rocblas_handle handle,
-                                                 const rocblas_fill uplo,
-                                                 const rocblas_int n,
-                                                 const rocblas_int k,
-                                                 const rocblas_int lda,
-                                                 const rocblas_int ldw,
-                                                 T A,
-                                                 S E,
-                                                 U tau,
-                                                 U W,
-                                                 const rocblas_int batch_count = 1)
-{
-    // order is important for unit tests:
-
-    // 1. invalid/non-supported values
-    if(uplo != rocblas_fill_upper && uplo != rocblas_fill_lower)
-        return rocblas_status_invalid_value;
-
-    // 2. invalid size
-    if(n < 0 || k < 0 || k > n || lda < n || ldw < n || batch_count < 0)
-        return rocblas_status_invalid_size;
-
-    // skip pointer check if querying memory size
-    if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_status_continue;
-
-    // 3. invalid pointers
-    if((n && !A) || (n && !E) || (n && !tau) || (n && k && !W))
-        return rocblas_status_invalid_pointer;
-
-    return rocblas_status_continue;
-}
-
 template <bool BATCHED, typename T>
 void rocsolver_latrd_forsytrd_getMemorySize(const rocblas_int n,
                                             const rocblas_int k,
@@ -1038,9 +936,9 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                 dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, j, A, shiftA, lda,
                 strideA, W, shiftW, ldw, strideW, work, strideblk, tau, strideP);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_forsytrd_dot_scale_axpy<1024, T>),
-                                    dim3(1, 1, batch_count), dim3(1024, 1, 1), 0, stream, n - 1 - j,
-                                    A, shiftA + idx2D(j + 1, j, lda), strideA, W,
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
+                                    dim3(1024, 1, 1), 0, stream, n - 1 - j, A,
+                                    shiftA + idx2D(j + 1, j, lda), strideA, W,
                                     shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
             //--------------------------------------------------------------
         }
@@ -1088,10 +986,10 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                 dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, k, j, A, shiftA,
                 lda, strideA, W, shiftW, ldw, strideW, work, strideblk, tau, strideP);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_forsytrd_dot_scale_axpy<1024, T>),
-                                    dim3(1, 1, batch_count), dim3(1024, 1, 1), 0, stream, j, A,
-                                    shiftA + idx2D(0, j, lda), strideA, W,
-                                    shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1, strideP);
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
+                                    dim3(1024, 1, 1), 0, stream, j, A, shiftA + idx2D(0, j, lda),
+                                    strideA, W, shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1,
+                                    strideP);
         }
     }
 

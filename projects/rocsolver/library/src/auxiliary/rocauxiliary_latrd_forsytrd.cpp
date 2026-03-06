@@ -55,7 +55,7 @@ rocblas_status rocsolver_latrd_forsytrd_impl(rocblas_handle handle,
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_latrd_forsytrd_argCheck(handle, uplo, n, k, lda, ldw, A, E, tau, W);
+    rocblas_status st = rocsolver_latrd_argCheck(handle, uplo, n, k, lda, ldw, A, E, tau, W);
     if(st != rocblas_status_continue)
         return st;
 

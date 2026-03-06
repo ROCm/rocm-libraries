@@ -172,7 +172,6 @@ void latrd_forsytrd_initData(const rocblas_handle handle,
                 if(j == i)
                 {
                     hA[0][i + j * lda] = hA[0][i + j * lda].real() + 400;
-                    ;
                 }
                 else if(j == i + 1)
                 {
