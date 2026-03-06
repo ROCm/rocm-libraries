@@ -35,10 +35,21 @@ constexpr auto ALGORITHM =
         .with_tile_optimizations(ckt::TileOptimizations{
             .num_groups_to_merge = 1, .split_image = false, .explicit_gemm = false, .two_stage = false});
 
+constexpr auto TWO_STAGE_ALGORITHM =
+    cku::ConvAlgorithm_Tile_GroupedConvolutionKernel{}
+        .with_tile_specializations(ckb::TileConvSpecialization::DEFAULT)
+        .with_tile_thread_block(cku::TileThreadBlock_64x64x64)
+        .with_tile_block_gemm(cku::TileBlockGemmDesc_16x16_v3_intrawave)
+        .with_tile_transfer(cku::TileTransfer_4x4x4)
+        .with_tile_optimizations(ckt::TileOptimizations{
+            .num_groups_to_merge = 1, .split_image = false, .explicit_gemm = false, .two_stage = true});
+
 using Builder  = ckb::ConvBuilder<SIGNATURE, ALGORITHM>;
 using Instance = Builder::Instance;
 
-using ElementwiseOpBuilder  = ckf::ElementwiseOpTileFactory<SIGNATURE, ALGORITHM>;
+using TwoStageBuilder  = ckb::ConvBuilder<SIGNATURE, TWO_STAGE_ALGORITHM>;
+using TwoStageInstance = TwoStageBuilder::Instance;
+using ElementwiseOpBuilder  = ckf::ElementwiseOpTileFactory<SIGNATURE, TWO_STAGE_ALGORITHM>;
 using ElementwiseOpInstance = ElementwiseOpBuilder::Instance;
 
 using Reference = ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
@@ -139,7 +150,7 @@ TEST(BwdWeight_TwoStage_2D_FP16_NHWGC, Execution)
 
     ckt::init_inputs(args, inputs.get());
 
-    auto conv = Instance{};
+    auto conv = TwoStageInstance{};
     auto elementwise_op = ElementwiseOpInstance{};
 
     EXPECT_THAT(ckt::run(conv, elementwise_op, args, inputs.get(), outputs.get()), SuccessfulRun());
