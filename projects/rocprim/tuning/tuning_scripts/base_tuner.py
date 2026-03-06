@@ -420,8 +420,6 @@ class BaseTuner(ABC):
             "-fPIC",
             "-std=c++17",
             f"-I{rocprim_dir / 'rocprim/include'}",
-            f"-I{rocprim_dir / 'build/rocprim/include/rocprim'}",
-            f"-I{rocprim_dir / 'build/release/rocprim/include/rocprim'}",
             f"-I{rocprim_dir / 'benchmark'}",
             f"-I{monorepo_dir / 'shared/primbench'}",
             "-Wno-#pragma-messages",
