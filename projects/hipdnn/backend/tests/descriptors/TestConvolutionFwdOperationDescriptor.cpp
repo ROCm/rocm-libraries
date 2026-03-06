@@ -77,9 +77,9 @@ public:
         auto computeType = HIPDNN_DATA_FLOAT;
         getDescriptor()->setAttribute(
             HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-        auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
+        hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
         getDescriptor()->setAttribute(
-            HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode);
+            HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     }
 
     void makeFinalized() const
@@ -242,9 +242,9 @@ TEST_F(TestConvolutionFwdOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
     setTensors();
     setConvParams();
-    auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
     getDescriptor()->setAttribute(
-        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode);
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -395,21 +395,43 @@ TEST_F(TestConvolutionFwdOperationDescriptor, SetConvolutionDilation)
 TEST_F(TestConvolutionFwdOperationDescriptor, SetConvMode)
 {
     auto desc = getDescriptor();
-    auto convMode = static_cast<int64_t>(ConvMode::CROSS_CORRELATION);
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
 
-    ASSERT_NO_THROW(
-        desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode));
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode));
 
     ASSERT_EQ(desc->getData().conv_mode, ConvMode::CROSS_CORRELATION);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, SetConvModeConvolution)
+{
+    auto desc = getDescriptor();
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode));
+
+    ASSERT_EQ(desc->getData().conv_mode, ConvMode::CONVOLUTION);
 }
 
 TEST_F(TestConvolutionFwdOperationDescriptor, SetConvModeWrongElementCount)
 {
     auto desc = getDescriptor();
-    int64_t convMode = 0;
+    hipdnnConvolutionMode_t convMode = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 2, &convMode),
+        desc->setAttribute(
+            HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 2, &convMode),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestConvolutionFwdOperationDescriptor, SetConvModeWrongTypeInt64ReturnsError)
+{
+    auto desc = getDescriptor();
+    int64_t convMode = 2; // Using int64_t with old HIPDNN_TYPE_INT64 should fail
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convMode),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -541,12 +563,15 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeConvParams)
     EXPECT_EQ(dilation, toVec(K_CONV_DILATION));
 
     // conv mode
-    int64_t convMode = -1;
+    hipdnnConvolutionMode_t convMode = {};
     int64_t convModeCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 1, &convModeCount, &convMode));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                                       HIPDNN_TYPE_CONVOLUTION_MODE,
+                                       1,
+                                       &convModeCount,
+                                       &convMode));
     ASSERT_EQ(convModeCount, 1);
-    EXPECT_EQ(convMode, static_cast<int64_t>(ConvMode::CROSS_CORRELATION));
+    EXPECT_EQ(convMode, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
 }
 
 TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeComputeType)
@@ -660,8 +685,11 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeConvModeQueryReturnsOn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
+                                       HIPDNN_TYPE_CONVOLUTION_MODE,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -730,7 +758,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, GetAttributeConvModeQueryFailsNull
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
-            HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_INT64, 0, nullptr, nullptr),
+            HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 0, nullptr, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 

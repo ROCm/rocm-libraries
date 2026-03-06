@@ -85,6 +85,7 @@ set(rocauxiliary_test_source
   auxiliary/larfb_gtest.cpp
   # norm and condition number
   auxiliary/lange_gtest.cpp
+  auxiliary/gecon_gtest.cpp
   # plane rotations
   auxiliary/lasr_gtest.cpp
   # orthonormal/unitary matrices

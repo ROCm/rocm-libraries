@@ -40,8 +40,6 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/target_properties.hpp>
 
-#include <boost/range/adaptor/transformed.hpp>
-
 #include <cstdio>
 #include <cstring>
 #include <ios>

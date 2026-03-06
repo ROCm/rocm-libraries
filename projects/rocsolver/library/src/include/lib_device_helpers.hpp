@@ -930,9 +930,10 @@ template <typename T, typename I, typename U>
 ROCSOLVER_KERNEL void reset_info(T* info, const I n, U val, I incr = 0)
 {
     I idx = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
+    I stride = hipGridDim_x * static_cast<I>(hipBlockDim_x);
 
-    if(idx < n)
-        info[idx] = T(val) + incr * idx;
+    for(I i = idx; i < n; i += stride)
+        info[i] = T(val) + incr * i;
 }
 
 template <typename T, typename I, typename S, typename U>

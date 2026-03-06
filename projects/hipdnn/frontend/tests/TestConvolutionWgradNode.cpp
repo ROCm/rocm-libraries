@@ -4,9 +4,18 @@
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
+
+#include "fake_backend/MockHipdnnBackend.hpp"
+
+#include <gmock/gmock.h>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
+using namespace ::testing;
 
 TEST(TestConvolutionWgradNode, PreValidateNode)
 {
@@ -1929,4 +1938,112 @@ TEST(TestConvolutionWgradNode, PreValidateNodeInputTooSmall)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+// =============================================================================
+// create_operation() Tests
+// =============================================================================
+
+class TestConvolutionWgradNodeCreateOperation : public ::testing::Test
+{
+protected:
+    std::shared_ptr<Mock_hipdnn_backend> _mockBackend;
+
+    void SetUp() override
+    {
+        _mockBackend = std::make_shared<Mock_hipdnn_backend>();
+        detail::IHipdnnBackend::setInstance(_mockBackend);
+    }
+    void TearDown() override
+    {
+        detail::IHipdnnBackend::resetInstance();
+        _mockBackend.reset();
+    }
+
+    static ConvolutionWgradNode makeConvWgradNode()
+    {
+        ConvWgradAttributes attrs;
+        auto x = std::make_shared<TensorAttributes>();
+        x->set_uid(K_TENSOR_X_UID)
+            .set_name("X")
+            .set_data_type(DataType::FLOAT)
+            .set_dim(toVec(K_TENSOR_X_DIMS))
+            .set_stride(toVec(K_TENSOR_X_STRIDES));
+        auto dy = std::make_shared<TensorAttributes>();
+        dy->set_uid(K_TENSOR_Y_UID)
+            .set_name("DY")
+            .set_data_type(DataType::FLOAT)
+            .set_dim(toVec(K_TENSOR_Y_DIMS))
+            .set_stride(toVec(K_TENSOR_Y_STRIDES));
+        auto dw = std::make_shared<TensorAttributes>();
+        dw->set_uid(K_TENSOR_W_UID)
+            .set_name("DW")
+            .set_data_type(DataType::FLOAT)
+            .set_dim(toVec(K_TENSOR_W_DIMS))
+            .set_stride(toVec(K_TENSOR_W_STRIDES));
+
+        attrs.set_x(x);
+        attrs.set_dy(dy);
+        attrs.set_dw(dw);
+        attrs.set_pre_padding(toVec(K_CONV_PADDING));
+        attrs.set_post_padding(toVec(K_CONV_PADDING));
+        attrs.set_stride(toVec(K_CONV_STRIDE));
+        attrs.set_dilation(toVec(K_CONV_DILATION));
+        attrs.compute_data_type = DataType::FLOAT;
+
+        GraphAttributes graphAttrs;
+        return {std::move(attrs), graphAttrs};
+    }
+};
+
+TEST_F(TestConvolutionWgradNodeCreateOperation, PropagatesBackendError)
+{
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(
+        *_mockBackend,
+        backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto node = makeConvWgradNode();
+    std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+
+    auto err = node.create_operation(tensorDescs, operations);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestConvolutionWgradNodeCreateOperation, SuccessCreatesThreeTensorsAndOneOperation)
+{
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, _))
+        .Times(3)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(
+        *_mockBackend,
+        backendCreateDescriptor(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR, _))
+        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(_))
+        .Times(4)
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    auto node = makeConvWgradNode();
+    std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+
+    auto err = node.create_operation(tensorDescs, operations);
+    EXPECT_TRUE(err.is_good()) << err.err_msg;
+    EXPECT_EQ(tensorDescs.size(), 3u);
+    EXPECT_EQ(operations.size(), 1u);
 }

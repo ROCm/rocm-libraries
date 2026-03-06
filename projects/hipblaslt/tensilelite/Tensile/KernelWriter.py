@@ -45,6 +45,7 @@ from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
 from .SolutionStructs import Solution, isPackedIndex
+from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -744,8 +745,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # previous iter 2nd half (not final)
             dstPackItems += carryOverPackItems.pop(0)
             if prefetch and mfma:
-              # add s_nop 0
-              dstPackItems.append(SNop(waitState=0, comment="nop for x32f emulation"))
+              # add s_nop 1
+              dstPackItems.append(SNop(waitState=1, comment="nop for x32f emulation"))
           else:
             # carry over current item to the next iteration
             carryOverPackItems.append(tmpPackItems)
@@ -2794,7 +2795,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if needNextBufLR:
             localReads.add(localReadCodeA)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop:
+          if doNext and self.states.doPackPreSchedulingNextLoop or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packPreA)
           else:
@@ -2845,7 +2846,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if needNextBufLR:
             localReads.add(localReadCodeB)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop:
+          if doNext and self.states.doPackPreSchedulingNextLoop or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packPreB)
           else:
@@ -2951,7 +2952,31 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       luIdx = u % self.states.numVgprBuffer # local to use for MACs
       if kernel["EnableMatrixInstruction"]:
-        macIterCode.add(self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollIdx = u, tail = useTailloopInNll))
+        postShiftK = Module()
+        if kernel["UseF32XEmulation"] and useTailloopInNll:
+          # useTailloopInNll case, we need to generate TF32 pack code after ShiftK
+          packItems = []
+          for iui in range(kernel["InnerUnroll"]):
+            # schedule both packPre and pack
+            packAPre = pack[packIdx].findNamedItem("packA_I%s Pre"%(iui))
+            packBPre = pack[packIdx].findNamedItem("packB_I%s Pre"%(iui))
+            packA = pack[packIdx].findNamedItem("packA_I%s"%(iui))
+            packB = pack[packIdx].findNamedItem("packB_I%s"%(iui))
+            if packAPre == None:
+              packAPre = Module()
+            if packBPre == None:
+              packBPre = Module()
+            packAItems = packA.flatitems()
+            packBItems = packB.flatitems()
+            # Gather A, B conversion code based on scheduling order
+            self._interleavePackAB(kernel, packAItems, packBItems, packItems, prefetch=True, searchStrings=["__TF32_1", "__TF32_2"])
+          # put packPre back to pack[packIdx]
+          pack[packIdx] = Module()
+          pack[packIdx].add(packAPre)
+          pack[packIdx].add(packBPre)
+          for item in packItems:
+            postShiftK.add(item)
+        macIterCode.add(self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollIdx = u, tail = useTailloopInNll, postShiftK = postShiftK))
       else:
         macIterCode.add(self.macIter(kernel, tensorParametersA, tensorParametersB, luIdx, kernel["InnerUnroll"], True))
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
@@ -3377,7 +3402,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           localReads.add(localReadCodeA)
           localReadsA.add(localReadCodeA)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop:
+          if doNext and self.states.doPackPreSchedulingNextLoop or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadA].add(packPreA)
           else:
@@ -3441,7 +3466,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           localReads.add(localReadCodeB)
           localReadsB.add(localReadCodeB)
           # packPre code
-          if doNext or self.states.doPackPreSchedulingThisLoop:
+          if doNext and self.states.doPackPreSchedulingNextLoop or self.states.doPackPreSchedulingThisLoop:
             # do pack pre scheduling for this loop. Put packPreCode to packPre
             packPre[packStoreIdx*self.states.numIterPerCoalescedReadB].add(packPreB)
           else:
@@ -4380,9 +4405,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if (not kernel["UseDotInstruction"]) and (kernel["AssertSummationElementMultiple"] % KinInnerUnroll == 0):
         tailLoopInnerUnroll = kernel["InnerUnroll"]
 
-      shiftK = Module()
       self.states.SubTileIdx = 0 # reset SubTileIdx before TailLoop local read
       for mValue in range(mEnd):
+        shiftK = Module()
         if mEnd > 1:
           # print tail loop counter if mEnd>1 (means do tail loop unroll)
           module.addComment1("tail loop unroll iter %u"%(mValue))
@@ -4641,8 +4666,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
     self.states.tailloopInNll = kernel["TailloopInNll"]
-    # remove staggerU code for tailloopInNll (cannot support staggerU)
-    self.states.staggerUCode = not self.states.tailloopInNll
+    # remove staggerU code for the following cases
+    # - tailloopInNll (cannot support staggerU)
+    # - StreamK + MX (not enough sgpr)
+    self.states.staggerUCode = True
+    if self.states.tailloopInNll or \
+       (kernel["StreamK"] and (kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"])):
+      self.states.staggerUCode = False
     self.states.tailloopInNllmaxUnit = 1
     if self.states.tailloopInNll:
       tluA = kernel["ProblemType"]["TLUA"]
@@ -4774,9 +4804,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Enabled lrvwTile>1 for UseF32XEmulation except for UseCustomMainLoopSchedule (TODO: enable for CMS)
     # TODO: implement extra logic to swap vgprs after local read to suport lrvwTile > 1 for umBytes >= 4 + MIInputPerThread > 1
     #       (except for UseF32XEmulation)
-    forceLrvwTile1 = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
+    forceLrvwTile1A = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
       (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1 and (not kernel["UseF32XEmulation"]))
-    if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1:
+    if not kernel["UnrollMajorLDSA"] and not forceLrvwTile1A:
       self.states.lrvwTileA = kernel["VectorWidthA"]
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.lrvwTileMXSA = kernel["VectorWidthA"]
@@ -4785,8 +4815,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["MXBlockA"]:
         self.states.lrvwTileMXSA = 1
 
-    forceLrvwTile1 = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1)
-    if not kernel["UnrollMajorLDSB"] and not forceLrvwTile1:
+    forceLrvwTile1B = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and \
+      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1 and (not kernel["UseF32XEmulation"]))
+    if not kernel["UnrollMajorLDSB"] and not forceLrvwTile1B:
       self.states.lrvwTileB = kernel["VectorWidthB"]
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.lrvwTileMXSB = kernel["VectorWidthB"]
@@ -5481,13 +5512,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.a.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprA"] else 1 * self.states.rpla
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.mxsa.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprMXSA"] else 1 * self.states.rpla
+      self.states.mxsa.numVgprLocalWriteSwapAddr = 0
     self.states.b.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprB"] else 1 * self.states.rpla
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprMXSB"] else 1 * self.states.rpla
+      self.states.mxsb.numVgprLocalWriteSwapAddr = 0
     self.states.m.numVgprLocalWriteAddr = 0 if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"] else 1 * self.states.rpla
     self.states.a.numVgprLocalReadSwapAddr = 0
     self.states.b.numVgprLocalReadSwapAddr = 0
     self.states.m.numVgprLocalReadSwapAddr = 0
+    if kernel["ProblemType"]["MXBlockA"]:
+      self.states.mxsa.numVgprLocalReadSwapAddr = 0
+    if kernel["ProblemType"]["MXBlockB"]:
+      self.states.mxsb.numVgprLocalReadSwapAddr = 0
     self.states.a.numVgprLocalWriteSwapAddr = 0
     self.states.b.numVgprLocalWriteSwapAddr = 0
     self.states.m.numVgprLocalWriteSwapAddr = 0
@@ -5559,8 +5596,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["StoreSwapAddr"]:
       if self.states.a.numVgprLocalReadAddr > 0:
         self.states.a.numVgprLocalReadSwapAddr = 1
+      if kernel["ProblemType"]["MXBlockA"]:
+        if self.states.mxsa.numVgprLocalReadAddr > 0:
+          self.states.mxsa.numVgprLocalReadSwapAddr = 1
       if self.states.b.numVgprLocalReadAddr > 0:
         self.states.b.numVgprLocalReadSwapAddr = 1
+      if kernel["ProblemType"]["MXBlockB"]:
+        if self.states.mxsb.numVgprLocalReadAddr > 0:
+          self.states.mxsb.numVgprLocalReadSwapAddr = 1
       if self.states.m.numVgprLocalReadAddr > 0:
         self.states.m.numVgprLocalReadSwapAddr = 1
       if not kernel["LocalWriteUseSgprA"] and self.states.a.numVgprLocalWriteAddr > 0:
@@ -5569,6 +5612,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.b.numVgprLocalWriteSwapAddr = 1
       if kernel["ProblemType"]["Sparse"] and not kernel["LocalWriteUseSgprMetadata"] and self.states.m.numVgprLocalWriteAddr > 0:
         self.states.m.numVgprLocalWriteSwapAddr = 1
+      if kernel["ProblemType"]["MXBlockA"]:
+        if not kernel["LocalWriteUseSgprMXSA"] and self.states.mxsa.numVgprLocalWriteAddr > 0:
+          self.states.mxsa.numVgprLocalWriteSwapAddr = 1
+      if kernel["ProblemType"]["MXBlockB"]:
+        if not kernel["LocalWriteUseSgprMXSB"] and self.states.mxsb.numVgprLocalWriteAddr > 0:
+          self.states.mxsb.numVgprLocalWriteSwapAddr = 1
       # Note: MXSA/MXSB do not use swap addresses
 
     ####################################
@@ -5683,8 +5732,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif kernel["ProblemType"]["TLU%s"%tc] == 1 and kernel["enableLDSTr%s"%tc]:
           usePerpPerm = (ntpl & (ntpl-1)) == 0
         else:
-          # TLU=0 Case, not needed
-          usePerpPerm = False
+          # Currently only VW=1,2 is supported due to how the local read offset
+          # is currently computed. Supporting VW=1,2 only required small modifications
+          # to the offset calc.
+          # TODO: Add support for VW=4,8, this will require more changes in LR offset
+          # calculations
+          usePerpPerm = False if kernel["VectorWidth%s"%tc] > 2 or kernel["ProblemType"]["DataType"].numBytes() == 2 else True
 
         permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
           else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
@@ -6147,6 +6200,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.b.numVgprLocalReadSwapAddr > 0:
       self.states.b.startVgprLocalReadSwapAddr = vgprIdx
       vgprIdx += 1
+    if kernel["ProblemType"]["MXBlockA"]:
+      if self.states.mxsa.numVgprLocalReadSwapAddr > 0:
+        self.states.mxsa.startVgprLocalReadSwapAddr = vgprIdx
+        vgprIdx += 1
+    if kernel["ProblemType"]["MXBlockB"]:
+      if self.states.mxsb.numVgprLocalReadSwapAddr > 0:
+        self.states.mxsb.startVgprLocalReadSwapAddr = vgprIdx
+        vgprIdx += 1
     if self.states.a.numVgprLocalWriteSwapAddr > 0:
       self.states.a.startVgprLocalWriteSwapAddr = vgprIdx
       vgprIdx += 1
@@ -6156,6 +6217,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.b.numVgprLocalWriteSwapAddr > 0:
       self.states.b.startVgprLocalWriteSwapAddr = vgprIdx
       vgprIdx += 1
+    if kernel["ProblemType"]["MXBlockA"]:
+      if self.states.mxsa.numVgprLocalWriteSwapAddr > 0:
+        self.states.mxsa.startVgprLocalWriteSwapAddr = vgprIdx
+        vgprIdx += 1
+    if kernel["ProblemType"]["MXBlockB"]:
+      if self.states.mxsb.numVgprLocalWriteSwapAddr > 0:
+        self.states.mxsb.startVgprLocalWriteSwapAddr = vgprIdx
+        vgprIdx += 1
 
     # X32F Emulation initializations
     # meaning of variables
@@ -6194,6 +6263,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # do packPre scheduling for This loop only not CLR or SubIter
           self.states.doPackPreSchedulingThisLoop = (not kernel["ClusterLocalRead"]) or kernel["ForceUnrollSubIter"]
         self.states.doPackPreSchedulingNextLoop = True
+      if self.states.tailloopInNll:
+        # disable all TF32 scheduling if tailloopInNll is enabled
+        self.states.doFullPackCodePrefetch = False
+        self.states.doPackPreSchedulingThisLoop = False
+        self.states.doPackPreSchedulingNextLoop = False
       numVgprsEmuA = initTF32EmuAB(self.states.a, self.states.lrvwTileA)
       numVgprsEmuB = initTF32EmuAB(self.states.b, self.states.lrvwTileB)
       return numVgprsEmuA, numVgprsEmuB
@@ -6583,6 +6657,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.defineSgpr("SwapA", 1)
       if kernel["LocalWriteUseSgprB"]:
         self.defineSgpr("SwapB", 1)
+      if kernel["ProblemType"]["MXBlockA"] and kernel["LocalWriteUseSgprMXSA"]:
+          self.defineSgpr("SwapMXSA", 1)
+      if kernel["ProblemType"]["MXBlockB"] and kernel["LocalWriteUseSgprMXSB"]:
+          self.defineSgpr("SwapMXSB", 1)
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         self.defineSgpr("SwapMetadata", 1)
 
@@ -6790,16 +6868,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["EnableMatrixInstruction"]:
       #TODO:import getMXMFMAIssueLatency
       from rocisa.instruction import getMFMAIssueLatency, getSMFMAIssueLatency
-      datatype = kernel["ProblemType"]["MacDataTypeA"]
-      if kernel["UseF32XEmulation"]:
-        datatype = DataType(DataTypeEnum.BFloat16)
-      self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(datatype.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"]) if kernel["ProblemType"]["Sparse"] else \
-                                              getMFMAIssueLatency(datatype.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
+      miInputType = getMiInputType(kernel)
+
+      if kernel["ProblemType"]["Sparse"]:
+        self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(
+            miInputType.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
+      else:
+        self.states.miLatency, miIssueLatency = getMFMAIssueLatency(
+            miInputType.toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
       # TODO: Avoid the logic which does not make sense.
       # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
       # Changed the value based on this and also to mitigate some instruction scheduling issues.
       # Invalidate this adjustment if ExtraMiLatencyLeft is >= 0
-      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and datatype.numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
+      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and miInputType.numBytes() == 2 and kernel["ExtraMiLatencyLeft"]== -1:
         self.states.miLatency = kernel["MatrixInstM"] // 2
         miIssueLatency = 2
 

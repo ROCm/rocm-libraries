@@ -353,6 +353,9 @@ TEST_F(CommandTest, CommandKernelPredicates)
     for(int i = 1; i < 100; i++)
     {
         commandArgs.setArgument(valTag, ArgumentType::Value, i);
+        CommandArgumentValue value(i);
+        commandArgs.setArgument(valTag, ArgumentType::Value, value);
+
         auto runtimeArguments = commandArgs.runtimeArguments();
         EXPECT_EQ(commandKernel.matchesPredicates(runtimeArguments), i % 2 == 0 && i % 5 == 0);
         if(!(i % 2 == 0 && i % 5 == 0))

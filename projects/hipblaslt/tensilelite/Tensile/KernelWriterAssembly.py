@@ -1171,6 +1171,14 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.m.numVgprLocalReadSwapAddr > 0:
       module.add(RegSet("v", "vgprLocalReadSwapAddrMetadata", \
           self.states.m.startVgprLocalReadSwapAddr))
+    if kernel["ProblemType"]["MXBlockA"]:
+      if self.states.mxsa.numVgprLocalReadSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalReadSwapAddrMXSA", \
+            self.states.mxsa.startVgprLocalReadSwapAddr))
+    if kernel["ProblemType"]["MXBlockB"]:
+      if self.states.mxsb.numVgprLocalReadSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalReadSwapAddrMXSB", \
+            self.states.mxsb.startVgprLocalReadSwapAddr))
     if self.states.a.numVgprLocalWriteSwapAddr > 0:
       module.add(RegSet("v", "vgprLocalWriteSwapAddrA", \
           self.states.a.startVgprLocalWriteSwapAddr))
@@ -1180,6 +1188,14 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.m.numVgprLocalWriteSwapAddr > 0:
       module.add(RegSet("v", "vgprLocalWriteSwapAddrMetadata", \
           self.states.m.startVgprLocalWriteSwapAddr))
+    if kernel["ProblemType"]["MXBlockA"]:
+      if self.states.mxsa.numVgprLocalWriteSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalWriteSwapAddrMXSA", \
+            self.states.mxsa.startVgprLocalWriteSwapAddr))
+    if kernel["ProblemType"]["MXBlockB"]:
+      if self.states.mxsb.numVgprLocalWriteSwapAddr > 0:
+        module.add(RegSet("v", "vgprLocalWriteSwapAddrMXSB", \
+            self.states.mxsb.startVgprLocalWriteSwapAddr))
 
     if kernel["ProblemType"]["OutputAmaxD"]:
       module.add(RegSet("v", "vgprAmaxOut", self.startVgprAmaxOut))
@@ -1771,10 +1787,16 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.a.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPA))
       module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPA, False, True))
+    if kernel["ProblemType"]["MXBlockA"]:
+      module.add(self.lraSwapAddressesForDTLPad(kernel, tPA["MX"]))
+      module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPA["MX"], False, True))
 
     if self.states.b.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPB))
       module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPB, False, True))
+    if kernel["ProblemType"]["MXBlockA"]:
+      module.add(self.lraSwapAddressesForDTLPad(kernel, tPB["MX"]))
+      module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPB["MX"], False, True))
     if self.states.m.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPM))
 
@@ -4598,8 +4620,7 @@ class KernelWriterAssembly(KernelWriter):
         self.vgprPool.checkIn(tmpv)
       self.vgprPool.checkIn(destVgpr)
 
-    # MXSA/MXSB do not use swap addresses (per mx_tony implementation)
-    if kernel["StoreSwapAddr"] and tc not in ("MXSA", "MXSB"):
+    if kernel["StoreSwapAddr"]:
       if kernel["LocalWriteUseSgpr%s"%tc]:
         # needed for the VReadfirstlaneB32 in the prior code block
         if self.states.archCaps["CrosslaneWait"]:
@@ -4868,8 +4889,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("lraSwapAddressesForDTLPad")
 
     tc = tP["tensorChar"]
-    # MXSA/MXSB do not use swap addresses (per mx_tony implementation)
-    if kernel["StoreSwapAddr"] and tc not in ("MXSA", "MXSB"):
+    if kernel["StoreSwapAddr"]:
       module.add(VAddU32(dst=vgpr("LocalReadSwapAddr%s"%tc), src0=kernel["LdsOffsetA_Blk"], src1=vgpr("LocalReadAddr%s"%tc), \
                          comment="Calculate starting lds addr of second buffer" ))
       module.add(VXorB32(dst=vgpr("LocalReadSwapAddr%s"%tc), \
@@ -9808,6 +9828,18 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SCmpEQU32(src0=sgpr("LDSBufferWriteInc"), src1="LdsBlockEndSize", comment="LDSBufferWriteInc == End ?"))
         module.add(SCMovB32(dst=sgpr("LDSBufferWriteInc"), src=0, comment="LDSBufferWriteInc loop back to 0"))
 
+    def getSrc0Val(tc):
+      src0Val = None
+      if kernel["StoreSwapAddr"]:
+        if kernel["LocalWriteUseSgpr%s"%tc]:
+          src0Val = sgpr("Swap%s"%tc)
+        else:
+          src0Val = vgpr("LocalWriteSwapAddr%s"%tc)
+      else:
+        # Using inlined constants
+        src0Val = hex(kernel["LdsOffsetA_Blk"])
+      return src0Val
+
     if needSwap:
       #fixme-iui  need to use wrapping increment for double or triple buffering:
 
@@ -9822,25 +9854,13 @@ class KernelWriterAssembly(KernelWriter):
         # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) only)
         localWriteAddRound(tc)
       else:
-        src0Val = None
-        if kernel["StoreSwapAddr"]:
-          if kernel["LocalWriteUseSgpr%s"%tc]:
-            src0Val = sgpr("Swap%s"%tc)
-          else:
-            src0Val = vgpr("LocalWriteSwapAddr%s"%tc)
-        else:
-          # Using inlined constants - TODO: always use LdsOffsetA_Blk for A/B/MXSA/MXSB?
-          src0Val = hex(kernel["LdsOffsetA_Blk"])
-
+        src0Val = getSrc0Val(tc)
         numLwa = self.states.a.numVgprLocalWriteAddr if tP["isA"] else self.states.b.numVgprLocalWriteAddr
         localWriteSwapXOR(tc, src0Val, numLwa)
-        #TODO:
         if "MX" in tP:
           tc = tP["MX"]["tensorChar"]
-          src0Val = hex(kernel["LdsOffsetA_Blk"])
-          #TODO:check to use isMXSA instead of isA
-          #numLwa = self.states.mxsa.numVgprLocalWriteAddr if tP["isA"] else self.states.mxsb.numVgprLocalWriteAddr
-          numLwa = self.states.mxsa.numVgprLocalWriteAddr if tP["isMXSA"] else self.states.mxsb.numVgprLocalWriteAddr
+          src0Val = getSrc0Val(tc)
+          numLwa = self.states.mxsa.numVgprLocalWriteAddr if tP["MX"]["isMXSA"] else self.states.mxsb.numVgprLocalWriteAddr
           localWriteSwapXOR(tc, src0Val, numLwa)
 
     # This used to control where to store the metadata
@@ -9855,14 +9875,7 @@ class KernelWriterAssembly(KernelWriter):
           tPM["localWriteSwapByteOffset"] = 0 if tPM["localWriteSwapByteOffset"] else kernel["LdsOffsetA_Blk"]
           module.addComment1("(EPS=1) local write swap internal offset -> %u" % tPM["localWriteSwapByteOffset"])
         else:
-          if kernel["StoreSwapAddr"]:
-            if kernel["LocalWriteUseSgpr%s"%tc]:
-              src0Val = sgpr("Swap%s"%tc)
-            else:
-              src0Val = vgpr("LocalWriteSwapAddr%s"%tc)
-          else:
-            # Using inlined constants
-            src0Val = hex(kernel["LdsOffsetA_Blk"])
+          src0Val = getSrc0Val(tc)
           numLwa = self.states.m.numVgprLocalWriteAddr
           localWriteSwapXOR(tc, src0Val, numLwa)
     return module
@@ -10843,13 +10856,6 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["StoreSwapAddr"]:
         tP["localReadSwapByteOffset"] = 0 if tP["localReadSwapByteOffset"] else kernel["LdsOffsetA_Blk"]
         module.addComment1("local read swap internal offset -> %u" % tP["localReadSwapByteOffset"])
-      elif tc in ("MXSA", "MXSB"):
-        #TODO: MXSA/MXSB do not use swap addresses, use fixed offset instead
-        module.add(VXorB32(
-          dst=vgpr("LocalReadAddr%s"%tc), \
-          src0=hex(kernel["LdsOffsetA_Blk"]), \
-          src1=vgpr("LocalReadAddr%s"%tc), \
-          comment="swap Red Blk"))
       else:
         module.add(VXorB32(
           dst=vgpr("LocalReadAddr%s"%tc), \

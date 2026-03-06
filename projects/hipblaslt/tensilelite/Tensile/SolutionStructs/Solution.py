@@ -681,7 +681,7 @@ class Solution(collections.abc.Mapping):
     if state["DirectToVgprA"] and state["DirectToVgprB"]:
       # change the following parameter values
       state["PrefetchGlobalRead"] = 1
-      state["ExpandPointerSwap"] = 0
+      state["ExpandPointerSwap"] = False
       state["1LDSBuffer"] = 0
       state["PrefetchLocalRead"] = 0
       # So far, DTVA + DTVB does not perform well (waitcnt is not ideal).
@@ -795,7 +795,7 @@ class Solution(collections.abc.Mapping):
     # does not work with PGR>=2 + EPS
     if state["PrefetchGlobalRead"] >= 2 and state["ExpandPointerSwap"]:
       # force EPS=0 and continue
-      state["ExpandPointerSwap"] = 0
+      state["ExpandPointerSwap"] = False
 
     # does not work with Sparse
     if state["ProblemType"]["Sparse"]:
@@ -907,8 +907,8 @@ class Solution(collections.abc.Mapping):
       if state["LSC%c"%tc] * state["LSP%c"%tc] * numBytesAB != state["WavefrontSize"] * state["GlobalReadVectorWidth%c"%tc] * numBytesAB:
         reject(state, printRejectionReason, "can't use DirectToLds for LSC%c and LSP%c * bpe!= WavefrontSize * GlobalReadVectorWidth%c * bpe%c > 4"%(tc, tc, tc, tc))
         return False
-      if state["WaveSeparateGlobalRead%c" % tc] == 2 and state["TransposeLDS"] != 2:
-        reject(state, printRejectionReason, "can't use DirectToLds for WSGR%s = 2 and TLDS != 2"%(tc))
+      if state["WaveSeparateGlobalRead%c" % tc] == 2:
+        reject(state, printRejectionReason, "can't use DirectToLds for WSGR%s = 2"%(tc))
         return False
     elif not state["UseGeneralizedNLCOne%s"%tc]:
       if state["LSC%c"%tc] * state["LSP%c"%tc] * numBytesAB != state["NumThreads"] * state["GlobalReadVectorWidth%c"%tc] * numBytesAB:
@@ -1359,7 +1359,7 @@ class Solution(collections.abc.Mapping):
 
     bufferLoad = state["BufferLoad"] and state["KernelLanguage"] == "Assembly"
     if not bufferLoad:
-      state["DirectToLds"] = False
+      state["DirectToLds"] = 0
       state["DirectToLdsA"] = False
       state["DirectToLdsB"] = False
       state["_UseSgprForGRO"] = False
@@ -1374,9 +1374,9 @@ class Solution(collections.abc.Mapping):
     #These modes only work under certain conditions, apply them here:
     #  - The "NoLoad" loop is only generated if PrefetchGlobalRead>0
     #  - And Suppress does not work if GSU>1 for some reason
-    if state["SuppressNoLoadLoop"] == 1:
+    if state["SuppressNoLoadLoop"]:
       if not (bufferLoad and state["PrefetchGlobalRead"] == 1 and (state["GlobalSplitU"]==1 or state["GlobalSplitU"]==-1)):
-        state["SuppressNoLoadLoop"] = 0
+        state["SuppressNoLoadLoop"] = False
 
     #print("PackedC0IdxChars", state["PackedC0IdxChars"])
     #print("PackedC1IdxChars", state["PackedC1IdxChars"])
@@ -1443,10 +1443,10 @@ class Solution(collections.abc.Mapping):
       state["VectorWidthB"] = 1
 
     if state["ScheduleIterAlg"] == 2:
-      state["ExpandPointerSwap"] = 1
+      state["ExpandPointerSwap"] = True
       print2("\nSet SIA=2, force ExpandPointerSwap=1")
 
-    if state["ExpandPointerSwap"] == 1:
+    if state["ExpandPointerSwap"]:
       # Pointer swap only used if PGR==1 or (PGR>1 and double/double complex) - so set ExpandPointerSwap=0 here
       # So far, EPS=1 and PGR>1 works only with double/double complex.
       #if not (bufferLoad and state["PrefetchGlobalRead"] == 1):
@@ -1454,7 +1454,7 @@ class Solution(collections.abc.Mapping):
               or (state["PrefetchGlobalRead"] > 1 and \
                   (state["ProblemType"]["MacDataTypeA"].isDouble() or state["ProblemType"]["MacDataTypeA"].isDoubleComplex()))
               or (state["ProblemType"]["Sparse"] and state["PrefetchGlobalRead"] > 0))):
-        state["ExpandPointerSwap"] = 0
+        state["ExpandPointerSwap"] = False
 
     #################################################################
     # ForceUnrollSubIter requirements
@@ -1551,7 +1551,7 @@ class Solution(collections.abc.Mapping):
       if not state["DirectToVgprSparseMetadata"]:
         state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
       # ON/OFF the sourceswap according to the sparse type automatically
-      state["SourceSwap"] = 0 if state["ProblemType"]["Sparse"] == 1 else 1
+      state["SourceSwap"] = False if state["ProblemType"]["Sparse"] == 1 else True
 
     # if state["EnableMatrixInstruction"] and not state["SourceSwap"] and (state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1):
     #   reject(state, printRejectionReason, "not implement VectorWidth without SourceSwap")
@@ -1679,8 +1679,8 @@ class Solution(collections.abc.Mapping):
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       # initialize CMS related config parameters (for CMS only)
-      state["SwapGlobalReadOrder"] = False
-      state["UsePLRPack"] = False
+      state["SwapGlobalReadOrder"] = 0
+      state["UsePLRPack"] = 0
 
       hasCMS,_ = hasCustomSchedule(state)
       if state["UseCustomMainLoopSchedule"] == 1 and not hasCMS:
@@ -1698,25 +1698,25 @@ class Solution(collections.abc.Mapping):
       # usePLRPack check
       # adjust setting only for non CMS (keep original setting for CMS)
       if backup_UsePLRPack:
-        state["UsePLRPack"] = True
+        state["UsePLRPack"] = 1
         # MatrixInstruction only
         if not state["EnableMatrixInstruction"]:
-          state["UsePLRPack"] = False
+          state["UsePLRPack"] = 0
         # F32X emulation only
         if not state["UseF32XEmulation"]:
-          state["UsePLRPack"] = False
+          state["UsePLRPack"] = 0
         # SIA3 only
         if state["ScheduleIterAlg"] != 3:
-          state["UsePLRPack"] = False
+          state["UsePLRPack"] = 0
         # enable UsePLRPack for SubIter only
         if not state["ForceUnrollSubIter"]:
           state["UsePLRPack"] = 0
         # DirectToLds (both A and B) only
         if state["DirectToLds"] != 1:
-          state["UsePLRPack"] = False
+          state["UsePLRPack"] = 0
         # PGR and PLR should be non 0
         if state["PrefetchGlobalRead"] == 0 or state["PrefetchLocalRead"] == 0:
-          state["UsePLRPack"] = False
+          state["UsePLRPack"] = 0
 
     # disable SwapGlobalReadOrder if grmode(normal/DTL/DTV) is different between A and B
     # GRA and GRB need to be equivalent to swap the order
@@ -1730,10 +1730,10 @@ class Solution(collections.abc.Mapping):
       return grmode
     if state["UseCustomMainLoopSchedule"] == 0:
       if getGrMode("A") != getGrMode("B"):
-        state["SwapGlobalReadOrder"] = False
+        state["SwapGlobalReadOrder"] = 0
       # SwapGlobalReadOrder does not work with UnrollLoopSwapGlobalReadOrder
       if state["UnrollLoopSwapGlobalReadOrder"]:
-        state["SwapGlobalReadOrder"] = False
+        state["SwapGlobalReadOrder"] = 0
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
@@ -1913,7 +1913,14 @@ class Solution(collections.abc.Mapping):
                   ldsPadA = state["VectorWidthA"]
             else:
               if state["DirectToLdsA"]:
-                ldsPadA = max(lrvwA, optPadA) if not state["ProblemType"]["TLUA"] else 0
+                if not state["ProblemType"]["TLUA"]:
+                  bpeA = state["ProblemType"]["DataTypeA"].numBytes()
+                  LdsStride = state["VectorWidthA"] * bpeA * state["DepthU"]
+                  MinLdsBlockSizePerPadA = (state[f"GlobalReadVectorWidthA"] * bpeA) * state["WavefrontSize"]
+                  isM0PadEnough = LdsStride >= MinLdsBlockSizePerPadA
+                  ldsPadA = state["MatrixInstK"] if bpeA == 2 and not isM0PadEnough else 2 * lrvw
+                else:
+                  ldsPadA = 0
               else:
                 ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
           assert(ldsPadA >= 0)
@@ -1939,7 +1946,14 @@ class Solution(collections.abc.Mapping):
                   ldsPadB = state["VectorWidthB"]
             else:
               if state["DirectToLdsB"]:
-                ldsPadB = max(lrvwB, optPadB) if not state["ProblemType"]["TLUB"] else 0
+                if not state["ProblemType"]["TLUB"]:
+                  bpeB = state["ProblemType"]["DataTypeB"].numBytes()
+                  LdsStride = state["VectorWidthB"] * bpeB * state["DepthU"]
+                  MinLdsBlockSizePerPadB = (state[f"GlobalReadVectorWidthB"] * bpeB) * state["WavefrontSize"]
+                  isM0PadEnough = LdsStride >= MinLdsBlockSizePerPadB
+                  ldsPadB = state["MatrixInstK"] if bpeB == 2 and not isM0PadEnough else 2 * lrvw
+                else:
+                  ldsPadB = 0
               else:
                 ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
@@ -2321,6 +2335,10 @@ class Solution(collections.abc.Mapping):
                 curGRVW *= 2
         if state["ProblemType"]["MXBlockA"]:
           state["GlobalReadVectorWidthMXSA"] = max(state["MacroTile0"] * state["_DepthUMXSA"] // state["NumThreads"], 1)
+          # workaround for DTL
+          # use 32bit load for DTL if GlobalReadVectorWidthMXS is 8
+          if state["DirectToLdsMXSA"] and state["GlobalReadVectorWidthMXSA"] == 8:
+            state["GlobalReadVectorWidthMXSA"] = 4
       else:
         # dot2
         if state["UseDotInstruction"]:
@@ -2365,6 +2383,10 @@ class Solution(collections.abc.Mapping):
                 curGRVW *= 2
         if state["ProblemType"]["MXBlockB"]:
           state["GlobalReadVectorWidthMXSB"] = max(state["MacroTile1"] * state["_DepthUMXSB"] // state["NumThreads"], 1)
+          # workaround for DTL
+          # use 32bit load for DTL if GlobalReadVectorWidthMXS is 8
+          if state["DirectToLdsMXSB"] and state["GlobalReadVectorWidthMXSB"] == 8:
+            state["GlobalReadVectorWidthMXSB"] = 4
       else:
         # dot2
         if state["UseDotInstruction"]:
@@ -3345,14 +3367,15 @@ class Solution(collections.abc.Mapping):
     # number of minimum GR inc inst per MFMA
     # default 1
     # Set at least 2 for gfx950 + MI16 + smaller MT case
+    # Set 3 for MX (number of GRInc is doubled)
     if state["MinGRIncPerMfma"] == -1:
       state["MinGRIncPerMfma"] = 1
       if isa == (9, 5, 0):
-        if state["EnableMatrixInstruction"] and state["MatrixInstM"] == 16 and state["MatrixInstK"] == 1:
-          if numMFMA<=32:
-            state["MinGRIncPerMfma"] = 2
-          if numMFMA<=16:
+        if state["EnableMatrixInstruction"] and state["MatrixInstM"] == 16 and state["MatrixInstB"] == 1:
+          if numMFMA<=16 or (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
             state["MinGRIncPerMfma"] = 3
+          elif numMFMA<=32:
+            state["MinGRIncPerMfma"] = 2
 
     # calculate ldsPad
     state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
@@ -3462,13 +3485,10 @@ class Solution(collections.abc.Mapping):
       # TODO:
       # Disable StoreSwapAddr to ensure LdsOffsetA_Blk is always a power of 2
       # This is consistent with referenc implementation which doesn't have StoreSwapAddr
-      if state["ProblemType"]["MXBlockA"]:
-        state["StoreSwapAddr"] = False
-      else:
-        # Original logic:
-        state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
-          (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
-          (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
+      # Original logic:
+      state["StoreSwapAddr"] = (state["PrefetchGlobalRead"] == 2) and \
+        (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
+        (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
 
       if offsetBlk > 0 and not state["StoreSwapAddr"] and numLdsBlk == 2:
         # Rounds offsetBlk to a power of two to enable inlining {s,v}_xor constants for swapping offsets
@@ -3546,9 +3566,9 @@ class Solution(collections.abc.Mapping):
       if ldsNumBytes > 32768 or \
           state["ProblemType"]["ComputeDataType"].numBytes() * state["MacroTile0"] * state["MacroTile1"] > 32768*4:
         state["NumElementsPerBatchStore"] = 0
-        state["StorePriorityOpt"] = 0
+        state["StorePriorityOpt"] = False
         state["StoreSyncOpt"] = 0
-        state["GroupLoadStore"] = 0
+        state["GroupLoadStore"] = False
       else:
         state["NumElementsPerBatchStore"] = 16 if not state["ProblemType"]["MacDataTypeA"].numBytes() == 8 else 1
 
@@ -4136,7 +4156,7 @@ class Solution(collections.abc.Mapping):
       if (rocmVersion.major < 6 or (rocmVersion.major == 6 and rocmVersion.patch < 32650)) or \
           not (isa == (9, 0, 10) or isa[:2] == (9, 4) or isa == (9, 5, 0)):
         #print("Force to Disable PreloadKernArgs since this hipcc version doesn't support",)
-        state["PreloadKernArgs"] = 0
+        state["PreloadKernArgs"] = False
 
     # change negative ExtraLatencyForLR to 0 for non DirectToVgpr
     if state["ExtraLatencyForLR"] < 0 and not (state["DirectToVgprA"] or state["DirectToVgprB"]):

@@ -188,6 +188,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DTHEROCK_ENABLE_RAND=ON \
             -DTHEROCK_ENABLE_ROCPROFSYS=ON \
             -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
+            -DTHEROCK_ENABLE_ROCGDB=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     else \
@@ -212,6 +213,7 @@ RUN if [ "$THEROCK_BUILD_MODE" = "Preset" ]; then \
             -DTHEROCK_ENABLE_RAND=ON \
             -DTHEROCK_ENABLE_ROCPROFSYS=ON \
             -DTHEROCK_ENABLE_ROCPROF_TRACE_DECODER_BINARY=ON \
+            -DTHEROCK_ENABLE_ROCGDB=ON \
             -DTHEROCK_AMDGPU_DIST_BUNDLE_NAME=multiarch \
             -DTHEROCK_AMDGPU_FAMILIES=$THEROCK_ASIC; \
     fi
@@ -254,7 +256,7 @@ ADD miopen/script/redis-cli.conf /redis-cli.conf
 ADD miopen/script/sccache_wrapper.sh /sccache_wrapper.sh
 
 ## Sccache binary built from source for ROCm, only install if MIOPEN_SCCACHE is defined
-ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
+ENV SCCACHE_VERSION="0.14.0"
 ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
 ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
 ARG MIOPEN_SCCACHE=""
@@ -273,7 +275,6 @@ RUN set -x && \
     echo Building for GPU Archs: ${THEROCK_ASIC} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
         mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-        export SCCACHE_VERSION=$(curl -s "https://api.github.com/repos/mozilla/sccache/releases/latest" | grep -Po '"tag_name": "v\K[0-9.]+') && \
         wget -qO sccache.tar.gz https://github.com/mozilla/sccache/releases/latest/download/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz && \
         tar -xzf sccache.tar.gz --strip-components=1 -C ${SCCACHE_INSTALL_LOCATION} && \
         chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache && \

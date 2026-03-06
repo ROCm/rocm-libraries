@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import pathlib
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import dataclass, field, fields
 from typing import Any, List, Optional
 
 import yaml
@@ -499,44 +499,6 @@ class CodeGenResult(CodeGen, RRPerfResult):
     """CodeGen result interface."""
 
     pass
-
-
-@dataclass(unsafe_hash=True)
-class TensileRun(GEMM):
-    """Tensile run interface."""
-
-    config: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
-    tensile_commit: str = "rocm-6.0.0"
-
-    @property
-    def group(self):
-        return "gemm"
-
-    def set_output(self, path: pathlib.Path):
-        self.output = path
-
-    def command(self, **extra_args) -> List[str]:
-        command = str(repo_dir / "scripts" / "benchmark_tensile")
-
-        arg_dict = asdict(self)
-        for key, value in extra_args.items():
-            arg_dict[key] = value
-
-        for non_gemm_arg in ["config", "output", "tensile_commit"]:
-            arg_dict.pop(non_gemm_arg, None)
-
-        args = list([f"{key}={value}" for key, value in arg_dict.items()])
-
-        retval = [
-            command,
-            str(self.config),
-            f"--yaml={str(self.output)}",
-            f"--tensile_commit={self.tensile_commit}",
-            "--kwargs",
-        ] + args
-
-        return retval
 
 
 #
