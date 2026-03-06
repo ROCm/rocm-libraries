@@ -535,7 +535,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, rms_dev, max_dev);
 
-            hipDeviceSynchronize();
+            [[maybe_unused]] auto status = hipDeviceSynchronize();
 
             TVerify max = std::max({*max_dev, std::numeric_limits<TVerify>::min()});
             error       = std::sqrt(*rms_dev) / (std::sqrt(sz) * max);
@@ -564,7 +564,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, mae_dev);
 
-            hipDeviceSynchronize();
+            [[maybe_unused]] auto status = hipDeviceSynchronize();
 
             error = *mae_dev;
         }
@@ -591,7 +591,7 @@ protected:
 
             kernel(uut_dev, ref_dev, sz, res_dev, mismatch_dev);
 
-            hipDeviceSynchronize();
+            [[maybe_unused]] auto status = hipDeviceSynchronize();
 
             error = *mismatch_dev;
         }
