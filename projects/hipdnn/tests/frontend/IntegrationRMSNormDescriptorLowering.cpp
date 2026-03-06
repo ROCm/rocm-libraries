@@ -101,8 +101,8 @@ TEST_F(IntegrationRMSNormDescriptorLowering, RMSNormGraphRoundTrip)
     rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
 
     auto outputs = graph->rmsnorm(x, scale, std::move(rmsnormAttrs));
-    auto y = outputs[0];
-    auto invRms = outputs[1];
+    const auto& y = outputs[0];
+    const auto& invRms = outputs[1];
 
     y->set_uid(K_RMSNORM_TENSOR_Y_UID).set_output(true).set_name("Y");
     ASSERT_NE(invRms, nullptr); // should be created in TRAINING mode
