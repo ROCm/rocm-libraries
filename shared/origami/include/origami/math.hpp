@@ -34,31 +34,33 @@ namespace origami {
 namespace math {
 
 /**
- * @brief Combines a hash value into a seed using the golden ratio method.
+ * @brief Combine a value into an existing hash seed.
  *
- * This is a standard technique for combining hash values, similar to boost::hash_combine.
- * The golden ratio constant helps distribute bits evenly across the hash space.
- *
- * @param seed The running hash seed (modified in place)
- * @param value The hash value to combine
- */
-inline void hash_combine(std::size_t& seed, std::size_t value) {
-  constexpr std::size_t golden_ratio = 0x9e3779b9;
-  seed ^= value + golden_ratio + (seed << 6) + (seed >> 2);
-}
-
-/**
- * @brief Combines a hashable value into a seed.
- *
- * Convenience overload that hashes the value before combining.
+ * Uses the golden ratio method similar to boost::hash_combine.
  *
  * @tparam T Type of value to hash (must be hashable via std::hash)
  * @param seed The running hash seed (modified in place)
- * @param value The value to hash and combine
+ * @param v The value to hash and combine
  */
 template <typename T>
-inline void hash_combine(std::size_t& seed, const T& value) {
-  hash_combine(seed, std::hash<T>{}(value));
+inline void hash_combine(std::size_t& seed, const T& v) {
+  seed ^= std::hash<T>{}(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+/**
+ * @brief Combine multiple values into a single hash.
+ *
+ * Uses C++17 fold expression to efficiently hash all arguments in one call.
+ *
+ * @tparam Types Types of values to hash (must be hashable via std::hash)
+ * @param args Values to hash and combine
+ * @return Combined hash of all arguments
+ */
+template <typename... Types>
+inline std::size_t hash_combine(const Types&... args) {
+  std::size_t seed = 0;
+  (hash_combine(seed, args), ...);
+  return seed;
 }
 
 /**

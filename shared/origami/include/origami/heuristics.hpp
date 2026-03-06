@@ -202,15 +202,10 @@ struct hand_optimized_kernel_key_t {
   }
 
   std::size_t hash() const {
-    std::size_t seed = 0;
-    math::hash_combine(seed, static_cast<int>(arch));
-    math::hash_combine(seed, static_cast<int>(mi_dtype));
-    math::hash_combine(seed, static_cast<int>(a_transpose));
-    math::hash_combine(seed, static_cast<int>(b_transpose));
-    math::hash_combine(seed, mt_m);
-    math::hash_combine(seed, mt_n);
-    math::hash_combine(seed, mt_k);
-    return seed;
+    return math::hash_combine(
+        static_cast<int>(arch), static_cast<int>(mi_dtype),
+        static_cast<int>(a_transpose), static_cast<int>(b_transpose),
+        mt_m, mt_n, mt_k);
   }
 };
 
