@@ -35,6 +35,8 @@ add_executable(
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
     descriptors/TestConvolutionWrwOperationDescriptor.cpp
     descriptors/TestGraphDescriptorConvolutionWrw.cpp
+    descriptors/TestBatchnormInferenceOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBatchnormInference.cpp
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
@@ -54,6 +56,7 @@ add_executable(
     TestPlatformUtils.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
+    TestVersion.cpp
     utilities/TestEngineOrdering.cpp
 )
 
