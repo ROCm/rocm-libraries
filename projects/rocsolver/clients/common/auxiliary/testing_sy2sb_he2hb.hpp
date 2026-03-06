@@ -40,28 +40,6 @@
 #include <stdlib.h>  // rand
 
 //------------------------------------------------------------------------------
-// todo: Including rocblas_utility.hpp seems like it should define these,
-// but `using rocsolver::conj` complains and calling `conj` complains.
-
-namespace foo {
-
-// Conjugate a value. For most types, simply return argument; for
-// rocblas_float_complex and rocblas_double_complex, return std::conj(z)
-template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
-__device__ __host__ inline T conjugate(const T& z)
-{
-    return z;
-}
-
-template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
-__device__ __host__ inline T conjugate(const T& z)
-{
-    return std::conj(z);
-}
-
-}  // namespace foo
-
-//------------------------------------------------------------------------------
 // todo: Can dA and hA have different lda? Or does lda apply only to hA? Weird argument order.
 template <bool CPU,
           bool GPU,
