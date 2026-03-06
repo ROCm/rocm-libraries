@@ -193,6 +193,15 @@ void RMSNormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                             "RMSNormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT:
+        // Optional: report 0 elements when not set (query mode included)
+        if(!_biasDesc)
+        {
+            THROW_IF_NULL(elementCount,
+                          HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                          "RMSNormOperationDescriptor::getAttribute(): elementCount is null");
+            *elementCount = 0;
+            break;
+        }
         getTensorDescriptor(_biasDesc,
                             attributeType,
                             requestedElementCount,
@@ -201,6 +210,15 @@ void RMSNormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                             "RMSNormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT:
+        // Optional: report 0 elements when not set (query mode included)
+        if(!_invRmsDesc)
+        {
+            THROW_IF_NULL(elementCount,
+                          HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                          "RMSNormOperationDescriptor::getAttribute(): elementCount is null");
+            *elementCount = 0;
+            break;
+        }
         getTensorDescriptor(_invRmsDesc,
                             attributeType,
                             requestedElementCount,

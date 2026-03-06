@@ -137,7 +137,7 @@ TEST_F(IntegrationRMSNormDescriptorLowering, RMSNormGraphRoundTrip)
     EXPECT_EQ(graphT.io_data_type, DataTypeSdk::FLOAT);
 
     // -- Verify tensors --
-    // X, Scale, Epsilon, Y, InvRms = 5 tensors
+    // X, Scale, Epsilon, Y, InvRms = 5 tensors (bias intentionally omitted from this test)
     ASSERT_EQ(graphT.tensors.size(), 5u);
 
     std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;

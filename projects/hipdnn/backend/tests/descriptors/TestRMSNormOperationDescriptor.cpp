@@ -306,7 +306,8 @@ TEST_F(TestRMSNormOperationDescriptor, SetForwardPhase)
 TEST_F(TestRMSNormOperationDescriptor, SetForwardPhaseWrongElementCount)
 {
     auto desc = getDescriptor();
-    int64_t forwardPhase = 0;
+    // Value is irrelevant — this test exercises the elementCount != 1 error path.
+    auto forwardPhase = static_cast<int64_t>(NormFwdPhase::TRAINING);
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
@@ -531,6 +532,7 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorYQueryReturnsOne)
 
 TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorBiasQueryReturnsOne)
 {
+    // makeFinalized() sets all optional tensors including bias — query returns 1.
     makeFinalized();
     auto desc = getDescriptor();
 
@@ -543,8 +545,25 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorBiasQueryReturnsOne)
     ASSERT_EQ(elementCount, 1);
 }
 
+TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorBiasQueryReturnsZeroWhenAbsent)
+{
+    // Finalize without bias — query should report 0 elements available.
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT});
+    getDescriptor()->finalize();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 0);
+}
+
 TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorInvRmsQueryReturnsOne)
 {
+    // makeFinalized() sets all optional tensors including inv_rms — query returns 1.
     makeFinalized();
     auto desc = getDescriptor();
 
@@ -555,6 +574,22 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorInvRmsQueryReturnsOne)
                                        &elementCount,
                                        nullptr));
     ASSERT_EQ(elementCount, 1);
+}
+
+TEST_F(TestRMSNormOperationDescriptor, GetAttributeTensorInvRmsQueryReturnsZeroWhenAbsent)
+{
+    // Finalize without inv_rms — query should report 0 elements available.
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT});
+    getDescriptor()->finalize();
+    auto desc = getDescriptor();
+
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
+    ASSERT_EQ(elementCount, 0);
 }
 
 TEST_F(TestRMSNormOperationDescriptor, GetAttributeForwardPhaseQueryReturnsOne)

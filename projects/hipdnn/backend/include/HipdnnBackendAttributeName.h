@@ -602,7 +602,9 @@ typedef enum
     /** @brief Forward phase for rmsnorm (TRAINING or INFERENCE) */
     HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT = 2406,
 
-    /** @brief Compute data type for rmsnorm */
+    /** @brief Compute data type for rmsnorm.
+     *  Note: intentionally omits OPERATION_ prefix to match the BatchNorm
+     *  inference convention (HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT). */
     HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT = 2407,
 
     /** @} */
