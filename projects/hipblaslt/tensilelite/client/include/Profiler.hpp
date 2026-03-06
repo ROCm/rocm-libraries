@@ -8,7 +8,6 @@
 #endif
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 
-#include <boost/program_options.hpp>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/registration.h>
@@ -22,13 +21,13 @@
 #include <future>
 #include <unordered_map>
 
+#include "ProgramOptions.hpp"
 #include "RunListener.hpp"
 
 namespace TensileLite
 {
     namespace Client
     {
-        namespace po = boost::program_options;
         class Profiler : public RunListener
         {
         public:
