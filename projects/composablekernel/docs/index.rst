@@ -25,6 +25,7 @@ The Composable Kernel project is located in https://github.com/ROCm/rocm-librari
 
     * :doc:`Composable Kernel structure <./conceptual/Composable-Kernel-structure>`
     * :doc:`Composable Kernel mathematical basis <./conceptual/Composable-Kernel-math>`
+    * :doc:`CK Tile intrawave and interwave scheduling <../conceptual/CK-Tile-intra-inter-wave>`
     * :doc:`CK Tile conceptual documentation <./conceptual/ck_tile/CK-tile-index>`
 
   .. grid-item-card:: Tutorials
