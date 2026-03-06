@@ -1450,10 +1450,15 @@ namespace TensileLite
                        << "), element size: " << DataTypeInfo::Get(p.first).elementSize
                        << ", element length: " << pUnit.maxElements;
 
+                    auto allocPinned = [](size_t bytes) {
+                        void* raw = nullptr;
+                        HIP_CHECK_EXC(hipHostMalloc(&raw, bytes, 0));
+                        return std::shared_ptr<void>(raw, [](auto p) { hipHostFree(p); });
+                    };
+
                     if(!pUnit.cpuInput.current)
                     {
-                        auto ptr
-                            = std::shared_ptr<void>(std::malloc(size), [](auto p) { free(p); });
+                        auto ptr = allocPinned(size);
                         if(ptr == nullptr)
                         {
                             std::stringstream s;
@@ -1464,8 +1469,7 @@ namespace TensileLite
                     }
                     if(!pUnit.cpuInput.valid)
                     {
-                        auto ptr
-                            = std::shared_ptr<void>(std::malloc(size), [](auto p) { free(p); });
+                        auto ptr = allocPinned(size);
                         if(ptr == nullptr)
                         {
                             std::stringstream s;
@@ -1476,8 +1480,7 @@ namespace TensileLite
                     }
                     if(!pUnit.cpuInput.bad && m_curBoundsCheck == BoundsCheckMode::NaN)
                     {
-                        auto ptr
-                            = std::shared_ptr<void>(std::malloc(size), [](auto p) { free(p); });
+                        auto ptr = allocPinned(size);
                         if(ptr == nullptr)
                         {
                             std::stringstream s;
@@ -2527,93 +2530,99 @@ namespace TensileLite
                                              hipMemcpyKind                     kind)
         {
             bool useAsync = (kind == hipMemcpyDeviceToDevice) && m_copyStream;
-            for(size_t i = 0; i < m_vdata.size(); i++)
             {
-                void* ptr  = nullptr;
-                auto& desc = problem.tensors()[i];
-                if(!desc.isOutput()) // Need init first
-                    continue;
-                auto it = m_vdata[i].pristine.find(desc.dataType());
-                if(it != m_vdata[i].pristine.end())
+                ScopedTimer t("gpu_input_reset.reset_output.copy_loop");
+                for(size_t i = 0; i < m_vdata.size(); i++)
                 {
-                    auto& p = it->second;
-                    // For output tensors with NaN bounds checking, initialize buffer with NaN sentinels
-                    if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                    void* ptr  = nullptr;
+                    auto& desc = problem.tensors()[i];
+                    if(!desc.isOutput()) // Need init first
+                        continue;
+                    auto it = m_vdata[i].pristine.find(desc.dataType());
+                    if(it != m_vdata[i].pristine.end())
                     {
-                        if(kind == hipMemcpyHostToHost)
-                            ptr = copyBadInputBuffers(desc,
-                                                      p.cpuInput.current.get(),
-                                                      p.cpuInput.valid.get(),
-                                                      p.cpuInput.bad.get(),
-                                                      p.maxElements,
-                                                      kind);
-                        else if(kind == hipMemcpyHostToDevice)
-                            ptr = copyBadInputBuffers(desc,
-                                                      p.gpuInput.current.get(),
-                                                      p.cpuInput.valid.get(),
-                                                      p.cpuInput.bad.get(),
-                                                      p.maxElements,
-                                                      kind);
-                        else if(kind == hipMemcpyDeviceToDevice)
-                            ptr = copyBadInputBuffers(desc,
-                                                      p.gpuInput.current.get(),
-                                                      p.gpuInput.valid.get(),
-                                                      p.gpuInput.bad.get(),
-                                                      p.maxElements,
-                                                      kind);
+                        auto& p = it->second;
+                        // For output tensors with NaN bounds checking, initialize buffer with NaN sentinels
+                        if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                        {
+                            if(kind == hipMemcpyHostToHost)
+                                ptr = copyBadInputBuffers(desc,
+                                                          p.cpuInput.current.get(),
+                                                          p.cpuInput.valid.get(),
+                                                          p.cpuInput.bad.get(),
+                                                          p.maxElements,
+                                                          kind);
+                            else if(kind == hipMemcpyHostToDevice)
+                                ptr = copyBadInputBuffers(desc,
+                                                          p.gpuInput.current.get(),
+                                                          p.cpuInput.valid.get(),
+                                                          p.cpuInput.bad.get(),
+                                                          p.maxElements,
+                                                          kind);
+                            else if(kind == hipMemcpyDeviceToDevice)
+                                ptr = copyBadInputBuffers(desc,
+                                                          p.gpuInput.current.get(),
+                                                          p.gpuInput.valid.get(),
+                                                          p.gpuInput.bad.get(),
+                                                          p.maxElements,
+                                                          kind);
+                        }
+                        else
+                        {
+                            if(kind == hipMemcpyHostToHost)
+                                ptr = copyInputBuffers(desc,
+                                                       p.cpuInput.current.get(),
+                                                       p.cpuInput.valid.get(),
+                                                       p.maxElements,
+                                                       kind);
+                            else if(kind == hipMemcpyHostToDevice)
+                                ptr = copyInputBuffers(desc,
+                                                       p.gpuInput.current.get(),
+                                                       p.cpuInput.valid.get(),
+                                                       p.maxElements,
+                                                       kind);
+                            else if(kind == hipMemcpyDeviceToDevice)
+                            {
+                                if(useAsync)
+                                {
+                                    HIP_CHECK_EXC(hipMemcpyAsync(p.gpuInput.current.get(),
+                                                                 p.gpuInput.valid.get(),
+                                                                 desc.elementBytes() * p.maxElements,
+                                                                 kind,
+                                                                 m_copyStream));
+                                    ptr = p.gpuInput.current.get();
+                                }
+                                else
+                                    ptr = copyInputBuffers(desc,
+                                                           p.gpuInput.current.get(),
+                                                           p.gpuInput.valid.get(),
+                                                           p.maxElements,
+                                                           kind);
+                            }
+                        }
+                        if(ptr == nullptr)
+                        {
+                            throw std::runtime_error("output ptr is null when copy input");
+                        }
+                        ptrs[i]        = ptr;
+                        batchPtrs[i]   = p.getInputByKind(kind).batch.get();
+                        maxElements[i] = p.maxElements;
+                        offsets[i]     = p.groupedGemmOffsets;
                     }
                     else
                     {
-                        if(kind == hipMemcpyHostToHost)
-                            ptr = copyInputBuffers(desc,
-                                                   p.cpuInput.current.get(),
-                                                   p.cpuInput.valid.get(),
-                                                   p.maxElements,
-                                                   kind);
-                        else if(kind == hipMemcpyHostToDevice)
-                            ptr = copyInputBuffers(desc,
-                                                   p.gpuInput.current.get(),
-                                                   p.cpuInput.valid.get(),
-                                                   p.maxElements,
-                                                   kind);
-                        else if(kind == hipMemcpyDeviceToDevice)
-                        {
-                            if(useAsync)
-                            {
-                                HIP_CHECK_EXC(hipMemcpyAsync(p.gpuInput.current.get(),
-                                                             p.gpuInput.valid.get(),
-                                                             desc.elementBytes() * p.maxElements,
-                                                             kind,
-                                                             m_copyStream));
-                                ptr = p.gpuInput.current.get();
-                            }
-                            else
-                                ptr = copyInputBuffers(desc,
-                                                       p.gpuInput.current.get(),
-                                                       p.gpuInput.valid.get(),
-                                                       p.maxElements,
-                                                       kind);
-                        }
+                        ptrs[i]        = nullptr;
+                        batchPtrs[i]   = nullptr;
+                        maxElements[i] = 0;
+                        offsets[i].clear();
                     }
-                    if(ptr == nullptr)
-                    {
-                        throw std::runtime_error("output ptr is null when copy input");
-                    }
-                    ptrs[i]        = ptr;
-                    batchPtrs[i]   = p.getInputByKind(kind).batch.get();
-                    maxElements[i] = p.maxElements;
-                    offsets[i]     = p.groupedGemmOffsets;
-                }
-                else
-                {
-                    ptrs[i]        = nullptr;
-                    batchPtrs[i]   = nullptr;
-                    maxElements[i] = 0;
-                    offsets[i].clear();
                 }
             }
             if(useAsync)
+            {
+                ScopedTimer t("gpu_input_reset.reset_output.sync");
                 HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
+            }
         }
 
         void DataInitialization::copyValidToGPUBuffer(ContractionProblemGemm const& problem)
@@ -2629,7 +2638,6 @@ namespace TensileLite
                 //Copy swizzle tensor would be in copySwizzledToGPUBuffer
                 if(needSwizzle || needMXSwizzle)
                     continue;
-                void* ptr  = nullptr;
                 auto& desc = problem.tensors()[i];
                 auto  it   = m_vdata[i].pristine.find(desc.dataType());
                 if(it == m_vdata[i].pristine.end())
@@ -2637,14 +2645,24 @@ namespace TensileLite
                 auto& p = m_vdata[i].pristine[desc.dataType()];
                 if(p.gpuInput.valid.get() == nullptr || p.cpuInput.valid.get() == nullptr)
                     continue;
-                ptr = copyInputBuffers(desc,
-                                       p.gpuInput.valid.get(),
-                                       p.cpuInput.valid.get(),
-                                       p.maxElements,
-                                       hipMemcpyHostToDevice);
-                if(ptr == nullptr)
-                    std::__throw_runtime_error("error");
+                if(m_copyStream)
+                {
+                    HIP_CHECK_EXC(hipMemcpyAsync(p.gpuInput.valid.get(),
+                                                 p.cpuInput.valid.get(),
+                                                 desc.elementBytes() * p.maxElements,
+                                                 hipMemcpyHostToDevice,
+                                                 m_copyStream));
+                }
+                else
+                {
+                    HIP_CHECK_EXC(hipMemcpy(p.gpuInput.valid.get(),
+                                            p.cpuInput.valid.get(),
+                                            desc.elementBytes() * p.maxElements,
+                                            hipMemcpyHostToDevice));
+                }
             }
+            if(m_copyStream)
+                HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
         }
 
         void DataInitialization::copySwizzledToGPUBuffer(ContractionProblemGemm const& problem)
