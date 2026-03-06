@@ -36,10 +36,11 @@ def get_gpu_arch(c):
         "build": "Build the tensilelite-client executable.",
         "build_dir": "Path to client build dir.",
         "build_type": "CMake build type (e.g. Release, Debug).",
-        "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101)."
+        "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101).",
+        "enable_rocprof": "Build tensilelite-client with rocprof.",
     }
 )
-def build_client(c, clean=False, configure=True, build=True, build_dir="build_tmp", build_type="Release", gpu_targets=None):
+def build_client(c, clean=False, configure=True, build=True, build_dir="build_tmp", build_type="Release", gpu_targets=None, enable_rocprof=False):
 
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
@@ -61,7 +62,8 @@ def build_client(c, clean=False, configure=True, build=True, build_dir="build_tm
             "-S", "../",
             "-B", build_dir,
             f"-DCMAKE_BUILD_TYPE={build_type}",
-            f"-DGPU_TARGETS={gpu_targets}"
+            f"-DGPU_TARGETS={gpu_targets}",
+            f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={enable_rocprof}",
         ]
 
         c.run(" ".join(cmake_cmd))
