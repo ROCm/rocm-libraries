@@ -34,6 +34,13 @@
  * - 1000-1099: Engine attributes
  * - 1100-1199: Kernel cache attributes
  * - 1200-1299: Device properties attributes
+ * - 1300-1399: Tensor attributes
+ * - 1400-1499: Convolution forward operation attributes
+ * - 1500-1599: Shared convolution descriptor attributes
+ * - 1600-1699: Convolution backward filter operation attributes
+ * - 1700-1799: Convolution backward data operation attributes
+ * - 1800-1899: Batchnorm inference operation attributes
+ * - 2100-2199: Matmul operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -401,22 +408,51 @@ typedef enum
     /** @} */
 
     /**
-     * @name Matmul Operation Attributes (1800-1899)
-     * Attributes for HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR
+     * @name Batchnorm Inference Operation Attributes (1800-1899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_EXT_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT = 1800,
+
+    /** @brief Mean tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT = 1801,
+
+    /** @brief Inverse variance tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT = 1802,
+
+    /** @brief Scale tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT = 1803,
+
+    /** @brief Bias tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT = 1804,
+
+    /** @brief Output tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT = 1805,
+
+    /** @brief Compute data type for batchnorm inference */
+    HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT = 1806,
+
+    /** @} */
+
+    /**
+     * @name Matmul Operation Attributes (2100-2199)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT
      * @{
      */
 
     /** @brief Left input matrix tensor (A) for matmul */
-    HIPDNN_ATTR_OPERATION_MATMUL_A = 1800,
+    HIPDNN_ATTR_OPERATION_MATMUL_A_EXT = 2100,
 
     /** @brief Right input matrix tensor (B) for matmul */
-    HIPDNN_ATTR_OPERATION_MATMUL_B = 1801,
+    HIPDNN_ATTR_OPERATION_MATMUL_B_EXT = 2101,
 
     /** @brief Output matrix tensor (C) for matmul */
-    HIPDNN_ATTR_OPERATION_MATMUL_C = 1802,
+    HIPDNN_ATTR_OPERATION_MATMUL_C_EXT = 2102,
 
     /** @brief Compute data type for matmul */
-    HIPDNN_ATTR_MATMUL_COMP_TYPE = 1803,
+    HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT = 2103,
 
     /** @} */
 

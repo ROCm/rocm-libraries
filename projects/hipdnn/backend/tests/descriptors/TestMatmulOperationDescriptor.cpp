@@ -52,14 +52,14 @@ public:
                 desc->setAttribute(attr, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &tensor);
             }
         };
-        setIf(HIPDNN_ATTR_OPERATION_MATMUL_A, _aDesc);
-        setIf(HIPDNN_ATTR_OPERATION_MATMUL_B, _bDesc);
-        setIf(HIPDNN_ATTR_OPERATION_MATMUL_C, _cDesc);
-        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_MATMUL_COMP_TYPE) == skip.end())
+        setIf(HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, _aDesc);
+        setIf(HIPDNN_ATTR_OPERATION_MATMUL_B_EXT, _bDesc);
+        setIf(HIPDNN_ATTR_OPERATION_MATMUL_C_EXT, _cDesc);
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT) == skip.end())
         {
             auto computeType = HIPDNN_DATA_FLOAT;
             desc->setAttribute(
-                HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+                HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
         }
     }
 
@@ -110,7 +110,7 @@ TEST_F(TestMatmulOperationDescriptor, CreateDescriptor)
     auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT);
 }
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeWithRequiredAttributes)
@@ -122,25 +122,25 @@ TEST_F(TestMatmulOperationDescriptor, FinalizeWithRequiredAttributes)
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeFailsWithoutATensor)
 {
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_A});
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_A_EXT});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeFailsWithoutBTensor)
 {
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_B});
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_B_EXT});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeFailsWithoutCTensor)
 {
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_C});
+    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_MATMUL_C_EXT});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestMatmulOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
-    setAllAttributesExcept({HIPDNN_ATTR_MATMUL_COMP_TYPE});
+    setAllAttributesExcept({HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -152,7 +152,7 @@ TEST_F(TestMatmulOperationDescriptor, SetTensorDescriptorA)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc));
+        HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc));
 
     ASSERT_EQ(desc->getData().a_tensor_uid, K_TENSOR_A_UID);
     ASSERT_NE(desc->getADesc(), nullptr);
@@ -162,7 +162,7 @@ TEST_F(TestMatmulOperationDescriptor, SetTensorDescriptorB)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_bDesc));
+        HIPDNN_ATTR_OPERATION_MATMUL_B_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_bDesc));
 
     ASSERT_EQ(desc->getData().b_tensor_uid, K_TENSOR_B_UID);
     ASSERT_NE(desc->getBDesc(), nullptr);
@@ -172,7 +172,7 @@ TEST_F(TestMatmulOperationDescriptor, SetTensorDescriptorC)
 {
     auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_cDesc));
+        HIPDNN_ATTR_OPERATION_MATMUL_C_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_cDesc));
 
     ASSERT_EQ(desc->getData().c_tensor_uid, K_TENSOR_C_UID);
     ASSERT_NE(desc->getCDesc(), nullptr);
@@ -183,7 +183,7 @@ TEST_F(TestMatmulOperationDescriptor, SetTensorFailsNotFinalized)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_unfinalizedTensor),
+            HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_unfinalizedTensor),
         HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
 }
 
@@ -191,7 +191,7 @@ TEST_F(TestMatmulOperationDescriptor, SetTensorFailsWrongType)
 {
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_INT64, 1, &_aDesc),
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_INT64, 1, &_aDesc),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -200,7 +200,7 @@ TEST_F(TestMatmulOperationDescriptor, SetTensorFailsWrongElementCount)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_aDesc),
+            HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &_aDesc),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -209,7 +209,7 @@ TEST_F(TestMatmulOperationDescriptor, SetTensorFailsNullPointer)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
+            HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -223,7 +223,7 @@ TEST_F(TestMatmulOperationDescriptor, SetComputeDataType)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(
-        desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -234,7 +234,7 @@ TEST_F(TestMatmulOperationDescriptor, SetComputeDataTypeWrongElementCount)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+        desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -249,7 +249,7 @@ TEST_F(TestMatmulOperationDescriptor, SetAttributeFailsAfterFinalize)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc),
+            HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_aDesc),
         HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
@@ -274,7 +274,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorDescriptor)
 
     HipdnnBackendDescriptor* retrievedA = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_MATMUL_A_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
@@ -293,13 +293,13 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeComputeType)
     auto desc = getDescriptor();
     setAllAttributesExcept();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
+        HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
 
     ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
     ASSERT_EQ(elementCount, 1);
@@ -317,7 +317,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeFailsBeforeFinalize)
     HipdnnBackendDescriptor* dummy = nullptr;
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr, &dummy),
+            HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr, &dummy),
         HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
@@ -328,7 +328,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeFailsNullPointer)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr, nullptr),
+            HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -354,7 +354,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorAQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -365,7 +365,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorBQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_B, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_OPERATION_MATMUL_B_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -376,7 +376,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorCQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_MATMUL_C, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_OPERATION_MATMUL_C_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -387,7 +387,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -398,7 +398,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorQueryFailsNullElementCou
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
-            HIPDNN_ATTR_OPERATION_MATMUL_A, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, nullptr, nullptr),
+            HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, nullptr, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -459,7 +459,7 @@ TEST_F(TestMatmulOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -480,7 +480,7 @@ TEST_F(TestMatmulOperationDescriptor, BuildNodeWithHalfComputeType)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();

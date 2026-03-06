@@ -42,7 +42,7 @@ void MatmulOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attrib
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_MATMUL_A:
+    case HIPDNN_ATTR_OPERATION_MATMUL_A_EXT:
         setTensorDescriptor(_aDesc,
                             _data.a_tensor_uid,
                             attributeType,
@@ -50,7 +50,7 @@ void MatmulOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attrib
                             arrayOfElements,
                             "MatmulOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_MATMUL_B:
+    case HIPDNN_ATTR_OPERATION_MATMUL_B_EXT:
         setTensorDescriptor(_bDesc,
                             _data.b_tensor_uid,
                             attributeType,
@@ -58,7 +58,7 @@ void MatmulOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attrib
                             arrayOfElements,
                             "MatmulOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_MATMUL_C:
+    case HIPDNN_ATTR_OPERATION_MATMUL_C_EXT:
         setTensorDescriptor(_cDesc,
                             _data.c_tensor_uid,
                             attributeType,
@@ -66,7 +66,7 @@ void MatmulOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attrib
                             arrayOfElements,
                             "MatmulOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_MATMUL_COMP_TYPE:
+    case HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -96,7 +96,7 @@ void MatmulOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attrib
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_MATMUL_A:
+    case HIPDNN_ATTR_OPERATION_MATMUL_A_EXT:
         getTensorDescriptor(_aDesc,
                             attributeType,
                             requestedElementCount,
@@ -104,7 +104,7 @@ void MatmulOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attrib
                             arrayOfElements,
                             "MatmulOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_MATMUL_B:
+    case HIPDNN_ATTR_OPERATION_MATMUL_B_EXT:
         getTensorDescriptor(_bDesc,
                             attributeType,
                             requestedElementCount,
@@ -112,7 +112,7 @@ void MatmulOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attrib
                             arrayOfElements,
                             "MatmulOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_MATMUL_C:
+    case HIPDNN_ATTR_OPERATION_MATMUL_C_EXT:
         getTensorDescriptor(_cDesc,
                             attributeType,
                             requestedElementCount,
@@ -120,7 +120,7 @@ void MatmulOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attrib
                             arrayOfElements,
                             "MatmulOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_MATMUL_COMP_TYPE:
+    case HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,
@@ -155,7 +155,7 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> MatmulOperationDescriptor:
 
 hipdnnBackendDescriptorType_t MatmulOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR;
+    return HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT;
 }
 
 std::string MatmulOperationDescriptor::toString() const
