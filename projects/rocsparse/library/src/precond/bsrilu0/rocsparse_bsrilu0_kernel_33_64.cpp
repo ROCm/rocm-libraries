@@ -387,7 +387,7 @@ namespace rocsparse
             bsr_dim,
             done_array + batch_index * done_array_stride,
             map,
-            zero_pivot + batch_index * done_array_stride,
+            zero_pivot + batch_index * zero_pivot_stride,
             idx_base,
             enable_boost,
             boost_tol,

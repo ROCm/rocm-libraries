@@ -450,24 +450,24 @@ Tests:
   formatA: [rocsparse_format_bsr]
   indextype: *i64
 
-# TEMP
-#- name: spilu0_file
-#  category: pre_checkin
-#  function: spilu0
-#  precision: *single_double_precisions_complex
-#  M: 1
-#  N: 1
-#  block_dim: [7]
-#  transA: [rocsparse_operation_none]
-#  apol: [rocsparse_analysis_policy_force]
-#  spol: [rocsparse_solve_policy_auto]
-#  baseA: [rocsparse_index_base_zero]
-#  direction: [rocsparse_direction_column]
-#  matrix: [rocsparse_matrix_file_rocalution]
-#  filename: [Chevron2]
-#  formatA: [rocsparse_format_bsr]
-#  indextype: *i32
-#  batch_count: [2,3]
+
+- name: spilu0_file
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [7]
+  transA: [rocsparse_operation_none]
+  apol: [rocsparse_analysis_policy_force]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+  batch_count: [2,3]
 
 
 - name: spilu0_file
