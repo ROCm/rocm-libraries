@@ -122,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           EXTRA_OPTS="-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
-          PROJECT_KEY="$(echo "${{inputs.project_to_test  }}" | tr '[:lower:]' '[:upper:]')"
+          PROJECT_KEY="$(echo "${{inputs.projects_to_test  }}" | tr '[:lower:]' '[:upper:]')"
           if [[ "${{ inputs.test_type }}" == "coverage" ]]; then
             EXTRA_OPTS="${EXTRA_OPTS} -D${PROJECT_KEY_UPPER}_ENABLE_COVERAGE=ON"
             echo "Coverage enabled for ${PROJECT_KEY_UPPER}: ${EXTRA_OPTS}"
@@ -227,8 +227,9 @@ jobs:
     - name: Run project coverage
       shell: bash
       run: |
-        BUILD_DIR="/build/TheRock/rocm-libraries/${{ inputs.project_to_test }}/build"
+        BUILD_DIR="/build/TheRock/rocm-libraries/${{ inputs.projects_to_test }}/build"
         cmake --build "${BUILD_DIR}" --target coverage || make -C "${BUILD_DIR}" coverage
+
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
