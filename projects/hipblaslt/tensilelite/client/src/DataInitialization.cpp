@@ -967,6 +967,7 @@ namespace TensileLite
                     = (std::string(prop.gcnArchName).find("gfx950") != std::string::npos);
             }
 
+            HIP_CHECK_EXC(hipStreamCreate(&m_copyStream));
             m_rotatingBuffer
                 = args["rotating-buffer-size"].as<int32_t>() * 1024 * 1024; // Change to bytes
             m_rotatingMode   = args["rotating-buffer-mode"].as<int32_t>();
@@ -2525,6 +2526,7 @@ namespace TensileLite
                                              ContractionProblemGemm const&     problem,
                                              hipMemcpyKind                     kind)
         {
+            bool useAsync = (kind == hipMemcpyDeviceToDevice) && m_copyStream;
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
                 void* ptr  = nullptr;
@@ -2575,11 +2577,23 @@ namespace TensileLite
                                                    p.maxElements,
                                                    kind);
                         else if(kind == hipMemcpyDeviceToDevice)
-                            ptr = copyInputBuffers(desc,
-                                                   p.gpuInput.current.get(),
-                                                   p.gpuInput.valid.get(),
-                                                   p.maxElements,
-                                                   kind);
+                        {
+                            if(useAsync)
+                            {
+                                HIP_CHECK_EXC(hipMemcpyAsync(p.gpuInput.current.get(),
+                                                             p.gpuInput.valid.get(),
+                                                             desc.elementBytes() * p.maxElements,
+                                                             kind,
+                                                             m_copyStream));
+                                ptr = p.gpuInput.current.get();
+                            }
+                            else
+                                ptr = copyInputBuffers(desc,
+                                                       p.gpuInput.current.get(),
+                                                       p.gpuInput.valid.get(),
+                                                       p.maxElements,
+                                                       kind);
+                        }
                     }
                     if(ptr == nullptr)
                     {
@@ -2598,6 +2612,8 @@ namespace TensileLite
                     offsets[i].clear();
                 }
             }
+            if(useAsync)
+                HIP_CHECK_EXC(hipStreamSynchronize(m_copyStream));
         }
 
         void DataInitialization::copyValidToGPUBuffer(ContractionProblemGemm const& problem)
@@ -3337,6 +3353,10 @@ namespace TensileLite
             return inputArr;
         }
 
-        DataInitialization::~DataInitialization() {}
+        DataInitialization::~DataInitialization()
+        {
+            if(m_copyStream)
+                hipStreamDestroy(m_copyStream);
+        }
     } // namespace Client
 } // namespace TensileLite
