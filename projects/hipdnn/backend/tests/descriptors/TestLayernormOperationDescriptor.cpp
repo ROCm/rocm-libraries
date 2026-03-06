@@ -15,6 +15,7 @@
 #include <hipdnn_data_sdk/data_objects/layernorm_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/LayernormConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <algorithm>
 #include <memory>
@@ -25,6 +26,7 @@ using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 
 namespace
 {
@@ -131,25 +133,27 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<LayernormOperationDescriptor>();
-        _xDesc = createFinalizedTensor(
-            K_LAYERNORM_TENSOR_X_UID, K_LAYERNORM_TENSOR_X_DIMS, K_LAYERNORM_TENSOR_X_STRIDES);
+        _xDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_X_UID,
+                                       toVec(K_LAYERNORM_TENSOR_X_DIMS),
+                                       toVec(K_LAYERNORM_TENSOR_X_STRIDES));
         _scaleDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_SCALE_UID,
-                                           K_LAYERNORM_TENSOR_SCALE_DIMS,
-                                           K_LAYERNORM_TENSOR_SCALE_STRIDES);
+                                           toVec(K_LAYERNORM_TENSOR_SCALE_DIMS),
+                                           toVec(K_LAYERNORM_TENSOR_SCALE_STRIDES));
         _biasDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_BIAS_UID,
-                                          K_LAYERNORM_TENSOR_BIAS_DIMS,
-                                          K_LAYERNORM_TENSOR_BIAS_STRIDES);
+                                          toVec(K_LAYERNORM_TENSOR_BIAS_DIMS),
+                                          toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
         _epsilonDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_EPSILON_UID,
-                                             K_LAYERNORM_TENSOR_EPSILON_DIMS,
-                                             K_LAYERNORM_TENSOR_EPSILON_STRIDES);
-        _yDesc = createFinalizedTensor(
-            K_LAYERNORM_TENSOR_Y_UID, K_LAYERNORM_TENSOR_Y_DIMS, K_LAYERNORM_TENSOR_Y_STRIDES);
+                                             toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS),
+                                             toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
+        _yDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_Y_UID,
+                                       toVec(K_LAYERNORM_TENSOR_Y_DIMS),
+                                       toVec(K_LAYERNORM_TENSOR_Y_STRIDES));
         _meanDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_MEAN_UID,
-                                          K_LAYERNORM_TENSOR_MEAN_DIMS,
-                                          K_LAYERNORM_TENSOR_MEAN_STRIDES);
+                                          toVec(K_LAYERNORM_TENSOR_MEAN_DIMS),
+                                          toVec(K_LAYERNORM_TENSOR_MEAN_STRIDES));
         _invVarianceDesc = createFinalizedTensor(K_LAYERNORM_TENSOR_INV_VARIANCE_UID,
-                                                 K_LAYERNORM_TENSOR_INV_VARIANCE_DIMS,
-                                                 K_LAYERNORM_TENSOR_INV_VARIANCE_STRIDES);
+                                                 toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_DIMS),
+                                                 toVec(K_LAYERNORM_TENSOR_INV_VARIANCE_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
