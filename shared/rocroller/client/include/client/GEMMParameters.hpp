@@ -35,6 +35,11 @@ namespace rocRoller
                 Count
             };
 
+            struct XYTuple
+            {
+                int x, y;
+            };
+
             struct MNKTuple
             {
                 int m, n, k;
@@ -84,6 +89,8 @@ namespace rocRoller
                 // Order: M/N, K tile, K subtile
                 std::vector<size_t> scaleShuffleTileA;
                 std::vector<size_t> scaleShuffleTileB;
+
+                std::vector<size_t> pretileB;
 
                 std::string kernelNamePart() const;
             };
@@ -189,6 +196,7 @@ namespace rocRoller
                 rocRoller::Client::BenchmarkResults benchmarkResults;
             };
 
+            std::ostream& operator<<(std::ostream& s, XYTuple const& x);
             std::ostream& operator<<(std::ostream& s, MNKTuple const& x);
             std::ostream& operator<<(std::ostream& s, MNKBTuple const& x);
             std::ostream& operator<<(std::ostream& s, MKNLTuple const& x);
@@ -206,9 +214,14 @@ namespace rocRoller::Client::GEMMClient::CLI
     constexpr bool PARSE_FAILURE = false;
 
     /**
-     * @brief Parse an XxY pair.
+     * @brief Parse an X,Y pair (negative OK).
      */
     bool ParseIntPair(const std::string& arg, std::pair<int, int>& x);
+
+    /**
+     * @brief Parse an XxY pair.
+     */
+    bool ParseXY(const std::string& arg, XYTuple& x);
 
     /**
      * @brief Parse an MxNxK or MxNxKxB tuple from a string.
