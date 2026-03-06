@@ -15,6 +15,15 @@
 #include <variant>
 
 #define CK_TILE_FMHA_HANDLE_XOR_LENGTH_FOLD 0
+
+#if !defined(CK_TILE_FMHA_FORCE_HEAD_MAJOR)
+#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx11__) || defined(__gfx12__))
+#define CK_TILE_FMHA_FORCE_HEAD_MAJOR 1
+#else
+#define CK_TILE_FMHA_FORCE_HEAD_MAJOR 0
+#endif
+#endif
+
 // S[seqlen_q, seqlen_k] = Q[seqlen_q, hdim_q] @ K[seqlen_k, hdim_q]
 // S'[seqlen_q, seqlen_k] = S[seqlen_q, seqlen_k] * Scale[1]
 // S''[seqlen_q, seqlen_k] = S'[seqlen_q, seqlen_k] + Bias[seqlen_q, seqlen_k]
@@ -1172,14 +1181,6 @@ struct FmhaFwdKernel
 
         if constexpr(kIsGroupMode)
             has_padded_seqlen_k = (kargs.seqlen_k_ptr != nullptr);
-
-#if !defined(CK_TILE_FMHA_FORCE_HEAD_MAJOR)
-#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx11__) || defined(__gfx12__))
-#define CK_TILE_FMHA_FORCE_HEAD_MAJOR 1
-#else
-#define CK_TILE_FMHA_FORCE_HEAD_MAJOR 0
-#endif
-#endif
 
         // bhsd should satisfy stride_q == hdim_q and nhead_stride_q > hdim_q.
         // The extra nhead_stride_q guard prevents bshd false-positive when nhead == 1.
