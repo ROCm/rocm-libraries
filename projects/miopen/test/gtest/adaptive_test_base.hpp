@@ -165,6 +165,30 @@ struct ChecksResult
  */
 constexpr int number_of_runs_after_failure = 5;
 
+template <typename T,
+          typename TVerify,
+          UnitUnderTest UUT,
+          TestReference REF,
+          AfterTestFailure ATF,
+          VerifyOption VER>
+class AdaptiveTest;
+
+template <typename T,
+          typename TVerify,
+          UnitUnderTest UUT,
+          TestReference REF,
+          AfterTestFailure ATF,
+          VerifyOption VER>
+static void SetUpSharedVerifyData();
+
+template <typename T,
+          typename TVerify,
+          UnitUnderTest UUT,
+          TestReference REF,
+          AfterTestFailure ATF,
+          VerifyOption VER>
+static void TearDownSharedVerifyData();
+
 /**
  * Base class for gtests, it provides interface to have different runs based on template parameters
  * that will determine the configuration.
@@ -343,20 +367,38 @@ private:
         }
     };
 
-    bool test_passed = true;
-    std::unordered_map<std::string, TVerify> failure_errors;
-    ErrorAnalysisInfo info;
+    bool test_passed;
+    std::unordered_map<std::string, TVerify> failure_errors{};
+    ErrorAnalysisInfo info{};
 
-    const int verify_block_size = 1024;
+    constexpr static int verify_block_size = 1024;
 
-public:
     inline static ChecksResult* res_dev = nullptr;
     inline static TVerify* rms_dev      = nullptr;
     inline static TVerify* max_dev      = nullptr;
     inline static TVerify* mae_dev      = nullptr;
     inline static TVerify* mismatch_dev = nullptr;
 
+public:
+    template <typename T_f,
+              typename TVerify_f,
+              UnitUnderTest UUT_f,
+              TestReference REF_f,
+              AfterTestFailure ATF_f,
+              VerifyOption VER_f>
+    friend void SetUpSharedVerifyData();
+
+    template <typename T_f,
+              typename TVerify_f,
+              UnitUnderTest UUT_f,
+              TestReference REF_f,
+              AfterTestFailure ATF_f,
+              VerifyOption VER_f>
+    friend void TearDownSharedVerifyData();
+
 protected:
+    AdaptiveTest() : test_passed(true) {}
+
     TestReference current_REF = REF;
     /**
      * Invoking corresponding implementation. These should be able to be called several times
