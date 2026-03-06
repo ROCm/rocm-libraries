@@ -136,8 +136,9 @@ __device__ void sb2st_larfg(
             {
                 s_scale = one / (alpha_r - norm);
                 tau = (norm - alpha_r) / norm;
-                alpha_r = norm;
             }
+
+            x[0] = norm;
         }
         __threadfence_block();  // for s_scale; was missing
 
@@ -319,7 +320,8 @@ __device__ void sb2st_hb2st_task(
     T* s_work)
 {
     const rocblas_int tid = xid + yid * DIMX;
-    const rocblas_int idiag = kd - 1;
+
+    rocblas_int idiag = kd - 1;
 
     // row, col index for current Householder vector vc within V.
     rocblas_int vi, vj;
@@ -333,39 +335,42 @@ __device__ void sb2st_hb2st_task(
     // `jp` is left col of previous diagonal tile and current off-diagonal tile.
     // `jc` is left col of current  diagonal tile.
     // `jn` is left col of next     diagonal tile; end of update.
+    //         (I.e., `jn` is right + 1 col of current diagonal tile.)
     rocblas_int jc = sweep + 1 + task*kd;
     rocblas_int jn = std::min( jc + kd, n );
     rocblas_int nc = jn -jc;
-    if (jc >= n)
-        return;
+    assert( nc > 0 );
 
     if (task == 0)
     {
-        // first task of the sweep
+        // First task of the sweep brings column sweep to tridiagonal,
+        // and applies reflector to diagonal block.
         if (yid == 0)
         {
-            // copy column s to shared memory, A[j+1:j+1+nc, s]
+            // Copy column sweep to shared memory, A[j+1:j+1+nc, s].
             for (rocblas_int i = xid; i < nc; i += DIMX)
                 s_housev[i] = Aband[(idiag + 1 + i) + sweep*ldab];
 
-            // generate Householder reflector
+            // Generate Householder reflector.
             sb2st_larfg( xid, nc, s_housev, s_tau, (S*) s_work );
 
-            // Copy Householder vector and tau to V, and subdiagonal element to E.
+            // Copy Householder vector and tau to V,
+            // and copy subdiagonal element to E.
             if (xid == 0)
             {
                 // Bottom row of V stores tau.
+                // todo: if desired, save s_housev[0] back to Aband as well.
+                assert( std::imag( s_housev[0] ) == 0 );
                 E[sweep] = std::real( s_housev[0] );
                 s_housev[0] = T( 1 );
                 V[ldv - 1 + vj*ldv] = s_tau;
             }
-            // was starting from 1, for (i = 1 + xid; ...
+            // was: starting from 1, for (i = 1 + xid; ...
             for (rocblas_int i = xid; i < nc; i += DIMX)
                 V[vi + i + vj*ldv] = s_housev[i];
         }
         __syncthreads();
 
-        // apply Householder reflector
         if (s_tau != 0)
         {
             // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
@@ -386,7 +391,9 @@ __device__ void sb2st_hb2st_task(
     }
     else
     {
-        // bulge chasing
+        // Bulge chasing applies reflector from previous step to off-diagonal
+        // block, creating a bulge, then brings 1st column of bulge back to band
+        // kd, and applies reflector to off-diagonal and diagonal block.
         rocblas_int jp = jc - kd;
 
         if (yid == 0)
@@ -412,14 +419,15 @@ __device__ void sb2st_hb2st_task(
         {
             if (yid == 0)
             {
-                // copy column s to shared memory
+                // Copy 1st column of bulge to shared memory.
                 for (rocblas_int i = xid; i < nc; i += DIMX)
                     s_housev[i] = Aband[idiag + kd + i + jp*ldab];
 
-                // generate Householder reflector
+                // Generate current Householder reflector, vc.
                 sb2st_larfg( xid, nc, s_housev, s_tau, (S*) s_work );
 
-                // copy Householder vector and tau to column V, and 1st element of larfg back to A.
+                // Copy Householder vector and tau to column V,
+                // and copy 1st element of larfg back to A.
                 if (xid == 0)
                 {
                     Aband[idiag + kd + jp*ldab] = s_housev[0];
@@ -449,7 +457,6 @@ __device__ void sb2st_hb2st_task(
                 __syncthreads();
 
                 // Apply on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
-                // todo: larfy
                 #if 1
                     sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, s_tau,
                                   Aband + idiag + jc*ldab, ldab-1, s_work );
@@ -696,7 +703,7 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     // todo: can we call BLAS copy( Aband[idiag, 0], ldab, D, 1 )?
     // todo: should this be done in sb2st_hb2st_task when E is set?
     rocblas_int idiag = kd - 1;
-    const rocblas_int copyblocks = ceildiv( n, BS1 );
+    rocblas_int copyblocks = ceildiv( n, BS1 );
     ROCSOLVER_LAUNCH_KERNEL(
         (sb2st_hb2st_copy_diag<T>),
         dim3( copyblocks, 1, batch_count ), dim3( BS1 ), 0, stream,
