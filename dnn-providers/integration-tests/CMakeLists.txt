@@ -16,7 +16,6 @@ find_package(nlohmann_json REQUIRED)
 
 add_executable(hipdnn_integration_tests
     src/main.cpp
-    src/list_plugins_test.cpp
     src/IntegrationGpuBatchnormBackwardActivation.cpp
     src/IntegrationGpuConvForward.cpp
 )

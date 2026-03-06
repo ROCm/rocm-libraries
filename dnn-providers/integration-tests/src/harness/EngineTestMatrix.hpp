@@ -60,7 +60,9 @@ std::vector<EngineTestCase<TestCase>> BuildEngineTestMatrix(
     std::vector<EngineTestCase<TestCase>> result;
 
     hipdnnHandle_t handle;
-    hipdnnCreate(&handle);
+    if (hipdnnCreate(&handle) != HIPDNN_STATUS_SUCCESS) {
+        throw std::runtime_error("BuildEngineTestMatrix: hipdnnCreate failed");
+    }
 
     for (const auto& testCase : testCaseGen) {
         auto [graph, outputs] = FixtureClass::buildGraph(handle, testCase);
