@@ -7,6 +7,7 @@
 #include "MiopenContainer.hpp"
 #include "version.h"
 
+// Defines are formatted as required for hipdnn_plugin_sdk/EnginePluginImpl.inl
 #define HIPDNN_PLUGIN_NAME "miopen_provider_plugin"
 #define HIPDNN_PLUGIN_VERSION MIOPEN_PROVIDER_VERSION_STRING
 #define HIPDNN_PLUGIN_API_VERSION "0.0.1"
