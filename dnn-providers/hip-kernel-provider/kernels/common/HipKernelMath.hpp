@@ -161,17 +161,17 @@ __forceinline__ __device__ __half fabs(__half x)
 {
     return static_cast<__half>(fabs(static_cast<_Float16>(x)));
 }
-__forceinline__ __device__ __half fmin(__half x)
+__forceinline__ __device__ __half fmin(__half x, __half y)
 {
-    return static_cast<__half>(fmin(static_cast<_Float16>(x)));
+    return static_cast<__half>(fmin(static_cast<_Float16>(x), static_cast<_Float16>(y)));
 }
-__forceinline__ __device__ __half fmax(__half x)
+__forceinline__ __device__ __half fmax(__half x, __half y)
 {
-    return static_cast<__half>(fmax(static_cast<_Float16>(x)));
+    return static_cast<__half>(fmax(static_cast<_Float16>(x), static_cast<_Float16>(y)));
 }
-__forceinline__ __device__ __half pow(__half x)
+__forceinline__ __device__ __half pow(__half x, __half y)
 {
-    return static_cast<__half>(pow(static_cast<_Float16>(x)));
+    return static_cast<__half>(pow(static_cast<_Float16>(x), static_cast<_Float16>(y)));
 }
 __forceinline__ __device__ __half tanh(__half x)
 {
