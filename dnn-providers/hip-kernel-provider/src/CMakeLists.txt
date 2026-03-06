@@ -43,7 +43,7 @@ target_link_libraries(hip_kernel_plugin_private PUBLIC hipdnn_data_sdk hipdnn_pl
 # hip_kernel_plugin - SHARED library (the actual plugin)
 add_library(hip_kernel_plugin SHARED $<TARGET_OBJECTS:hip_kernel_plugin_impl>)
 target_compile_definitions(hip_kernel_plugin PRIVATE COMPONENT_NAME="hip_kernel_plugin")
-target_link_libraries(hip_kernel_plugin PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
+target_link_libraries(hip_kernel_plugin PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
 if(NOT WIN32)
     target_link_libraries(hip_kernel_plugin PRIVATE "-Xlinker --exclude-libs=ALL")

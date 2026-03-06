@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdio>
 #include <gtest/gtest.h>
 
 #include "engines/plans/BatchnormFwdInferencePlan.hpp"
@@ -120,7 +121,7 @@ hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
     hipDeviceProp_t deviceProps = {};
     deviceProps.multiProcessorCount = 60;
     deviceProps.warpSize = 64;
-    strncpy(deviceProps.gcnArchName, archName, sizeof(deviceProps.gcnArchName));
+    std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", archName);
     return deviceProps;
 }
 
