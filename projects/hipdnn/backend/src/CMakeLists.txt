@@ -26,8 +26,10 @@ add_library(
     descriptors/TensorDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
     descriptors/ConvolutionWrwOperationDescriptor.cpp
+    descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
+    descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/DescriptorAttributeUtils.cpp
     descriptors/DataTypeConversion.cpp
     descriptors/VariantDescriptor.cpp
