@@ -23,6 +23,7 @@ file(MAKE_DIRECTORY "${BUILT_OBJ_DIR}")
 
 # Assembly source files for custom kernels (explicit list)
 set(CUSTOM_KERNEL_ASM_SOURCES
+    # Aiter kernels
     ${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128.s
     ${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_BpreShuffle_32x256.s
     ${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_BpreShuffle_32x384.s
@@ -58,6 +59,10 @@ set(CUSTOM_KERNEL_ASM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_BpreShuffle_256x128.s
     ${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_BpreShuffle_256x256.s
     ${CMAKE_CURRENT_SOURCE_DIR}/f4gemm_bf16_per1x32Fp4_noBpreShuffle_256x256.s
+    # Wave kernels
+    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_64x64x256.s
+    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_128x32x256.s
+    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_256x224x256.s
 )
 
 # Build combined .co from all assembly sources

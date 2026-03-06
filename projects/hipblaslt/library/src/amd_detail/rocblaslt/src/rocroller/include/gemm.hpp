@@ -104,6 +104,10 @@ public:
 
     std::optional<GemmHipModuleWrapper> module;
 
+    // Wave kernels need a non-default block size (e.g. {64,4,1}).
+    // AITER kernels leave this empty and use the hardcoded default.
+    std::optional<std::array<int, 3>> customBlockSize;
+
     bool isCustomKernel() const
     {
         return module.has_value();

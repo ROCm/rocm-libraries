@@ -21,7 +21,7 @@ const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
  * compile-time known.
  */
 
-constexpr size_t possibleTileSizesCount = 35;
+constexpr size_t possibleTileSizesCount = 38;
 
 constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSizes
     = {{{256, 256, 256}, {256, 256, 128}, {256, 192, 128}, {256, 128, 128}, {256, 64, 128},
@@ -30,24 +30,26 @@ constexpr std::array<WorkGroupTileSize, possibleTileSizesCount> possibleTileSize
         {128, 32, 128},  {64, 256, 128},  {64, 192, 128},  {64, 128, 128},  {64, 64, 128},
         {64, 32, 128},   {32, 256, 128},  {32, 192, 128},  {32, 128, 128},  {32, 64, 128},
         {32, 32, 128},   {32, 32, 64},    {16, 256, 128},  {64, 16, 128},   {16, 64, 128},
-        {32, 16, 128},   {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256}}};
+        {32, 16, 128},   {16, 32, 128},   {16, 16, 128},   {16, 16, 256},   {16, 64, 256},
+        {64, 64, 256},   {128, 32, 256},  {256, 224, 256}}};
 
-constexpr size_t possibleSwizzleTileSizesCount = 34;
+constexpr size_t possibleSwizzleTileSizesCount = 37;
 
-constexpr std::array<WorkGroupTileSize, possibleSwizzleTileSizesCount> possibleSwizzleTileSizes
-    = {{//{32,32,128}, {64, 32, 128}, {64, 64, 128}, {128, 32, 128}, TODO: Add these in once rocRoller supports swizzleB
-        {32, 128, 128},  {32, 256, 128},  {32, 384, 128},  {32, 512, 128},  {32, 640, 128},
-        {32, 768, 128},  {32, 896, 128},  {32, 1024, 128}, {64, 128, 128},  {64, 256, 128},
-        {64, 384, 128},  {64, 512, 128},  {64, 640, 128},  {64, 768, 128},  {64, 896, 128},
-        {64, 1024, 128}, {96, 128, 128},  {96, 256, 128},  {96, 384, 128},  {96, 512, 128},
-        {96, 640, 128},  {128, 128, 128}, {128, 256, 128}, {128, 384, 128}, {128, 512, 128},
-        {160, 128, 128}, {160, 256, 128}, {160, 384, 128}, {192, 128, 128}, {192, 256, 128},
-        {224, 128, 128}, {224, 256, 128}, {256, 128, 128}, {256, 256, 128}}};
+constexpr std::array<WorkGroupTileSize, possibleSwizzleTileSizesCount> possibleSwizzleTileSizes = {
+    {//{32,32,128}, {64, 32, 128}, {64, 64, 128}, {128, 32, 128}, TODO: Add these in once rocRoller supports swizzleB
+     {32, 128, 128},  {32, 256, 128},  {32, 384, 128},  {32, 512, 128},  {32, 640, 128},
+     {32, 768, 128},  {32, 896, 128},  {32, 1024, 128}, {64, 128, 128},  {64, 256, 128},
+     {64, 384, 128},  {64, 512, 128},  {64, 640, 128},  {64, 768, 128},  {64, 896, 128},
+     {64, 1024, 128}, {96, 128, 128},  {96, 256, 128},  {96, 384, 128},  {96, 512, 128},
+     {96, 640, 128},  {128, 128, 128}, {128, 256, 128}, {128, 384, 128}, {128, 512, 128},
+     {160, 128, 128}, {160, 256, 128}, {160, 384, 128}, {192, 128, 128}, {192, 256, 128},
+     {224, 128, 128}, {224, 256, 128}, {256, 128, 128}, {256, 256, 128}, {64, 64, 256},
+     {128, 32, 256},  {256, 224, 256}}};
 
 // Helper to generate tile list from a compile-time known tile array
-template <rocRoller::DataType typeA,
-          rocRoller::DataType typeB,
-          size_t              TileCount,
+template <rocRoller::DataType                             typeA,
+          rocRoller::DataType                             typeB,
+          size_t                                          TileCount,
           const std::array<WorkGroupTileSize, TileCount>& TileArray>
 std::vector<origami::config_t> generateTileListImpl(bool hasPreSwizzle, bool hasPreTile)
 {
@@ -101,8 +103,10 @@ std::vector<origami::config_t> generateTileList(bool hasPreSwizzle, bool hasPreT
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
 std::vector<origami::config_t> generateSwizzleTileList(bool hasPreSwizzle, bool hasPreTile)
 {
-    return generateTileListImpl<typeA, typeB, possibleSwizzleTileSizesCount, possibleSwizzleTileSizes>(
-        hasPreSwizzle, hasPreTile);
+    return generateTileListImpl<typeA,
+                                typeB,
+                                possibleSwizzleTileSizesCount,
+                                possibleSwizzleTileSizes>(hasPreSwizzle, hasPreTile);
 }
 
 using TileListGeneratorFn = std::vector<origami::config_t> (*)(bool, bool);
@@ -144,8 +148,8 @@ std::vector<origami::config_t> getTileListForKernelType(const KernelType& kernel
     // Compute hasPreSwizzle and hasPreTile from ScaleType
     bool hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
                           && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
-    bool hasPreTile    = (kernelType.scaleTypeA.preTile.size() == 2
-                       && kernelType.scaleTypeB.preTile.size() == 2);
+    bool hasPreTile
+        = (kernelType.scaleTypeA.preTile.size() == 2 && kernelType.scaleTypeB.preTile.size() == 2);
 
     // Use swizzle tile sizes only for FP4 x FP4 with swizzleB enabled
     if(kernelType.swizzleB && kernelType.typeA == rocRoller::DataType::FP4
@@ -210,18 +214,18 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     auto prediction_result
         = origami::rank_configs(origami_problem, analytical_hardware, origami_config_list);
 
-
     for(auto const& result : prediction_result)
     {
         auto              mt_m = static_cast<int>(result.config.mt.m);
         auto              mt_n = static_cast<int>(result.config.mt.n);
         auto              mt_k = static_cast<int>(result.config.mt.k);
         WorkGroupTileSize wgt{mt_m, mt_n, mt_k};
-        auto hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
+        auto              hasPreSwizzle = (kernelType.scaleTypeA.preSwizzleTile.size() == 3
                               && kernelType.scaleTypeB.preSwizzleTile.size() == 3);
-        auto hasPreTile = (kernelType.scaleTypeA.preTile.size() == 2
+        auto              hasPreTile    = (kernelType.scaleTypeA.preTile.size() == 2
                            && kernelType.scaleTypeB.preTile.size() == 2);
-        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt, hasPreSwizzle, hasPreTile);
+        int               unrollAmount  = preferredUnrolling(
+            kernelType.typeA, kernelType.typeB, wgt, hasPreSwizzle, hasPreTile);
         wgt.k /= unrollAmount;
 
         if((requestedAlgoCount == -1)
@@ -245,12 +249,12 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 continue;
 
             // check if this size is valid for pre-swizzled data
-            if (hasPreSwizzle)
+            if(hasPreSwizzle)
             {
-                if (kernelType.typeA != rocRoller::DataType::FP4 ||
-                    kernelType.typeB != rocRoller::DataType::FP4)
+                if(kernelType.typeA != rocRoller::DataType::FP4
+                   || kernelType.typeB != rocRoller::DataType::FP4)
                     continue;
-                if (wgt.m % 32 != 0 || wgt.n % 32 != 0)
+                if(wgt.m % 32 != 0 || wgt.n % 32 != 0)
                     continue;
             }
 
@@ -273,7 +277,6 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
             params.push_back({wgt, true, false, useTailLoops});
 
-
             if(prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
             {
                 params.back().workgroupMapping = false;
@@ -294,13 +297,13 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                          || kernelType.typeA == rocRoller::DataType::BF6
                          || kernelType.typeB == rocRoller::DataType::FP6
                          || kernelType.typeB == rocRoller::DataType::BF6);
-            auto isLargeF8 = ((kernelType.typeA == rocRoller::DataType::FP8
-                || kernelType.typeA == rocRoller::DataType::BF8
-                || kernelType.typeB == rocRoller::DataType::FP8
-                || kernelType.typeB == rocRoller::DataType::BF8)
-               && wgt.m + wgt.n > 256);
-            if(numTiles < analytical_hardware.N_CU && itersPerTile >= 16
-               && !isF6 && !isLargeF8 && !is256Tile)
+            auto   isLargeF8    = ((kernelType.typeA == rocRoller::DataType::FP8
+                               || kernelType.typeA == rocRoller::DataType::BF8
+                               || kernelType.typeB == rocRoller::DataType::FP8
+                               || kernelType.typeB == rocRoller::DataType::BF8)
+                              && wgt.m + wgt.n > 256);
+            if(numTiles < analytical_hardware.N_CU && itersPerTile >= 16 && !isF6 && !isLargeF8
+               && !is256Tile)
             {
                 params.back().streamK = true;
             }
