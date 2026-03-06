@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/host/concat.hpp"
 
 namespace ck_tile {
 struct ElementWiseDefaultPolicy
@@ -23,6 +24,11 @@ struct ElementWiseDefaultPolicy
                                        sequence<1, 1>,                  // Yield
                                        sequence<0, 3>>{}                // Yield
         );
+    }
+
+    [[nodiscard]] CK_TILE_HOST static const std::string GetName()
+    {        
+        return "ElementWiseDefaultPolicy";
     }
 };
 
