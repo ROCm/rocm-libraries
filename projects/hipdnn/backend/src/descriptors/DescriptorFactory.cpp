@@ -3,6 +3,7 @@
 
 #include "DescriptorFactory.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "BatchnormInferenceOperationDescriptor.hpp"
 #include "ConvolutionBwdOperationDescriptor.hpp"
 #include "ConvolutionFwdOperationDescriptor.hpp"
 #include "ConvolutionWrwOperationDescriptor.hpp"
@@ -12,6 +13,7 @@
 #include "ExecutionPlanDescriptor.hpp"
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
+#include "KnobSettingDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
@@ -57,6 +59,12 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionWrwOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<BatchnormInferenceOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
+        privateDesc = std::make_shared<KnobSettingDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionBwdOperationDescriptor>();

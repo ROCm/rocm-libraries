@@ -185,6 +185,7 @@ class TestLayoutAutoDetection:
         """Auto-detected layouts must match the previously hand-declared layouts for all existing schedules."""
         EXPECTED = {
             "_get_schedule_256x96x64_16bit": {"NN", "TN"},
+            "_get_schedule_256x96x64_16bit_DPLB": {"NT"},
             "_get_schedule_192x256x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_256x192x64_16bit": {"NN", "NT", "TN"},
             "_get_schedule_256x256x128_8bit": {"TN"},
