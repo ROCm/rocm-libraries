@@ -12,3 +12,5 @@ using BF16 = ck_tile::bf16_t;
 using BF8  = ck_tile::bf8_t;
 
 using I4 = ck_tile::pk_int4_t;
+
+using TF32 = ck_tile::tf32_t;
