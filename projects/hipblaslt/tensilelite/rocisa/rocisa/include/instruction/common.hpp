@@ -4556,9 +4556,10 @@ namespace rocisa
         VMovB32(const std::shared_ptr<Container>&   dst,
                 const InstructionInput&             src,
                 const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
-                const std::string&                  comment = "")
+                const std::string&                  comment = "",
+                const std::optional<DPPModifiers>&  dpp     = std::nullopt)
             : CommonInstruction(
-                InstType::INST_B32, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, dpp, sdwa, std::nullopt, comment)
         {
             setInst("v_mov_b32");
         }

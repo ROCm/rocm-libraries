@@ -3765,14 +3765,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.addComment0("Number of subtiles for B: %u"%(len(self.states.b.tileInfo.localSubtiles)))
 
 
+    # Allocate registers for GR/LR
+    self.states.a.tileInfo.allocOffsetRegisters(self, kernel)
+    self.states.b.tileInfo.allocOffsetRegisters(self, kernel)
+
     module.add(self.setupNewTile(kernel, tensorParametersA, tensorParametersB, isOptNLL=False))
     self.removeSgprVarFromPool("SrdD")
     self.removeSgprVarFromPool("SrdC")
 
-
-    # Allocate registers for GR/LR
-    self.states.a.tileInfo.allocOffsetRegisters(self, kernel)
-    self.states.b.tileInfo.allocOffsetRegisters(self, kernel)
 
     atile = self.states.a.tileInfo
     btile = self.states.b.tileInfo
@@ -3786,12 +3786,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     for v in self.states.b.tileInfo.sharedVgprLROffset:
       module.addComment("Allocating v[%u] for B LR"%(v))
 
-    for st in self.states.a.tileInfo.localSubtiles:
+    for st in atile.localSubtiles:
       for reg in atile.localSubtilesRegister[st.regListId]:
         regstr = 's' if st.useSgpr else 'v'
         module.addComment0("Using %s%u for A GR"%(regstr, reg))
 
-    for st in self.states.b.tileInfo.localSubtiles:
+    for st in btile.localSubtiles:
       for reg in btile.localSubtilesRegister[st.regListId]:
         regstr = 's' if st.useSgpr else 'v'
         module.addComment0("Using %s%u for B GR"%(regstr, reg))

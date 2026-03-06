@@ -418,14 +418,19 @@ namespace rocisa
     // dot2: for WaveSplitK reduction. Only a subset of DPP modifiers are used here
     struct DPPModifiers : public Container
     {
-        int row_shr;
-        int row_bcast;
-        int bound_ctrl;
+        int              row_shr;
+        int              row_bcast;
+        int              bound_ctrl;
+        std::vector<int> quad_perm;
 
-        DPPModifiers(int row_shr = -1, int row_bcast = -1, int bound_ctrl = -1)
+        DPPModifiers(int                      row_shr    = -1,
+                     int                      row_bcast  = -1,
+                     int                      bound_ctrl = -1,
+                     const std::vector<int>&  quad_perm  = {})
             : row_shr(row_shr)
             , row_bcast(row_bcast)
             , bound_ctrl(bound_ctrl)
+            , quad_perm(quad_perm)
         {
         }
 
@@ -443,7 +448,24 @@ namespace rocisa
                 kStr += " row_bcast:" + std::to_string(row_bcast);
             if(bound_ctrl != -1)
                 kStr += " bound_ctrl:" + std::to_string(bound_ctrl);
+            if(!quad_perm.empty())
+                kStr += " quad_perm:" + vectorToString(quad_perm);
             return kStr;
+        }
+
+        std::string vectorToString(const std::vector<int>& vec) const
+        {
+            std::string result = "[";
+            for(size_t i = 0; i < vec.size(); ++i)
+            {
+                result += std::to_string(vec[i]);
+                if(i < vec.size() - 1)
+                {
+                    result += ",";
+                }
+            }
+            result += "]";
+            return result;
         }
     };
 

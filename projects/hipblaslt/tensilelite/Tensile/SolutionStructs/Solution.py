@@ -464,8 +464,8 @@ class Solution(collections.abc.Mapping):
       state["UseMFMAF32XEmulation"] = True # enable MFMA version by default
 
     state["MfmaInitCVgprs"] = False
-    state["UseSubtileImpl"] = False#True
-    
+
+    state["UseSubtileImpl"] = True  
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
