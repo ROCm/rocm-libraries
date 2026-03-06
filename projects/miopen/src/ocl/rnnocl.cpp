@@ -929,31 +929,31 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
             call_hx_next_gemm(layer_id);
             call_next_hidden_state_update(layer_id);
         }
-        ms_controller.RecordEvent(layer_chunk_end_event[layer_id][chunk_id].get(), stream_id);
+        (void)ms_controller.RecordEvent(layer_chunk_end_event[layer_id][chunk_id].get(), stream_id);
     };
 
     auto sync_next_chunk_across_time = [&layer_chunk_end_event,
                                         &ms_controller](int stream_id, int layer_id, int chunk_id) {
         if(chunk_id > 0)
         {
-            ms_controller.SetWaitEvent(layer_chunk_end_event[layer_id][chunk_id - 1].get(),
-                                       stream_id);
+            (void)ms_controller.SetWaitEvent(layer_chunk_end_event[layer_id][chunk_id - 1].get(),
+                                             stream_id);
         }
     };
 
-    auto sync_next_chunk_across_layers =
-        [&layer_chunk_end_event, &ms_controller](int stream_id, int layer_id, int chunk_id) {
-            if(layer_id > 0)
-            {
-                ms_controller.SetWaitEvent(layer_chunk_end_event[layer_id - 1][chunk_id].get(),
-                                           stream_id);
-            }
-        };
+    auto sync_next_chunk_across_layers = [&layer_chunk_end_event, &ms_controller](
+                                             int stream_id, int layer_id, int chunk_id) {
+        if(layer_id > 0)
+        {
+            (void)ms_controller.SetWaitEvent(layer_chunk_end_event[layer_id - 1][chunk_id].get(),
+                                             stream_id);
+        }
+    };
 
     { // extra_space clean set 0
         const int fill_val = 0;
         // if(biasMode == 0u) req
-        hipMemsetAsync(extra_space, fill_val, extra_space_size, handle.GetStream());
+        (void)hipMemsetAsync(extra_space, fill_val, extra_space_size, handle.GetStream());
     }
 
     // stage 0 bias and input preload
@@ -983,8 +983,8 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
 
         // sync first to second stream
         const miopen::HipEventPtr next_chunk_inx = make_hip_fast_event();
-        ms_controller.RecordEvent(next_chunk_inx.get(), extra_stream_id);
-        ms_controller.SetWaitEvent(next_chunk_inx.get(), stream_id);
+        (void)ms_controller.RecordEvent(next_chunk_inx.get(), extra_stream_id);
+        (void)ms_controller.SetWaitEvent(next_chunk_inx.get(), stream_id);
     }
 
     auto spiral_dispatch = [&](int first_stream, int last_stream) {
@@ -1131,8 +1131,8 @@ void RNNDescriptor::RNNForwardMS(const Handle& handle,
 
     ms_controller.ChangeActiveStream(root_stream_id);
 
-    ms_controller.SetWaitEvent(layer_chunk_end_event[nLayers - 1][chunks_cnt - 1].get(),
-                               root_stream_id);
+    (void)ms_controller.SetWaitEvent(layer_chunk_end_event[nLayers - 1][chunks_cnt - 1].get(),
+                                     root_stream_id);
 
     // output tensor copy
     {
