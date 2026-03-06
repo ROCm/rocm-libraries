@@ -135,7 +135,7 @@ jobs:
             --upload
 
       - name: Notify MIOpen Teams Channel on Failure
-      # Channel name "MIOpen CI Reporting"
+        # Channel name "MIOpen CI Reporting"
         if: ${{ contains(inputs.projects_to_test, 'miopen') && failure() && github.event_name == 'push' }}
         run: |
           python3 .github/scripts/notify_teams.py \
