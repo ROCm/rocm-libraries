@@ -26,8 +26,8 @@ constexpr std::array<int64_t, 4> K_LAYERNORM_TENSOR_BIAS_DIMS = {1, 64, 32, 32};
 constexpr std::array<int64_t, 4> K_LAYERNORM_TENSOR_BIAS_STRIDES = {65536, 1024, 32, 1};
 
 constexpr int64_t K_LAYERNORM_TENSOR_EPSILON_UID = 83;
-constexpr std::array<int64_t, 4> K_LAYERNORM_TENSOR_EPSILON_DIMS = {1, 1, 1, 1};
-constexpr std::array<int64_t, 4> K_LAYERNORM_TENSOR_EPSILON_STRIDES = {1, 1, 1, 1};
+constexpr std::array<int64_t, 1> K_LAYERNORM_TENSOR_EPSILON_DIMS = {1};
+constexpr std::array<int64_t, 1> K_LAYERNORM_TENSOR_EPSILON_STRIDES = {1};
 
 constexpr int64_t K_LAYERNORM_TENSOR_Y_UID = 84;
 constexpr std::array<int64_t, 4> K_LAYERNORM_TENSOR_Y_DIMS = {2, 64, 32, 32};

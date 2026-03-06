@@ -95,9 +95,10 @@ TEST_F(IntegrationLayernormDescriptorLowering, LayernormGraphRoundTrip)
     auto epsilon = std::make_shared<TensorAttributes>();
     epsilon->set_uid(K_LAYERNORM_TENSOR_EPSILON_UID)
         .set_name("EPSILON")
-        .set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS))
-        .set_stride(toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS))
+        .set_stride(toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES))
+        .set_value(1e-5f);
 
     LayernormAttributes layernormAttrs;
     layernormAttrs.set_name("layernorm_op");
@@ -256,9 +257,11 @@ TEST_F(IntegrationLayernormDescriptorLowering, AutoAssignedUidsPreservedInRoundT
         .set_stride(toVec(K_LAYERNORM_TENSOR_BIAS_STRIDES));
 
     auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_name("EPSILON").set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS))
-        .set_stride(toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES));
+    epsilon->set_name("EPSILON")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_LAYERNORM_TENSOR_EPSILON_DIMS))
+        .set_stride(toVec(K_LAYERNORM_TENSOR_EPSILON_STRIDES))
+        .set_value(1e-5f);
 
     LayernormAttributes layernormAttrs;
     layernormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
