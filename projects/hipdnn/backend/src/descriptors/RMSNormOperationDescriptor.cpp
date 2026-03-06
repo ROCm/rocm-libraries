@@ -85,32 +85,21 @@ void RMSNormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                             "RMSNormOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT:
-    {
-        // Bias is optional — we store it via the Optional<int64_t> field.
-        // Use a local int64_t for the setTensorDescriptor call, then copy to optional.
-        int64_t biasUid = 0;
-        setTensorDescriptor(_biasDesc,
-                            biasUid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "RMSNormOperationDescriptor::setAttribute()");
-        _data.bias_tensor_uid = biasUid;
+        setOptionalTensorDescriptor(_biasDesc,
+                                    _data.bias_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "RMSNormOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT:
-    {
-        // Inv_rms is optional — same pattern as bias.
-        int64_t invRmsUid = 0;
-        setTensorDescriptor(_invRmsDesc,
-                            invRmsUid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "RMSNormOperationDescriptor::setAttribute()");
-        _data.inv_rms_tensor_uid = invRmsUid;
+        setOptionalTensorDescriptor(_invRmsDesc,
+                                    _data.inv_rms_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "RMSNormOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT:
     {
         checkSetArgs(HIPDNN_TYPE_INT64,
@@ -193,38 +182,20 @@ void RMSNormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                             "RMSNormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT:
-        // Optional: report 0 elements when not set (query mode included)
-        if(!_biasDesc)
-        {
-            THROW_IF_NULL(elementCount,
-                          HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                          "RMSNormOperationDescriptor::getAttribute(): elementCount is null");
-            *elementCount = 0;
-            break;
-        }
-        getTensorDescriptor(_biasDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "RMSNormOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_biasDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "RMSNormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT:
-        // Optional: report 0 elements when not set (query mode included)
-        if(!_invRmsDesc)
-        {
-            THROW_IF_NULL(elementCount,
-                          HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                          "RMSNormOperationDescriptor::getAttribute(): elementCount is null");
-            *elementCount = 0;
-            break;
-        }
-        getTensorDescriptor(_invRmsDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "RMSNormOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_invRmsDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "RMSNormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT:
     {

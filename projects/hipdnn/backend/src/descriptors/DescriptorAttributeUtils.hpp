@@ -172,6 +172,8 @@ void setOptionalTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                                  const void* arrayOfElements,
                                  const char* errorPrefix);
 
+// Like getTensorDescriptor, but descSource may be null (optional tensor).
+// Returns elementCount=0 when the tensor was not set.
 void getOptionalTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
                                  hipdnnBackendAttributeType_t attributeType,
                                  int64_t requestedElementCount,
