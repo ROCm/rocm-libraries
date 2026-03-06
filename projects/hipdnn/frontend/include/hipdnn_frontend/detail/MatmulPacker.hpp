@@ -24,12 +24,21 @@ inline Error
     }
 
     // Create tensor descriptors (if needed) and set them on the operation
-    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(
-        opDesc.get(), HIPDNN_ATTR_OPERATION_MATMUL_A_EXT, attributes.get_a(), tensorDescs, "matmul A"));
-    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(
-        opDesc.get(), HIPDNN_ATTR_OPERATION_MATMUL_B_EXT, attributes.get_b(), tensorDescs, "matmul B"));
-    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(
-        opDesc.get(), HIPDNN_ATTR_OPERATION_MATMUL_C_EXT, attributes.get_c(), tensorDescs, "matmul C"));
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             HIPDNN_ATTR_OPERATION_MATMUL_A_EXT,
+                                             attributes.get_a(),
+                                             tensorDescs,
+                                             "matmul A"));
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             HIPDNN_ATTR_OPERATION_MATMUL_B_EXT,
+                                             attributes.get_b(),
+                                             tensorDescs,
+                                             "matmul B"));
+    HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
+                                             HIPDNN_ATTR_OPERATION_MATMUL_C_EXT,
+                                             attributes.get_c(),
+                                             tensorDescs,
+                                             "matmul C"));
 
     // Set compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
