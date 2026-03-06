@@ -11,6 +11,7 @@ add_executable(
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
     IntegrationBlockScaleDequantize.cpp
+    IntegrationBlockScaleDequantizeDescriptorLowering.cpp
     IntegrationBlockScaleQuantize.cpp
     IntegrationConvForward.cpp
     IntegrationConvolutionBackwardData.cpp

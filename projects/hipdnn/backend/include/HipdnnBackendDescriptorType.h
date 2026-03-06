@@ -176,4 +176,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR,
 
+    /**
+     * @brief Block scale dequantize operation descriptor
+     *
+     * Represents a block scale dequantize operation with input (X),
+     * scale, and output (Y) tensors plus block size parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT,
+
 } hipdnnBackendDescriptorType_t;

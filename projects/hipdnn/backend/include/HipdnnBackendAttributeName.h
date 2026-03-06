@@ -34,6 +34,13 @@
  * - 1000-1099: Engine attributes
  * - 1100-1199: Kernel cache attributes
  * - 1200-1299: Device properties attributes
+ * - 1300-1399: Tensor attributes
+ * - 1400-1499: Convolution forward operation attributes
+ * - 1500-1599: Shared convolution descriptor attributes
+ * - 1600-1699: Convolution backward filter operation attributes
+ * - 1700-1799: Convolution backward data operation attributes
+ * - 1800-1899: Batchnorm inference operation attributes
+ * - 2600-2699: Block scale dequantize operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -426,6 +433,32 @@ typedef enum
 
     /** @brief Compute data type for batchnorm inference */
     HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT = 1806,
+
+    /** @} */
+
+    /**
+     * @name BlockScaleDequantize Operation Attributes (2600-2699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_DEQUANTIZE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_X_EXT = 2600,
+
+    /** @brief Scale tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_SCALE_EXT = 2601,
+
+    /** @brief Output tensor for block scale dequantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_Y_EXT = 2602,
+
+    /** @brief Block sizes for each dimension */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT = 2603,
+
+    /** @brief Whether scale is negative */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_IS_NEGATIVE_SCALE_EXT = 2604,
+
+    /** @brief Compute data type for block scale dequantize */
+    HIPDNN_ATTR_BLOCK_SCALE_DEQUANTIZE_COMP_TYPE_EXT = 2605,
 
     /** @} */
 
