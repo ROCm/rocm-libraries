@@ -21,7 +21,8 @@ same Windows versions and toolchains that the HIP SDK supports. For more informa
 Installing prebuilt packages
 ============================
 
-hipSPARSE can be installed on Windows 10 or 11 using the AMD HIP SDK installer.
+hipSPARSE can be installed on Windows using the AMD HIP SDK installer.
+For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
 
 To add hipSPARSE to your code, use CMake.
 Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.

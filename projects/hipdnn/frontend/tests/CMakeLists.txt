@@ -19,6 +19,8 @@ add_executable(
     TestBackendLoggingHelpers.cpp
     TestBlockScaleDequantizeAttributes.cpp
     TestBlockScaleDequantizeNode.cpp
+    TestBlockScaleQuantizeAttributes.cpp
+    TestBlockScaleQuantizeNode.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp
     TestBatchnormBackwardNode.cpp
