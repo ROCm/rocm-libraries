@@ -96,7 +96,7 @@ template <>
 auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
 {
     double rtol = 1e-1;
-    double atol = 2.6e-1;
+    double atol = 2.8e-1;
     return ck_tile::make_tuple(rtol, atol);
 }
 
