@@ -873,8 +873,8 @@ class Solution(collections.abc.Mapping):
       if state["LSC%c"%tc] * state["LSP%c"%tc] * numBytesAB != state["WavefrontSize"] * state["GlobalReadVectorWidth%c"%tc] * numBytesAB:
         reject(state, printRejectionReason, "can't use DirectToLds for LSC%c and LSP%c * bpe!= WavefrontSize * GlobalReadVectorWidth%c * bpe%c > 4"%(tc, tc, tc, tc))
         return False
-      if state["WaveSeparateGlobalRead%c" % tc] == 2 and state["TransposeLDS"] != 2:
-        reject(state, printRejectionReason, "can't use DirectToLds for WSGR%s = 2 and TLDS != 2"%(tc))
+      if state["WaveSeparateGlobalRead%c" % tc] == 2:
+        reject(state, printRejectionReason, "can't use DirectToLds for WSGR%s = 2"%(tc))
         return False
     elif not state["UseGeneralizedNLCOne%s"%tc]:
       if state["LSC%c"%tc] * state["LSP%c"%tc] * numBytesAB != state["NumThreads"] * state["GlobalReadVectorWidth%c"%tc] * numBytesAB:

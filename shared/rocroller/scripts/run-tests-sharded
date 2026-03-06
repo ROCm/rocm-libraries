@@ -150,10 +150,10 @@ def start_shard(
                 str(shard_index),
                 "--rng-seed",
                 str(shard_seed),
-                "-r",
-                "junit",
-                "-o",
-                f"test_report/catch2_shard_{shard_index}.xml",
+                "--reporter",
+                f"junit::out=test_report/catch2_shard_{shard_index}.xml",
+                "--reporter",
+                "console::out=-::colour-mode=ansi",
             ]
         )
     elif test_type == "ctest":
@@ -168,6 +168,18 @@ def start_shard(
                 f"test_report/ctest_shard_{shard_index}.xml",
             ]
         )
+
+    # Log environment variables we set (added or overridden)
+    orig_env = os.environ
+    set_vars = [
+        (k, env[k])
+        for k in sorted(env.keys())
+        if k not in orig_env or orig_env.get(k) != env[k]
+    ]
+    if set_vars:
+        print(f"{shard_tag} Environment:", flush=True)
+        for k, v in set_vars:
+            print(f"{shard_tag}   {k}={v}", flush=True)
 
     # Log the command being executed
     cmd_str = " ".join(cmd)
