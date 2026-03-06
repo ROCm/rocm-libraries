@@ -11,6 +11,7 @@
 #include <cstring>
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <memory>
 #include <vector>
@@ -124,6 +125,20 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
                       int64_t* elementCount,
                       void* arrayOfElements,
                       const char* errorPrefix);
+
+// NormFwdPhase is passed as HIPDNN_TYPE_INT64 (no dedicated C API enum type).
+void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix);
+
+void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix);
 
 void setOptionalFloat(flatbuffers::Optional<float>& target,
                       hipdnnBackendAttributeType_t attributeType,

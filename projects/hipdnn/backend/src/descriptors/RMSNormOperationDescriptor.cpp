@@ -6,8 +6,6 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 
-#include <cstring>
-
 namespace hipdnn_backend
 {
 
@@ -101,24 +99,12 @@ void RMSNormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attri
                                     "RMSNormOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT:
-    {
-        checkSetArgs(HIPDNN_TYPE_INT64,
-                     attributeType,
-                     arrayOfElements,
-                     "RMSNormOperationDescriptor::setAttribute()");
-        THROW_IF_FALSE(elementCount == 1,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "RMSNormOperationDescriptor::setAttribute(): elementCount is not 1");
-        int64_t phaseVal = 0;
-        std::memcpy(&phaseVal, arrayOfElements, sizeof(int64_t));
-        auto phase = static_cast<hipdnn_data_sdk::data_objects::NormFwdPhase>(phaseVal);
-        THROW_IF_TRUE(phase < hipdnn_data_sdk::data_objects::NormFwdPhase::MIN
-                          || phase > hipdnn_data_sdk::data_objects::NormFwdPhase::MAX,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "RMSNormOperationDescriptor::setAttribute(): invalid forward_phase value");
-        _data.forward_phase = phase;
+        setNormFwdPhase(_data.forward_phase,
+                        attributeType,
+                        elementCount,
+                        arrayOfElements,
+                        "RMSNormOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT:
         setDataType(_computeDataType,
                     attributeType,
@@ -198,31 +184,13 @@ void RMSNormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attri
                                     "RMSNormOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT:
-    {
-        checkGetArgs(
-            HIPDNN_TYPE_INT64, attributeType, "RMSNormOperationDescriptor::getAttribute()");
-
-        if(arrayOfElements == nullptr || requestedElementCount == 0)
-        {
-            THROW_IF_NULL(elementCount,
-                          HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                          "RMSNormOperationDescriptor::getAttribute(): elementCount is null");
-            *elementCount = 1;
-            return;
-        }
-
-        THROW_IF_FALSE(requestedElementCount >= 1,
-                       HIPDNN_STATUS_BAD_PARAM,
-                       "RMSNormOperationDescriptor::getAttribute(): requestedElementCount < 1");
-
-        if(elementCount != nullptr)
-        {
-            *elementCount = 1;
-        }
-        auto phaseVal = static_cast<int64_t>(_data.forward_phase);
-        std::memcpy(arrayOfElements, &phaseVal, sizeof(int64_t));
+        getNormFwdPhase(_data.forward_phase,
+                        attributeType,
+                        requestedElementCount,
+                        elementCount,
+                        arrayOfElements,
+                        "RMSNormOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT:
         getDataType(_computeDataType,
                     attributeType,

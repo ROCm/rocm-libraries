@@ -213,6 +213,56 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
     }
 }
 
+void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_INT64, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    int64_t phaseVal = 0;
+    std::memcpy(&phaseVal, arrayOfElements, sizeof(int64_t));
+    auto phase = static_cast<hipdnn_data_sdk::data_objects::NormFwdPhase>(phaseVal);
+    THROW_IF_TRUE(phase < hipdnn_data_sdk::data_objects::NormFwdPhase::MIN
+                      || phase > hipdnn_data_sdk::data_objects::NormFwdPhase::MAX,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(errorPrefix) + ": invalid NormFwdPhase value");
+    target = phase;
+}
+
+void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+    auto phaseVal = static_cast<int64_t>(source);
+    std::memcpy(arrayOfElements, &phaseVal, sizeof(int64_t));
+}
+
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                          int64_t& uidTarget,
                          hipdnnBackendAttributeType_t attributeType,
