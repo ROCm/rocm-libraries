@@ -813,12 +813,19 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
                 set(KERNEL_SRC_ASM_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.S)
                 set(KERNEL_SRC_BIN_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.bin)
 
+                # Generate response file for this batch to avoid command line length limits
+                set(KERNEL_RESPONSE_FILE ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}_files.txt)
+                file(WRITE ${KERNEL_RESPONSE_FILE} "")
+                foreach(kernel_file ${KERNELS_BATCH})
+                    file(APPEND ${KERNEL_RESPONSE_FILE} "${kernel_file}\n")
+                endforeach()
+
                 if(MIOPEN_INCBIN)
                     add_custom_command(
                         OUTPUT ${KERNEL_SRC_HPP_PATH} ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
-                        COMMAND $<TARGET_FILE:addkernels> -asm ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH} -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
+                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES} ${KERNEL_RESPONSE_FILE}
+                        COMMAND $<TARGET_FILE:addkernels> -asm ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH} -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} @${KERNEL_RESPONSE_FILE}
                         COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
                         )
                     list(APPEND MIOpen_Source ${KERNEL_SRC_HPP_PATH} ${KERNEL_SRC_ASM_PATH})
@@ -826,8 +833,8 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
                     add_custom_command(
                         OUTPUT ${KERNEL_SRC_HPP_PATH}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
-                        COMMAND $<TARGET_FILE:addkernels> -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
+                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES} ${KERNEL_RESPONSE_FILE}
+                        COMMAND $<TARGET_FILE:addkernels> -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} @${KERNEL_RESPONSE_FILE}
                         COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
                         )
                     configure_file(kernels/kernels_batch.cpp.in ${KERNEL_SRC_CPP_PATH})

@@ -1766,7 +1766,7 @@ protected:
             miopenDropoutGetStatesSize(&handle, &statesSizeInBytes);
 
             void* dropout_state_buf;
-            hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
+            (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
 
             miopenSetDropoutDescriptor(&dropoutDesc,
                                        &handle,
