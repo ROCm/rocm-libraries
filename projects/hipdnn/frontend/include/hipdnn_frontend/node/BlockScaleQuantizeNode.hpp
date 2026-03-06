@@ -128,49 +128,6 @@ public:
 
         auto axis = attributes.get_axis();
 
-        // Lambda for transposed stride inference: reorders strides so the block-scale axis
-        // becomes the most tightly packed dimension (stride=1).
-        auto inferStridesTransposed = [&x](const std::shared_ptr<TensorAttributes>& t,
-                                           const std::optional<int64_t>& axisOpt) {
-            auto const& xStrides = x->get_stride();
-            auto const& xDims = x->get_dim();
-            size_t numDims = xStrides.size();
-
-            // Sort dimension indices by X's strides ascending,
-            // with singleton-dimension tiebreaker (singletons sort first)
-            std::vector<size_t> sortedIndices(numDims);
-            std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
-            std::sort(sortedIndices.begin(),
-                      sortedIndices.end(),
-                      [&xStrides, &xDims](size_t a, size_t b) {
-                          if(xStrides[a] != xStrides[b])
-                          {
-                              return xStrides[a] < xStrides[b];
-                          }
-                          return (xDims[a] == 1) > (xDims[b] == 1);
-                      });
-
-            // If axis is set, rotate so the axis dimension becomes most packed
-            if(axisOpt.has_value())
-            {
-                auto axisVal = static_cast<size_t>(axisOpt.value());
-                auto it = std::find(sortedIndices.begin(), sortedIndices.end(), axisVal);
-                if(it != sortedIndices.end())
-                {
-                    std::rotate(sortedIndices.begin(), it, sortedIndices.end());
-                }
-            }
-
-            // Build stride order from inverse permutation
-            std::vector<int64_t> strideOrder(numDims);
-            for(size_t i = 0; i < numDims; ++i)
-            {
-                strideOrder[sortedIndices[i]] = static_cast<int64_t>(i);
-            }
-
-            t->set_stride(hipdnn_data_sdk::utilities::generateStrides(t->get_dim(), strideOrder));
-        };
-
         // Infer Y dims and strides from X
         if(y->get_dim().empty())
         {
@@ -181,7 +138,8 @@ public:
         {
             if(attributes.get_transpose() && !x->get_stride().empty())
             {
-                inferStridesTransposed(y, axis);
+                y->set_stride(hipdnn_data_sdk::utilities::generateStridesWithPackedAxis(
+                    x->get_stride(), x->get_dim(), y->get_dim(), axis));
             }
             else if(!x->get_stride().empty())
             {
@@ -215,7 +173,8 @@ public:
         {
             if(attributes.get_transpose() && !x->get_stride().empty() && !scale->get_dim().empty())
             {
-                inferStridesTransposed(scale, axis);
+                scale->set_stride(hipdnn_data_sdk::utilities::generateStridesWithPackedAxis(
+                    x->get_stride(), x->get_dim(), scale->get_dim(), axis));
             }
             else if(!x->get_stride().empty() && !scale->get_dim().empty())
             {
