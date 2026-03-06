@@ -46,6 +46,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
     FLOAT prv_exp_scale[VERT_OUT_PIX][HORIZ_OUT_PIX];
 
     // load top_diff and scale tiles
+    #pragma unroll VERT_OUT_PIX
     for(int b_j = lcl_id1; b_j < local_data_height; b_j += GROUP_SIZE_Y)
     {
         int top_y_act   = top_y + b_j - PAD;
@@ -55,6 +56,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
         const int top_df_y_off = top_y_act * TOPDF_STRIDE;
         const int scale_y_off  = top_y_act * SCALE_STRIDE;
         const int lcl_off_v    = b_j * local_data_width;
+        #pragma unroll HORIZ_OUT_PIX
         for(int b_i = lcl_id0; b_i < local_data_width; b_i += GROUP_SIZE_X)
         {
             int top_x_act   = top_x + b_i - PAD;
@@ -90,6 +92,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
 
     // read top and load ratio tile
     const int top_off = b * TOP_BATCH_STRIDE + o * TOP_CHANNEL_STRIDE;
+    #pragma unroll VERT_OUT_PIX
     for(int b_j = lcl_id1; b_j < local_data_height; b_j += GROUP_SIZE_Y)
     {
         int top_y_act   = top_y + b_j - PAD;
@@ -98,6 +101,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
 
         const int top_y_off = top_y_act * TOP_STRIDE;
         const int lcl_off_v = b_j * local_data_width;
+        #pragma unroll HORIZ_OUT_PIX
         for(int b_i = lcl_id0; b_i < local_data_width; b_i += GROUP_SIZE_X)
         {
             int top_x_act   = top_x + b_i - PAD;
