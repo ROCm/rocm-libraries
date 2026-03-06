@@ -83,8 +83,12 @@ using HipdnnHandlePtr = std::unique_ptr<hipdnnHandle_t, HipdnnHandleDeleter>;
  * @code{.cpp}
  * HipdnnHandlePtr handle;
  * auto err = createHipdnnHandle(handle);
- * if (err.is_bad()) { /* handle error */ }
-*@endcode* / inline Error createHipdnnHandle(HipdnnHandlePtr& handle, hipStream_t stream = nullptr)
+ * if (err.is_bad()) {
+ *     // handle error
+ * }
+ * @endcode
+ */
+inline Error createHipdnnHandle(HipdnnHandlePtr& handle, hipStream_t stream = nullptr)
 {
     auto* handlePtr = new hipdnnHandle_t{nullptr};
     auto status = detail::hipdnnBackend()->create(handlePtr);
@@ -118,8 +122,12 @@ using HipdnnHandlePtr = std::unique_ptr<hipdnnHandle_t, HipdnnHandleDeleter>;
  *
  * @code{.cpp}
  * auto [handle, err] = createHipdnnHandle();
- * if (err.is_bad()) { /* handle error */ }
-*@endcode* / inline std::pair<HipdnnHandlePtr, Error> createHipdnnHandle(hipStream_t stream = nullptr)
+ * if (err.is_bad()) {
+ *     // handle error
+ * }
+ * @endcode
+ */
+inline std::pair<HipdnnHandlePtr, Error> createHipdnnHandle(hipStream_t stream = nullptr)
 {
     HipdnnHandlePtr handle;
     auto error = createHipdnnHandle(handle, stream);
