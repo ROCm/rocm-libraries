@@ -159,7 +159,7 @@ void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeN
         break;
     case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT:
     {
-        int64_t blockSizeInt64 = static_cast<int64_t>(_data.block_size);
+        auto blockSizeInt64 = static_cast<int64_t>(_data.block_size);
         getScalar(blockSizeInt64,
                   HIPDNN_TYPE_INT64,
                   attributeType,
@@ -239,7 +239,7 @@ std::string BlockScaleQuantizeOperationDescriptor::toString() const
     str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
     str += ", block_size=" + std::to_string(_data.block_size);
     str += ", axis=" + (_data.axis.has_value() ? std::to_string(_data.axis.value()) : "null");
-    str += ", transpose=" + std::to_string(_data.transpose);
+    str += std::string(", transpose=") + (_data.transpose ? "true" : "false");
     str += ", compute_data_type=";
     str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";

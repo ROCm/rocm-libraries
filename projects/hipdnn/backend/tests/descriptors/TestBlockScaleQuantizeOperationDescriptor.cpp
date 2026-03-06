@@ -26,14 +26,16 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
-using namespace hipdnn_tests::constants;
-
-namespace
-{
-constexpr int64_t K_TENSOR_X_UID = K_BSQ_TENSOR_X_UID;
-constexpr int64_t K_TENSOR_Y_UID = K_BSQ_TENSOR_Y_UID;
-constexpr int64_t K_TENSOR_SCALE_UID = K_BSQ_TENSOR_SCALE_UID;
-} // namespace
+using hipdnn_tests::constants::K_BSQ_BLOCK_SIZE;
+using hipdnn_tests::constants::K_BSQ_TENSOR_SCALE_DIMS;
+using hipdnn_tests::constants::K_BSQ_TENSOR_SCALE_STRIDES;
+using hipdnn_tests::constants::K_BSQ_TENSOR_SCALE_UID;
+using hipdnn_tests::constants::K_BSQ_TENSOR_X_DIMS;
+using hipdnn_tests::constants::K_BSQ_TENSOR_X_STRIDES;
+using hipdnn_tests::constants::K_BSQ_TENSOR_X_UID;
+using hipdnn_tests::constants::K_BSQ_TENSOR_Y_DIMS;
+using hipdnn_tests::constants::K_BSQ_TENSOR_Y_STRIDES;
+using hipdnn_tests::constants::K_BSQ_TENSOR_Y_UID;
 
 class TestBlockScaleQuantizeOperationDescriptor : public ::testing::Test
 {
@@ -82,13 +84,13 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<BlockScaleQuantizeOperationDescriptor>();
-        _xDesc = createFinalizedTensor(K_TENSOR_X_UID,
+        _xDesc = createFinalizedTensor(K_BSQ_TENSOR_X_UID,
                                        hipdnn_tests::toVec(K_BSQ_TENSOR_X_DIMS),
                                        hipdnn_tests::toVec(K_BSQ_TENSOR_X_STRIDES));
-        _yDesc = createFinalizedTensor(K_TENSOR_Y_UID,
+        _yDesc = createFinalizedTensor(K_BSQ_TENSOR_Y_UID,
                                        hipdnn_tests::toVec(K_BSQ_TENSOR_Y_DIMS),
                                        hipdnn_tests::toVec(K_BSQ_TENSOR_Y_STRIDES));
-        _scaleDesc = createFinalizedTensor(K_TENSOR_SCALE_UID,
+        _scaleDesc = createFinalizedTensor(K_BSQ_TENSOR_SCALE_UID,
                                            hipdnn_tests::toVec(K_BSQ_TENSOR_SCALE_DIMS),
                                            hipdnn_tests::toVec(K_BSQ_TENSOR_SCALE_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
@@ -160,7 +162,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorX)
                                        &_xDesc));
 
     // Verify UID extracted via getData()
-    ASSERT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
+    ASSERT_EQ(desc->getData().x_tensor_uid, K_BSQ_TENSOR_X_UID);
     ASSERT_NE(desc->getXDesc(), nullptr);
 }
 
@@ -172,7 +174,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorY)
                                        1,
                                        &_yDesc));
 
-    ASSERT_EQ(desc->getData().y_tensor_uid, K_TENSOR_Y_UID);
+    ASSERT_EQ(desc->getData().y_tensor_uid, K_BSQ_TENSOR_Y_UID);
     ASSERT_NE(desc->getYDesc(), nullptr);
 }
 
@@ -184,7 +186,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, SetTensorDescriptorScale)
                                        1,
                                        &_scaleDesc));
 
-    ASSERT_EQ(desc->getData().scale_tensor_uid, K_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getData().scale_tensor_uid, K_BSQ_TENSOR_SCALE_UID);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
 }
 
@@ -455,9 +457,9 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, FinalizePreservesTensorReferen
     ASSERT_NE(desc->getScaleDesc(), nullptr);
 
     // Verify UIDs match
-    ASSERT_EQ(desc->getXDesc()->getData().uid, K_TENSOR_X_UID);
-    ASSERT_EQ(desc->getYDesc()->getData().uid, K_TENSOR_Y_UID);
-    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getXDesc()->getData().uid, K_BSQ_TENSOR_X_UID);
+    ASSERT_EQ(desc->getYDesc()->getData().uid, K_BSQ_TENSOR_Y_UID);
+    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_BSQ_TENSOR_SCALE_UID);
 }
 
 // =============================================================================
@@ -471,9 +473,9 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, ToStringContainsExpectedInfo)
 
     std::string str = desc->toString();
     ASSERT_NE(str.find("BlockScaleQuantizeOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("x_uid=" + std::to_string(K_TENSOR_X_UID)), std::string::npos);
-    ASSERT_NE(str.find("y_uid=" + std::to_string(K_TENSOR_Y_UID)), std::string::npos);
-    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_TENSOR_SCALE_UID)), std::string::npos);
+    ASSERT_NE(str.find("x_uid=" + std::to_string(K_BSQ_TENSOR_X_UID)), std::string::npos);
+    ASSERT_NE(str.find("y_uid=" + std::to_string(K_BSQ_TENSOR_Y_UID)), std::string::npos);
+    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BSQ_TENSOR_SCALE_UID)), std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -488,9 +490,9 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, GetTensorDescriptorsReturnsAll
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, K_TENSOR_X_UID);
-    ASSERT_EQ(tensors[1]->getData().uid, K_TENSOR_Y_UID);
-    ASSERT_EQ(tensors[2]->getData().uid, K_TENSOR_SCALE_UID);
+    ASSERT_EQ(tensors[0]->getData().uid, K_BSQ_TENSOR_X_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_BSQ_TENSOR_Y_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_BSQ_TENSOR_SCALE_UID);
 }
 
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -510,9 +512,9 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto* attrs = node->attributes.AsBlockScaleQuantizeAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->x_tensor_uid, K_TENSOR_X_UID);
-    ASSERT_EQ(attrs->y_tensor_uid, K_TENSOR_Y_UID);
-    ASSERT_EQ(attrs->scale_tensor_uid, K_TENSOR_SCALE_UID);
+    ASSERT_EQ(attrs->x_tensor_uid, K_BSQ_TENSOR_X_UID);
+    ASSERT_EQ(attrs->y_tensor_uid, K_BSQ_TENSOR_Y_UID);
+    ASSERT_EQ(attrs->scale_tensor_uid, K_BSQ_TENSOR_SCALE_UID);
 }
 
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithHalfComputeType)
@@ -553,7 +555,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsValidGrap
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 3);
-    ASSERT_EQ(tensors[0]->getData().uid, K_TENSOR_X_UID);
+    ASSERT_EQ(tensors[0]->getData().uid, K_BSQ_TENSOR_X_UID);
 }
 
 TEST_F(TestBlockScaleQuantizeOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
