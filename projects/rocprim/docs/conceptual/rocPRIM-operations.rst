@@ -15,7 +15,6 @@ The :doc:`scope <./rocPRIM-scope>` of an operation determines whether an operati
 The following tables provide a summary of the different types of operations and what they do.
 
 
-
 +------------------------+---------------------------+-----------------------------------------------+ 
 | Type                   | Operation                 | Description                                   |
 +========================+===========================+===============================================+
