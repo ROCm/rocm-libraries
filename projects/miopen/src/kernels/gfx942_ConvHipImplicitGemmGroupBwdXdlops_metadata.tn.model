@@ -1,17 +1,16 @@
 {
-    "generated_on": "02 Mar 2026, 10:04:00",
+    "generated_on": "06 Mar 2026, 08:30:49",
     "gpu": {
-        "num_cu": 256,
-        "arch": "gfx950"
+        "num_cu": 304,
+        "arch": "gfx942"
     },
     "version_info": {
-        "miopen_version": "4d4d42e748"
+        "miopen_version": "c7fcb3c947"
     },
     "sessions": [
-        1,
-        3
+        2
     ],
-    "note": "Data merged from sessions: [1, 3]",
+    "note": "Data merged from sessions: [2]",
     "solver_name": "ConvHipImplicitGemmGroupBwdXdlops",
     "output_params": [
         "000_kernel_name",

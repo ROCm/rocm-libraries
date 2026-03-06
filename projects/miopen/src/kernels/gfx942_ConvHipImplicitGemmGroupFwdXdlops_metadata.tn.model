@@ -1,17 +1,16 @@
 {
-    "generated_on": "06 Mar 2026, 08:27:19",
+    "generated_on": "06 Mar 2026, 08:22:32",
     "gpu": {
-        "num_cu": 256,
-        "arch": "gfx950"
+        "num_cu": 304,
+        "arch": "gfx942"
     },
     "version_info": {
-        "miopen_version": "4d4d42e748"
+        "miopen_version": "c7fcb3c947"
     },
     "sessions": [
-        1,
-        3
+        2
     ],
-    "note": "Data merged from sessions: [1, 3]",
+    "note": "Data merged from sessions: [2]",
     "solver_name": "ConvHipImplicitGemmGroupFwdXdlops",
     "output_params": [
         "000_kernel_name",
@@ -165,8 +164,7 @@
             "000_kernel_name": {
                 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle": 0,
                 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3": 1,
-                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_DirectLoad": 2,
-                "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor": 3
+                "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor": 2
             },
             "005_ConvForwardSpecialization": {
                 "Default": 0,
@@ -212,8 +210,7 @@
             "000_kernel_name": {
                 "0": "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle",
                 "1": "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3",
-                "2": "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_DirectLoad",
-                "3": "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor"
+                "2": "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor"
             },
             "005_ConvForwardSpecialization": {
                 "0": "Default",
@@ -247,10 +244,7 @@
             "bias": "0",
             "direction": "F"
         },
-        "outputs": {
-            "013_CShuffleMXdlPerWavePerShuffle": "1",
-            "014_CShuffleNXdlPerWavePerShuffle": "1"
-        }
+        "outputs": {}
     },
     "missing_value_token": -1.0
 }
