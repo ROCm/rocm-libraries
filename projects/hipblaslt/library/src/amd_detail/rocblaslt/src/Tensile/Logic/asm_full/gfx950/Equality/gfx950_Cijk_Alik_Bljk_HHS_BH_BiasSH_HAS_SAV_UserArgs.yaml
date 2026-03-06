@@ -34382,7 +34382,7 @@
     StreamK: 3
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 0
+    StreamKXCCMapping: 2
     SubGroup0: 2
     SubGroup1: 128
     SubGroupA: 2
@@ -40781,7 +40781,7 @@
     StreamK: 3
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
-    StreamKXCCMapping: 0
+    StreamKXCCMapping: 4
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
