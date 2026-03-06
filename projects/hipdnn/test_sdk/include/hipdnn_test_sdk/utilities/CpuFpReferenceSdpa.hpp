@@ -64,6 +64,10 @@ if(o.dims().size() != 4)
         const auto numKvHeads = k.dims()[1];
         const auto seqKv = k.dims()[2];
         const auto headDimV = v.dims()[3];
+        if(batch <= 0 || numHeads <= 0 || seqQ <= 0 || headDim <= 0
+   || numKvHeads <= 0 || seqKv <= 0 || headDimV <= 0)
+    throw std::invalid_argument("CpuFpReferenceSdpa: all dimensions must be positive");
+
 // ===== CROSS-TENSOR CHECKS (insert HERE) =====
 if(k.dims()[0] != batch || v.dims()[0] != batch || o.dims()[0] != batch)
     throw std::invalid_argument("CpuFpReferenceSdpa: batch dimension mismatch");
