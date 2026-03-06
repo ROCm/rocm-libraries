@@ -10,7 +10,7 @@ namespace hipdnn_frontend::detail
 {
 
 // Builds a matmul operation descriptor from MatmulAttributes.
-// Tensor descriptors are created/deduplicated via createOrFindTensorDesc.
+// Tensor descriptors are created/deduplicated via ensureAndSetTensorRef.
 inline Error
     createMatmulOperation(const graph::MatmulAttributes& attributes,
                           std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,

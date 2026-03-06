@@ -13,6 +13,8 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/matmul_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/MatmulConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
@@ -24,12 +26,13 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 
 namespace
 {
-constexpr int64_t K_TENSOR_A_UID = 10;
-constexpr int64_t K_TENSOR_B_UID = 20;
-constexpr int64_t K_TENSOR_C_UID = 30;
+constexpr int64_t K_TENSOR_A_UID = K_MATMUL_TENSOR_A_UID;
+constexpr int64_t K_TENSOR_B_UID = K_MATMUL_TENSOR_B_UID;
+constexpr int64_t K_TENSOR_C_UID = K_MATMUL_TENSOR_C_UID;
 } // namespace
 
 class TestMatmulOperationDescriptor : public ::testing::Test
@@ -76,9 +79,15 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<MatmulOperationDescriptor>();
-        _aDesc = createFinalizedTensor(K_TENSOR_A_UID);
-        _bDesc = createFinalizedTensor(K_TENSOR_B_UID);
-        _cDesc = createFinalizedTensor(K_TENSOR_C_UID);
+        _aDesc = createFinalizedTensor(K_TENSOR_A_UID,
+                                       hipdnn_tests::toVec(K_MATMUL_TENSOR_A_DIMS),
+                                       hipdnn_tests::toVec(K_MATMUL_TENSOR_A_STRIDES));
+        _bDesc = createFinalizedTensor(K_TENSOR_B_UID,
+                                       hipdnn_tests::toVec(K_MATMUL_TENSOR_B_DIMS),
+                                       hipdnn_tests::toVec(K_MATMUL_TENSOR_B_STRIDES));
+        _cDesc = createFinalizedTensor(K_TENSOR_C_UID,
+                                       hipdnn_tests::toVec(K_MATMUL_TENSOR_C_DIMS),
+                                       hipdnn_tests::toVec(K_MATMUL_TENSOR_C_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
