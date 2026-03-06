@@ -18,6 +18,7 @@ set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(
     hipdnn_backend_private
     descriptors/BackendDescriptor.cpp
+    descriptors/BlockScaleQuantizeOperationDescriptor.cpp
     descriptors/EngineConfigDescriptor.cpp
     descriptors/EngineDescriptor.cpp
     descriptors/EngineHeuristicDescriptor.cpp

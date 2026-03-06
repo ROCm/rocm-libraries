@@ -34,6 +34,13 @@
  * - 1000-1099: Engine attributes
  * - 1100-1199: Kernel cache attributes
  * - 1200-1299: Device properties attributes
+ * - 1300-1399: Tensor attributes
+ * - 1400-1499: Convolution forward operation attributes
+ * - 1500-1599: Shared convolution descriptor attributes
+ * - 1600-1699: Convolution backward filter operation attributes
+ * - 1700-1799: Convolution backward data operation attributes
+ * - 1800-1899: Batchnorm inference operation attributes
+ * - 2500-2599: Block scale quantize operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -426,6 +433,35 @@ typedef enum
 
     /** @brief Compute data type for batchnorm inference */
     HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT = 1806,
+
+    /** @} */
+
+    /**
+     * @name Block Scale Quantize Operation Attributes (2500-2599)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor (X) for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT = 2500,
+
+    /** @brief Output tensor (Y) for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT = 2501,
+
+    /** @brief Scale tensor for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT = 2502,
+
+    /** @brief Block size parameter for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT = 2503,
+
+    /** @brief Axis parameter for block scale quantize (optional) */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT = 2504,
+
+    /** @brief Transpose parameter for block scale quantize */
+    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT = 2505,
+
+    /** @brief Compute data type for block scale quantize */
+    HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT = 2506,
 
     /** @} */
 

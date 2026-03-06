@@ -1,0 +1,249 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "BlockScaleQuantizeOperationDescriptor.hpp"
+#include "DescriptorAttributeUtils.hpp"
+#include "HipdnnBackendDescriptorType.h"
+#include "HipdnnException.hpp"
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+
+namespace hipdnn_backend
+{
+
+void BlockScaleQuantizeOperationDescriptor::finalize()
+{
+    THROW_IF_NULL(_xDesc,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "BlockScaleQuantizeOperationDescriptor::finalize() failed: X_EXT tensor not set");
+    THROW_IF_NULL(_yDesc,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "BlockScaleQuantizeOperationDescriptor::finalize() failed: Y_EXT tensor not set");
+    THROW_IF_NULL(
+        _scaleDesc,
+        HIPDNN_STATUS_BAD_PARAM,
+        "BlockScaleQuantizeOperationDescriptor::finalize() failed: SCALE_EXT tensor not set");
+    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "BlockScaleQuantizeOperationDescriptor::finalize() failed: compute data type not "
+                  "set");
+
+    HipdnnBackendDescriptorImpl<BlockScaleQuantizeOperationDescriptor>::finalize();
+}
+
+// ============================================================================
+// setAttribute
+// ============================================================================
+
+void BlockScaleQuantizeOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
+                                                         hipdnnBackendAttributeType_t attributeType,
+                                                         int64_t elementCount,
+                                                         const void* arrayOfElements)
+{
+    THROW_IF_TRUE(
+        isFinalized(),
+        HIPDNN_STATUS_NOT_INITIALIZED,
+        "BlockScaleQuantizeOperationDescriptor::setAttribute() failed: Already finalized.");
+
+    switch(attributeName)
+    {
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT:
+        setTensorDescriptor(_xDesc,
+                            _data.x_tensor_uid,
+                            attributeType,
+                            elementCount,
+                            arrayOfElements,
+                            "BlockScaleQuantizeOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT:
+        setTensorDescriptor(_yDesc,
+                            _data.y_tensor_uid,
+                            attributeType,
+                            elementCount,
+                            arrayOfElements,
+                            "BlockScaleQuantizeOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT:
+        setTensorDescriptor(_scaleDesc,
+                            _data.scale_tensor_uid,
+                            attributeType,
+                            elementCount,
+                            arrayOfElements,
+                            "BlockScaleQuantizeOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT:
+    {
+        int64_t blockSizeInt64 = 0;
+        setScalar(blockSizeInt64,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "BlockScaleQuantizeOperationDescriptor::setAttribute()");
+        _data.block_size = static_cast<int32_t>(blockSizeInt64);
+        break;
+    }
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT:
+    {
+        int64_t axisInt64 = 0;
+        setScalar(axisInt64,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "BlockScaleQuantizeOperationDescriptor::setAttribute()");
+        _data.axis = axisInt64;
+        break;
+    }
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT:
+        setScalar(_data.transpose,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "BlockScaleQuantizeOperationDescriptor::setAttribute()");
+        break;
+    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT:
+        setDataType(_computeDataType,
+                    attributeType,
+                    elementCount,
+                    arrayOfElements,
+                    "BlockScaleQuantizeOperationDescriptor::setAttribute()");
+        break;
+    default:
+        throw HipdnnException(
+            HIPDNN_STATUS_NOT_SUPPORTED,
+            "BlockScaleQuantizeOperationDescriptor::setAttribute: attributeName not "
+            "supported");
+    }
+}
+
+// ============================================================================
+// getAttribute
+// ============================================================================
+
+void BlockScaleQuantizeOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
+                                                         hipdnnBackendAttributeType_t attributeType,
+                                                         int64_t requestedElementCount,
+                                                         int64_t* elementCount,
+                                                         void* arrayOfElements) const
+{
+    THROW_IF_FALSE(isFinalized(),
+                   HIPDNN_STATUS_NOT_INITIALIZED,
+                   "BlockScaleQuantizeOperationDescriptor::getAttribute() failed: Not finalized.");
+
+    switch(attributeName)
+    {
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_X_EXT:
+        getTensorDescriptor(_xDesc,
+                            attributeType,
+                            requestedElementCount,
+                            elementCount,
+                            arrayOfElements,
+                            "BlockScaleQuantizeOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_Y_EXT:
+        getTensorDescriptor(_yDesc,
+                            attributeType,
+                            requestedElementCount,
+                            elementCount,
+                            arrayOfElements,
+                            "BlockScaleQuantizeOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_SCALE_EXT:
+        getTensorDescriptor(_scaleDesc,
+                            attributeType,
+                            requestedElementCount,
+                            elementCount,
+                            arrayOfElements,
+                            "BlockScaleQuantizeOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_BLOCK_SIZE_EXT:
+    {
+        int64_t blockSizeInt64 = static_cast<int64_t>(_data.block_size);
+        getScalar(blockSizeInt64,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "BlockScaleQuantizeOperationDescriptor::getAttribute()");
+        break;
+    }
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT:
+    {
+        int64_t axisInt64 = _data.axis.has_value() ? _data.axis.value() : 0;
+        getScalar(axisInt64,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "BlockScaleQuantizeOperationDescriptor::getAttribute()");
+        break;
+    }
+    case HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_TRANSPOSE_EXT:
+        getScalar(_data.transpose,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "BlockScaleQuantizeOperationDescriptor::getAttribute()");
+        break;
+    case HIPDNN_ATTR_BLOCK_SCALE_QUANTIZE_COMP_TYPE_EXT:
+        getDataType(_computeDataType,
+                    attributeType,
+                    requestedElementCount,
+                    elementCount,
+                    arrayOfElements,
+                    "BlockScaleQuantizeOperationDescriptor::getAttribute()");
+        break;
+    default:
+        throw HipdnnException(
+            HIPDNN_STATUS_NOT_SUPPORTED,
+            "BlockScaleQuantizeOperationDescriptor::getAttribute: attributeName not "
+            "supported");
+    }
+}
+
+// ============================================================================
+// Other methods
+// ============================================================================
+
+std::vector<std::shared_ptr<TensorDescriptor>>
+    BlockScaleQuantizeOperationDescriptor::getTensorDescriptors() const
+{
+    return {_xDesc, _yDesc, _scaleDesc};
+}
+
+std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+    BlockScaleQuantizeOperationDescriptor::buildNode() const
+{
+    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    node->compute_data_type = _computeDataType;
+    node->attributes.Set(hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributesT(_data));
+    return node;
+}
+
+hipdnnBackendDescriptorType_t BlockScaleQuantizeOperationDescriptor::getStaticType()
+{
+    return HIPDNN_BACKEND_OPERATION_BLOCK_SCALE_QUANTIZE_DESCRIPTOR_EXT;
+}
+
+std::string BlockScaleQuantizeOperationDescriptor::toString() const
+{
+    using hipdnn_data_sdk::utilities::vecToString;
+    std::string str = "BlockScaleQuantizeOperationDescriptor: {";
+    str += "x_uid=" + std::to_string(_data.x_tensor_uid);
+    str += ", y_uid=" + std::to_string(_data.y_tensor_uid);
+    str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
+    str += ", block_size=" + std::to_string(_data.block_size);
+    str += ", axis=" + (_data.axis.has_value() ? std::to_string(_data.axis.value()) : "null");
+    str += ", transpose=" + std::to_string(_data.transpose);
+    str += ", compute_data_type=";
+    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += "}";
+    return str;
+}
+
+} // namespace hipdnn_backend

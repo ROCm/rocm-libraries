@@ -25,6 +25,7 @@ set(TEST_ENGINE_PLUGIN1_NAME "hipdnn_test_engine_plugin1")
 add_executable(
     hipdnn_backend_tests
     descriptors/TestBackendDescriptor.cpp
+    descriptors/TestBlockScaleQuantizeOperationDescriptor.cpp
     descriptors/TestDescriptorFactory.cpp
     descriptors/TestEngineConfigDescriptor.cpp
     descriptors/TestEngineDescriptor.cpp
@@ -39,6 +40,7 @@ add_executable(
     descriptors/TestGraphDescriptorBatchnormInference.cpp
     descriptors/TestKnobSettingDescriptor.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBlockScaleQuantize.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestGraphDescriptorOps.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
