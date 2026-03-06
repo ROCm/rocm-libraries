@@ -1087,7 +1087,7 @@ namespace TensileLite
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
-            bool m_enableMXPreSwizzle = false;
+            int m_mxScaleFormat = 0;
         };
 
         template <>

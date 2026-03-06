@@ -217,9 +217,9 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
   iniFile = "--config-file={}".format(clientParametersPath)
   args = [clientExe, iniFile]
 
-  # Add MX PreSwizzle flag if enabled
-  if globalParameters["EnableMXPreSwizzle"]:
-    args.append("--enable-mx-preswizzle")
+  # Add MX scale format if set
+  if globalParameters["MXScaleFormat"]:
+    args.append("--mx-scale-format={}".format(globalParameters["MXScaleFormat"]))
 
   try:
     subprocess.run(args, check=True)
@@ -323,9 +323,9 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
 
     clientExe = getClientExecutablePath()
     timingFlag = " --timing-instrumentation" if globalParameters["TimingInstrumentation"] else ""
-    mxPreSwizzleFlag = " --enable-mx-preswizzle" if globalParameters["EnableMXPreSwizzle"] else ""
+    mxScaleFormatFlag = " --mx-scale-format={}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {}{}\n".format(clientExe, configFile, timingFlag, mxPreSwizzleFlag))
+      runScriptFile.write("{} --config-file {}{}{}\n".format(clientExe, configFile, timingFlag, mxScaleFormatFlag))
     runScriptFile.write("ERR2=$?\n\n")
 
     runScriptFile.write("""
@@ -347,9 +347,9 @@ fi
         runScriptFile.write("%s -d 0 --resetclocks\n" % globalParameters["ROCmSMIPath"])
         runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
   else:
-    mxPreSwizzleFlag = " --enable-mx-preswizzle" if globalParameters["EnableMXPreSwizzle"] else ""
+    mxScaleFormatFlag = " --mx-scale-format={}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxPreSwizzleFlag))
+      runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")
