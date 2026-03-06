@@ -36,6 +36,18 @@ function(get_cu_count cu_count_arg)
             message(FATAL_ERROR "Compilation of ${CPP_FILE_PATH} failed.\n")
         endif()
 
+        # Get the HIP library directory
+        get_filename_component(HIP_COMPILER_DIR ${CMAKE_HIP_COMPILER} DIRECTORY)
+        get_filename_component(HIP_ROOT_DIR ${HIP_COMPILER_DIR} DIRECTORY)
+        set(HIP_LIB_DIR "${HIP_ROOT_DIR}/lib")
+
+        # Set library path for runtime execution
+        if(WIN32)
+            set(ENV{PATH} "${HIP_LIB_DIR};$ENV{PATH}")
+        else()
+            set(ENV{LD_LIBRARY_PATH} "${HIP_LIB_DIR}:$ENV{LD_LIBRARY_PATH}")
+        endif()
+
         execute_process(
             COMMAND ${CPP_EXE_PATH}
             OUTPUT_STRIP_TRAILING_WHITESPACE
