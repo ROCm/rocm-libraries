@@ -85,6 +85,8 @@ public:
             return typeid(hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt);
         case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
             return typeid(hipdnn_data_sdk::data_objects::BlockScaleDequantizeAttributes);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+            return typeid(hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
             return typeid(hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
