@@ -1080,7 +1080,11 @@ std::string SdpaFpropOperationDescriptor::toString() const
         return opt.has_value() ? std::to_string(*opt) : "null";
     };
     auto optBoolStr = [](const ::flatbuffers::Optional<bool>& opt) -> std::string {
-        return opt.has_value() ? (*opt ? "true" : "false") : "null";
+        if(!opt.has_value())
+        {
+            return "null";
+        }
+        return *opt ? "true" : "false";
     };
     auto optFloatStr = [](const ::flatbuffers::Optional<float>& opt) -> std::string {
         return opt.has_value() ? std::to_string(*opt) : "null";
@@ -1113,10 +1117,14 @@ std::string SdpaFpropOperationDescriptor::toString() const
     str += ", amax_s_uid=" + optInt64Str(_data.amax_s_tensor_uid);
     str += ", amax_o_uid=" + optInt64Str(_data.amax_o_tensor_uid);
     str += ", generate_stats=" + optBoolStr(_data.generate_stats);
-    str += ", alibi_mask=" + std::to_string(_data.alibi_mask);
-    str += ", padding_mask=" + std::to_string(_data.padding_mask);
-    str += ", causal_mask=" + std::to_string(_data.causal_mask);
-    str += ", causal_mask_bottom_right=" + std::to_string(_data.causal_mask_bottom_right);
+    str += ", alibi_mask=";
+    str += _data.alibi_mask ? "true" : "false";
+    str += ", padding_mask=";
+    str += _data.padding_mask ? "true" : "false";
+    str += ", causal_mask=";
+    str += _data.causal_mask ? "true" : "false";
+    str += ", causal_mask_bottom_right=";
+    str += _data.causal_mask_bottom_right ? "true" : "false";
     str += ", dropout_probability=" + optFloatStr(_data.dropout_probability);
     str += ", attn_scale_value=" + optFloatStr(_data.attn_scale_value);
     str += ", left_bound=" + optInt64Str(_data.left_bound);

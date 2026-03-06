@@ -199,7 +199,7 @@ inline Error createSdpaFpropOperation(
     }
     if(attributes.max_seq_len_kv.has_value())
     {
-        int64_t val = static_cast<int64_t>(attributes.max_seq_len_kv.value());
+        auto val = static_cast<int64_t>(attributes.max_seq_len_kv.value());
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT,
                                                    HIPDNN_TYPE_INT64,

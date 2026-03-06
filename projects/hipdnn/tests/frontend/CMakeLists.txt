@@ -10,20 +10,20 @@ add_executable(
     main.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
+    IntegrationBatchnormInferenceDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleQuantize.cpp
     IntegrationConvForward.cpp
+    IntegrationConvFpropDescriptorLowering.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
+    IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
-    IntegrationConvFpropDescriptorLowering.cpp
-    IntegrationMatmul.cpp
-    IntegrationConvolutionWgradDescriptorLowering.cpp
-    IntegrationBatchnormInferenceDescriptorLowering.cpp
-    IntegrationConvolutionDgradDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
+    IntegrationMatmul.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
