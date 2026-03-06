@@ -14,6 +14,18 @@
 
 using namespace hipdnn_data_sdk::types;
 
+namespace
+{
+// E8M0 bit patterns for test values
+constexpr uint8_t E8M0_BITS_HALF = 0x7E; // 2^-1 = 0.5
+constexpr uint8_t E8M0_BITS_ONE = 0x7F; // 2^0  = 1.0
+constexpr uint8_t E8M0_BITS_TWO = 0x80; // 2^1  = 2.0
+constexpr uint8_t E8M0_BITS_FOUR = 0x81; // 2^2  = 4.0
+constexpr uint8_t E8M0_BITS_MIN = 0x00; // 2^-127 (minimum positive value)
+constexpr uint8_t E8M0_BITS_MAX = 0xFE; // 2^127 (maximum value)
+constexpr uint8_t E8M0_BITS_NAN = 0xFF; // NaN
+} // anonymous namespace
+
 // ============================================================================
 // Construction Tests
 // ============================================================================
@@ -21,62 +33,54 @@ using namespace hipdnn_data_sdk::types;
 TEST(TestFp8E8M0, DefaultConstruction)
 {
     fp8_e8m0 val;
-    EXPECT_EQ(val.data, 0);
+    EXPECT_EQ(val.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, ConstructFromFloat)
 {
-    // 0.5 = 2^-1, exponent = 126 = 0x7E
     fp8_e8m0 half(0.5f);
-    EXPECT_EQ(half.data, 0x7E);
+    EXPECT_EQ(half.data, E8M0_BITS_HALF);
 
-    // 1.0 = 2^0, exponent = 127 = 0x7F
     fp8_e8m0 one(1.0f);
-    EXPECT_EQ(one.data, 0x7F);
+    EXPECT_EQ(one.data, E8M0_BITS_ONE);
 
-    // 2.0 = 2^1, exponent = 128 = 0x80
     fp8_e8m0 two(2.0f);
-    EXPECT_EQ(two.data, 0x80);
+    EXPECT_EQ(two.data, E8M0_BITS_TWO);
 
-    // 4.0 = 2^2, exponent = 129 = 0x81
     fp8_e8m0 four(4.0f);
-    EXPECT_EQ(four.data, 0x81);
+    EXPECT_EQ(four.data, E8M0_BITS_FOUR);
 }
 
 TEST(TestFp8E8M0, ConstructFromDouble)
 {
-    // 1.0 = 2^0, exponent = 127 = 0x7F
     fp8_e8m0 one(1.0);
-    EXPECT_EQ(one.data, 0x7F);
+    EXPECT_EQ(one.data, E8M0_BITS_ONE);
 }
 
 TEST(TestFp8E8M0, ConstructFromIntegral)
 {
-    // 1 = 2^0, exponent = 127 = 0x7F
     fp8_e8m0 one(1);
-    EXPECT_EQ(one.data, 0x7F);
+    EXPECT_EQ(one.data, E8M0_BITS_ONE);
 
-    // 4 = 2^2, exponent = 129 = 0x81
     fp8_e8m0 four(4);
-    EXPECT_EQ(four.data, 0x81);
+    EXPECT_EQ(four.data, E8M0_BITS_FOUR);
 
-    // Negative values clamp to min (2^-127)
+    // Negative values clamp to min
     fp8_e8m0 negVal(-4);
-    EXPECT_EQ(negVal.data, 0x00);
+    EXPECT_EQ(negVal.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, FromBits)
 {
-    // 0x7F = exponent 127 = 2^0 = 1.0
-    fp8_e8m0 one = fp8_e8m0::from_bits(0x7F);
+    fp8_e8m0 one = fp8_e8m0::from_bits(E8M0_BITS_ONE);
     EXPECT_EQ(static_cast<float>(one), 1.0f);
 
     // scale=0 is 2^-127, NOT zero
     fp8_e8m0 minVal = fp8_e8m0::from_bits(0x00);
     EXPECT_EQ(static_cast<float>(minVal), 0x1p-127f);
 
-    // 0xFF = NaN
-    fp8_e8m0 nan = fp8_e8m0::from_bits(0xFF);
+    // NaN
+    fp8_e8m0 nan = fp8_e8m0::from_bits(E8M0_BITS_NAN);
     EXPECT_TRUE(isnan(nan));
 }
 
@@ -143,76 +147,76 @@ TEST(TestFp8E8M0, NonPowerOfTwoRounding)
 
 TEST(TestFp8E8M0, MinimumValue)
 {
-    // E8M0 has no zero - scale=0 represents 2^-127
+    // E8M0 has no zero - scale=0 represents min
     fp8_e8m0 minVal = fp8_e8m0::from_bits(0x00);
-    EXPECT_EQ(minVal.data, 0);
+    EXPECT_EQ(minVal.data, E8M0_BITS_MIN);
     EXPECT_EQ(static_cast<float>(minVal), 0x1p-127f);
 }
 
 TEST(TestFp8E8M0, NaNValue)
 {
-    fp8_e8m0 nan = fp8_e8m0::from_bits(0xFF);
+    fp8_e8m0 nan = fp8_e8m0::from_bits(E8M0_BITS_NAN);
     EXPECT_TRUE(isnan(nan));
 }
 
 TEST(TestFp8E8M0, Signbit)
 {
     // E8M0 is unsigned - signbit always returns false
-    EXPECT_FALSE(signbit(fp8_e8m0::from_bits(0x00)));
-    EXPECT_FALSE(signbit(fp8_e8m0::from_bits(0xFE)));
-    EXPECT_FALSE(signbit(fp8_e8m0::from_bits(0xFF))); // even NaN
+    EXPECT_FALSE(signbit(fp8_e8m0::from_bits(E8M0_BITS_MIN)));
+    EXPECT_FALSE(signbit(fp8_e8m0::from_bits(E8M0_BITS_MAX)));
+    EXPECT_FALSE(signbit(fp8_e8m0::from_bits(E8M0_BITS_NAN))); // even NaN
 }
 
 TEST(TestFp8E8M0, Isinf)
 {
     // E8M0 has no infinity - isinf always returns false
-    EXPECT_FALSE(isinf(fp8_e8m0::from_bits(0x00)));
-    EXPECT_FALSE(isinf(fp8_e8m0::from_bits(0xFE)));
-    EXPECT_FALSE(isinf(fp8_e8m0::from_bits(0xFF))); // NaN is not infinity
+    EXPECT_FALSE(isinf(fp8_e8m0::from_bits(E8M0_BITS_MIN)));
+    EXPECT_FALSE(isinf(fp8_e8m0::from_bits(E8M0_BITS_MAX)));
+    EXPECT_FALSE(isinf(fp8_e8m0::from_bits(E8M0_BITS_NAN))); // NaN is not infinity
 }
 
 TEST(TestFp8E8M0, Isfinite)
 {
     // isfinite returns true for all values except NaN
-    EXPECT_TRUE(isfinite(fp8_e8m0::from_bits(0x00)));
-    EXPECT_TRUE(isfinite(fp8_e8m0::from_bits(0xFE)));
-    EXPECT_FALSE(isfinite(fp8_e8m0::from_bits(0xFF))); // NaN
+    EXPECT_TRUE(isfinite(fp8_e8m0::from_bits(E8M0_BITS_MIN)));
+    EXPECT_TRUE(isfinite(fp8_e8m0::from_bits(E8M0_BITS_MAX)));
+    EXPECT_FALSE(isfinite(fp8_e8m0::from_bits(E8M0_BITS_NAN))); // NaN
 }
 
 TEST(TestFp8E8M0, NegativeValuesClampToMin)
 {
-    // E8M0 has no zero - negative values clamp to min (2^-127)
+    // E8M0 has no zero - negative values clamp to min
     fp8_e8m0 neg(-1.0f);
-    EXPECT_EQ(neg.data, 0x00);
+    EXPECT_EQ(neg.data, E8M0_BITS_MIN);
 
     fp8_e8m0 negLarge(-1000.0f);
-    EXPECT_EQ(negLarge.data, 0x00);
+    EXPECT_EQ(negLarge.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, ZeroClampedToMin)
 {
-    // E8M0 has no zero representation - 0.0f clamps to min (2^-127)
+    // E8M0 has no zero representation - 0.0f clamps to min
     fp8_e8m0 zero(0.0f);
-    EXPECT_EQ(zero.data, 0x00);
+    EXPECT_EQ(zero.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, InfinityClampedToMax)
 {
     fp8_e8m0 posInf(std::numeric_limits<float>::infinity());
-    EXPECT_EQ(posInf.data, 0xFE); // Max finite value
+    EXPECT_EQ(posInf.data, E8M0_BITS_MAX); // Max value
 }
 
 TEST(TestFp8E8M0, NegativeInfinityClampedToMin)
 {
-    // E8M0 is unsigned - negative infinity clamps to min (2^-127)
+    // E8M0 is unsigned - negative infinity clamps to min
     fp8_e8m0 negInf(-std::numeric_limits<float>::infinity());
-    EXPECT_EQ(negInf.data, 0x00);
+    EXPECT_EQ(negInf.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, NaNFromFloat)
 {
     fp8_e8m0 nan(std::numeric_limits<float>::quiet_NaN());
-    EXPECT_EQ(nan.data, 0xFF);
+    EXPECT_EQ(nan.data, E8M0_BITS_NAN);
     EXPECT_TRUE(isnan(nan));
 }
 
@@ -223,7 +227,7 @@ TEST(TestFp8E8M0, NaNFromFloat)
 TEST(TestFp8E8M0, MaximumValue)
 {
     // Maximum value: exponent = 254, value = 2^(254-127) = 2^127
-    fp8_e8m0 maxVal = fp8_e8m0::from_bits(0xFE);
+    fp8_e8m0 maxVal = fp8_e8m0::from_bits(E8M0_BITS_MAX);
     EXPECT_EQ(static_cast<float>(maxVal), 0x1p127f);
 }
 
@@ -270,26 +274,26 @@ TEST(TestFp8E8M0, NumericLimitsNaN)
 {
     fp8_e8m0 nan = std::numeric_limits<fp8_e8m0>::quiet_NaN();
     EXPECT_TRUE(isnan(nan));
-    EXPECT_EQ(nan.data, 0xFF);
+    EXPECT_EQ(nan.data, E8M0_BITS_NAN);
 }
 
 TEST(TestFp8E8M0, NumericLimitsMax)
 {
     fp8_e8m0 maxVal = std::numeric_limits<fp8_e8m0>::max();
-    EXPECT_EQ(maxVal.data, 0xFE);
+    EXPECT_EQ(maxVal.data, E8M0_BITS_MAX);
 }
 
 TEST(TestFp8E8M0, NumericLimitsMin)
 {
     // min() is the smallest positive value: scale=0 = 2^-127
     fp8_e8m0 minVal = std::numeric_limits<fp8_e8m0>::min();
-    EXPECT_EQ(minVal.data, 0x00);
+    EXPECT_EQ(minVal.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, NumericLimitsLowest)
 {
     fp8_e8m0 lowestVal = std::numeric_limits<fp8_e8m0>::lowest();
-    EXPECT_EQ(lowestVal.data, 0x00);
+    EXPECT_EQ(lowestVal.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, LowestEqualsMin)
@@ -311,7 +315,7 @@ TEST(TestFp8E8M0, NumericLimitsEpsilon)
 {
     // E8M0 epsilon = 1.0 (smallest difference at 1.0 is to 2.0)
     fp8_e8m0 eps = std::numeric_limits<fp8_e8m0>::epsilon();
-    EXPECT_EQ(eps.data, 0x7F); // scale=127 = 1.0
+    EXPECT_EQ(eps.data, E8M0_BITS_ONE); // scale=127 = 1.0
     EXPECT_EQ(static_cast<float>(eps), 1.0f);
 }
 
@@ -328,7 +332,7 @@ TEST(TestFp8E8M0, NumericLimitsSignalingNaN)
     // E8M0 has only one NaN representation
     fp8_e8m0 snan = std::numeric_limits<fp8_e8m0>::signaling_NaN();
     EXPECT_TRUE(isnan(snan));
-    EXPECT_EQ(snan.data, 0xFF);
+    EXPECT_EQ(snan.data, E8M0_BITS_NAN);
 }
 
 // ============================================================================
