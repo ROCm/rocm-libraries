@@ -29,6 +29,7 @@ add_library(
     descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
+    descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/DescriptorAttributeUtils.cpp
     descriptors/DataTypeConversion.cpp
     descriptors/VariantDescriptor.cpp
