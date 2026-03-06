@@ -88,7 +88,12 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
                             OutDataType* output,
                             const ck_tile::stream_config s_conf)
 {
-    using Conv       = std::remove_reference_t<decltype(conv)>;
+    using Conv              = std::remove_reference_t<decltype(conv)>;
+    using ElementwiseOp     = std::remove_reference_t<decltype(elementwise_op)>;
+    using WorkspaceDataType = typename ElementwiseOp::ComputeDataType;
+    using CDataType         = typename ElementwiseOp::YDataType;
+    using BlockShape        = typename ElementwiseOp::Problem::BlockShape;
+
     const auto param = args.to_ck_tile_conv_param();
 
     ck_tile::GroupedConvHostArgs<InDataType*, WeiDataType*, OutDataType*, ck_tile::PassThrough>
@@ -113,11 +118,6 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
     if(!Conv::IsSupportedArgument(kargs))
         return RunResult::not_supported("unsupported ck_tile arguments");
 
-    using ElementWiseKernel = std::remove_cv_t<decltype(elemenwise_op)>;
-    using WorkspaceDataType = ElementwiseKernel::ComputeDataType;
-    using CDataType = ElementwiseKernel::YDataType;
-    using BlockShape = ElementwiseKernel::Problem::BlockShape;
-
     ck_tile::index_t total_elements     = 1;
     std::vector<ck_tile::index_t> shape = {
         static_cast<ck_tile::index_t>(host_args.G_ * host_args.K_),
@@ -126,7 +126,7 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
     for(auto d : shape)
         total_elements *= d;
 
-    const ck_tile::index_t kBlockSize = ElementwiseKernel::BlockSize();
+    const ck_tile::index_t kBlockSize = ElementwiseOp::BlockSize();
 
     constexpr ck_tile::index_t elements_per_block = BlockShape::kBlockM;
     ck_tile::index_t kGridSize = (total_elements + elements_per_block - 1) / elements_per_block;
@@ -135,7 +135,7 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
     auto input_size    = ck_tile::make_tuple(shape[0], shape[1]);
 
     // Check if the kernel configuration is supported
-    if(!ElementwiseKernel::IsSupportedArgument(input_size))
+    if(!ElementwiseOp::IsSupportedArgument(input_size))
     {
         return RunResult::not_supported("unsupported ck_tile arguments for elementwise op");
     }
@@ -149,7 +149,7 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
                     hipMemsetAsync(ws_args.wei_ptr,
                                    0,
                                    shape[0] * shape[1] * sizeof(WorkspaceDataType),
-                                   s.stream_id_));
+                                   s_conf.stream_id_));
             }
         }
     };
@@ -157,21 +157,22 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
     constexpr index_t minimum_occupancy =
         Conv::GemmPipeline::Scheduler == ck_tile::GemmPipelineScheduler::Intrawave ? 1 : 2;
 
-    return RunResult::from_runtime(ck_tile::launch_kernel_time_mask(
-        s_conf,
-        preprocess,
-        ck_tile::make_kernel<minimum_occupancy>(conv, grids, blocks, 0, kargs)),
-        ck_tile::make_kernel<minimum_occupancy>(
-                elementwise_op,
-                kGridSize,
-                kBlockSize,
-                0,
-                input_size,
-                ck_tile::make_tuple(shape[1], 1), // Input Stride
-                ck_tile::make_tuple(shape[1], 1), // Output Stride
-                input_tensors,
-                static_cast<CDataType*>(c_ptr))
-    );
+    return RunResult::from_runtime(
+        ck_tile::launch_kernel_time_mask(
+            s_conf,
+            preprocess,
+            ck_tile::make_kernel<minimum_occupancy>(conv, grids, blocks, 0, kargs),
+            ck_tile::make_kernel<minimum_occupancy>(
+                    elementwise_op,
+                    kGridSize,
+                    kBlockSize,
+                    0,
+                    input_size,
+                    ck_tile::make_tuple(shape[1], 1), // Input Stride
+                    ck_tile::make_tuple(shape[1], 1), // Output Stride
+                    input_tensors,
+                    static_cast<CDataType*>(c_ptr))
+    ));
 }
 
 } // namespace detail
