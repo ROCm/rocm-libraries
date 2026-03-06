@@ -10,7 +10,6 @@
 #include "ck_tile/utility/json_dump.hpp"
 
 #include <array>
-#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <cmath>
@@ -1368,7 +1367,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         return fmha_fwd(fmha_traits, fmha_args, sc);
     };
 
-    float fwd_ave_time = run_fwd(stream_config);
+    const float fwd_ave_time = run_fwd(stream_config);
     if(fwd_ave_time < 0.0f)
     {
         std::cout << ", not supported yet" << std::flush << std::endl;
