@@ -2049,6 +2049,18 @@ public:
         return {y, invRmsOut};
     }
 
+    /** @brief Block-scale dequantization
+     *
+     * Dequantizes a blocked low-precision tensor using per-block scale factors.
+     * Supports MX blocked data-types (mxfp8, mxbfp8, mxfp6, mxfp4).
+     *
+     * @param x Input blocked tensor to dequantize
+     * @param scale Scale tensor for block dequantization
+     * @param attributes Configuration: block_size, is_negative_scale
+     * @return y: Dequantized output tensor
+     *
+     * @see BlockScaleDequantizeAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::shared_ptr<TensorAttributes>
         block_scale_dequantize(std::shared_ptr<TensorAttributes> x,
@@ -2073,6 +2085,18 @@ public:
         return y;
     }
 
+    /** @brief Block-scale quantization
+     *
+     * Quantizes an input tensor into a blocked low-precision representation
+     * with per-block scale factors. Supports MX blocked data-types
+     * (mxfp8, mxbfp8, mxfp6, mxfp4).
+     *
+     * @param x Input tensor to quantize
+     * @param attributes Configuration: block_size, axis, transpose
+     * @return [y, scale]: Quantized output tensor and computed scale tensor
+     *
+     * @see BlockScaleQuantizeAttributes
+     */
     // NOLINTBEGIN(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2>
         block_scale_quantize(std::shared_ptr<TensorAttributes> x,
@@ -2268,6 +2292,26 @@ public:
         return c;
     }
 
+    /** @brief Scaled dot-product attention forward pass
+     *
+     * Computes scaled dot-product attention:
+     * @code
+     * Attention(Q, K, V) = softmax(Q * K^T / sqrt(d_k)) * V
+     * @endcode
+     *
+     * Supports optional causal masking, attention bias, dropout, paged
+     * attention, and FP8 quantization via descale/scale tensors.
+     *
+     * @param q Query tensor [B, H, S_q, D]
+     * @param k Key tensor [B, H, S_kv, D]
+     * @param v Value tensor [B, H, S_kv, D]
+     * @param attributes Configuration: masking, dropout, attention scale,
+     *        paged attention, and other SDPA options
+     * @return [o, stats]: Output tensor [B, H, S_q, D] and optional softmax
+     *         statistics (nullptr if generate_stats is not set)
+     *
+     * @see SdpaAttributes
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2> sdpa(std::shared_ptr<TensorAttributes> q,
                                                           std::shared_ptr<TensorAttributes> k,
