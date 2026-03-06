@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -40,8 +40,6 @@
 #include "RunListener.hpp"
 
 #include <mxDataGen.hpp>
-
-namespace po = boost::program_options;
 
 namespace TensileLite
 {
