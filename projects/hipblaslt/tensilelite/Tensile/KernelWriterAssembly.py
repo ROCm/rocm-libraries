@@ -12373,7 +12373,7 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("SrdTDInit")
     tmpspgr0 = self.sgprPool.checkOut(1)
     tmpspgr1 = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
-
+    tmpspgr2 = self.sgprPool.checkOutAligned(2, 4, preventOverflow=False)
     module.addComment0("calculate SrdTD address")
 
     module.add(SMovB32(dst=sgpr("SrdTD+2"), src="BufferOOB"))
@@ -12386,6 +12386,12 @@ class KernelWriterAssembly(KernelWriter):
     bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) # self.states.bpeCinternal
     module.add(SLShiftLeftB64(dst=sgpr(tmpspgr1,2), src=sgpr(tmpspgr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
 
+    SrdTDGeneralBatched = Label(label="SrdTDInit_GeneralBatched", comment="")
+    SrdTDGeneralBatched_End = Label(label="SrdTDInit_GeneralBatched_End", comment="")
+
+    module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=3, comment="ArgType == 3 for General Batched GEMM"))
+    module.add(SCBranchSCC1(labelName=SrdTDGeneralBatched.getLabelName(), comment="Initializing General Batched GEMM SrdTD differently"))
+
     module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("AddressTD+0"), src1=sgpr(tmpspgr1+0), comment="add lo to SRTD" ))
     module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("AddressTD+1"), src1=sgpr(tmpspgr1+1), comment="add hi to SRTD" ))
 
@@ -12393,12 +12399,20 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMulI32(dst=sgpr(tmpspgr1+0), src0=sgpr("WorkGroup2"), src1=sgpr("StrideDK"), comment=""))
 
     module.add(SLShiftLeftB64(dst=sgpr(tmpspgr1,2), src=sgpr(tmpspgr1,2), shiftHex=log2(bpe), comment="scale by bpe"))
-
+    module.add(SBranch(labelName=SrdTDGeneralBatched_End.getLabelName()))
+    module.add(SrdTDGeneralBatched)
+    module.add(SMulI32(dst=sgpr(tmpspgr2+0), src0="BpeAddress", src1=sgpr("WorkGroup2"), comment="Compute stride in bytes into Pointer Array"))
+    module.add(SAddU32(dst=sgpr(tmpspgr2+0), src0=sgpr(tmpspgr2+0), src1=sgpr("AddressTD+0"), comment="Offsetting to the location [Lower half of address]"))
+    module.add(SAddCU32(dst=sgpr(tmpspgr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
+    module.add(SMemLoadInstruction(instType=InstType.INST_B64, dst=sgpr("SrdTD", 2), base=sgpr(tmpspgr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
+    module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+    module.add(SrdTDGeneralBatched_End)
     module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpspgr1+0), comment="add lo to SRTD" ))
     module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpspgr1+1), comment="add hi to SRTD" ))
 
     self.sgprPool.checkIn(tmpspgr0)
     self.sgprPool.checkIn(tmpspgr1)
+    self.sgprPool.checkIn(tmpspgr2)
 
     return module
 
