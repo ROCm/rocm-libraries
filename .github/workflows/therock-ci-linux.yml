@@ -124,8 +124,8 @@ jobs:
           EXTRA_OPTS="-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           PROJECT_KEY="$(echo "${{inputs.projects_to_test  }}" | tr '[:lower:]' '[:upper:]')"
           if [[ "${{ inputs.test_type }}" == "coverage" ]]; then
-            EXTRA_OPTS="${EXTRA_OPTS} -D${PROJECT_KEY_UPPER}_ENABLE_COVERAGE=ON"
-            echo "Coverage enabled for ${PROJECT_KEY_UPPER}: ${EXTRA_OPTS}"
+            EXTRA_OPTS="${EXTRA_OPTS} -D${PROJECT_KEY}_ENABLE_COVERAGE=ON"
+            echo "Coverage enabled for ${PROJECT_KEY}: ${EXTRA_OPTS}"
           fi
           export extra_cmake_options="${EXTRA_OPTS}"
           python3 TheRock/build_tools/github_actions/build_configure.py
@@ -221,7 +221,7 @@ jobs:
 
   therock-test-coverage:
     name: Code Coverage
-    if: ${{ inputs.test_type == 'coverage' }}
+    if: ${{ inputs.test_type == 'coverage' && inputs.amdgpu_families != 'gfx950-dcgpu'}}
     needs: [therock-build-linux]
     runs-on: ubuntu-latest
 
