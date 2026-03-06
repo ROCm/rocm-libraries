@@ -34,6 +34,13 @@
  * - 1000-1099: Engine attributes
  * - 1100-1199: Kernel cache attributes
  * - 1200-1299: Device properties attributes
+ * - 1300-1399: Tensor attributes
+ * - 1400-1499: Convolution forward operation attributes
+ * - 1500-1599: Shared convolution descriptor attributes
+ * - 1600-1699: Convolution backward filter operation attributes
+ * - 1700-1799: Convolution backward operation attributes
+ * - 1800-1899: Batchnorm inference operation attributes
+ * - 1900-1999: SDPA forward propagation operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum

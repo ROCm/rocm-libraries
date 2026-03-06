@@ -467,7 +467,8 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                   elementCount,
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.max_seq_len_kv = static_cast<int32_t>(val);
+        _data.max_seq_len_kv
+            = static_cast<int32_t>(val); // FlatBuffer schema uses int32 for max_seq_len_kv
         break;
     }
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
@@ -529,7 +530,7 @@ void SdpaFpropOperationDescriptor::setMmaCoreMode(hipdnnBackendAttributeType_t a
     THROW_IF_TRUE(mode < hipdnn_data_sdk::data_objects::DataType::MIN
                       || mode > hipdnn_data_sdk::data_objects::DataType::MAX,
                   HIPDNN_STATUS_BAD_PARAM,
-                  "SdpaFpropOperationDescriptor::setAttribute(): invalid DataType value");
+                  "SdpaFpropOperationDescriptor::setAttribute(): invalid MMA core mode (DataType) value");
     _data.mma_core_mode = mode;
 }
 
@@ -1070,7 +1071,6 @@ hipdnnBackendDescriptorType_t SdpaFpropOperationDescriptor::getStaticType()
 
 std::string SdpaFpropOperationDescriptor::toString() const
 {
-    using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "SdpaFpropOperationDescriptor: {";
     str += "q_uid=" + std::to_string(_data.q_tensor_uid);
     str += ", k_uid=" + std::to_string(_data.k_tensor_uid);
