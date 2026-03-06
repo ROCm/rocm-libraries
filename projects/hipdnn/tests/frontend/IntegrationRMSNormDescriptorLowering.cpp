@@ -88,12 +88,8 @@ TEST_F(IntegrationRMSNormDescriptorLowering, RMSNormGraphRoundTrip)
     scale->set_dim(toVec(K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_uid(K_RMSNORM_TENSOR_EPSILON_UID)
-        .set_name("Epsilon")
-        .set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_RMSNORM_TENSOR_EPSILON_DIMS))
-        .set_stride(toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(K_RMSNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
 
     RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_name("rmsnorm_op");
@@ -221,10 +217,8 @@ TEST_F(IntegrationRMSNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTri
     scale->set_dim(toVec(K_RMSNORM_TENSOR_SCALE_DIMS))
         .set_stride(toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
 
-    auto epsilon = std::make_shared<TensorAttributes>();
-    epsilon->set_name("Epsilon").set_data_type(DataType::FLOAT);
-    epsilon->set_dim(toVec(K_RMSNORM_TENSOR_EPSILON_DIMS))
-        .set_stride(toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_name("Epsilon");
 
     RMSNormAttributes rmsnormAttrs;
     rmsnormAttrs.set_epsilon(epsilon);
