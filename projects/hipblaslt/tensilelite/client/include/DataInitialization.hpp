@@ -1118,6 +1118,8 @@ namespace TensileLite
 
             std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 
+            hipStream_t m_copyStream = nullptr;
+
             size_t m_maxBatch;
 
             size_t m_workspaceSize;
