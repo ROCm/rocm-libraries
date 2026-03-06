@@ -119,18 +119,22 @@ TEST(CkTileSequence, SequenceGenLarger)
     EXPECT_EQ(Result{}.at(7), 49);
 }
 
+// Defined at namespace scope because template members are not allowed in local classes.
+namespace {
+struct NumberParamFunctor
+{
+    template <index_t I>
+    constexpr index_t operator()(number<I>) const
+    {
+        return I + 10;
+    }
+};
+} // anonymous namespace
+
 TEST(CkTileSequence, SequenceGenWithNumberParam)
 {
     // Verify functor taking number<I> directly (the documented API contract)
-    struct F
-    {
-        template <index_t I>
-        constexpr index_t operator()(number<I>) const
-        {
-            return I + 10;
-        }
-    };
-    using Result = typename sequence_gen<4, F>::type;
+    using Result = typename sequence_gen<4, NumberParamFunctor>::type;
     EXPECT_EQ(Result{}.at(0), 10);
     EXPECT_EQ(Result{}.at(3), 13);
 }
