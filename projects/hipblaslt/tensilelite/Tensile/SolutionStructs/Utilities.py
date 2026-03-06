@@ -28,6 +28,25 @@ import math
 from Tensile.Common.DataType import DataType
 from rocisa.enum import DataTypeEnum
 
+def getMiInputType(kernel: dict):
+  """Select the effective MI operand type for MFMA latency lookup.
+
+  Handles three cases based on kernel flags:
+    1. EnableF32XdlMathOp + UseF32XEmulation → BFloat16 (BF16 emulation)
+    2. EnableF32XdlMathOp only               → F32XdlMathOp (native XF32)
+    3. Neither                               → MacDataTypeA (plain)
+
+  UseF32XEmulation implies EnableF32XdlMathOp (guaranteed by Solution.__init__).
+
+  Raises:
+      KeyError: If EnableF32XdlMathOp or UseF32XEmulation is missing from the kernel dict.
+  """
+  if kernel["EnableF32XdlMathOp"]:
+    if kernel["UseF32XEmulation"]:
+      return DataType(DataTypeEnum.BFloat16)
+    return kernel["ProblemType"]["F32XdlMathOp"]
+  return kernel["ProblemType"]["MacDataTypeA"]
+
 def reject(state: dict, printSolutionRejectionReason: bool = True, *args) -> bool:
   """
   Reject a solution based on its internal state.

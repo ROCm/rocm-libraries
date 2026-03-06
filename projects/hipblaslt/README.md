@@ -144,8 +144,7 @@ Refer to the available build options using `./install.sh --help`:
 
 * `HIPBLASLT_ENABLE_BLIS`: Enable BLIS support (default `ON`)
 * `HIPBLASLT_ENABLE_HIP`: Use the HIP runtime (default `ON`)
-* `HIPBLASLT_ENABLE_LLVM`: Use msgpack for parsing configuration files (default `OFF`)
-* `HIPBLASLT_ENABLE_MSGPACK` Use msgpack for parsing configuration files (default `ON`)
+* `HIPBLASLT_ENABLE_YAML`: Use YAML for serializing and parsing configuration files; if `OFF` msgpack will be used (default `OFF`)
 * `HIPBLASLT_ENABLE_OPENMP`: "Use OpenMP to improve performance (default `ON`)
 * `HIPBLASLT_ENABLE_ROCROLLER:` Use RocRoller library (default `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build

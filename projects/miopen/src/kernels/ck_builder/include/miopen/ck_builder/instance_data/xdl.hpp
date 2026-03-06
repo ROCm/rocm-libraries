@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <miopen/ck_builder/shared.hpp>
+#include <miopen/ck_builder/instance_data/common.hpp>
 
 namespace miopen {
 namespace conv {
@@ -17,18 +17,7 @@ struct XdlAlgorithm
     using GemmSpecial = ckb::GemmSpecialization;
     using PipeSched   = ckb::PipelineScheduler;
 
-    struct ThreadBlock
-    {
-        std::size_t block_size;
-        struct TileSize
-        {
-            std::size_t m;
-            std::size_t n;
-            std::size_t k;
-        } tile_size;
-    } thread_block;
-
-    static_assert(ckb::ThreadBlockDescriptor<ThreadBlock>);
+    ThreadBlock thread_block;
 
     struct GridwiseGemm
     {
@@ -45,52 +34,8 @@ struct XdlAlgorithm
     } gridwise_gemm;
 
     static_assert(ckb::GridwiseFwdXdlGemmDescriptor<GridwiseGemm>);
-    struct TransferABC
-    {
-        struct TransferAB
-        {
-            struct BlockTransfer
-            {
-                std::size_t k0;
-                std::size_t m_n;
-                std::size_t k1;
-            } block_transfer;
-            struct LdsTransfer
-            {
-                std::size_t src_vector_dim;
-                std::size_t src_scalar_per_vector;
-                std::size_t lds_dst_scalar_per_vector;
-                bool is_direct_load;
-                bool lds_padding;
-            } lds_transfer;
-            struct BlockTransferAccessOrder
-            {
-                std::array<size_t, 3> order{0, 2, 1};
-            } thread_cluster_arrange_order;
-            struct SrcAccessOrder
-            {
-                std::array<size_t, 3> order{0, 2, 1};
-            } src_access_order;
-        };
-        TransferAB a;
-        TransferAB b;
-        struct TransferC
-        {
-            struct ThreadClusterDims
-            {
-                std::size_t m_block;
-                std::size_t m_wave_per_xdl;
-                std::size_t n_block;
-                std::size_t n_wave_per_xdl;
-            } thread_cluster_dims;
-            struct Epilogue
-            {
-                std::size_t m_xdl_per_wave_per_shuffle;
-                std::size_t n_per_wave_per_shuffle;
-                std::size_t scalar_per_vector;
-            } epilogue;
-        } c;
-    } transfer;
+
+    TransferABC transfer;
 
     // TODO - Fix CK Builder schema to not require these defaults.
     ConvSpecial fwd_specialization;
@@ -99,30 +44,13 @@ struct XdlAlgorithm
     std::size_t num_gemm_k_prefetch_stages;
     std::size_t num_conv_groups_to_merge;
     PipeSched loop_scheduler;
+
+    ElementwiseOps elementwise_ops;
 };
 
 static_assert(ckb::factory::FwdXdlAlgorithm<XdlAlgorithm>);
 
-struct TensorDescriptor
-{
-    struct Config
-    {
-        ckb::TensorLayout layout;
-        ckb::DataType data_type;
-        ckb::DataType compute_type;
-    } config;
-};
-
-struct XdlSignature
-{
-    int spatial_dim;
-    ckb::ConvDirection direction;
-    TensorDescriptor input;
-    TensorDescriptor weight;
-    TensorDescriptor output;
-    ckb::DataType data_type;
-    ckb::DataType accumulation_data_type;
-};
+using XdlSignature = ConvSignature;
 
 // Struct to hold both signature and algorithm
 struct XdlInstance
@@ -133,20 +61,26 @@ struct XdlInstance
 
 // Constexpr function to create XdlInstance from old DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 // template parameters Parameters are in the same order as the template parameters
-constexpr XdlInstance make_xdl_instance_from_old_params(
+template <std::size_t NumDTensor>
+constexpr XdlInstance DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle(
     // 1. NDimSpatial
     std::size_t spatial_dim,
     // 2-5. Layouts
     ckb::TensorLayout input_layout,
     ckb::TensorLayout weight_layout,
+    const std::array<ckb::TensorLayout, NumDTensor>& ds_layouts,
     ckb::TensorLayout output_layout,
     // 6-11. Data types
     ckb::DataType input_data_type,
     ckb::DataType weight_data_type,
     ckb::DataType acc_data_type,
     ckb::DataType cshuffle_data_type,
+    const std::array<ckb::DataType, NumDTensor>& ds_data_types,
     ckb::DataType output_data_type,
-    // 12-14. Elementwise operations (not stored in XdlSignature/XdlAlgorithm currently)
+    // 12-14. Elementwise operations
+    ckb::ElementwiseOperation input_elementwise_op,
+    ckb::ElementwiseOperation weight_elementwise_op,
+    ckb::ElementwiseOperation output_elementwise_op,
     // 15-16. Specializations
     ckb::ConvSpecialization conv_fwd_specialization,
     ckb::GemmSpecialization gemm_specialization,
@@ -193,6 +127,18 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
     // 49. Groups to merge
     std::size_t num_conv_groups_to_merge = 1)
 {
+    // TODO: ds_layouts and ds_data_types are not yet stored in the instance data but will be used
+    // in future work. They are present now so that the parameter list aligns with the original CK
+    // template this function is based on.
+    static_assert(NumDTensor == 0,
+                  "ds_layouts and ds_data_types are not yet stored in instance data");
+    (void)ds_layouts;
+    (void)ds_data_types;
+
+    // cshuffle_data_type is not stored because CK Builder derives it internally from the primary
+    // data type (see TileConvTensorTypes in conv_tile_tensor_type.hpp).
+    (void)cshuffle_data_type;
+
     // Our project auto-formatting makes this initializer hard to read
     // clang-format off
     return XdlInstance{
@@ -301,7 +247,12 @@ constexpr XdlInstance make_xdl_instance_from_old_params(
             .gemm_specialization        = gemm_specialization,
             .num_gemm_k_prefetch_stages = num_gemm_k_prefetch_stage,
             .num_conv_groups_to_merge   = num_conv_groups_to_merge,
-            .loop_scheduler             = loop_scheduler
+            .loop_scheduler             = loop_scheduler,
+            .elementwise_ops = {
+                .input_op  = input_elementwise_op,
+                .weight_op = weight_elementwise_op,
+                .output_op = output_elementwise_op
+            }
         }
     };
     // clang-format on

@@ -31,7 +31,7 @@
 #include <string>
 
 namespace miopen {
-MIOPEN_INTERNALS_EXPORT void check_bz2_error(int e, const std::string& name);
+void check_bz2_error(int e, const std::string& name);
 MIOPEN_INTERNALS_EXPORT std::vector<char> compress(const std::vector<char>& v,
                                                    bool* compressed = nullptr);
 MIOPEN_INTERNALS_EXPORT std::vector<char> decompress(const std::vector<char>& v, unsigned int size);

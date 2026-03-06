@@ -123,6 +123,7 @@ globalParameters["CpuThreads"] = (
 )  # How many CPU threads to use for kernel generation.  0=no threading, -1 == nproc, N=min(nproc,N).  TODO - 0 sometimes fails with a kernel name error?  0 does not check error codes correctly
 globalParameters["NumWarmups"] = 0
 globalParameters["TimingInstrumentation"] = False  # Enable detailed timing instrumentation output
+globalParameters["ParallelGpuExecution"] = 1  # Number of GPUs for parallel client execution (0=auto-detect, 1=serial, N=use N GPUs)
 
 globalParameters["PythonProfile"] = False  # Enable python profiling
 
@@ -409,7 +410,7 @@ defaultBenchmarkCommonParameters = [
     {"GlobalSplitUAlgorithm": ["MultipleBuffer"]},
     {"GlobalSplitUCoalesced": [False]},
     {"GlobalSplitUWorkGroupMappingRoundRobin": [False]},
-    {"Use64bShadowLimit": [1]},
+    {"Use64bShadowLimit": [True]},
     {"NumLoadsCoalescedA": [1]},
     {"NumLoadsCoalescedB": [1]},
     {"WorkGroup": [[16, 16, 1]]},

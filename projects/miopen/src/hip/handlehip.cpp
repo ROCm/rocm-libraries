@@ -122,6 +122,8 @@ void default_deallocator(void*, void* mem)
 
 } // namespace
 
+// MIOPEN_INTERNALS_EXPORT set here because the function isn't present in headers
+// but called from test/gtest/handle_hip_device.cpp
 MIOPEN_INTERNALS_EXPORT int get_device_id() // Get random device
 {
     int device;
@@ -131,6 +133,8 @@ MIOPEN_INTERNALS_EXPORT int get_device_id() // Get random device
     return device;
 }
 
+// MIOPEN_INTERNALS_EXPORT set here because the function isn't present in headers
+// but called from test/gtest/handle_hip_device.cpp
 MIOPEN_INTERNALS_EXPORT void set_device(int id)
 {
     auto status = hipSetDevice(id);
@@ -160,7 +164,7 @@ struct HandleImpl
     // typedef MIOPEN_MANAGE_PTR(hipStream_t, hipStreamDestroy) StreamPtr;
     using StreamPtr = std::shared_ptr<typename std::remove_pointer<hipStream_t>::type>;
 
-    HandleImpl() { hipInit(0); }
+    HandleImpl() { (void)hipInit(0); }
 
     StreamPtr create_stream()
     {
@@ -185,7 +189,7 @@ struct HandleImpl
     void elapsed_time(hipEvent_t start, hipEvent_t stop)
     {
         if(enable_profiling)
-            hipEventElapsedTime(&this->profiling_result, start, stop);
+            (void)hipEventElapsedTime(&this->profiling_result, start, stop);
     }
 
     std::function<void(hipEvent_t, hipEvent_t)> elapsed_time_handler()
@@ -199,7 +203,7 @@ struct HandleImpl
     std::string get_device_name() const
     {
         hipDeviceProp_t props{};
-        hipGetDeviceProperties(&props, device);
+        (void)hipGetDeviceProperties(&props, device);
         const std::string name(props.gcnArchName);
         MIOPEN_LOG_NQI("Raw device name: " << name);
         return name; // NOLINT (performance-no-automatic-move)
@@ -663,9 +667,11 @@ void Handle::Finish() const
     }
 #else
     // hipStreamSynchronize is broken, so we use hipEventSynchronize instead
-    auto ev = make_hip_event();
-    hipEventRecord(ev.get(), this->GetStream());
-    auto status = hipEventSynchronize(ev.get());
+    auto ev     = make_hip_event();
+    auto status = hipEventRecord(ev.get(), this->GetStream());
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status, "Failed hip event recording");
+    status = hipEventSynchronize(ev.get());
     if(status != hipSuccess)
         MIOPEN_THROW_HIP_STATUS(status, "Failed hip sychronization");
 #endif
@@ -727,7 +733,7 @@ std::size_t Handle::GetImage3dMaxWidth() const
 std::size_t Handle::GetWavefrontWidth() const
 {
     hipDeviceProp_t props{};
-    hipGetDeviceProperties(&props, this->impl->device);
+    (void)hipGetDeviceProperties(&props, this->impl->device);
     auto result = static_cast<size_t>(props.warpSize);
     return result;
 }

@@ -1,10 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
+#include "descriptors/BackendDescriptor.hpp"
 #include "descriptors/DescriptorAttributeUtils.hpp"
+#include "descriptors/TensorDescriptor.hpp"
 #include <array>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <vector>
 
@@ -310,6 +314,300 @@ TEST(TestDescriptorAttributeUtils, GetDataTypeThrowsOnWrongAttributeType)
     ASSERT_THROW_HIPDNN_STATUS(
         getDataType(DataType::FLOAT, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
         HIPDNN_STATUS_BAD_PARAM);
+}
+
+// --- setConvMode ---
+
+TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnNullArrayOfElements)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    auto target = ConvMode::UNSET;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, nullptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnNullErrorPrefix)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    auto target = ConvMode::UNSET;
+    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnWrongAttributeType)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    auto target = ConvMode::UNSET;
+    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+
+    ASSERT_THROW_HIPDNN_STATUS(setConvMode(target, HIPDNN_TYPE_INT64, 1, &value, "test"),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetConvModeThrowsOnWrongElementCount)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    auto target = ConvMode::UNSET;
+    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+
+    ASSERT_THROW_HIPDNN_STATUS(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 2, &value, "test"),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetConvModeSuccessCrossCorrelation)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    auto target = ConvMode::UNSET;
+    auto value = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+
+    ASSERT_NO_THROW(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, "test"));
+    ASSERT_EQ(target, ConvMode::CROSS_CORRELATION);
+}
+
+TEST(TestDescriptorAttributeUtils, SetConvModeSuccessConvolution)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    auto target = ConvMode::UNSET;
+    auto value = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+
+    ASSERT_NO_THROW(setConvMode(target, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &value, "test"));
+    ASSERT_EQ(target, ConvMode::CONVOLUTION);
+}
+
+// --- getConvMode ---
+
+TEST(TestDescriptorAttributeUtils, GetConvModeQueryReturnsOneOnNullArray)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(getConvMode(
+        ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, nullptr, "test"));
+    ASSERT_EQ(count, 1);
+}
+
+TEST(TestDescriptorAttributeUtils, GetConvModeQueryReturnsOneOnZeroRequestedCount)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    int64_t count = 0;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+
+    ASSERT_NO_THROW(getConvMode(
+        ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 0, &count, &output, "test"));
+    ASSERT_EQ(count, 1);
+}
+
+TEST(TestDescriptorAttributeUtils, GetConvModeQueryThrowsWhenBothPointersNull)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getConvMode(
+            ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, nullptr, nullptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, GetConvModeThrowsOnNullErrorPrefix)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    int64_t count = 0;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getConvMode(
+            ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, &output, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, GetConvModeThrowsOnWrongAttributeType)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    int64_t count = 0;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getConvMode(ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, GetConvModeSuccessCrossCorrelation)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    int64_t count = 0;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+
+    ASSERT_NO_THROW(getConvMode(
+        ConvMode::CROSS_CORRELATION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, &output, "test"));
+    ASSERT_EQ(output, HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION);
+}
+
+TEST(TestDescriptorAttributeUtils, GetConvModeSuccessConvolution)
+{
+    using hipdnn_data_sdk::data_objects::ConvMode;
+    int64_t count = 0;
+    hipdnnConvolutionMode_t output = HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+
+    ASSERT_NO_THROW(getConvMode(
+        ConvMode::CONVOLUTION, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &count, &output, "test"));
+    ASSERT_EQ(output, HIPDNN_CONVOLUTION_MODE_CONVOLUTION);
+}
+
+// --- setTensorDescriptor ---
+
+TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnNullArrayOfElements)
+{
+    std::shared_ptr<TensorDescriptor> descTarget;
+    int64_t uidTarget = 0;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setTensorDescriptor(
+            descTarget, uidTarget, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnNullErrorPrefix)
+{
+    std::shared_ptr<TensorDescriptor> descTarget;
+    int64_t uidTarget = 0;
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto* ptr = wrapper.get();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setTensorDescriptor(
+            descTarget, uidTarget, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &ptr, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnWrongAttributeType)
+{
+    std::shared_ptr<TensorDescriptor> descTarget;
+    int64_t uidTarget = 0;
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto* ptr = wrapper.get();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setTensorDescriptor(descTarget, uidTarget, HIPDNN_TYPE_INT64, 1, &ptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnWrongElementCount)
+{
+    std::shared_ptr<TensorDescriptor> descTarget;
+    int64_t uidTarget = 0;
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    const auto* ptr = wrapper.get();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setTensorDescriptor(descTarget, uidTarget, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, &ptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, SetTensorDescriptorThrowsOnUnfinalizedTensor)
+{
+    std::shared_ptr<TensorDescriptor> descTarget;
+    int64_t uidTarget = 0;
+    auto wrapper = test_utilities::createDescriptor<TensorDescriptor>();
+    const auto* ptr = wrapper.get();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        setTensorDescriptor(descTarget, uidTarget, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &ptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
+}
+
+TEST(TestDescriptorAttributeUtils, SetTensorDescriptorSuccess)
+{
+    std::shared_ptr<TensorDescriptor> descTarget;
+    int64_t uidTarget = 0;
+    auto wrapper = test_utilities::createFinalizedTensor(42);
+    const auto* ptr = wrapper.get();
+
+    ASSERT_NO_THROW(setTensorDescriptor(
+        descTarget, uidTarget, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &ptr, "test"));
+    ASSERT_NE(descTarget, nullptr);
+    ASSERT_EQ(uidTarget, 42);
+}
+
+// --- getTensorDescriptor ---
+
+TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryReturnsOneOnNullArray)
+{
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
+    int64_t count = 0;
+
+    ASSERT_NO_THROW(
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, nullptr, "test"));
+    ASSERT_EQ(count, 1);
+}
+
+TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryReturnsOneOnZeroRequestedCount)
+{
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
+    int64_t count = 0;
+    HipdnnBackendDescriptor* output = nullptr;
+
+    ASSERT_NO_THROW(
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, &output, "test"));
+    ASSERT_EQ(count, 1);
+}
+
+TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryThrowsWhenBothPointersNull)
+{
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr, nullptr, "test"),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, GetTensorDescriptorThrowsOnNullErrorPrefix)
+{
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
+    int64_t count = 0;
+    HipdnnBackendDescriptor* output = nullptr;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, &output, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+TEST(TestDescriptorAttributeUtils, GetTensorDescriptorThrowsOnWrongAttributeType)
+{
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
+    int64_t count = 0;
+    HipdnnBackendDescriptor* output = nullptr;
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        getTensorDescriptor(source, HIPDNN_TYPE_INT64, 1, &count, &output, "test"),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST(TestDescriptorAttributeUtils, GetTensorDescriptorSuccess)
+{
+    auto wrapper = test_utilities::createFinalizedTensor(1);
+    auto source = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        wrapper.get(), HIPDNN_STATUS_BAD_PARAM, "unpack");
+    int64_t count = 0;
+    HipdnnBackendDescriptor* output = nullptr;
+
+    ASSERT_NO_THROW(
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, &output, "test"));
+    ASSERT_EQ(count, 1);
+    ASSERT_NE(output, nullptr);
 }
 
 } // namespace testing
