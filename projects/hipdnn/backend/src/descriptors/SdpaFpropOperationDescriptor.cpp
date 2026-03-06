@@ -79,205 +79,305 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                             "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_attnMaskDesc,
-                            _data.attn_mask_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.attn_mask_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_scaleDesc,
-                            _data.scale_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.scale_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_seqLenQDesc,
-                            _data.seq_len_q_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.seq_len_q_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_seqLenKvDesc,
-                            _data.seq_len_kv_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.seq_len_kv_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_seedDesc,
-                            _data.seed_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.seed_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_offsetDesc,
-                            _data.offset_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.offset_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_dropoutMaskDesc,
-                            _data.dropout_mask_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.dropout_mask_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_dropoutScaleDesc,
-                            _data.dropout_scale_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.dropout_scale_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_pageTableKDesc,
-                            _data.page_table_k_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.page_table_k_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_pageTableVDesc,
-                            _data.page_table_v_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.page_table_v_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_blockMaskDesc,
-                            _data.block_mask_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.block_mask_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_sinkTokenDesc,
-                            _data.sink_token_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.sink_token_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_descaleQDesc,
-                            _data.descale_q_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.descale_q_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_descaleKDesc,
-                            _data.descale_k_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.descale_k_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_descaleVDesc,
-                            _data.descale_v_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.descale_v_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_descaleSDesc,
-                            _data.descale_s_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.descale_s_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_scaleSDesc,
-                            _data.scale_s_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.scale_s_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_scaleODesc,
-                            _data.scale_o_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.scale_o_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_statsDesc,
-                            _data.stats_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.stats_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_maxDesc,
-                            _data.max_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.max_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_sumExpDesc,
-                            _data.sum_exp_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.sum_exp_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_rngDumpDesc,
-                            _data.rng_dump_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.rng_dump_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_amaxSDesc,
-                            _data.amax_s_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.amax_s_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT:
+    {
+        int64_t uid = 0;
         setTensorDescriptor(_amaxODesc,
-                            _data.amax_o_tensor_uid,
+                            uid,
                             attributeType,
                             elementCount,
                             arrayOfElements,
                             "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.amax_o_tensor_uid = uid;
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT:
-        setScalar(_data.generate_stats,
+    {
+        bool val = false;
+        setScalar(val,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
                   elementCount,
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.generate_stats = val;
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT:
         setScalar(_data.alibi_mask,
                   HIPDNN_TYPE_BOOLEAN,
@@ -311,45 +411,65 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                   "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT:
-        setScalar(_data.dropout_probability,
+    {
+        float val = 0.0f;
+        setScalar(val,
                   HIPDNN_TYPE_FLOAT,
                   attributeType,
                   elementCount,
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.dropout_probability = val;
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT:
-        setScalar(_data.attn_scale_value,
+    {
+        float val = 0.0f;
+        setScalar(val,
                   HIPDNN_TYPE_FLOAT,
                   attributeType,
                   elementCount,
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.attn_scale_value = val;
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT:
-        setScalar(_data.left_bound,
+    {
+        int64_t val = 0;
+        setScalar(val,
                   HIPDNN_TYPE_INT64,
                   attributeType,
                   elementCount,
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.left_bound = val;
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT:
-        setScalar(_data.right_bound,
+    {
+        int64_t val = 0;
+        setScalar(val,
                   HIPDNN_TYPE_INT64,
                   attributeType,
                   elementCount,
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.right_bound = val;
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT:
-        setScalar(_data.max_seq_len_kv,
+    {
+        int64_t val = 0;
+        setScalar(val,
                   HIPDNN_TYPE_INT64,
                   attributeType,
                   elementCount,
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::setAttribute()");
+        _data.max_seq_len_kv = static_cast<int32_t>(val);
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
         setDiagonalAlignment(attributeType, elementCount, arrayOfElements);
         break;
@@ -675,7 +795,9 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                             "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT:
-        getScalar(_data.generate_stats,
+    {
+        bool val = _data.generate_stats.value_or(false);
+        getScalar(val,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
                   requestedElementCount,
@@ -683,6 +805,7 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT:
         getScalar(_data.alibi_mask,
                   HIPDNN_TYPE_BOOLEAN,
@@ -720,7 +843,9 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT:
-        getScalar(_data.dropout_probability,
+    {
+        float val = _data.dropout_probability.value_or(0.0f);
+        getScalar(val,
                   HIPDNN_TYPE_FLOAT,
                   attributeType,
                   requestedElementCount,
@@ -728,8 +853,11 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT:
-        getScalar(_data.attn_scale_value,
+    {
+        float val = _data.attn_scale_value.value_or(0.0f);
+        getScalar(val,
                   HIPDNN_TYPE_FLOAT,
                   attributeType,
                   requestedElementCount,
@@ -737,8 +865,11 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT:
-        getScalar(_data.left_bound,
+    {
+        int64_t val = _data.left_bound.value_or(0);
+        getScalar(val,
                   HIPDNN_TYPE_INT64,
                   attributeType,
                   requestedElementCount,
@@ -746,8 +877,11 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT:
-        getScalar(_data.right_bound,
+    {
+        int64_t val = _data.right_bound.value_or(0);
+        getScalar(val,
                   HIPDNN_TYPE_INT64,
                   attributeType,
                   requestedElementCount,
@@ -755,8 +889,11 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT:
-        getScalar(_data.max_seq_len_kv,
+    {
+        int64_t val = static_cast<int64_t>(_data.max_seq_len_kv.value_or(0));
+        getScalar(val,
                   HIPDNN_TYPE_INT64,
                   attributeType,
                   requestedElementCount,
@@ -764,6 +901,7 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   arrayOfElements,
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
+    }
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
         getDiagonalAlignment(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
@@ -938,40 +1076,52 @@ std::string SdpaFpropOperationDescriptor::toString() const
     str += ", k_uid=" + std::to_string(_data.k_tensor_uid);
     str += ", v_uid=" + std::to_string(_data.v_tensor_uid);
     str += ", o_uid=" + std::to_string(_data.o_tensor_uid);
-    str += ", attn_mask_uid=" + std::to_string(_data.attn_mask_tensor_uid);
-    str += ", scale_uid=" + std::to_string(_data.scale_tensor_uid);
-    str += ", seq_len_q_uid=" + std::to_string(_data.seq_len_q_tensor_uid);
-    str += ", seq_len_kv_uid=" + std::to_string(_data.seq_len_kv_tensor_uid);
-    str += ", seed_uid=" + std::to_string(_data.seed_tensor_uid);
-    str += ", offset_uid=" + std::to_string(_data.offset_tensor_uid);
-    str += ", dropout_mask_uid=" + std::to_string(_data.dropout_mask_tensor_uid);
-    str += ", dropout_scale_uid=" + std::to_string(_data.dropout_scale_tensor_uid);
-    str += ", page_table_k_uid=" + std::to_string(_data.page_table_k_tensor_uid);
-    str += ", page_table_v_uid=" + std::to_string(_data.page_table_v_tensor_uid);
-    str += ", block_mask_uid=" + std::to_string(_data.block_mask_tensor_uid);
-    str += ", sink_token_uid=" + std::to_string(_data.sink_token_tensor_uid);
-    str += ", descale_q_uid=" + std::to_string(_data.descale_q_tensor_uid);
-    str += ", descale_k_uid=" + std::to_string(_data.descale_k_tensor_uid);
-    str += ", descale_v_uid=" + std::to_string(_data.descale_v_tensor_uid);
-    str += ", descale_s_uid=" + std::to_string(_data.descale_s_tensor_uid);
-    str += ", scale_s_uid=" + std::to_string(_data.scale_s_tensor_uid);
-    str += ", scale_o_uid=" + std::to_string(_data.scale_o_tensor_uid);
-    str += ", stats_uid=" + std::to_string(_data.stats_tensor_uid);
-    str += ", max_uid=" + std::to_string(_data.max_tensor_uid);
-    str += ", sum_exp_uid=" + std::to_string(_data.sum_exp_tensor_uid);
-    str += ", rng_dump_uid=" + std::to_string(_data.rng_dump_tensor_uid);
-    str += ", amax_s_uid=" + std::to_string(_data.amax_s_tensor_uid);
-    str += ", amax_o_uid=" + std::to_string(_data.amax_o_tensor_uid);
-    str += ", generate_stats=" + std::to_string(_data.generate_stats);
+    auto optInt64Str = [](const ::flatbuffers::Optional<int64_t>& opt) -> std::string {
+        return opt.has_value() ? std::to_string(*opt) : "null";
+    };
+    auto optBoolStr = [](const ::flatbuffers::Optional<bool>& opt) -> std::string {
+        return opt.has_value() ? (*opt ? "true" : "false") : "null";
+    };
+    auto optFloatStr = [](const ::flatbuffers::Optional<float>& opt) -> std::string {
+        return opt.has_value() ? std::to_string(*opt) : "null";
+    };
+    auto optInt32Str = [](const ::flatbuffers::Optional<int32_t>& opt) -> std::string {
+        return opt.has_value() ? std::to_string(*opt) : "null";
+    };
+    str += ", attn_mask_uid=" + optInt64Str(_data.attn_mask_tensor_uid);
+    str += ", scale_uid=" + optInt64Str(_data.scale_tensor_uid);
+    str += ", seq_len_q_uid=" + optInt64Str(_data.seq_len_q_tensor_uid);
+    str += ", seq_len_kv_uid=" + optInt64Str(_data.seq_len_kv_tensor_uid);
+    str += ", seed_uid=" + optInt64Str(_data.seed_tensor_uid);
+    str += ", offset_uid=" + optInt64Str(_data.offset_tensor_uid);
+    str += ", dropout_mask_uid=" + optInt64Str(_data.dropout_mask_tensor_uid);
+    str += ", dropout_scale_uid=" + optInt64Str(_data.dropout_scale_tensor_uid);
+    str += ", page_table_k_uid=" + optInt64Str(_data.page_table_k_tensor_uid);
+    str += ", page_table_v_uid=" + optInt64Str(_data.page_table_v_tensor_uid);
+    str += ", block_mask_uid=" + optInt64Str(_data.block_mask_tensor_uid);
+    str += ", sink_token_uid=" + optInt64Str(_data.sink_token_tensor_uid);
+    str += ", descale_q_uid=" + optInt64Str(_data.descale_q_tensor_uid);
+    str += ", descale_k_uid=" + optInt64Str(_data.descale_k_tensor_uid);
+    str += ", descale_v_uid=" + optInt64Str(_data.descale_v_tensor_uid);
+    str += ", descale_s_uid=" + optInt64Str(_data.descale_s_tensor_uid);
+    str += ", scale_s_uid=" + optInt64Str(_data.scale_s_tensor_uid);
+    str += ", scale_o_uid=" + optInt64Str(_data.scale_o_tensor_uid);
+    str += ", stats_uid=" + optInt64Str(_data.stats_tensor_uid);
+    str += ", max_uid=" + optInt64Str(_data.max_tensor_uid);
+    str += ", sum_exp_uid=" + optInt64Str(_data.sum_exp_tensor_uid);
+    str += ", rng_dump_uid=" + optInt64Str(_data.rng_dump_tensor_uid);
+    str += ", amax_s_uid=" + optInt64Str(_data.amax_s_tensor_uid);
+    str += ", amax_o_uid=" + optInt64Str(_data.amax_o_tensor_uid);
+    str += ", generate_stats=" + optBoolStr(_data.generate_stats);
     str += ", alibi_mask=" + std::to_string(_data.alibi_mask);
     str += ", padding_mask=" + std::to_string(_data.padding_mask);
     str += ", causal_mask=" + std::to_string(_data.causal_mask);
     str += ", causal_mask_bottom_right=" + std::to_string(_data.causal_mask_bottom_right);
-    str += ", dropout_probability=" + std::to_string(_data.dropout_probability);
-    str += ", attn_scale_value=" + std::to_string(_data.attn_scale_value);
-    str += ", left_bound=" + std::to_string(_data.left_bound);
-    str += ", right_bound=" + std::to_string(_data.right_bound);
-    str += ", max_seq_len_kv=" + std::to_string(_data.max_seq_len_kv);
+    str += ", dropout_probability=" + optFloatStr(_data.dropout_probability);
+    str += ", attn_scale_value=" + optFloatStr(_data.attn_scale_value);
+    str += ", left_bound=" + optInt64Str(_data.left_bound);
+    str += ", right_bound=" + optInt64Str(_data.right_bound);
+    str += ", max_seq_len_kv=" + optInt32Str(_data.max_seq_len_kv);
     str += ", diagonal_alignment=" + std::to_string(static_cast<int>(_data.diagonal_alignment));
     str += ", mma_core_mode=" + std::to_string(static_cast<int>(_data.mma_core_mode));
     str += ", implementation=" + std::to_string(static_cast<int>(_data.implementation));
