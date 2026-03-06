@@ -443,9 +443,6 @@ struct config_t {
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
-  /// CMS kernel flag
-  bool cms_kernel = false;
-
   /// Global read vector width for matrix A (elements per load)
   std::size_t grvw_a = 1;
 
@@ -487,7 +484,9 @@ struct config_t {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
            cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
            workgroup_mapping == o.workgroup_mapping && prediction_mode == o.prediction_mode &&
-           target == o.target && backend == o.backend;
+           target == o.target && grvw_a == o.grvw_a && grvw_b == o.grvw_b &&
+           gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
+           vector_width_b == o.vector_width_b && backend == o.backend;
   }
 
   std::size_t hash() const {
