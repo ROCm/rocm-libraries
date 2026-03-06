@@ -19,8 +19,12 @@ add_executable(
     IntegrationGraphEngineFiltering.cpp
     IntegrationGraphKnobsApi.cpp
     IntegrationConvFpropDescriptorLowering.cpp
+    IntegrationMatmul.cpp
+    IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationBatchnormInferenceDescriptorLowering.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp

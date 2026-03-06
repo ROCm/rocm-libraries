@@ -18,6 +18,8 @@ set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(
     hipdnn_backend_private
     descriptors/BatchnormBackwardOperationDescriptor.cpp
+    descriptors/BatchnormInferenceOperationDescriptor.cpp
+    descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
     descriptors/ConvolutionBwdOperationDescriptor.cpp
     descriptors/ConvolutionFwdOperationDescriptor.cpp
