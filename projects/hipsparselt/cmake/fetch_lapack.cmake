@@ -13,7 +13,7 @@ if(NOT LAPACK_FOUND AND HIPSPARSELT_ENABLE_FETCH)
     set(BUILD_TESTING OFF CACHE BOOL "")
     fetchcontent_makeavailable(lapack)
     message(STATUS "Fetched LAPACK at: ${lapack_SOURCE_DIR}")
-else()
+elseif(NOT LAPACK_FOUND)
     message(FATAL_ERROR "LAPACK not found. Install with your package manager (recommended) or "
                         "opt-in to fetch with `-DHIPSPARSELT_ENABLE_FETCH=ON`."
     )
