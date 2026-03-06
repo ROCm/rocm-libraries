@@ -28,16 +28,6 @@ using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 
-namespace
-{
-constexpr int64_t K_TENSOR_X_UID = K_RMSNORM_TENSOR_X_UID;
-constexpr int64_t K_TENSOR_SCALE_UID = K_RMSNORM_TENSOR_SCALE_UID;
-constexpr int64_t K_TENSOR_EPSILON_UID = K_RMSNORM_TENSOR_EPSILON_UID;
-constexpr int64_t K_TENSOR_Y_UID = K_RMSNORM_TENSOR_Y_UID;
-constexpr int64_t K_TENSOR_BIAS_UID = K_RMSNORM_TENSOR_BIAS_UID;
-constexpr int64_t K_TENSOR_INV_RMS_UID = K_RMSNORM_TENSOR_INV_RMS_UID;
-} // namespace
-
 class TestRMSNormOperationDescriptor : public ::testing::Test
 {
 public:
@@ -95,22 +85,22 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<RMSNormOperationDescriptor>();
-        _xDesc = createFinalizedTensor(K_TENSOR_X_UID,
+        _xDesc = createFinalizedTensor(K_RMSNORM_TENSOR_X_UID,
                                        hipdnn_tests::toVec(K_RMSNORM_TENSOR_X_DIMS),
                                        hipdnn_tests::toVec(K_RMSNORM_TENSOR_X_STRIDES));
-        _scaleDesc = createFinalizedTensor(K_TENSOR_SCALE_UID,
+        _scaleDesc = createFinalizedTensor(K_RMSNORM_TENSOR_SCALE_UID,
                                            hipdnn_tests::toVec(K_RMSNORM_TENSOR_SCALE_DIMS),
                                            hipdnn_tests::toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
-        _epsilonDesc = createFinalizedTensor(K_TENSOR_EPSILON_UID,
+        _epsilonDesc = createFinalizedTensor(K_RMSNORM_TENSOR_EPSILON_UID,
                                              hipdnn_tests::toVec(K_RMSNORM_TENSOR_EPSILON_DIMS),
                                              hipdnn_tests::toVec(K_RMSNORM_TENSOR_EPSILON_STRIDES));
-        _yDesc = createFinalizedTensor(K_TENSOR_Y_UID,
+        _yDesc = createFinalizedTensor(K_RMSNORM_TENSOR_Y_UID,
                                        hipdnn_tests::toVec(K_RMSNORM_TENSOR_Y_DIMS),
                                        hipdnn_tests::toVec(K_RMSNORM_TENSOR_Y_STRIDES));
-        _biasDesc = createFinalizedTensor(K_TENSOR_BIAS_UID,
+        _biasDesc = createFinalizedTensor(K_RMSNORM_TENSOR_BIAS_UID,
                                           hipdnn_tests::toVec(K_RMSNORM_TENSOR_BIAS_DIMS),
                                           hipdnn_tests::toVec(K_RMSNORM_TENSOR_BIAS_STRIDES));
-        _invRmsDesc = createFinalizedTensor(K_TENSOR_INV_RMS_UID,
+        _invRmsDesc = createFinalizedTensor(K_RMSNORM_TENSOR_INV_RMS_UID,
                                             hipdnn_tests::toVec(K_RMSNORM_TENSOR_INV_RMS_DIMS),
                                             hipdnn_tests::toVec(K_RMSNORM_TENSOR_INV_RMS_STRIDES));
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
@@ -202,7 +192,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorDescriptorX)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc));
 
-    ASSERT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
+    ASSERT_EQ(desc->getData().x_tensor_uid, K_RMSNORM_TENSOR_X_UID);
     ASSERT_NE(desc->getXDesc(), nullptr);
 }
 
@@ -212,7 +202,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorDescriptorScale)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_scaleDesc));
 
-    ASSERT_EQ(desc->getData().scale_tensor_uid, K_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getData().scale_tensor_uid, K_RMSNORM_TENSOR_SCALE_UID);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
 }
 
@@ -224,7 +214,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorDescriptorEpsilon)
                                        1,
                                        &_epsilonDesc));
 
-    ASSERT_EQ(desc->getData().epsilon_tensor_uid, K_TENSOR_EPSILON_UID);
+    ASSERT_EQ(desc->getData().epsilon_tensor_uid, K_RMSNORM_TENSOR_EPSILON_UID);
     ASSERT_NE(desc->getEpsilonDesc(), nullptr);
 }
 
@@ -234,7 +224,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorDescriptorY)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_yDesc));
 
-    ASSERT_EQ(desc->getData().y_tensor_uid, K_TENSOR_Y_UID);
+    ASSERT_EQ(desc->getData().y_tensor_uid, K_RMSNORM_TENSOR_Y_UID);
     ASSERT_NE(desc->getYDesc(), nullptr);
 }
 
@@ -245,7 +235,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorDescriptorBias)
         HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_biasDesc));
 
     ASSERT_TRUE(desc->getData().bias_tensor_uid.has_value());
-    ASSERT_EQ(*desc->getData().bias_tensor_uid, K_TENSOR_BIAS_UID);
+    ASSERT_EQ(*desc->getData().bias_tensor_uid, K_RMSNORM_TENSOR_BIAS_UID);
     ASSERT_NE(desc->getBiasDesc(), nullptr);
 }
 
@@ -258,7 +248,7 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorDescriptorInvRms)
                                        &_invRmsDesc));
 
     ASSERT_TRUE(desc->getData().inv_rms_tensor_uid.has_value());
-    ASSERT_EQ(*desc->getData().inv_rms_tensor_uid, K_TENSOR_INV_RMS_UID);
+    ASSERT_EQ(*desc->getData().inv_rms_tensor_uid, K_RMSNORM_TENSOR_INV_RMS_UID);
     ASSERT_NE(desc->getInvRmsDesc(), nullptr);
 }
 
@@ -629,12 +619,12 @@ TEST_F(TestRMSNormOperationDescriptor, FinalizePreservesTensorReferences)
     ASSERT_NE(desc->getBiasDesc(), nullptr);
     ASSERT_NE(desc->getInvRmsDesc(), nullptr);
 
-    ASSERT_EQ(desc->getXDesc()->getData().uid, K_TENSOR_X_UID);
-    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_TENSOR_SCALE_UID);
-    ASSERT_EQ(desc->getEpsilonDesc()->getData().uid, K_TENSOR_EPSILON_UID);
-    ASSERT_EQ(desc->getYDesc()->getData().uid, K_TENSOR_Y_UID);
-    ASSERT_EQ(desc->getBiasDesc()->getData().uid, K_TENSOR_BIAS_UID);
-    ASSERT_EQ(desc->getInvRmsDesc()->getData().uid, K_TENSOR_INV_RMS_UID);
+    ASSERT_EQ(desc->getXDesc()->getData().uid, K_RMSNORM_TENSOR_X_UID);
+    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_RMSNORM_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getEpsilonDesc()->getData().uid, K_RMSNORM_TENSOR_EPSILON_UID);
+    ASSERT_EQ(desc->getYDesc()->getData().uid, K_RMSNORM_TENSOR_Y_UID);
+    ASSERT_EQ(desc->getBiasDesc()->getData().uid, K_RMSNORM_TENSOR_BIAS_UID);
+    ASSERT_EQ(desc->getInvRmsDesc()->getData().uid, K_RMSNORM_TENSOR_INV_RMS_UID);
 }
 
 // =============================================================================
@@ -648,12 +638,15 @@ TEST_F(TestRMSNormOperationDescriptor, ToStringContainsExpectedInfo)
 
     std::string str = desc->toString();
     ASSERT_NE(str.find("RMSNormOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("x_uid=" + std::to_string(K_TENSOR_X_UID)), std::string::npos);
-    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_TENSOR_SCALE_UID)), std::string::npos);
-    ASSERT_NE(str.find("epsilon_uid=" + std::to_string(K_TENSOR_EPSILON_UID)), std::string::npos);
-    ASSERT_NE(str.find("y_uid=" + std::to_string(K_TENSOR_Y_UID)), std::string::npos);
-    ASSERT_NE(str.find("bias_uid=" + std::to_string(K_TENSOR_BIAS_UID)), std::string::npos);
-    ASSERT_NE(str.find("inv_rms_uid=" + std::to_string(K_TENSOR_INV_RMS_UID)), std::string::npos);
+    ASSERT_NE(str.find("x_uid=" + std::to_string(K_RMSNORM_TENSOR_X_UID)), std::string::npos);
+    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_RMSNORM_TENSOR_SCALE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("epsilon_uid=" + std::to_string(K_RMSNORM_TENSOR_EPSILON_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("y_uid=" + std::to_string(K_RMSNORM_TENSOR_Y_UID)), std::string::npos);
+    ASSERT_NE(str.find("bias_uid=" + std::to_string(K_RMSNORM_TENSOR_BIAS_UID)), std::string::npos);
+    ASSERT_NE(str.find("inv_rms_uid=" + std::to_string(K_RMSNORM_TENSOR_INV_RMS_UID)),
+              std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -668,12 +661,12 @@ TEST_F(TestRMSNormOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
-    ASSERT_EQ(tensors[0]->getData().uid, K_TENSOR_X_UID);
-    ASSERT_EQ(tensors[1]->getData().uid, K_TENSOR_SCALE_UID);
-    ASSERT_EQ(tensors[2]->getData().uid, K_TENSOR_EPSILON_UID);
-    ASSERT_EQ(tensors[3]->getData().uid, K_TENSOR_Y_UID);
-    ASSERT_EQ(tensors[4]->getData().uid, K_TENSOR_BIAS_UID);
-    ASSERT_EQ(tensors[5]->getData().uid, K_TENSOR_INV_RMS_UID);
+    ASSERT_EQ(tensors[0]->getData().uid, K_RMSNORM_TENSOR_X_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_RMSNORM_TENSOR_SCALE_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_RMSNORM_TENSOR_EPSILON_UID);
+    ASSERT_EQ(tensors[3]->getData().uid, K_RMSNORM_TENSOR_Y_UID);
+    ASSERT_EQ(tensors[4]->getData().uid, K_RMSNORM_TENSOR_BIAS_UID);
+    ASSERT_EQ(tensors[5]->getData().uid, K_RMSNORM_TENSOR_INV_RMS_UID);
 }
 
 TEST_F(TestRMSNormOperationDescriptor, GetTensorDescriptorsWithoutOptionalTensors)
@@ -685,10 +678,10 @@ TEST_F(TestRMSNormOperationDescriptor, GetTensorDescriptorsWithoutOptionalTensor
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 4);
-    ASSERT_EQ(tensors[0]->getData().uid, K_TENSOR_X_UID);
-    ASSERT_EQ(tensors[1]->getData().uid, K_TENSOR_SCALE_UID);
-    ASSERT_EQ(tensors[2]->getData().uid, K_TENSOR_EPSILON_UID);
-    ASSERT_EQ(tensors[3]->getData().uid, K_TENSOR_Y_UID);
+    ASSERT_EQ(tensors[0]->getData().uid, K_RMSNORM_TENSOR_X_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_RMSNORM_TENSOR_SCALE_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_RMSNORM_TENSOR_EPSILON_UID);
+    ASSERT_EQ(tensors[3]->getData().uid, K_RMSNORM_TENSOR_Y_UID);
 }
 
 TEST_F(TestRMSNormOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -707,14 +700,14 @@ TEST_F(TestRMSNormOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto* attrs = node->attributes.AsRMSNormAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->x_tensor_uid, K_TENSOR_X_UID);
-    ASSERT_EQ(attrs->scale_tensor_uid, K_TENSOR_SCALE_UID);
-    ASSERT_EQ(attrs->epsilon_tensor_uid, K_TENSOR_EPSILON_UID);
-    ASSERT_EQ(attrs->y_tensor_uid, K_TENSOR_Y_UID);
+    ASSERT_EQ(attrs->x_tensor_uid, K_RMSNORM_TENSOR_X_UID);
+    ASSERT_EQ(attrs->scale_tensor_uid, K_RMSNORM_TENSOR_SCALE_UID);
+    ASSERT_EQ(attrs->epsilon_tensor_uid, K_RMSNORM_TENSOR_EPSILON_UID);
+    ASSERT_EQ(attrs->y_tensor_uid, K_RMSNORM_TENSOR_Y_UID);
     ASSERT_TRUE(attrs->bias_tensor_uid.has_value());
-    ASSERT_EQ(*attrs->bias_tensor_uid, K_TENSOR_BIAS_UID);
+    ASSERT_EQ(*attrs->bias_tensor_uid, K_RMSNORM_TENSOR_BIAS_UID);
     ASSERT_TRUE(attrs->inv_rms_tensor_uid.has_value());
-    ASSERT_EQ(*attrs->inv_rms_tensor_uid, K_TENSOR_INV_RMS_UID);
+    ASSERT_EQ(*attrs->inv_rms_tensor_uid, K_RMSNORM_TENSOR_INV_RMS_UID);
     ASSERT_EQ(attrs->forward_phase, NormFwdPhase::TRAINING);
 }
 
@@ -756,7 +749,7 @@ TEST_F(TestRMSNormOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
 
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 6);
-    ASSERT_EQ(tensors[0]->getData().uid, K_TENSOR_X_UID);
+    ASSERT_EQ(tensors[0]->getData().uid, K_RMSNORM_TENSOR_X_UID);
 }
 
 TEST_F(TestRMSNormOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
