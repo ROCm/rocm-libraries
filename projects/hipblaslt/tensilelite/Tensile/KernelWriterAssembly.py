@@ -3903,7 +3903,7 @@ class KernelWriterAssembly(KernelWriter):
         unrollStride = 0
 
         if (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]:
-          unrollStride = perp*uVW + (kernel[tP["lsp"]] * sPerp * kernel["LocalReadVectorWidth"])
+          unrollStride = perp*uVW + (kernel[tP["lsp"]] * sPerp * kernel["LocalReadVectorWidth%s"%tc])
         else:
           unrollStride = kernel[tP["lsp"]] * (perp*uVW + sPerp*uVS)
 
