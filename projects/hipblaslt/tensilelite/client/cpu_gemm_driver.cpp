@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,10 +31,7 @@
 #include <random>
 #include <vector>
 
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
-#include <boost/program_options.hpp>
-
+#include "ProgramOptions.hpp"
 #include "Reference.hpp"
 #include "rocisa/include/enum.hpp"
 
@@ -68,8 +65,8 @@
 
 namespace
 {
-    namespace po = boost::program_options;
     using namespace TensileLite;
+    using namespace TensileLite::Client;
 
     // Helper traits to map C++ storage types to rocisa data type enums.
     template <typename T>
@@ -276,26 +273,18 @@ int runGemm(size_t m,
 
 int main(int argc, char* argv[])
 {
-    // command line argument storage
-    size_t      m, n, k;
-    float       alpha, beta;
-    std::string typeStr;
-    bool        transA, transB, validate, tryFastPath;
-
     po::options_description desc("Allowed options");
     desc.add_options()("help,h", "Produce help message")(
-        "M", po::value<size_t>(&m)->default_value(128), "Matrix M dimension")(
-        "N", po::value<size_t>(&n)->default_value(128), "Matrix N dimension")(
-        "K", po::value<size_t>(&k)->default_value(128), "Matrix K dimension")(
-        "transA", po::value<bool>(&transA)->default_value(false), "Transpose A")(
-        "transB", po::value<bool>(&transB)->default_value(true), "Transpose B")(
-        "alpha", po::value<float>(&alpha)->default_value(1.0f), "Alpha scalar")(
-        "beta", po::value<float>(&beta)->default_value(0.0f), "Beta scalar")(
-        "type",
-        po::value<std::string>(&typeStr)->default_value("f32"),
-        "Data type (f32, f16, bf16)")(
-        "validate", po::value<bool>(&validate)->default_value(true), "Run validation against ref")(
-        "tryFastPath", po::value<bool>(&tryFastPath)->default_value(true), "Use optimized path");
+        "M", po::value<size_t>()->default_value(128), "Matrix M dimension")(
+        "N", po::value<size_t>()->default_value(128), "Matrix N dimension")(
+        "K", po::value<size_t>()->default_value(128), "Matrix K dimension")(
+        "transA", po::value<bool>()->default_value(false), "Transpose A")(
+        "transB", po::value<bool>()->default_value(true), "Transpose B")(
+        "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
+        "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
+        "type", po::value<std::string>()->default_value("f32"), "Data type (f32, f16, bf16)")(
+        "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
+        "tryFastPath", po::value<bool>()->default_value(true), "Use optimized path");
 
     po::variables_map vm;
     try
@@ -303,7 +292,7 @@ int main(int argc, char* argv[])
         po::store(po::parse_command_line(argc, argv, desc), vm);
         po::notify(vm);
     }
-    catch(const po::error& ex)
+    catch(const std::exception& ex)
     {
         std::cerr << "Error parsing options: " << ex.what() << std::endl;
         return 1;
@@ -314,6 +303,17 @@ int main(int argc, char* argv[])
         std::cout << desc << "\n";
         return 0;
     }
+
+    size_t      m           = vm["M"].as<size_t>();
+    size_t      n           = vm["N"].as<size_t>();
+    size_t      k           = vm["K"].as<size_t>();
+    bool        transA      = vm["transA"].as<bool>();
+    bool        transB      = vm["transB"].as<bool>();
+    float       alpha       = vm["alpha"].as<float>();
+    float       beta        = vm["beta"].as<float>();
+    std::string typeStr     = vm["type"].as<std::string>();
+    bool        validate    = vm["validate"].as<bool>();
+    bool        tryFastPath = vm["tryFastPath"].as<bool>();
 
     std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k << " Type=" << typeStr
               << " FastPath=" << tryFastPath << std::endl;
