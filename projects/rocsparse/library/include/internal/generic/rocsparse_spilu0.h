@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -101,8 +101,7 @@ rocsparse_status rocsparse_spilu0_buffer_size(rocsparse_handle            handle
 *  data types for \p A: \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
 *
 *  \note The descriptor \p rocsparse_spilu0_descr needs to be configured with \ref rocsparse_spilu0_set_input.
-*  \note
-*  The sparse matrix formats currently supported are: \ref rocsparse_format_csr and \ref rocsparse_format_bsr.
+*  \note The sparse matrix formats currently supported are: \ref rocsparse_format_csr and \ref rocsparse_format_bsr.
 *
 *  \note
 *  the \ref rocsparse_spilu0_stage_compute stage is non blocking
