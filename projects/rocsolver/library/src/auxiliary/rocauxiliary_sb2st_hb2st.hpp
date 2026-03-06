@@ -47,7 +47,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define DIMY 32
 
 //------------------------------------------------------------------------------
-// todo:should these be static to avoid one definition rule violations?
+// todo: should these be static to avoid one definition rule violations?
 // or namespaced? or in some general utility header?
 template <typename T, std::enable_if_t<! rocblas_is_complex<T>, int> = 0>
 __device__ __inline__ T shift_left( T& value, int lane_delta )
@@ -71,7 +71,9 @@ __device__ __inline__ T shift_left( T& value, int lane_delta )
 
 //------------------------------------------------------------------------------
 // Generate Householder reflector.
-// Must be called with one wave
+// Must be called with one wave; this assumes threads are synchronized and does
+// not do __syncthreads. It does __threadfence_block where __syncthreads would
+// normally be required.
 // Compared to usual larfg, this passes x = [alpha; xhat] as single argument
 // to make reduction simpler.
 // If norm( xhat ) == 0, LAPACK sets tau = 0 and H = I,
@@ -80,13 +82,13 @@ __device__ __inline__ T shift_left( T& value, int lane_delta )
 //, std::enable_if_t<! rocblas_is_complex<T>, int> = 0>
 template <typename T, typename I
 __device__ void sb2st_larfg(
-    const I xid, I n, T* x, T& tau, S* s_reduct )
+    const I xid, I n, T* x, T& tau, S* s_work )
 {
     using S = decltype( std::real( T{} ) );
 
     const S one = 1;
 
-    // dot reduction
+    // norm reduction
     // was T, but should be real.
     S norm2 = 0;
     for (I i = xid; i < n; i += DIMX)
@@ -97,10 +99,9 @@ __device__ void sb2st_larfg(
     norm2 += shift_left( norm2, 2 );
     norm2 += shift_left( norm2, 1 );
     if (xid == 0)
-        s_reduct[0] = norm2;
-    // larfg is called with one wave, so __syncthreads is impossible & not needed.
+        s_work[0] = norm2;
     __threadfence_block();
-    norm2 = s_reduct[0];
+    norm2 = s_work[0];
 
     S ar = real( alpha );
     S ai = imag( alpha );  // In real, ai = 0. Compiler can eliminate it.
@@ -135,7 +136,7 @@ __device__ void sb2st_larfg(
                 alpha = norm;
             }
         }
-        __syncthreads();  // for s_scale; was missing
+        __threadfence_block();  // for s_scale; was missing
 
         // scal x[1:n]
         for (I i = xid+1; i < n; i += DIMX)
@@ -148,84 +149,14 @@ __device__ void sb2st_larfg(
 }
 
 //------------------------------------------------------------------------------
-/*
-template <typename T, typename I, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
-__device__ void sb2st_larfg(
-    const I xid, I n, T* x, T& tau, S* s_reduct )
-{
-    using S = decltype( std::real( T{} ) );
-
-    const S one = 1;
-
-    // dot reduction
-    // was T, but should be real.
-    S norm2 = 0;
-    for (I i = xid; i < n - 1; i += DIMX)
-        norm2 += std::norm( x[i] );  // i.e., abs(xi)^2.
-    norm2 += shift_left( norm2, 16 );
-    norm2 += shift_left( norm2, 8 );
-    norm2 += shift_left( norm2, 4 );
-    norm2 += shift_left( norm2, 2 );
-    norm2 += shift_left( norm2, 1 );
-    if (xid == 0)
-        s_reduct[0] = norm2;
-    //__threadfence();  // not strong enough
-    __syncthreads();  // was missing
-    norm2 = s_reduct[0];
-    // was: ... + std::norm( alpha );
-
-    /// If we use `S` for real_t, and `s` for scale, can we rename one?
-    /// Greatly dislike having variables differ only by case,
-    /// esp. S vs. s. Hard to read.
-    S ar = alpha.real();
-    S ai = alpha.imag();
-    __shared__ T s_scale;
-
-    /// Why need to check ai, isn't it already incorporated into norm2?
-    /// Ah, LAPACK doesn't add (ar, ai) into norm2 until after this statement.
-    if (norm2 > 0 || ai > 0)
-    {
-        if (xid == 0)
-        {
-            S norm = ar >= 0 ? -std::sqrt( norm2 ) : std::sqrt( norm2 );
-
-            // scaling factor
-            /// If norm is T, this is doing complex arithmetic. norm should be S.
-            S r = (ar - norm) * (ar - norm) + ai * ai;
-            S rr = (ar - norm) / r;
-            S ri = -ai / r;
-            s_scale = rocblas_complex_num<S>( rr, ri );
-
-            // tau
-            rr = (norm - ar) / norm;
-            ri = -ai / norm;
-            tau = rocblas_complex_num<S>( rr, ri );
-
-            // alpha
-            alpha = norm;
-        }
-        __syncthreads();  // for s_scale; was missing
-
-        // scal x[1:n]
-        for (I i = xid+1; i < n; i += DIMX)
-            x[i] *= s_scale;
-    }
-    else
-    {
-        tau = 0;
-    }
-}
-*/
-
-//------------------------------------------------------------------------------
-// Apply H on left or right
-// C := H C on left
-// C := C H on right
+// Apply H on left or right of C:
+// C := H C if on left,
+// C := C H if on right.
 // To apply H^H, pass in conj( tau ).
 template <typename T, typename I>
 __device__ void sb2st_larf(
     const I xid, const I yid, rocblas_side side, I m, I n,
-    T* v, T tau, T* C, I ldc, T* s_reduct )
+    T* v, T tau, T* C, I ldc, T* s_work )
 {
     if (side == rocblas_side_left)
     {
@@ -245,13 +176,13 @@ __device__ void sb2st_larf(
             value += shift_left( value, 1 );
             if (xid == 0)
                 /// What about multiplying tau here?
-                s_reduct[yid] = value;
+                s_work[yid] = value;
             __threadfence();  // todo: need __syncthreads? This gets called by whole block.
 
             // ger
             /// Cj = Cj - tau v conj( wj ) = C[:,j] - tau v (v^H Cj)
             for (I i = xid; i < m; i += DIMX)
-                C[i + j * ldc] -= tau * v[i] * conj( s_reduct[yid] );
+                C[i + j * ldc] -= tau * v[i] * conj( s_work[yid] );
         }
     }
     else
@@ -270,14 +201,82 @@ __device__ void sb2st_larf(
             value += shift_left( value, 1 );
             if (xid == 0)
                 /// What about multiplying tau here?
-                s_reduct[yid] = value;
+                s_work[yid] = value;
             __threadfence();
 
             // ger
             // Cj = Cj - tau wj v^H = Cj - tau (Cj v) v^H
             for (I j = xid; j < n; j += DIMX)
-                C[i + j * ldc] -= tau * conj( v[j] ) * s_reduct[yid];
+                C[i + j * ldc] -= tau * conj( v[j] ) * s_work[yid];
         }
+    }
+}
+
+//------------------------------------------------------------------------------
+// Apply H on left and right of Hermitian block:
+// C := H^H C H
+// Assumes the whole Hermitian block is set, both upper and lower.
+// (In LAPACK, this is larfy, which is an odd name. I guess y comes from sy.)
+template <typename T, typename I>
+__device__ void sb2st_helarf(
+    const I xid, const I yid, rocblas_side side, I n,
+    T* v, T tau, T* C, I ldc, T* s_work )
+{
+    // gemv/hemv: w = C * v
+    for (I j = yid; j < n; j += DIMY)
+    {
+        // gemv reduction
+        /// C = (I - tau v v^H) C = C - tau v (v^H C)
+        /// wj = v^T * conj( Cj )
+        /// Why not do wj = v^H * Cj, i.e., conj( v )?
+        T value = 0;
+        for (I i = xid; i < n; i += DIMX)
+            value += C[i + j*dc] * v[i];
+        value += shift_left( value, 16 );
+        value += shift_left( value, 8 );
+        value += shift_left( value, 4 );
+        value += shift_left( value, 2 );
+        value += shift_left( value, 1 );
+        if (xid == 0)
+            /// What about multiplying tau here?
+            s_work[yid] = value;
+    }
+    __syncthreads();
+
+    // w = w - (0.5 tau w^H v) v
+    // dot reduction: alpha = 0.5 tau w^H v
+    __shared__ T s_alpha;
+    if (yid == 0)
+    {
+        T value = 0;
+        for (I i = xid; i < n; i += DIMX)
+            value += conj( s_work[xid] ) * v[ xid ];
+        value += shift_left( value, 16 );
+        value += shift_left( value, 8 );
+        value += shift_left( value, 4 );
+        value += shift_left( value, 2 );
+        value += shift_left( value, 1 );
+        if (xid == 0)
+            s_alpha = 0.5 * tau * value;
+    }
+    __syncthreads();
+
+    // axpy: w = w - alpha v
+    if (yid == 0)
+    {
+        for (I i = xid; i < n; i += DIMX)
+        {
+            s_work[xid] -= alpha*v[xid];
+        }
+    }
+    __syncthreads();
+
+    // ger2/her2: C := C - tau v w^H - conj(tau) w v^H
+    for (I j = yid; j < n; j += DIMY)
+    {
+        for (I i = xid; i < m; i += DIMX)
+            C[i + j*ldc] -= tau * v[i] * conj( s_work[yid] )
+                          + conj( tau ) * s_work[yid] * conj( v[i] );
     }
 }
 
@@ -313,7 +312,7 @@ __device__ void sb2st_hb2st_sweep_step(
     S* D,
     S* E,
     T* s_housev,
-    T* s_reduct)
+    T* s_work)
 {
     const rocblas_int tid = xid + yid * DIMX;
 
@@ -350,7 +349,7 @@ __device__ void sb2st_hb2st_sweep_step(
                 s_housev[i] = Aband[(idiag + 1 + i) + s * ldab];
 
             // generate Householder reflector
-            sb2st_larfg( xid, nc, s_housev, tau, s_reduct );
+            sb2st_larfg( xid, nc, s_housev, tau, s_work );
 
             // Copy Householder vector and tau to V, and subdiagonal element to E.
             // todo: copy diagonal to D? A[sweep+1, sweep+1] is computed below in larfy.
@@ -378,11 +377,16 @@ __device__ void sb2st_hb2st_sweep_step(
 
             // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
             // Using ldab-1 adjusts for band format.
-            sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( tau ),
-                        A + idiag + (sweep + 1)*ldab, ldab-1, s_reduct );
-            __syncthreads();
-            sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, tau,
-                        A + idiag + (sweep + 1)*ldab, ldab-1, s_reduct);
+            #if 1
+                sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, tau,
+                              A + idiag + (sweep + 1)*ldab, ldab-1, s_work );
+            #else
+                sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( tau ),
+                            A + idiag + (sweep + 1)*ldab, ldab-1, s_work );
+                __syncthreads();
+                sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, tau,
+                            A + idiag + (sweep + 1)*ldab, ldab-1, s_work);
+            #endif
 
             // todo: copy A[ idiag + (sweep + 1)*ldab ] to D[s+1]?
 
@@ -391,12 +395,12 @@ __device__ void sb2st_hb2st_sweep_step(
             // and upper off-diagonal block, A{i,i+1} = H^H A{i,i+1}.
             rocblas_int nn = su_e - sm_i;
             sb2st_larf( xid, yid, rocblas_side_left, mm, m, s_housev, conj( tau ),
-                        A + sm_i + sm_i * ldab, ldab, s_reduct );
+                        A + sm_i + sm_i * ldab, ldab, s_work );
             __syncthreads();
 
             // Apply H^H on right to diagonal block, A{i,i} := A{i,i} H.
             sb2st_larf( xid, yid, rocblas_side_right, mm, mm, s_housev, tau,
-                        A + sm_i + sm_i * ldab, ldab, s_reduct);
+                        A + sm_i + sm_i * ldab, ldab, s_work);
 
             // Copy & transpose upper off-diagonal block A{i,i+1}
             // to lower off-diagonal block A{i+1,i}.
@@ -444,7 +448,7 @@ __device__ void sb2st_hb2st_sweep_step(
         if (tau != 0)
         {
             sb2st_larf( xid, yid, rocblas_side_right, nc, kd, s_housev, conj( tau ),
-                        A + sm_i + (sd_i + 1) * ldab, ldab, s_reduct );
+                        A + sm_i + (sd_i + 1) * ldab, ldab, s_work );
             __syncthreads();
         }
 
@@ -457,7 +461,7 @@ __device__ void sb2st_hb2st_sweep_step(
                     s_housev[i] = Aband[idiag + kd + i + jp*ldab];
 
                 // generate Householder reflector
-                sb2st_larfg( xid, mm, s_housev, tau, s_reduct );
+                sb2st_larfg( xid, mm, s_housev, tau, s_work );
 
                 /// TODO: copy to V storage. The larfg kernel could do this during scaling.
                 // copy Householder vector to column s of A,
@@ -486,30 +490,35 @@ __device__ void sb2st_hb2st_sweep_step(
             {
                 // Apply on left of lower off-diagonal, A{jc, jp} := H^H A{jc, jp}.
                 sb2st_larf( xid, yid, rocblas_side_left, nc, kd, s_housev, conj( tau ),
-                            A + idiag + kd + jp*ldab, ldab-1, s_reduct );
+                            A + idiag + kd + jp*ldab, ldab-1, s_work );
                 __syncthreads();
 
                 // Apply on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
                 // todo: larfy
-                sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( tau ),
-                            A + idiag + jc*ldab, ldab-1, s_reduct );
-                __syncthreads();
+                #if 1
+                    sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, tau,
+                                  A + idiag + jc*ldab, ldab-1, s_work );
+                #else
+                    sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( tau ),
+                                A + idiag + jc*ldab, ldab-1, s_work );
+                    __syncthreads();
 
-                sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, tau,
-                            A + idiag + jc*ldab, ldab-1, s_reduct );
+                    sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, tau,
+                                A + idiag + jc*ldab, ldab-1, s_work );
+                #endif
 
                 /*
                 // Apply on left of (prev) off-diagonal and diagonal block, A{i, i-1:i} = H^H A{i, i-1:i}.
                 rocblas_int nn = su_e - sd_i - 1;
                 sb2st_larf( xid, yid, rocblas_side_left, mm, nn, s_housev, conj( tau ),
-                            A + sm_i + (sd_i + 1) * ldab, ldab, s_reduct );
+                            A + sm_i + (sd_i + 1) * ldab, ldab, s_work );
                 __syncthreads();
                 // Apply on right of diagonal and (next) off-diagonal block, A{i:i+1, i} = A{i:i+1, i} H.
                 /// Isn't this a race condition with the thread block updating the
                 /// left off-diagonal of next block? Or are they not packing the
                 /// tasks as tightly, skipping every other task to avoid races?
                 sb2st_larf( xid, yid, rocblas_side_right, mm, mm, s_housev, tau,
-                            A + sm_i + sm_i * ldab, ldab, s_reduct);
+                            A + sm_i + sm_i * ldab, ldab, s_work);
 
                 /// I think there's no reason to copy transpose blocks.
                 /// Are they ever used for anything?
@@ -579,7 +588,7 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     // shared memory setup
     extern __shared__ double s_mem[];
     T* s_housev = reinterpret_cast<T*>(s_mem);
-    T* s_reduct = reinterpret_cast<T*>(s_housev + kd);
+    T* s_work   = reinterpret_cast<T*>(s_housev + kd);
 
     // get sweep parameters
     rocblas_int last_sweep = round / 3;
@@ -593,7 +602,7 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     // execute sweep step
     sb2st_hb2st_sweep_step<T, S>(
         xid, yid, n, kd, sweep, sm_i, Aband, ldab, V, ldv, E,
-        s_housev, s_reduct );
+        s_housev, s_work );
 }
 
 //------------------------------------------------------------------------------
