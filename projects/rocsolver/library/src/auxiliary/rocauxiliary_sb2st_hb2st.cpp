@@ -29,23 +29,32 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+// todo: what is difference between T, S, U?
+// I gather that for complex, T=complex, S=real, U=complex*.
+// Why not just use T* instead of U?
+
 template <typename T, typename S, typename U>
 rocblas_status rocsolver_sb2st_hb2st_impl(
     rocblas_handle handle,
     const rocblas_int n,
-    const rocblas_int nb,
-    U A,
-    const rocblas_int lda,
+    const rocblas_int kd,
+    U Aband,
+    const rocblas_int ldab,
     S* D,
-    S* E)
+    S* E,
+    U V,
+    const rocblas_int ldv )
 {
-    ROCSOLVER_ENTER_TOP( "sb2st_hb2st", "-n", n, "-nb", nb, "--lda", lda );
+    ROCSOLVER_ENTER_TOP( "sb2st_hb2st", "-n", n, "--kd", kd, "--ldab", ldab, "--ldv", ldv );
 
     if (! handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_sb2st_hb2st_argCheck( handle, n, nb, lda, A, D, E );
+    // todo: why is argCheck not in same order as routine itself?
+    rocblas_status st = rocsolver_sb2st_hb2st_argCheck(
+        handle, n, kd, ldab, ldv, Aband, D, E, V );
+        // handle, n, kd, Aband, ldab, D, E, V, ldv  // e.g.
     if (st != rocblas_status_continue)
         return st;
 
@@ -56,14 +65,16 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
     rocblas_stride strideA = 0;
     rocblas_stride strideD = 0;
     rocblas_stride strideE = 0;
+    rocblas_stride strideV = 0;
     rocblas_int batch_count = 1;
 
     // memory workspace sizes:
     // size of reusable workspace
     size_t size_work;
-    rocsolver_sb2st_hb2st_getMemorySize<false, T, S>(n, nb, batch_count, &size_work);
+    rocsolver_sb2st_hb2st_getMemorySize<false, T, S>(
+        n, kd, batch_count, &size_work );
 
-    if (rocblas_is_device_memory_size_query( handle) )
+    if (rocblas_is_device_memory_size_query( handle ) )
         return rocblas_set_optimal_device_memory_size( handle, size_work );
 
     // memory workspace allocation
@@ -75,10 +86,15 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
 
     work = mem[0];
 
+    // todo: for what matrices do we need shift and when not?
     // execution
     return rocsolver_sb2st_hb2st_template<false, false, T>(
-        handle, n, nb, A, shiftA, lda, strideA,
-        D, strideD, E, strideE, batch_count, (T*)work );
+        handle, n, kd,
+        Aband, shiftA, ldab, strideA,
+        D, strideD,
+        E, strideE,
+        V, ldv, strideV,
+        batch_count, (T*)work );
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -94,49 +110,61 @@ extern "C" {
 ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(
     rocblas_handle handle,
     const rocblas_int n,
-    const rocblas_int nb,
-    float* A,
-    const rocblas_int lda,
+    const rocblas_int kd,
+    float* Aband,
+    const rocblas_int ldab,
     float* D,
-    float* E)
+    float* E,
+    float* V,
+    const rocblas_int ldv )
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<float>( handle, n, nb, A, lda, D, E );
+    return rocsolver::rocsolver_sb2st_hb2st_impl<float>(
+        handle, n, kd, Aband, ldab, D, E, V, ldv );
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(
     rocblas_handle handle,
     const rocblas_int n,
-    const rocblas_int nb,
-    double* A,
-    const rocblas_int lda,
+    const rocblas_int kd,
+    double* Aband,
+    const rocblas_int ldab,
     double* D,
-    double* E)
+    double* E,
+    double* V,
+    const rocblas_int ldv )
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<double>( handle, n, nb, A, lda, D, E );
+    return rocsolver::rocsolver_sb2st_hb2st_impl<double>(
+        handle, n, kd, Aband, ldab, D, E, V, ldv );
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(
     rocblas_handle handle,
     const rocblas_int n,
-    const rocblas_int nb,
-    rocblas_float_complex* A,
-    const rocblas_int lda,
+    const rocblas_int kd,
+    rocblas_float_complex* Aband,
+    const rocblas_int ldab,
     float* D,
-    float* E)
+    float* E,
+    rocblas_float_complex* V,
+    const rocblas_int ldv )
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex>( handle, n, nb, A, lda, D, E );
+    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex>(
+        handle, n, kd, Aband, ldab, D, E, V, ldv );
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(
     rocblas_handle handle,
     const rocblas_int n,
-    const rocblas_int nb,
-    rocblas_double_complex* A,
-    const rocblas_int lda,
+    const rocblas_int kd,
+    rocblas_double_complex* Aband,
+    const rocblas_int ldab,
     double* D,
-    double* E)
+    double* E,
+    rocblas_double_complex* V,
+    const rocblas_int ldv )
 {
-    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex>( handle, n, nb, A, lda, D, E );
+    return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex>(
+        handle, n, kd, Aband, ldab, D, E, V, ldv );
 }
 
 } // extern C

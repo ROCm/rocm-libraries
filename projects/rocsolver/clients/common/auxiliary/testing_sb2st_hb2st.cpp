@@ -25,8 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
- #include "testing_sb2st_hb2st.hpp"
+#include "testing_sb2st_hb2st.hpp"
 
- #define TESTING_SB2ST_HB2ST(...) template void testing_sb2st_hb2st<__VA_ARGS__>(Arguments&);
+#define TESTING_SB2ST_HB2ST(...) template void testing_sb2st_hb2st<__VA_ARGS__>(Arguments&);
 
- INSTANTIATE(TESTING_SB2ST_HB2ST, FOREACH_SCALAR_TYPE, APPLY_STAMP)
+INSTANTIATE(TESTING_SB2ST_HB2ST, FOREACH_SCALAR_TYPE, APPLY_STAMP)
