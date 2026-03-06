@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -132,7 +133,7 @@ rocblas_status rocblas_internal_spr2_launcher(rocblas_handle handle,
     static constexpr bool is_float = std::is_same_v<TScal, float>;
 
     static constexpr int SPR2_DIM_X = 128;
-    static constexpr int SPR2_DIM_Y = 8;
+    static constexpr int SPR2_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
     static constexpr int N_TX       = is_float ? 2 : 1; // x items per x thread
 
     rocblas_int blocksX = (n - 1) / (SPR2_DIM_X * N_TX) + 1;
