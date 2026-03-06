@@ -2515,7 +2515,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       vregSetIdxMFMA = 1 - vregSetIdxGR
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
 
-    self.states.SubTileIdx = 1 # For SubIter. Start from 1
+    # initialize SubTileIdx
+    self.states.SubTileIdx = 1 if self.states.numItersPLR and kernel["numSubTiles"] else 0
 
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
@@ -2924,6 +2925,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def _loopBody( self, kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, firstIter=False, dsWriteBA=False, grBA=False, isDTVGRSecondBuf=False, skipClose=False ):
     module = Module("loopBody")
     expand = kernel["ExpandPointerSwap"]
+    # initialize SubTileIdx
+    self.states.SubTileIdx = 1 if self.states.numItersPLR and kernel["numSubTiles"] else 0
 
     # not generate openLoop for firstIter
     if not firstIter:
