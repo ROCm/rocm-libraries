@@ -22,13 +22,11 @@
  * ************************************************************************ */
 #pragma once
 
-#include <cassert>
 #include <functional>
 #include <iosfwd>
 #include <memory>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -111,84 +109,12 @@ namespace stinkytofu
         virtual void run(Function& func, PassContext& passCtx) = 0;
     };
 
-    // Base class for all analysis passes.
-    //
-    // An analysis pass computes information from the IR.
-    // Its results can be queried by other passes through
-    // the AnalysisManager.
-    class AnalysisPass : public Pass
-    {
-    };
-
-    // AnalysisManager manages analysis passes and their results.
-    //
-    // It runs analysis passes on demand, and each pass caches its own result.
-    // If a result is invalidated by another pass, the manager will rerun the
-    // analysis pass when the result is requested.
-    class AnalysisManager
-    {
-    public:
-        enum class PassState
-        {
-            NotRun,
-            Completed,
-
-            // The result of the pass is invalidated by another pass.
-            // If the other pass wants to use the result, PassManager needs to
-            // rerun the pass.
-            Invalidated,
-        };
-
-        ~AnalysisManager();
-
-        void registerAnalysisPass(std::unique_ptr<AnalysisPass> pass)
-        {
-            // Release ownership, AnalysisManager will manage the lifetime of the pass.
-            AnalysisPass* passPtr = pass.release();
-
-            analysisPasses[passPtr->getPassID()] = {passPtr, PassState::NotRun};
-        }
-
-        template <class AnalysisPassType, class IRUnitType>
-        AnalysisPassType& getResult(IRUnitType& irUnit, PassContext& passCtx)
-        {
-            Pass::ID pid = AnalysisPassType::ID;
-            auto     it  = analysisPasses.find(pid);
-            assert(it != analysisPasses.end() && "Analysis pass not registered");
-
-            std::pair<AnalysisPass*, PassState>& entry = it->second;
-
-            PassState&        state = entry.second;
-            AnalysisPassType* pass  = static_cast<AnalysisPassType*>(entry.first);
-            if(state != PassState::Completed)
-            {
-                assert(state == PassState::NotRun || state == PassState::Invalidated);
-                pass->run(irUnit, passCtx);
-                state = PassState::Completed;
-            }
-            return *pass;
-        }
-
-        void invalidate(Pass::ID pid)
-        {
-            auto it = analysisPasses.find(pid);
-            assert(it != analysisPasses.end() && "Analysis pass not registered");
-            it->second.second = PassState::Invalidated;
-        }
-
-    private:
-        // Note that AnalysisManager owns the AnalysisPass pointers and will delete them in
-        // destructor.
-        std::unordered_map<Pass::ID, std::pair<AnalysisPass*, PassState>> analysisPasses;
-    };
-
     // The PassContext serves as the central state and resource manager for
     // the StinkyTofu pass execution framework.
     //
     // It does not own a Function; the Function is passed to PassManager::run(Function&).
     class PassContext
     {
-        AnalysisManager   analysisMgr;
         GemmTileConfig    gemmConfig;
         PassFeatureConfig passConfig;
         uint32_t          wavefrontSize = 0; ///< Computed from gemmConfig.arch
@@ -202,13 +128,6 @@ namespace stinkytofu
             : globalBBFilter(BasicBlockFilterBuilder::all())
         {
         }
-
-        AnalysisManager& getAnalysisManager()
-        {
-            return analysisMgr;
-        }
-
-        // ========== New API (preferred) ==========
 
         void setGemmTileConfig(const GemmTileConfig& config);
 
@@ -312,7 +231,6 @@ namespace stinkytofu
     };
 
     // PassManager manages a list of passes to run on a module.
-    // It also manages the analysis passes and their results through PassContext.
     //
     // Note: The module is using physical registers, so it is no longer in SSA form.
     //
@@ -332,11 +250,6 @@ namespace stinkytofu
         void addPass(std::unique_ptr<Pass> pass)
         {
             passes.push_back(std::move(pass));
-        }
-
-        void registerAnalysisPass(std::unique_ptr<AnalysisPass> pass)
-        {
-            passCtx.getAnalysisManager().registerAnalysisPass(std::move(pass));
         }
 
         PassManager()  = default;

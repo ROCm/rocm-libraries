@@ -22,7 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/OptimizationPipeline.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
-#include "stinkytofu/ir/asm/DefUseChain.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
@@ -210,22 +210,11 @@ namespace stinkytofu
         passManager.addPass(createStinkyIRVerifierPass());
 
         // ========== Phase 0: Custom Passes (Before) ==========
-        if(!config.beforeAnalysisPasses.empty() || !config.beforePasses.empty())
+        if(!config.beforePasses.empty())
         {
             if(config.verbose)
                 std::cout << "\nPhase 0: Custom Passes (Before Built-in Pipeline)" << std::endl;
 
-            // Register analysis passes first
-            for(size_t i = 0; i < config.beforeAnalysisPasses.size(); ++i)
-            {
-                if(config.verbose)
-                    std::cout << "  - [Analysis] " << config.beforeAnalysisPasses[i]->getName()
-                              << std::endl;
-                passManager.registerAnalysisPass(std::move(config.beforeAnalysisPasses[i]));
-            }
-            config.beforeAnalysisPasses.clear();
-
-            // Then add transformation passes
             for(size_t i = 0; i < config.beforePasses.size(); ++i)
             {
                 if(config.verbose)
@@ -324,22 +313,11 @@ namespace stinkytofu
         }
 
         // ========== Phase 5: Custom Passes (After) ==========
-        if(!config.afterPasses.empty() || !config.afterAnalysisPasses.empty())
+        if(!config.afterPasses.empty())
         {
             if(config.verbose)
                 std::cout << "\nPhase 5: Custom Passes (After Built-in Pipeline)" << std::endl;
 
-            // Register analysis passes first
-            for(size_t i = 0; i < config.afterAnalysisPasses.size(); ++i)
-            {
-                if(config.verbose)
-                    std::cout << "  - [Analysis] " << config.afterAnalysisPasses[i]->getName()
-                              << std::endl;
-                passManager.registerAnalysisPass(std::move(config.afterAnalysisPasses[i]));
-            }
-            config.afterAnalysisPasses.clear();
-
-            // Then add transformation passes
             for(size_t i = 0; i < config.afterPasses.size(); ++i)
             {
                 if(config.verbose)

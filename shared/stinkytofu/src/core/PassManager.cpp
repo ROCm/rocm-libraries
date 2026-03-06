@@ -22,19 +22,10 @@
 
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/ir/asm/DefUseChain.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu
 {
-    AnalysisManager::~AnalysisManager()
-    {
-        for(auto& entry : analysisPasses)
-        {
-            delete entry.second.first;
-        }
-    }
-
     void PassContext::setGemmTileConfig(const GemmTileConfig& config)
     {
         gemmConfig = config;
@@ -170,10 +161,6 @@ namespace stinkytofu
     //----------------------------------------------------------------------
     void PassManager::run(Function& F)
     {
-        // Build use-def chains once before running passes
-        // TODO: Remove this once all IR generation uses automatic builder setters
-        buildUseDefChain(F);
-
         if(dbgCfg)
         {
             dbgCfg->prepareDumpOutputStream();

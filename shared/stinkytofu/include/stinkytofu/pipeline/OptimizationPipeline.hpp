@@ -116,11 +116,6 @@ namespace stinkytofu
         std::unique_ptr<PassManagerDebugConfig> debugConfig; ///< Debug output configuration
 
         // ========== Custom Pass Extension ==========
-        /// Custom analysis passes executed BEFORE built-in pipeline (in order)
-        /// These are registered with the AnalysisManager
-        /// Mutable to allow pass execution from const config
-        mutable std::vector<std::unique_ptr<AnalysisPass>> beforeAnalysisPasses;
-
         /// Custom transformation passes executed BEFORE built-in pipeline (in order)
         /// Order: beforePasses[0] -> beforePasses[1] -> ... -> built-in passes
         /// Mutable to allow pass execution from const config
@@ -130,18 +125,6 @@ namespace stinkytofu
         /// Order: built-in passes -> afterPasses[0] -> afterPasses[1] -> ...
         /// Mutable to allow pass execution from const config
         mutable std::vector<std::unique_ptr<Pass>> afterPasses;
-
-        /// Custom analysis passes executed AFTER built-in pipeline (in order)
-        /// These are registered with the AnalysisManager
-        /// Mutable to allow pass execution from const config
-        mutable std::vector<std::unique_ptr<AnalysisPass>> afterAnalysisPasses;
-
-        /// Add a custom analysis pass to run before the built-in pipeline
-        PipelineConfig& addAnalysisPassBefore(std::unique_ptr<AnalysisPass> pass)
-        {
-            beforeAnalysisPasses.push_back(std::move(pass));
-            return *this;
-        }
 
         /// Add a custom transformation pass to run before the built-in pipeline
         PipelineConfig& addPassBefore(std::unique_ptr<Pass> pass)
@@ -154,13 +137,6 @@ namespace stinkytofu
         PipelineConfig& addPassAfter(std::unique_ptr<Pass> pass)
         {
             afterPasses.push_back(std::move(pass));
-            return *this;
-        }
-
-        /// Add a custom analysis pass to run after the built-in pipeline
-        PipelineConfig& addAnalysisPassAfter(std::unique_ptr<AnalysisPass> pass)
-        {
-            afterAnalysisPasses.push_back(std::move(pass));
             return *this;
         }
 

@@ -79,6 +79,34 @@ namespace stinkytofu
         return labelInst;
     }
 
+    StinkyInstruction* AsmIRBuilder::createPhi(RegType type, unsigned regIdx, IRBase* insertPt)
+    {
+        static const HwInstDesc phiMCID{
+            GFX::PHI, GFX::PHI, 0, 0, "PHI", makeFlagSet({InstFlag::IF_HasSideEffect})};
+
+        const size_t numPreds = bb->getPredecessors().size();
+
+        if(insertPt == nullptr)
+            insertPt = bb->empty() ? nullptr : &*bb->begin();
+
+        if(insertPt != nullptr)
+        {
+            auto it = IRList::iterator(insertPt);
+            assert((it == bb->begin()
+                    || cast<StinkyInstruction>(std::prev(it).getNodePtr())->getUnifiedOpcode()
+                           == GFX::PHI)
+                   && "insertPt must be at block begin or immediately after a PHI");
+        }
+
+        StinkyInstruction* phi = insertPt ? create(&phiMCID, insertPt) : create(&phiMCID);
+        phi->addDestReg(StinkyRegister(type, regIdx, 1));
+
+        for(size_t i = 0; i < numPreds; ++i)
+            phi->addSrcReg(StinkyRegister(0));
+
+        return phi;
+    }
+
     //----------------------------------------------------------------------
     // StinkyInstruction Use-Def Chain Maintenance Implementation
     //----------------------------------------------------------------------
@@ -292,24 +320,27 @@ namespace stinkytofu
 
     void StinkyInstruction::unlinkFromSources()
     {
-        // Remove this instruction from all its sources' user lists
+        // Remove this instruction from all its operand-defs' user lists
         for(StinkyInstruction* source : sources)
         {
-            auto& sourceUsers = source->users;
-            sourceUsers.erase(std::remove(sourceUsers.begin(), sourceUsers.end(), this),
-                              sourceUsers.end());
+            if(source != nullptr)
+            {
+                auto& sourceUsers = source->users;
+                sourceUsers.erase(std::remove(sourceUsers.begin(), sourceUsers.end(), this),
+                                  sourceUsers.end());
+            }
         }
         sources.clear();
     }
 
     void StinkyInstruction::unlinkFromUsers()
     {
-        // Remove this instruction from all its users' source lists
+        // Remove this instruction from all its users' operand-def lists
         for(StinkyInstruction* user : users)
         {
-            auto& userSources = user->sources;
-            userSources.erase(std::remove(userSources.begin(), userSources.end(), this),
-                              userSources.end());
+            auto& userOperandDefs = user->sources;
+            userOperandDefs.erase(std::remove(userOperandDefs.begin(), userOperandDefs.end(), this),
+                                  userOperandDefs.end());
         }
         users.clear();
     }

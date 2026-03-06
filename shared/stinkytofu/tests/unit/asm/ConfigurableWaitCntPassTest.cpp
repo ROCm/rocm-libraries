@@ -45,7 +45,8 @@ protected:
 
         // Create a Function with a single BasicBlock for testing
         func = std::make_unique<Function>("test_function");
-        bb   = func->createBasicBlock("entry");
+        func->setGemmTileConfig(gemmConfig);
+        bb = func->createBasicBlock("entry");
     }
 
     void TearDown() override
@@ -734,8 +735,9 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_NoLoop)
     // - This is NOT a loop, so there's no dependency from "previous iteration"
 
     TearDown();
-    auto        noLoopFunc = std::make_unique<Function>("test_no_loop");
-    BasicBlock* block      = noLoopFunc->createBasicBlock("single_block");
+    auto noLoopFunc = std::make_unique<Function>("test_no_loop");
+    noLoopFunc->setGemmTileConfig(gemmConfig);
+    BasicBlock* block = noLoopFunc->createBasicBlock("single_block");
 
     // NO back-edge, NO loop
     EXPECT_FALSE(hasLoopBackEdge(block)) << "Should NOT be a loop block";
@@ -826,7 +828,8 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_LoopOnly)
     // Current status: SKIPPED - requires iterative dataflow for convergence
 
     TearDown();
-    auto        loopFunc  = std::make_unique<Function>("test_loop_only");
+    auto loopFunc = std::make_unique<Function>("test_loop_only");
+    loopFunc->setGemmTileConfig(gemmConfig);
     BasicBlock* loopBlock = loopFunc->createBasicBlock("loop_start");
 
     // Set up loop back-edge: block points to itself
@@ -961,6 +964,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain)
 
     TearDown();
     func = std::make_unique<Function>("test_two_block_chain");
+    func->setGemmTileConfig(gemmConfig);
 
     // Create Block 1 (entry block)
     BasicBlock* block1 = func->createBasicBlock("entry");
@@ -1116,6 +1120,7 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
 
     TearDown();
     func = std::make_unique<Function>("test_two_block_chain");
+    func->setGemmTileConfig(gemmConfig);
 
     // Create Block 1 (entry block)
     BasicBlock* block1 = func->createBasicBlock("entry");
@@ -1264,9 +1269,10 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_TwoBlockChain2)
 TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerge)
 {
     TearDown();
-    auto        testFunc = std::make_unique<Function>("test_multi_pred");
-    BasicBlock* entry    = testFunc->createBasicBlock("entry");
-    BasicBlock* block1   = testFunc->createBasicBlock("b1");
+    auto testFunc = std::make_unique<Function>("test_multi_pred");
+    testFunc->setGemmTileConfig(gemmConfig);
+    BasicBlock* entry  = testFunc->createBasicBlock("entry");
+    BasicBlock* block1 = testFunc->createBasicBlock("b1");
     BasicBlock* block2   = testFunc->createBasicBlock("b2");
     BasicBlock* block3   = testFunc->createBasicBlock("b3");
 
@@ -1380,10 +1386,11 @@ TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerg
 TEST_F(ConfigurableWaitCntPassTest, BasicBlockStateTracking_MultiPredecessorMerge2)
 {
     TearDown();
-    auto        testFunc = std::make_unique<Function>("test_multi_pred");
-    BasicBlock* entry    = testFunc->createBasicBlock("entry");
-    BasicBlock* block1   = testFunc->createBasicBlock("b1");
-    BasicBlock* block2   = testFunc->createBasicBlock("b2");
+    auto testFunc = std::make_unique<Function>("test_multi_pred");
+    testFunc->setGemmTileConfig(gemmConfig);
+    BasicBlock* entry  = testFunc->createBasicBlock("entry");
+    BasicBlock* block1 = testFunc->createBasicBlock("b1");
+    BasicBlock* block2 = testFunc->createBasicBlock("b2");
     BasicBlock* block3   = testFunc->createBasicBlock("b3");
     BasicBlock* block4   = testFunc->createBasicBlock("b4");
 

@@ -80,27 +80,41 @@ namespace stinkytofu
             return config;
         }
 
-        void addPipeline(BasicBlockFilter bbFilter, const std::string& groupName)
+        /**
+         * @brief Populate the pipeline specifications for the GFX1250 architecture.
+         * @param module The StinkyAsmModule to populate the pipeline specifications for.
+         * @param specs The vector of pipeline specifications to populate.
+         */
+        void pipelineSpecPopulator(const StinkyAsmModule&                      module,
+                                   std::vector<BackendRegistry::PipelineSpec>& specs)
         {
-            BackendRegistry::addArchPipeline(
-                GFX1250_ARCH,
-                [bbFilter, groupName](const StinkyAsmModule& module) {
-                    return createDefaultPipeline(module, bbFilter, groupName);
-                },
-                groupName);
+            const auto& moduleOptions = module.getModuleOptions();
+
+            /* Skip pipeline population for optimization levels less than O3 */
+            if(moduleOptions.OptLevel < static_cast<int>(OptLevel::O3))
+            {
+                return;
+            }
+
+            /* Add pipelines for O3 optimization level */
+            specs.emplace_back(
+                /* PipelineConfig */ createDefaultPipeline(
+                    module,
+                    stinkytofu::BasicBlockFilterBuilder::byLabelPrefix("label_LoopBegin"),
+                    "loopWithPrefetch"),
+                /* groupName */ "loopWithPrefetch");
+
+            specs.emplace_back(
+                /* PipelineConfig */ createDefaultPipeline(
+                    module, stinkytofu::BasicBlockFilterBuilder::all(), "noLoadLoopBody"),
+                /* groupName */ "noLoadLoopBody");
         }
 
         struct Gfx1250BackendRegistrar
         {
             Gfx1250BackendRegistrar()
             {
-                addPipeline(
-                    /* bbFilter */ stinkytofu::BasicBlockFilterBuilder::byLabelPrefix(
-                        "label_LoopBegin"),
-                    /* groupName */ "loopWithPrefetch");
-                addPipeline(
-                    /* bbFilter */ stinkytofu::BasicBlockFilterBuilder::all(),
-                    /* groupName */ "noLoadLoopBody");
+                BackendRegistry::setArchPipeline(GFX1250_ARCH, pipelineSpecPopulator);
             }
         };
         static Gfx1250BackendRegistrar s_gfx1250BackendRegistrar;

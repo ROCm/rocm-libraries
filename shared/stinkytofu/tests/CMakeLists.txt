@@ -36,6 +36,8 @@ set(TEST_LINK_LIBS
 set(UNIT_ASM_TEST_FILES
     unit/asm/ConfigurableWaitCntPassTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
+    unit/asm/DefUseChainTest.cpp
+    unit/asm/InsertPhiTest.cpp
     unit/asm/DelayAluInsertionPassTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
@@ -61,7 +63,6 @@ set(UNIT_LOGICAL_TEST_FILES
     unit/logical/LogicalToAsmPipelineTest.cpp
     unit/logical/LogicalToAsmMultiArchTest.cpp
     unit/logical/LogicalIntrinsicFlowTest.cpp
-    unit/logical/LogicalPassManagerTest.cpp
 )
 
 # Common/Shared Tests

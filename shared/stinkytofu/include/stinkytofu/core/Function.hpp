@@ -89,6 +89,13 @@ namespace stinkytofu
             return c;
         }
 
+        /// Add CFG edge from \p from to \p to (updates both successor and predecessor).
+        void addEdge(BasicBlock* from, BasicBlock* to)
+        {
+            from->addSuccessor(to);
+            to->addPredecessor(from);
+        }
+
         /// Remove BasicBlock from this function (block must be in this function). Does not delete the block.
         void removeBasicBlock(BasicBlock* bb)
         {
@@ -155,5 +162,7 @@ namespace stinkytofu
         }
 
         void dump(std::ostream& out) const;
+
+        void dump() const;
     };
 }

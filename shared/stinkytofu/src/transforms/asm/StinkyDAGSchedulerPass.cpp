@@ -21,9 +21,9 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
-#include "stinkytofu/support/CFGTraversal.hpp"
 #include "dag/CDNA3.hpp"
 #include "dag/CDNA5.hpp"
+#include "stinkytofu/support/CFGTraversal.hpp"
 
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
 
@@ -298,11 +298,6 @@ namespace
 
         void runOnBasicBlock(BasicBlock& bb, PassContext& passCtx)
         {
-            // Use-def chains are already built by OptimizationPipeline
-            // inst->sources and inst->users are ready to use
-
-            PASS_DEBUG(dumpUseDefChain(bb));
-
             std::unique_ptr<ReadyQueue> readyQueue = chooseReadyQueue(passCtx);
             scheduleInDAG(bb, *readyQueue);
         }

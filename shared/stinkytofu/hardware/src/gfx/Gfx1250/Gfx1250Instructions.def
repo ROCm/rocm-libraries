@@ -31,100 +31,16 @@ DEF_T(BufferAtomicAddF32Inst, "buffer_atomic_add_f32",
     .logical = "BufferAtomicAddF32"
 )
 
-DEF_T(BufferAtomicCmpswapInst, "buffer_atomic_cmpswap",
+DEF_T(BufferAtomicCmpswapInst, "buffer_atomic_cmpswap_b32",
     .format = MUBUF,
     .flags = {MUBUFAtomic},
     .logical = "BufferAtomicCmpswapB32"
 )
 
-DEF_T(BufferAtomicCmpswapX2Inst, "buffer_atomic_cmpswap_x2",
+DEF_T(BufferAtomicCmpswapX2Inst, "buffer_atomic_cmpswap_b64",
     .format = MUBUF,
     .flags = {MUBUFAtomic},
     .logical = "BufferAtomicCmpswapB64"
-)
-
-DEF_T(BufferLoadB128Inst, "buffer_load_b128",
-    .format = MUBUF,
-    .cost = {12, 116},
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadB128"
-)
-
-DEF_T(BufferLoadB16Inst, "buffer_load_b16",
-    .format = MUBUF,
-    .flags = {MUBUFLoad}
-)
-
-DEF_T(BufferLoadB32Inst, "buffer_load_b32",
-    .format = MUBUF,
-    .cost = {12, 108},
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadB32"
-)
-
-DEF_T(BufferLoadB64Inst, "buffer_load_b64",
-    .format = MUBUF,
-    .cost = {12, 120},
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadB64"
-)
-
-DEF_T(BufferLoadB8Inst, "buffer_load_b8",
-    .format = MUBUF,
-    .flags = {MUBUFLoad}
-)
-
-DEF_T(BufferLoadB96Inst, "buffer_load_b96",
-    .format = MUBUF,
-    .cost = {12, 120},
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadB96"
-)
-
-DEF_T(BufferLoadD16B16Inst, "buffer_load_d16_b16",
-    .format = MUBUF,
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadD16B16"
-)
-
-DEF_T(BufferLoadD16HiB16Inst, "buffer_load_d16_hi_b16",
-    .format = MUBUF,
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadD16HIB16"
-)
-
-DEF_T(BufferLoadD16HiI8Inst, "buffer_load_d16_hi_i8",
-    .format = MUBUF,
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadD16HII8"
-)
-
-DEF_T(BufferLoadI8Inst, "buffer_load_i8",
-    .format = MUBUF,
-    .cost = {12, 104},
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadI8"
-)
-
-DEF_T(BufferLoadSbyteD16Inst, "buffer_load_sbyte_d16",
-    .format = MUBUF,
-    .cost = {12, 108},
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadD16I8"
-)
-
-DEF_T(BufferLoadSbyteD16HiInst, "buffer_load_sbyte_d16_hi",
-    .format = MUBUF,
-    .cost = {12, 104},
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadD16HII8"
-)
-
-DEF_T(BufferLoadI16Inst, "buffer_load_i16",
-    .format = MUBUF,
-    .cost = {12, 104},
-    .flags = {MUBUFLoad},
-    .logical = "BufferLoadI16"
 )
 
 DEF_T(BufferLoadU8Inst, "buffer_load_u8",
@@ -148,6 +64,19 @@ DEF_T(BufferLoadU8D16HiInst, "buffer_load_d16_hi_u8",
     .logical = "BufferLoadD16HIU8"
 )
 
+DEF_T(BufferLoadI8Inst, "buffer_load_i8",
+    .format = MUBUF,
+    .cost = {12, 104},
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadI8"
+)
+
+DEF_T(BufferLoadD16HiI8Inst, "buffer_load_d16_hi_i8",
+    .format = MUBUF,
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16HII8"
+)
+
 DEF_T(BufferLoadU16Inst, "buffer_load_u16",
     .format = MUBUF,
     .cost = {12, 108},
@@ -155,16 +84,75 @@ DEF_T(BufferLoadU16Inst, "buffer_load_u16",
     .logical = "BufferLoadU16"
 )
 
-DEF_T(BufferStoreB128Inst, "buffer_store_b128",
+DEF_T(BufferLoadI16Inst, "buffer_load_i16",
+    .format = MUBUF,
+    .cost = {12, 104},
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadI16"
+)
+
+DEF_T(BufferLoadD16B16Inst, "buffer_load_d16_b16",
+    .format = MUBUF,
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16B16"
+)
+
+DEF_T(BufferLoadD16HiB16Inst, "buffer_load_d16_hi_b16",
+    .format = MUBUF,
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadD16HIB16"
+)
+
+DEF_T(BufferLoadB32Inst, "buffer_load_b32",
+    .format = MUBUF,
+    .cost = {12, 108},
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadB32"
+)
+
+DEF_T(BufferLoadB64Inst, "buffer_load_b64",
+    .format = MUBUF,
+    .cost = {12, 120},
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadB64"
+)
+
+DEF_T(BufferLoadB96Inst, "buffer_load_b96",
+    .format = MUBUF,
+    .cost = {12, 120},
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadB96"
+)
+
+DEF_T(BufferLoadB128Inst, "buffer_load_b128",
+    .format = MUBUF,
+    .cost = {12, 116},
+    .flags = {MUBUFLoad},
+    .logical = "BufferLoadB128"
+)
+
+DEF_T(BufferStoreB8Inst, "buffer_store_b8",
     .format = MUBUF,
     .flags = {MUBUFStore},
-    .logical = "BufferStoreB128"
+    .logical = "BufferStoreB8"
+)
+
+DEF_T(BufferStoreD16HiB8Inst, "buffer_store_d16_hi_b8",
+    .format = MUBUF,
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreD16HIU8"
 )
 
 DEF_T(BufferStoreB16Inst, "buffer_store_b16",
     .format = MUBUF,
     .flags = {MUBUFStore},
     .logical = "BufferStoreB16"
+)
+
+DEF_T(BufferStoreD16HiB16Inst, "buffer_store_d16_hi_b16",
+    .format = MUBUF,
+    .flags = {MUBUFStore},
+    .logical = "BufferStoreD16HIB16"
 )
 
 DEF_T(BufferStoreB32Inst, "buffer_store_b32",
@@ -179,28 +167,17 @@ DEF_T(BufferStoreB64Inst, "buffer_store_b64",
     .logical = "BufferStoreB64"
 )
 
-DEF_T(BufferStoreB8Inst, "buffer_store_b8",
-    .format = MUBUF,
-    .flags = {MUBUFStore},
-    .logical = "BufferStoreB8"
-)
-
 DEF_T(BufferStoreB96Inst, "buffer_store_b96",
     .format = MUBUF,
     .flags = {MUBUFStore},
     .logical = "BufferStoreB96"
 )
 
-DEF_T(BufferStoreD16HiB16Inst, "buffer_store_d16_hi_b16",
-    .format = MUBUF,
-    .flags = {MUBUFStore},
-    .logical = "BufferStoreD16HIB16"
-)
 
-DEF_T(BufferStoreD16HiB8Inst, "buffer_store_d16_hi_b8",
+DEF_T(BufferStoreB128Inst, "buffer_store_b128",
     .format = MUBUF,
     .flags = {MUBUFStore},
-    .logical = "BufferStoreD16HIU8"
+    .logical = "BufferStoreB128"
 )
 
 // Control Flow
@@ -316,145 +293,22 @@ DEF_T(SWaitTensorcntInst, "s_wait_tensorcnt",
 )
 
 // Flat Memory
-
-DEF_T(FlatAtomicAddInst, "flat_atomic_add",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicAddF32Inst, "flat_atomic_add_f32",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicAddF64Inst, "flat_atomic_add_f64",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicAndInst, "flat_atomic_and",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicCmpswapInst, "flat_atomic_cmpswap",
-    .format = FLAT,
-    .flags = {FLATAtomic},
-    .logical = "FlatAtomicCmpswapB32"
-)
-
-DEF_T(FlatAtomicDecInst, "flat_atomic_dec",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicIncInst, "flat_atomic_inc",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicMaxF64Inst, "flat_atomic_max_f64",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicMinF64Inst, "flat_atomic_min_f64",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicOrInst, "flat_atomic_or",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicPkAddBf16Inst, "flat_atomic_pk_add_bf16",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicPkAddF16Inst, "flat_atomic_pk_add_f16",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicSmaxInst, "flat_atomic_smax",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicSminInst, "flat_atomic_smin",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicSubInst, "flat_atomic_sub",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicSwapInst, "flat_atomic_swap",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicUmaxInst, "flat_atomic_umax",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicUminInst, "flat_atomic_umin",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatAtomicXorInst, "flat_atomic_xor",
-    .format = FLAT,
-    .flags = {FLATAtomic}
-)
-
-DEF_T(FlatLoadB128Inst, "flat_load_b128",
+DEF_T(FlatLoadU8Inst, "flat_load_u8",
     .format = FLAT,
     .flags = {FLATLoad},
-    .logical = "FlatLoadB128"
+    .logical = "FlatLoadU8"
 )
 
-DEF_T(FlatLoadB32Inst, "flat_load_b32",
+DEF_T(FlatLoadU8D16Inst, "flat_load_d16_u8",
     .format = FLAT,
     .flags = {FLATLoad},
-    .logical = "FlatLoadB32"
+    .logical = "FlatLoadD16U8"
 )
 
-DEF_T(FlatLoadB64Inst, "flat_load_b64",
+DEF_T(FlatLoadU8D16HiInst, "flat_load_d16_hi_u8",
     .format = FLAT,
     .flags = {FLATLoad},
-    .logical = "FlatLoadB64"
-)
-
-DEF_T(FlatLoadB96Inst, "flat_load_b96",
-    .format = FLAT,
-    .flags = {FLATLoad},
-    .logical = "FlatLoadB96"
-)
-
-DEF_T(FlatLoadDwordInst, "flat_load_dword",
-    .format = FLAT,
-    .flags = {FLATLoad}
-)
-
-DEF_T(FlatLoadDwordx2Inst, "flat_load_dwordx2",
-    .format = FLAT,
-    .flags = {FLATLoad}
-)
-
-DEF_T(FlatLoadDwordx3Inst, "flat_load_dwordx3",
-    .format = FLAT,
-    .flags = {FLATLoad}
-)
-
-DEF_T(FlatLoadDwordx4Inst, "flat_load_dwordx4",
-    .format = FLAT,
-    .flags = {FLATLoad}
+    .logical = "FlatLoadD16HIU8"
 )
 
 DEF_T(FlatLoadI8Inst, "flat_load_i8",
@@ -475,6 +329,18 @@ DEF_T(FlatLoadI8D16HiInst, "flat_load_d16_hi_i8",
     .logical = "FlatLoadD16HII8"
 )
 
+DEF_T(FlatLoadU16Inst, "flat_load_u16",
+    .format = FLAT,
+    .flags = {FLATLoad},
+    .logical = "FlatLoadU16"
+)
+
+DEF_T(FlatLoadI16Inst, "flat_load_i16",
+    .format = FLAT,
+    .flags = {FLATLoad},
+    .logical = "FlatLoadI16"
+)
+
 DEF_T(FlatLoadB16D16Inst, "flat_load_d16_b16",
     .format = FLAT,
     .flags = {FLATLoad},
@@ -487,40 +353,52 @@ DEF_T(FlatLoadB16D16HiInst, "flat_load_d16_hi_b16",
     .logical = "FlatLoadD16HIB16"
 )
 
-DEF_T(FlatLoadI16Inst, "flat_load_i16",
+DEF_T(FlatLoadB32Inst, "flat_load_b32",
     .format = FLAT,
     .flags = {FLATLoad},
-    .logical = "FlatLoadI16"
+    .logical = "FlatLoadB32"
 )
 
-DEF_T(FlatLoadU8Inst, "flat_load_u8",
+DEF_T(FlatLoadB64Inst, "flat_load_b64",
     .format = FLAT,
     .flags = {FLATLoad},
-    .logical = "FlatLoadU8"
+    .logical = "FlatLoadB64"
 )
 
-DEF_T(FlatLoadU8D16Inst, "flat_load_d16_u8",
+DEF_T(FlatLoadB96Inst, "flat_load_b96",
     .format = FLAT,
     .flags = {FLATLoad},
-    .logical = "FlatLoadD16U8"
+    .logical = "FlatLoadB96"
 )
 
-DEF_T(FlatLoadU8D16HiInst, "flat_load_d16_hi_u8",
+DEF_T(FlatLoadB128Inst, "flat_load_b128",
     .format = FLAT,
     .flags = {FLATLoad},
-    .logical = "FlatLoadD16HIU8"
+    .logical = "FlatLoadB128"
 )
 
-DEF_T(FlatLoadU16Inst, "flat_load_u16",
-    .format = FLAT,
-    .flags = {FLATLoad},
-    .logical = "FlatLoadU16"
-)
-
-DEF_T(FlatStoreB128Inst, "flat_store_b128",
+DEF_T(FlatStoreByteInst, "flat_store_b8",
     .format = FLAT,
     .flags = {FLATStore},
-    .logical = "FlatStoreB128"
+    .logical = "FlatStoreB8"
+)
+
+DEF_T(FlatStoreByteD16HiInst, "flat_store_d16_hi_b8",
+    .format = FLAT,
+    .flags = {FLATStore},
+    .logical = "FlatStoreD16HIB8"
+)
+
+DEF_T(FlatStoreB16Inst, "flat_store_b16",
+    .format = FLAT,
+    .flags = {FLATStore},
+    .logical = "FlatStoreB16"
+)
+
+DEF_T(FlatStoreB16D16HiInst, "flat_store_d16_hi_b16",
+    .format = FLAT,
+    .flags = {FLATStore},
+    .logical = "FlatStoreD16HIB16"
 )
 
 DEF_T(FlatStoreB32Inst, "flat_store_b32",
@@ -541,63 +419,137 @@ DEF_T(FlatStoreB96Inst, "flat_store_b96",
     .logical = "FlatStoreB96"
 )
 
-DEF_T(FlatStoreByteInst, "flat_store_b8",
+DEF_T(FlatStoreB128Inst, "flat_store_b128",
     .format = FLAT,
     .flags = {FLATStore},
-    .logical = "FlatStoreB8"
+    .logical = "FlatStoreB128"
 )
 
-DEF_T(FlatStoreByteD16HiInst, "flat_store_d16_hi_b8",
+DEF_T(FlatAtomicSwapB32Inst, "flat_atomic_swap_b32",
     .format = FLAT,
-    .flags = {FLATStore},
-    .logical = "FlatStoreD16HIB8"
+    .flags = {FLATAtomic}
 )
 
-DEF_T(FlatStoreDwordInst, "flat_store_dword",
+DEF_T(FlatAtomicCmpswapB32Inst, "flat_atomic_cmpswap_b32",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATAtomic},
+    .logical = "FlatAtomicCmpswapB32"
 )
 
-DEF_T(FlatStoreDwordx2Inst, "flat_store_dwordx2",
+DEF_T(FlatAtomicAddF32Inst, "flat_atomic_add_f32",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATAtomic}
 )
 
-DEF_T(FlatStoreDwordx3Inst, "flat_store_dwordx3",
+DEF_T(FlatAtomicAddF64Inst, "flat_atomic_add_f64",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATAtomic}
 )
 
-DEF_T(FlatStoreDwordx4Inst, "flat_store_dwordx4",
+DEF_T(FlatAtomicPkAddF16Inst, "flat_atomic_pk_add_f16",
     .format = FLAT,
-    .flags = {FLATStore}
+    .flags = {FLATAtomic}
 )
 
-DEF_T(FlatStoreB16Inst, "flat_store_b16",
+DEF_T(FlatAtomicPkAddBf16Inst, "flat_atomic_pk_add_bf16",
     .format = FLAT,
-    .flags = {FLATStore},
-    .logical = "FlatStoreB16"
+    .flags = {FLATAtomic}
 )
 
-DEF_T(FlatStoreB16D16HiInst, "flat_store_d16_hi_b16",
+DEF_T(FlatAtomicIncU32Inst, "flat_atomic_inc_u32",
     .format = FLAT,
-    .flags = {FLATStore},
-    .logical = "FlatStoreD16HIB16"
+    .flags = {FLATAtomic}
 )
 
-// Global Memory
-
-DEF_T(GlobalLoadDwordInst, "global_load_dword",
+DEF_T(FlatAtomicDecU32Inst, "flat_atomic_dec_u32",
     .format = FLAT,
-    .flags = {GLOBALLoad}
+    .flags = {FLATAtomic}
 )
 
-DEF_T(GlobalStoreDwordInst, "global_store_dword",
+DEF_T(FlatAtomicMinF64Inst, "flat_atomic_min_num_f64",
     .format = FLAT,
-    .flags = {GLOBALStore}
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicMaxF64Inst, "flat_atomic_max_num_f64",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicAndB32Inst, "flat_atomic_and_b32",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicOrB32Inst, "flat_atomic_or_b32",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicXorB32Inst, "flat_atomic_xor_b32",
+    .format = FLAT,
+    .flags = {FLATAtomic}
+)
+
+DEF_T(FlatAtomicSubU64Inst, "flat_atomic_sub_u64",
+    .format = FLAT,
+    .flags = {FLATAtomic}
 )
 
 // LDS Operations
+DEF_T(DsLoadU8Inst, "ds_load_u8",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoadU8"
+)
+
+DEF_T(DsLoadI8Inst, "ds_load_i8",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoadI8"
+)
+
+DEF_T(DsLoadU16Inst, "ds_load_u16",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoadU16"
+)
+
+DEF_T(DsLoadI16Inst, "ds_load_i16",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoadI16"
+)
+
+DEF_T(DsLoadB32Inst, "ds_load_b32",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoadB32"
+)
+
+DEF_T(DsRead2B32Inst, "ds_load_2addr_b32",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoad2B32"
+)
+
+DEF_T(DsLoadB64Inst, "ds_load_b64",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoadB64"
+)
+
+DEF_T(DsRead2B64Inst, "ds_load_2addr_b64",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoad2B64"
+)
+
+DEF_T(DsLoadB96Inst, "ds_load_b96",
+    .format = DS,
+    .flags = {DSRead},
+    .logical = "DSLoadB96"
+)
 
 DEF_T(DsLoadB128Inst, "ds_load_b128",
     .format = DS,
@@ -610,42 +562,6 @@ DEF_T(DsLoadB192Inst, "ds_load_b192",
     .format = DS,
     .flags = {DSRead},
     .logical = "DSLoadB192"
-)
-
-DEF_T(DsLoadB32Inst, "ds_load_b32",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoadB32"
-)
-
-DEF_T(DsLoadB64Inst, "ds_load_b64",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoadB64"
-)
-
-DEF_T(DsLoadB96Inst, "ds_load_b96",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoadB96"
-)
-
-DEF_T(DsLoadI16Inst, "ds_load_i16",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoadI16"
-)
-
-DEF_T(DsLoadI8Inst, "ds_load_i8",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoadI8"
-)
-
-DEF_T(DsLoadTr16B128Inst, "ds_load_tr16_b128",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoadB128TrB16"
 )
 
 DEF_T(DsLoadTr4B64Inst, "ds_load_tr4_b64",
@@ -666,134 +582,16 @@ DEF_T(DsLoadTr8B64Inst, "ds_load_tr8_b64",
     .logical = "DSLoadB64TrB8"
 )
 
-DEF_T(DsLoadU16Inst, "ds_load_u16",
+DEF_T(DsLoadTr16B128Inst, "ds_load_tr16_b128",
     .format = DS,
     .flags = {DSRead},
-    .logical = "DSLoadU16"
-)
-
-DEF_T(DsLoadU8Inst, "ds_load_u8",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoadU8"
-)
-
-DEF_T(DsRead2B32Inst, "ds_load_2addr_b32",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoad2B32"
-)
-
-DEF_T(DsRead2B64Inst, "ds_load_2addr_b64",
-    .format = DS,
-    .flags = {DSRead},
-    .logical = "DSLoad2B64"
-)
-
-DEF_T(DsReadB128Inst, "ds_read_b128",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadB32Inst, "ds_read_b32",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadB64Inst, "ds_read_b64",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadB64TrB16Inst, "ds_read_b64_tr_b16",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadB64TrB4Inst, "ds_read_b64_tr_b4",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadB64TrB8Inst, "ds_read_b64_tr_b8",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadB96Inst, "ds_read_b96",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadB96TrB6Inst, "ds_read_b96_tr_b6",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadI16Inst, "ds_read_i16",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadI8Inst, "ds_read_i8",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadU16Inst, "ds_read_u16",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadU16D16HiInst, "ds_read_u16_d16_hi",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadU8Inst, "ds_read_u8",
-    .format = DS,
-    .flags = {DSRead}
-)
-
-DEF_T(DsReadU8D16HiInst, "ds_read_u8_d16_hi",
-    .format = DS,
-    .flags = {DSRead}
+    .logical = "DSLoadB128TrB16"
 )
 
 DEF_T(DsBpermuteB32Inst, "ds_bpermute_b32",
     .format = DS,
     .flags = {DSStore},
     .logical = "DSBPermuteB32"
-)
-
-DEF_T(DsStoreB128Inst, "ds_store_b128",
-    .format = DS,
-    .flags = {DSStore},
-    .logical = "DSStoreB128"
-)
-
-DEF_T(DsStoreB16Inst, "ds_store_b16",
-    .format = DS,
-    .flags = {DSStore},
-    .logical = "DSStoreB16"
-)
-
-DEF_T(DsStoreB192Inst, "ds_store_b192",
-    .format = DS,
-    .flags = {DSStore},
-    .logical = "DSStoreB192"
-)
-
-DEF_T(DsStoreB32Inst, "ds_store_b32",
-    .format = DS,
-    .flags = {DSStore},
-    .logical = "DSStoreB32"
-)
-
-DEF_T(DsStoreB64Inst, "ds_store_b64",
-    .format = DS,
-    .flags = {DSStore},
-    .logical = "DSStoreB64"
 )
 
 DEF_T(DsStoreB8Inst, "ds_store_b8",
@@ -808,16 +606,23 @@ DEF_T(DsStoreB8D16HiInst, "ds_store_b8_d16_hi",
     .logical = "DSStoreB8HID16"
 )
 
+DEF_T(DsStoreB16Inst, "ds_store_b16",
+    .format = DS,
+    .flags = {DSStore},
+    .logical = "DSStoreB16"
+)
+
 DEF_T(DsStoreB16D16HiInst, "ds_store_b16_d16_hi",
     .format = DS,
     .flags = {DSStore},
     .logical = "DSStoreD16HIB16"
 )
 
-DEF_T(DsStoreB96Inst, "ds_store_b96",
+
+DEF_T(DsStoreB32Inst, "ds_store_b32",
     .format = DS,
     .flags = {DSStore},
-    .logical = "DSStoreB96"
+    .logical = "DSStoreB32"
 )
 
 DEF_T(DsWrite2B32Inst, "ds_store_2addr_b32",
@@ -826,301 +631,118 @@ DEF_T(DsWrite2B32Inst, "ds_store_2addr_b32",
     .logical = "DSStore2B32"
 )
 
+DEF_T(DsStoreB64Inst, "ds_store_b64",
+    .format = DS,
+    .flags = {DSStore},
+    .logical = "DSStoreB64"
+)
+
 DEF_T(DsWrite2B64Inst, "ds_store_2addr_b64",
     .format = DS,
     .flags = {DSStore},
     .logical = "DSStore2B64"
 )
 
-DEF_T(DsWriteB128Inst, "ds_write_b128",
+DEF_T(DsStoreB96Inst, "ds_store_b96",
     .format = DS,
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB96"
 )
 
-DEF_T(DsWriteB16Inst, "ds_write_b16",
+DEF_T(DsStoreB128Inst, "ds_store_b128",
     .format = DS,
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB128"
 )
 
-DEF_T(DsWriteB16D16HiInst, "ds_write_b16_d16_hi",
+DEF_T(DsStoreB192Inst, "ds_store_b192",
     .format = DS,
-    .flags = {DSStore}
-)
-
-DEF_T(DsWriteB32Inst, "ds_write_b32",
-    .format = DS,
-    .flags = {DSStore}
-)
-
-DEF_T(DsWriteB64Inst, "ds_write_b64",
-    .format = DS,
-    .flags = {DSStore}
-)
-
-DEF_T(DsWriteB8Inst, "ds_write_b8",
-    .format = DS,
-    .flags = {DSStore}
-)
-
-DEF_T(DsWriteB8D16HiInst, "ds_write_b8_d16_hi",
-    .format = DS,
-    .flags = {DSStore}
-)
-
-DEF_T(DsWriteB96Inst, "ds_write_b96",
-    .format = DS,
-    .flags = {DSStore}
+    .flags = {DSStore},
+    .logical = "DSStoreB192"
 )
 
 // Matrix Instructions (WMMA/MXWMMA only; gfx1250 has no MFMA)
+DEF_T(VWmmaScale16F3232x16x128F4Inst, "v_wmma_scale16_f32_32x16x128_f4", .format = MXWMMA)
+DEF_T(VWmmaScaleF3216x16x128F8f6f4Inst, "v_wmma_scale_f32_16x16x128_f8f6f4", .format = MXWMMA)
+DEF_T(VWmmaScaleF3232x16x128F4Inst, "v_wmma_scale_f32_32x16x128_f4", .format = MXWMMA)
 
 DEF_T(VWmmaScale16F3216x16x128F8f6f4Inst, "v_wmma_scale16_f32_16x16x128_f8f6f4",
-    .format = MXWMMA,
-    .flags = {MXWMMA, WMMA}
-)
-
-DEF_T(VWmmaScale16F3232x16x128F4Inst, "v_wmma_scale16_f32_32x16x128_f4",
-    .format = MXWMMA,
-    .flags = {MXWMMA, WMMA}
-)
-
-DEF_T(VWmmaScaleF3216x16x128F8f6f4Inst, "v_wmma_scale_f32_16x16x128_f8f6f4",
-    .format = MXWMMA,
-    .flags = {MXWMMA, WMMA}
-)
-
-DEF_T(VWmmaScaleF3232x16x128F4Inst, "v_wmma_scale_f32_32x16x128_f4",
-    .format = MXWMMA,
-    .flags = {MXWMMA, WMMA}
-)
-
+    .format = WMMA,
+    .cost = {6, 8},
+    .costOverride = { { MatrixFmtData(FP4, FP4), 4, 4 } })
 
 // === SWMMA (v_swmmac_*) - grouped by shape 16x16x32, 16x16x64, 16x16x128 ===
 // 16x16x32
-DEF_T(VSwmmacBf1616x16x32Bf16Inst, "v_swmmac_bf16_16x16x32_bf16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF1616x16x32F16Inst, "v_swmmac_f16_16x16x32_f16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x32Bf16Inst, "v_swmmac_f32_16x16x32_bf16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x32Bf8Bf8Inst, "v_swmmac_f32_16x16x32_bf8_bf8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x32Bf8Fp8Inst, "v_swmmac_f32_16x16x32_bf8_fp8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x32F16Inst, "v_swmmac_f32_16x16x32_f16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x32Fp8Bf8Inst, "v_swmmac_f32_16x16x32_fp8_bf8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x32Fp8Fp8Inst, "v_swmmac_f32_16x16x32_fp8_fp8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacI3216x16x32Iu4Inst, "v_swmmac_i32_16x16x32_iu4",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacI3216x16x32Iu8Inst, "v_swmmac_i32_16x16x32_iu8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
+DEF_T(VSwmmacBf1616x16x32Bf16Inst, "v_swmmac_bf16_16x16x32_bf16", .format = SWMMA)
+DEF_T(VSwmmacF1616x16x32F16Inst, "v_swmmac_f16_16x16x32_f16", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x32Bf16Inst, "v_swmmac_f32_16x16x32_bf16", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x32F16Inst, "v_swmmac_f32_16x16x32_f16", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x32Bf8Bf8Inst, "v_swmmac_f32_16x16x32_bf8_bf8", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x32Bf8Fp8Inst, "v_swmmac_f32_16x16x32_bf8_fp8", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x32Fp8Bf8Inst, "v_swmmac_f32_16x16x32_fp8_bf8", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x32Fp8Fp8Inst, "v_swmmac_f32_16x16x32_fp8_fp8", .format = SWMMA)
+DEF_T(VSwmmacI3216x16x32Iu4Inst, "v_swmmac_i32_16x16x32_iu4", .format = SWMMA)
+DEF_T(VSwmmacI3216x16x32Iu8Inst, "v_swmmac_i32_16x16x32_iu8", .format = SWMMA_INT8)
 
 // 16x16x64
-DEF_T(VSwmmacBf1616x16x64Bf16Inst, "v_swmmac_bf16_16x16x64_bf16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacBf16f3216x16x64Bf16Inst, "v_swmmac_bf16f32_16x16x64_bf16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x64Bf16Inst, "v_swmmac_f32_16x16x64_bf16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x64F16Inst, "v_swmmac_f32_16x16x64_f16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF1616x16x64F16Inst, "v_swmmac_f16_16x16x64_f16",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacI3216x16x64Iu4Inst, "v_swmmac_i32_16x16x64_iu4",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
+DEF_T(VSwmmacBf1616x16x64Bf16Inst, "v_swmmac_bf16_16x16x64_bf16", .format = SWMMA)
+DEF_T(VSwmmacF1616x16x64F16Inst, "v_swmmac_f16_16x16x64_f16", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x64Bf16Inst, "v_swmmac_f32_16x16x64_bf16", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x64F16Inst, "v_swmmac_f32_16x16x64_f16", .format = SWMMA)
+DEF_T(VSwmmacBf16f3216x16x64Bf16Inst, "v_swmmac_bf16f32_16x16x64_bf16", .format = SWMMA)
+DEF_T(VSwmmacI3216x16x64Iu4Inst, "v_swmmac_i32_16x16x64_iu4", .format = SWMMA)
 
 // 16x16x128
-DEF_T(VSwmmacF3216x16x128Bf8Bf8Inst, "v_swmmac_f32_16x16x128_bf8_bf8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x128Fp8Fp8Inst, "v_swmmac_f32_16x16x128_fp8_fp8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacI3216x16x128Iu8Inst, "v_swmmac_i32_16x16x128_iu8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF1616x16x128Bf8Bf8Inst, "v_swmmac_f16_16x16x128_bf8_bf8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF1616x16x128Bf8Fp8Inst, "v_swmmac_f16_16x16x128_bf8_fp8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF1616x16x128Fp8Bf8Inst, "v_swmmac_f16_16x16x128_fp8_bf8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF1616x16x128Fp8Fp8Inst, "v_swmmac_f16_16x16x128_fp8_fp8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x128Bf8Fp8Inst, "v_swmmac_f32_16x16x128_bf8_fp8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
-DEF_T(VSwmmacF3216x16x128Fp8Bf8Inst, "v_swmmac_f32_16x16x128_fp8_bf8",
-    .format = WMMA,
-    .flags = {SWMMA}
-)
+DEF_T(VSwmmacF3216x16x128Bf8Bf8Inst, "v_swmmac_f32_16x16x128_bf8_bf8", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x128Fp8Fp8Inst, "v_swmmac_f32_16x16x128_fp8_fp8", .format = SWMMA)
+DEF_T(VSwmmacF1616x16x128Bf8Bf8Inst, "v_swmmac_f16_16x16x128_bf8_bf8", .format = SWMMA)
+DEF_T(VSwmmacF1616x16x128Bf8Fp8Inst, "v_swmmac_f16_16x16x128_bf8_fp8", .format = SWMMA)
+DEF_T(VSwmmacF1616x16x128Fp8Bf8Inst, "v_swmmac_f16_16x16x128_fp8_bf8", .format = SWMMA)
+DEF_T(VSwmmacF1616x16x128Fp8Fp8Inst, "v_swmmac_f16_16x16x128_fp8_fp8", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x128Bf8Fp8Inst, "v_swmmac_f32_16x16x128_bf8_fp8", .format = SWMMA)
+DEF_T(VSwmmacF3216x16x128Fp8Bf8Inst, "v_swmmac_f32_16x16x128_fp8_bf8", .format = SWMMA)
+DEF_T(VSwmmacI3216x16x128Iu8Inst, "v_swmmac_i32_16x16x128_iu8", .format = SWMMA_INT8)
 
 // === WMMA (v_wmma_*) - grouped by shape 16x16x4, 16x16x16, 16x16x32, 16x16x64, 16x16x128 ===
 // 16x16x4
-DEF_T(VWmmaF3216x16x4F32Inst, "v_wmma_f32_16x16x4_f32",
-    .format = WMMA,
-    .flags = {WMMA}
-)
+DEF_T(VWmmaF3216x16x4F32Inst, "v_wmma_f32_16x16x4_f32", .format = WMMA)
 
 // 16x16x16
-DEF_T(VWmmaBf1616x16x16Bf16Inst, "v_wmma_bf16_16x16x16_bf16",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF1616x16x16F16Inst, "v_wmma_f16_16x16x16_f16",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x16Bf16Inst, "v_wmma_f32_16x16x16_bf16",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x16Bf8Bf8Inst, "v_wmma_f32_16x16x16_bf8_bf8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x16Bf8Fp8Inst, "v_wmma_f32_16x16x16_bf8_fp8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x16F16Inst, "v_wmma_f32_16x16x16_f16",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x16Fp8Bf8Inst, "v_wmma_f32_16x16x16_fp8_bf8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x16Fp8Fp8Inst, "v_wmma_f32_16x16x16_fp8_fp8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaI3216x16x16Iu4Inst, "v_wmma_i32_16x16x16_iu4",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaI3216x16x16Iu8Inst, "v_wmma_i32_16x16x16_iu8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
+DEF_T(VWmmaBf1616x16x16Bf16Inst, "v_wmma_bf16_16x16x16_bf16", .format = WMMA)
+DEF_T(VWmmaF3216x16x16Bf16Inst, "v_wmma_f32_16x16x16_bf16", .format = WMMA)
+DEF_T(VWmmaF1616x16x16F16Inst, "v_wmma_f16_16x16x16_f16", .format = WMMA)
+DEF_T(VWmmaF3216x16x16F16Inst, "v_wmma_f32_16x16x16_f16", .format = WMMA)
+DEF_T(VWmmaF3216x16x16Bf8Bf8Inst, "v_wmma_f32_16x16x16_bf8_bf8", .format = WMMA)
+DEF_T(VWmmaF3216x16x16Bf8Fp8Inst, "v_wmma_f32_16x16x16_bf8_fp8", .format = WMMA)
+DEF_T(VWmmaF3216x16x16Fp8Bf8Inst, "v_wmma_f32_16x16x16_fp8_bf8", .format = WMMA)
+DEF_T(VWmmaF3216x16x16Fp8Fp8Inst, "v_wmma_f32_16x16x16_fp8_fp8", .format = WMMA)
+DEF_T(VWmmaI3216x16x16Iu4Inst, "v_wmma_i32_16x16x16_iu4", .format = WMMA)
+DEF_T(VWmmaI3216x16x16Iu8Inst, "v_wmma_i32_16x16x16_iu8", .format = WMMA_INT8)
 
 // 16x16x32
-DEF_T(VWmmaBf1616x16x32Bf16Inst, "v_wmma_bf16_16x16x32_bf16",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaBf16f3216x16x32Bf16Inst, "v_wmma_bf16f32_16x16x32_bf16",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF1616x16x32F16Inst, "v_wmma_f16_16x16x32_f16",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x32Bf16Inst, "v_wmma_f32_16x16x32_bf16",
-    .format = WMMA,
-    .cost = {1, 16},
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x32F16Inst, "v_wmma_f32_16x16x32_f16",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaI3216x16x32Iu4Inst, "v_wmma_i32_16x16x32_iu4",
-    .format = WMMA,
-    .flags = {WMMA}
-)
+DEF_T(VWmmaBf1616x16x32Bf16Inst, "v_wmma_bf16_16x16x32_bf16", .format = WMMA)
+DEF_T(VWmmaF3216x16x32Bf16Inst, "v_wmma_f32_16x16x32_bf16", .format = WMMA)
+DEF_T(VWmmaF1616x16x32F16Inst, "v_wmma_f16_16x16x32_f16", .format = WMMA)
+DEF_T(VWmmaF3216x16x32F16Inst, "v_wmma_f32_16x16x32_f16", .format = WMMA)
+DEF_T(VWmmaBf16f3216x16x32Bf16Inst, "v_wmma_bf16f32_16x16x32_bf16", .format = WMMA)
+DEF_T(VWmmaI3216x16x32Iu4Inst, "v_wmma_i32_16x16x32_iu4", .format = WMMA)
 
 // 16x16x64
-DEF_T(VWmmaF1616x16x64Bf8Bf8Inst, "v_wmma_f16_16x16x64_bf8_bf8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF1616x16x64Bf8Fp8Inst, "v_wmma_f16_16x16x64_bf8_fp8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF1616x16x64Fp8Bf8Inst, "v_wmma_f16_16x16x64_fp8_bf8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF1616x16x64Fp8Fp8Inst, "v_wmma_f16_16x16x64_fp8_fp8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x64Bf8Bf8Inst, "v_wmma_f32_16x16x64_bf8_bf8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x64Bf8Fp8Inst, "v_wmma_f32_16x16x64_bf8_fp8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x64Fp8Bf8Inst, "v_wmma_f32_16x16x64_fp8_bf8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaF3216x16x64Fp8Fp8Inst, "v_wmma_f32_16x16x64_fp8_fp8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
-DEF_T(VWmmaI3216x16x64Iu8Inst, "v_wmma_i32_16x16x64_iu8",
-    .format = WMMA,
-    .flags = {WMMA}
-)
+DEF_T(VWmmaF1616x16x64Bf8Bf8Inst, "v_wmma_f16_16x16x64_bf8_bf8", .format = WMMA_FLOAT8MIX_16x16x64)
+DEF_T(VWmmaF1616x16x64Bf8Fp8Inst, "v_wmma_f16_16x16x64_bf8_fp8", .format = WMMA_FLOAT8MIX_16x16x64)
+DEF_T(VWmmaF1616x16x64Fp8Bf8Inst, "v_wmma_f16_16x16x64_fp8_bf8", .format = WMMA_FLOAT8MIX_16x16x64)
+DEF_T(VWmmaF1616x16x64Fp8Fp8Inst, "v_wmma_f16_16x16x64_fp8_fp8", .format = WMMA_FLOAT8MIX_16x16x64)
+DEF_T(VWmmaF3216x16x64Bf8Bf8Inst, "v_wmma_f32_16x16x64_bf8_bf8", .format = WMMA_FLOAT8MIX_16x16x64)
+DEF_T(VWmmaF3216x16x64Bf8Fp8Inst, "v_wmma_f32_16x16x64_bf8_fp8", .format = WMMA_FLOAT8MIX_16x16x64)
+DEF_T(VWmmaF3216x16x64Fp8Bf8Inst, "v_wmma_f32_16x16x64_fp8_bf8", .format = WMMA_FLOAT8MIX_16x16x64)
+DEF_T(VWmmaF3216x16x64Fp8Fp8Inst, "v_wmma_f32_16x16x64_fp8_fp8", .format = WMMA_FLOAT8MIX_16x16x64)
+DEF_T(VWmmaI3216x16x64Iu8Inst, "v_wmma_i32_16x16x64_iu8", .format = WMMA_INT8)
 
 // 16x16x128
 DEF_T(VWmmaF3216x16x128F8f6f4Inst, "v_wmma_f32_16x16x128_f8f6f4",
     .format = WMMA,
-    .flags = {WMMA}
-)
+    .cost = {5, 8},
+    .costOverride = { { MatrixFmtData(FP4, FP4), 3, 4 } })
 
 // Other
 

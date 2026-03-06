@@ -53,8 +53,13 @@ namespace
         {
             if(!arch.has(hwInstName))
             {
-                std::cerr << "Error: Hardware instruction " << hwInstName << " not found in "
-                          << archName << ".\n";
+                std::cerr << "RocisaHwInstMappings.hpp: error: hardware instruction '" << hwInstName
+                          << "' not found in " << archName << "\n"
+                          << "  mapping: rocisa::" << rocisaInstName << " -> " << hwInstName
+                          << "\n  source: getGfx" << archName << "RocisaSimpleMappings()\n"
+                          << "  fix: add DEF_T(..., \"" << hwInstName
+                          << "\", ...) to hardware/src/gfx/" << archName << "/" << archName
+                          << "Instructions.def, or correct the mapping\n";
                 success = false;
                 continue;
             }
@@ -119,8 +124,8 @@ namespace
     {
         const GpuArch& arch = *manager.getArch(archName);
 
-        std::filesystem::path path
-            = std::filesystem::path(outdir) / ("stinkytofu/ir/rocisa/Rocisa" + archName + "Mappings.inc");
+        std::filesystem::path path = std::filesystem::path(outdir)
+                                     / ("stinkytofu/ir/rocisa/Rocisa" + archName + "Mappings.inc");
 
         std::ofstream os(path);
         if(!os)

@@ -21,11 +21,19 @@
 
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
+#include <iostream>
+#include <ostream>
+
 namespace stinkytofu
 {
     void Function::dump(std::ostream& out) const
     {
         AsmPrinter printer(out, AsmPrinterOptions());
         printer.print(*this);
+    }
+
+    void Function::dump() const
+    {
+        dump(std::cerr);
     }
 }

@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,13 @@ namespace stinkytofu
         NONE = -1,
         LOW  = 0,
         HIGH = 1
+    };
+
+    enum class MatrixFmt : uint8_t
+    {
+        FP4 = 0,
+        FP6 = 1,
+        FP8 = 2
     };
 
     struct Modifier
@@ -61,6 +69,7 @@ namespace stinkytofu
             LABEL_NAME,
             MFMA_DATA,
             COMMENT,
+            MATRIX_FMT,
         };
 
         Modifier(Type type)
@@ -69,6 +78,9 @@ namespace stinkytofu
         }
 
         virtual ~Modifier() = default;
+
+        /// Deep copy; each TypedModifier<Derived> returns std::make_unique<Derived>(*this).
+        virtual std::unique_ptr<Modifier> clone() const = 0;
 
         const Type& getType() const
         {
@@ -93,6 +105,11 @@ namespace stinkytofu
         static bool classof(const Modifier* m)
         {
             return m && m->getType() == Derived::Type;
+        }
+
+        std::unique_ptr<Modifier> clone() const override
+        {
+            return std::make_unique<Derived>(*static_cast<const Derived*>(this));
         }
 
     protected:
@@ -813,6 +830,21 @@ namespace stinkytofu
         }
 
         std::string comment;
+    };
+
+    struct MatrixFmtData : public TypedModifier<MatrixFmtData>
+    {
+        static constexpr Modifier::Type Type = Modifier::Type::MATRIX_FMT;
+
+        MatrixFmtData(MatrixFmt fmtA, MatrixFmt fmtB)
+            : TypedModifier<MatrixFmtData>()
+            , a(fmtA)
+            , b(fmtB)
+        {
+        }
+
+        MatrixFmt a;
+        MatrixFmt b;
     };
 
 } // namespace stinkytofu

@@ -2794,6 +2794,19 @@ namespace rocisa
             return std::make_shared<DSBPermuteB32>(*this);
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            // ds_bpermute_b32 vgpr_rtn (VDST) , vgpr_a (ADDR) , vgpr_d0 (DATA0)
+            //
+            // dstAddr is VDST (TODO: the name is confusing.)
+            return {dstAddr};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {src0, src1};
+        }
+
         const std::vector<InstructionInput> getMsbSrcParams() const override
         {
             return {src0, src1};

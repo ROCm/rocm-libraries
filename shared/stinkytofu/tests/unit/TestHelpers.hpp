@@ -23,12 +23,188 @@
 
 #pragma once
 
+#include <algorithm>
+#include <gtest/gtest.h>
+
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu
 {
     namespace test
     {
+        // -----------------------------------------------------------------
+        // Function configuration helpers
+        // -----------------------------------------------------------------
+
+        /// Sets gemmConfig.arch on \p func from a GfxArchID.
+        /// Must be called before constructing AsmIRBuilder on blocks in \p func.
+        inline void setFunctionArch(Function& func, GfxArchID archID)
+        {
+            const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+            assert(archInfo && "Invalid GfxArchID");
+            GemmTileConfig config = func.getGemmTileConfig();
+            config.arch           = {static_cast<int>(archInfo->major),
+                                     static_cast<int>(archInfo->minor),
+                                     static_cast<int>(archInfo->stepping)};
+            func.setGemmTileConfig(config);
+        }
+
+        // -----------------------------------------------------------------
+        // Instruction creation helpers
+        // -----------------------------------------------------------------
+
+        inline StinkyInstruction*
+            createVAddInBlock(BasicBlock* bb, GfxArchID arch, int destReg, int src0Reg, int src1Reg)
+        {
+            AsmIRBuilder       builder(*bb, arch);
+            StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+            inst->addDestReg(StinkyRegister("v", destReg, 1));
+            inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+            inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
+            return inst;
+        }
+
+        /// Create ds_read_b128 in \p bb: v[destReg:destReg+3] = mem[v[addrReg]].
+        /// Defines a 4-DWORD wide vector register.
+        inline StinkyInstruction*
+            createDsReadB128InBlock(BasicBlock* bb, GfxArchID arch, int destReg, int addrReg)
+        {
+            AsmIRBuilder       builder(*bb, arch);
+            StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::ds_read_b128, arch));
+            inst->addDestReg(StinkyRegister("v", destReg, 4));
+            inst->addSrcReg(StinkyRegister("v", addrReg, 1));
+            return inst;
+        }
+
+        // -----------------------------------------------------------------
+        // PHI counting
+        // -----------------------------------------------------------------
+
+        inline size_t countPhis(const BasicBlock& bb)
+        {
+            size_t count = 0;
+            for(const IRBase& ir : bb)
+            {
+                if(ir.getType() == IRBase::IRType::StinkyTofu)
+                {
+                    auto* inst = cast<StinkyInstruction>(&ir);
+                    if(inst->getUnifiedOpcode() == GFX::PHI)
+                        count++;
+                }
+            }
+            return count;
+        }
+
+        inline size_t countPhisInFunction(const Function& func)
+        {
+            size_t count = 0;
+            for(const BasicBlock& bb : func)
+                count += countPhis(bb);
+            return count;
+        }
+
+        /// Find a PHI in \p bb whose dest register matches (type, idx).
+        /// Returns nullptr if not found.
+        inline StinkyInstruction* findPhi(BasicBlock& bb, RegType type, unsigned idx)
+        {
+            for(IRBase& ir : bb)
+            {
+                if(ir.getType() != IRBase::IRType::StinkyTofu)
+                    break;
+                auto* inst = cast<StinkyInstruction>(&ir);
+                if(inst->getUnifiedOpcode() != GFX::PHI)
+                    break;
+                if(inst->getDestReg(0).reg.type == type && inst->getDestReg(0).reg.idx == idx)
+                    return inst;
+            }
+            return nullptr;
+        }
+
+        // -----------------------------------------------------------------
+        // Chain-consistency verification (gtest assertions)
+        // -----------------------------------------------------------------
+
+        /// For each PHI operandDef, verify the PHI appears in that def's users list.
+        inline void verifyPhiChainConsistency(const Function& func)
+        {
+            for(const BasicBlock& bb : func)
+            {
+                for(const IRBase& ir : bb)
+                {
+                    if(ir.getType() != IRBase::IRType::StinkyTofu)
+                        continue;
+                    auto* inst = cast<StinkyInstruction>(&ir);
+                    if(inst->getUnifiedOpcode() != GFX::PHI)
+                        continue;
+                    for(StinkyInstruction* def : inst->getSources())
+                    {
+                        if(def == nullptr)
+                            continue;
+                        const auto& defUsers = def->getUsers();
+                        EXPECT_TRUE(std::find(defUsers.begin(), defUsers.end(), inst)
+                                    != defUsers.end())
+                            << "PHI must appear in its operand-def's users list";
+                    }
+                }
+            }
+        }
+
+        /// For each instruction's operandDef, verify the instruction appears in
+        /// that def's users list.  nullptr sources are allowed only for PHIs.
+        inline void verifyDefUseChainConsistency(const Function& func)
+        {
+            for(const BasicBlock& bb : func)
+            {
+                for(const IRBase& ir : bb)
+                {
+                    if(ir.getType() != IRBase::IRType::StinkyTofu)
+                        continue;
+                    auto* userInst = cast<StinkyInstruction>(&ir);
+                    for(StinkyInstruction* def : userInst->getSources())
+                    {
+                        if(def == nullptr)
+                        {
+                            EXPECT_EQ(userInst->getUnifiedOpcode(), GFX::PHI)
+                                << "Only PHI instructions may have nullptr sources";
+                            continue;
+                        }
+                        const auto& defUsers = def->getUsers();
+                        EXPECT_TRUE(std::find(defUsers.begin(), defUsers.end(), userInst)
+                                    != defUsers.end())
+                            << "Def-use invariant: user must be in def->getUsers()";
+                    }
+                }
+            }
+        }
+
+        /// Reverse check: for each def's user, the user's sources must contain def.
+        inline void verifyUsersSourcesConsistency(const Function& func)
+        {
+            for(const BasicBlock& bb : func)
+            {
+                for(const IRBase& ir : bb)
+                {
+                    if(ir.getType() != IRBase::IRType::StinkyTofu)
+                        continue;
+                    auto* defInst = cast<StinkyInstruction>(&ir);
+                    for(StinkyInstruction* user : defInst->getUsers())
+                    {
+                        ASSERT_NE(user, nullptr);
+                        const auto& opDefs = user->getSources();
+                        EXPECT_TRUE(std::find(opDefs.begin(), opDefs.end(), defInst)
+                                    != opDefs.end())
+                            << "Def-use invariant: def must be in user->getSources()";
+                    }
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Original helpers
+        // -----------------------------------------------------------------
 
         /**
      * @brief Add a vector of instructions to a BasicBlock
@@ -54,8 +230,8 @@ namespace stinkytofu
      *   for (auto it = bb->begin(); it != bb->end(); ++it) { ... }
      * @endcode
      */
-        inline StinkyInstruction* addToIRList(BasicBlock&                        bb,
-                                            std::vector<StinkyInstruction*>&& insts)
+        inline StinkyInstruction* addToIRList(BasicBlock&                       bb,
+                                              std::vector<StinkyInstruction*>&& insts)
         {
             if(insts.empty())
                 return nullptr;

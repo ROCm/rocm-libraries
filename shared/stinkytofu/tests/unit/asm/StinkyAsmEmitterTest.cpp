@@ -53,7 +53,8 @@ protected:
 
         passCtx.setGemmTileConfig(gemmConfig);
 
-        bb        = func.createBasicBlock("entry");
+        func.setGemmTileConfig(gemmConfig);
+        bb = func.createBasicBlock("entry");
         irBuilder = std::make_unique<AsmIRBuilder>(*bb, arch);
     }
 

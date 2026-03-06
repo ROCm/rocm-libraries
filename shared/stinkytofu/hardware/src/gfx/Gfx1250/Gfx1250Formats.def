@@ -154,7 +154,23 @@ DEF_FORMAT(WMMA,
     .parent = VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 4,
+    .cost = {4, 8},
     .flags = {WMMA},
+)
+
+DEF_FORMAT(WMMA_INT8,
+    .parent = WMMA,
+    .cost = {8, 16},
+)
+
+DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
+    .parent = WMMA,
+    .cost = {3, 4},
+)
+
+DEF_FORMAT(WMMA_FLOAT8MIX_16x16x128,
+    .parent = WMMA,
+    .cost = {5, 8},
 )
 
 // Sparse Wave Matrix Multiply-Accumulate
@@ -162,7 +178,13 @@ DEF_FORMAT(SWMMA,
     .parent = VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 5,
+    .cost = {6, 8},
     .flags = {SWMMA},
+)
+
+DEF_FORMAT(SWMMA_INT8,
+    .parent = SWMMA,
+    .cost = {12, 16},
 )
 
 // MX Format Wave Matrix Multiply-Accumulate (v_mxwmma_*, v_wmma_scale*)
@@ -170,6 +192,7 @@ DEF_FORMAT(MXWMMA,
     .parent = VOP3P,
     .unit = MatrixUnit,
     .maxOperands = 4,
+    .cost = {6, 8},
     .flags = {MXWMMA},
 )
 
@@ -193,6 +216,7 @@ DEF_FORMAT(DS,
     .unit = LDS,
     .encoding = {64},
     .maxOperands = 3,
+    .cost = {1, 52},
     .flags = {},
 )
 

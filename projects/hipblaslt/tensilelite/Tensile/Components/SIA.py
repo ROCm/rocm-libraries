@@ -127,14 +127,13 @@ class SIA1(SIA):
 
     def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, globalReadIncBCode, isNGLL):
         # Get schedule information
-        numGlobalReadInsPerIter, numLocalWriteModPerIter, _ = getScheduleParams(kernel)
+        numGlobalReadInsPerIter, numLocalWriteModPerIter, numEmptyGlobalReadIncCode = getScheduleParams(kernel)
         numLocalWritesPerSched = numLocalWriteModPerIter
-        numEmptyGlobalReadIncCode = 0 # Tempoaraily hack
         # Schedule global read
         if not writer.states.scheduleGlobalRead:
             itemsGRToSchedLater, lastLoadIter = noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode)
         else:
-            itemsGRToSched, itemsGRToSchedLater = prepareGRInstToSched(writer, kernel, isNGLL, not writer.states.scheduleLocalWrite)
+            itemsGRToSched, itemsGRToSchedLater = prepareGRInstToSched(writer, kernel, isNGLL)
             itemsGRIncToSched = appendInstToSchedDefault(numEmptyGlobalReadIncCode, globalReadIncACode, globalReadIncBCode)
             schedNumForIter0, endIter = getSchedNumForIter0Default(itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, localWriteEndIter)
             lastLoadIter = schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsPerIter, schedNumForIter0, endIter)
@@ -518,7 +517,7 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     lastLoadIter = 0
     return itemsGRToSchedLater, lastLoadIter
 
-def prepareGRInstToSched(writer, kernel, isNGLL, noLWSched=False):
+def prepareGRInstToSched(writer, kernel, isNGLL):
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadA.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB.header)
@@ -542,13 +541,12 @@ def prepareGRInstToSched(writer, kernel, isNGLL, noLWSched=False):
                         list(writer.codes.globalReadB.middle.items())
         itemsGRToSchedLater = []
 
-    if not noLWSched:
-        itemsGRToSchedTemp = []
-        for i in range(len(itemsGRToSched)):
-            itemsGRToSchedTemp.append(itemsGRToSched.pop(0))
-            for j in range(PRECISION-1):
-                itemsGRToSchedTemp.append(Module())
-        itemsGRToSched = itemsGRToSchedTemp
+    itemsGRToSchedTemp = []
+    for i in range(len(itemsGRToSched)):
+        itemsGRToSchedTemp.append(itemsGRToSched.pop(0))
+        for j in range(PRECISION-1):
+            itemsGRToSchedTemp.append(Module())
+    itemsGRToSched = itemsGRToSchedTemp
     return itemsGRToSched, itemsGRToSchedLater
 
 
