@@ -38,6 +38,7 @@
 #include <random>
 
 #include "RunListener.hpp"
+#include "TimingInstrumentation.hpp"
 
 namespace TensileLite
 {
@@ -310,6 +311,7 @@ namespace TensileLite
                 {
                     if(m_elementsToValidate)
                     {
+                        ScopedTimer t("gpu_input_reset.reset_output");
                         resetOutput(m_gpuPtrs,
                                     m_gpuBatchPtrs,
                                     m_maxElements,
@@ -323,25 +325,43 @@ namespace TensileLite
                 {
                     // Update CPU Inputs if prepareGPUInputs is not called.
                     if(m_cpuPtrs.empty() && m_problemDependentData)
+                    {
+                        ScopedTimer t("gpu_input_reset.init_cpu_inputs");
                         initializeCPUInputs(problem);
+                    }
                     if(m_problemDependentData)
+                    {
+                        ScopedTimer t("gpu_input_reset.copy_valid_to_gpu");
                         copyValidToGPUBuffer(problem.gemms[0]);
+                    }
 
-                    // gpu to gpu
-                    copyInputs(m_gpuPtrs,
-                               m_gpuBatchPtrs,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               problem.gemms[0],
-                               hipMemcpyDeviceToDevice);
+                    {
+                        ScopedTimer t("gpu_input_reset.copy_inputs");
+                        // gpu to gpu
+                        copyInputs(m_gpuPtrs,
+                                   m_gpuBatchPtrs,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   problem.gemms[0],
+                                   hipMemcpyDeviceToDevice);
+                    }
                     m_gpuInit = true;
-                    initializeGPUBatchedInputs(problem.gemms[0]);
+                    {
+                        ScopedTimer t("gpu_input_reset.init_gpu_batched");
+                        initializeGPUBatchedInputs(problem.gemms[0]);
+                    }
                 }
 
                 if(m_cpuPtrs.empty())
+                {
+                    ScopedTimer t("gpu_input_reset.init_constant");
                     initializeConstantInputs(problem.gemms[0]);
+                }
 
-                m_cachedGPUInputs = ConvertToProblemInputs(problem.gemms[0], true);
+                {
+                    ScopedTimer t("gpu_input_reset.convert_to_inputs");
+                    m_cachedGPUInputs = ConvertToProblemInputs(problem.gemms[0], true);
+                }
                 return m_cachedGPUInputs;
             }
 
@@ -372,6 +392,7 @@ namespace TensileLite
                 {
                     if(m_elementsToValidate)
                     {
+                        ScopedTimer t("gpu_input_reset.reset_output");
                         resetOutput(m_gpuPtrs,
                                     m_gpuBatchPtrs,
                                     m_maxElements,
@@ -385,21 +406,34 @@ namespace TensileLite
                 {
                     // Update CPU Inputs if prepareGPUInputs is not called.
                     if(m_cpuPtrs.empty() && m_problemDependentData)
+                    {
+                        ScopedTimer t("gpu_input_reset.init_cpu_inputs");
                         initializeCPUInputs(problem);
+                    }
                     if(m_problemDependentData)
+                    {
+                        ScopedTimer t("gpu_input_reset.copy_valid_to_gpu");
                         copyValidToGPUBuffer(problem);
+                    }
                     if(needSwizzle || needMXSwizzle)
+                    {
+                        ScopedTimer t("gpu_input_reset.copy_swizzled_to_gpu");
                         copySwizzledToGPUBuffer(problem);
+                    }
 
-                    // gpu to gpu
-                    copyInputs(m_gpuPtrs,
-                               m_gpuBatchPtrs,
-                               m_maxElements,
-                               m_groupedOffsets,
-                               problem,
-                               hipMemcpyDeviceToDevice);
+                    {
+                        ScopedTimer t("gpu_input_reset.copy_inputs");
+                        // gpu to gpu
+                        copyInputs(m_gpuPtrs,
+                                   m_gpuBatchPtrs,
+                                   m_maxElements,
+                                   m_groupedOffsets,
+                                   problem,
+                                   hipMemcpyDeviceToDevice);
+                    }
                     if(m_rotatingMode == 1 && m_rotatingBuffer > 0)
                     {
+                        ScopedTimer t("gpu_input_reset.rotating_init");
                         auto mem = m_rm->getRotatingMemory();
                         // init mode 1 rotating data
                         for(size_t j = 1; j < mem.size(); j++)
@@ -419,13 +453,22 @@ namespace TensileLite
                             }
                     }
                     m_gpuInit = true;
-                    initializeGPUBatchedInputs(problem);
+                    {
+                        ScopedTimer t("gpu_input_reset.init_gpu_batched");
+                        initializeGPUBatchedInputs(problem);
+                    }
                 }
 
                 if(m_cpuPtrs.empty())
+                {
+                    ScopedTimer t("gpu_input_reset.init_constant");
                     initializeConstantInputs(problem);
+                }
 
-                m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+                {
+                    ScopedTimer t("gpu_input_reset.convert_to_inputs");
+                    m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+                }
                 return m_cachedGPUInputs;
             }
 
