@@ -25,6 +25,8 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#pragma once
+
 #include <rocblas/rocblas.h>
 
 /* Utility macros for explicit template instantiations.
