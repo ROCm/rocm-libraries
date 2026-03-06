@@ -194,6 +194,52 @@ TEST_F(TestUserDefinedLiterals, Fp8E5M2LiteralPowerOfTwo)
 }
 
 // ============================================================================
+// fp8_e8m0 literal (_e8m0) tests
+// Note: E8M0 is an unsigned type (scale type) - only positive powers of 2
+// ============================================================================
+
+TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralPositive)
+{
+    auto a = 1.0_e8m0;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e8m0>));
+    EXPECT_EQ(static_cast<float>(a), 1.0f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralZero)
+{
+    // E8M0 has no zero - 0.0 clamps to min (2^-127)
+    auto a = 0.0_e8m0;
+    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e8m0>));
+    EXPECT_EQ(static_cast<float>(a), 0x1p-127f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralPowerOfTwo)
+{
+    // E8M0 only represents powers of 2 exactly
+    auto a = 2.0_e8m0;
+    EXPECT_EQ(static_cast<float>(a), 2.0f);
+
+    auto b = 4.0_e8m0;
+    EXPECT_EQ(static_cast<float>(b), 4.0f);
+
+    auto c = 8.0_e8m0;
+    EXPECT_EQ(static_cast<float>(c), 8.0f);
+
+    auto d = 0.5_e8m0;
+    EXPECT_EQ(static_cast<float>(d), 0.5f);
+
+    auto e = 0.25_e8m0;
+    EXPECT_EQ(static_cast<float>(e), 0.25f);
+}
+
+TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralFromNegativeFloat)
+{
+    // E8M0 is unsigned - negative values clamp to min (2^-127)
+    fp8_e8m0 a(-1.0f);
+    EXPECT_EQ(static_cast<float>(a), 0x1p-127f);
+}
+
+// ============================================================================
 // Literal usage in expressions
 // ============================================================================
 
@@ -237,11 +283,13 @@ TEST_F(TestUserDefinedLiterals, LiteralAssignment)
     half b = 2.5_h;
     fp8_e4m3 c = 3.0_e4m3;
     fp8_e5m2 d = 4.0_e5m2;
+    fp8_e8m0 e = 4.0_e8m0;
 
     EXPECT_TRUE(nearEqual(static_cast<float>(a), 1.5f));
     EXPECT_TRUE(nearEqual(static_cast<float>(b), 2.5f));
     EXPECT_TRUE(nearEqual(static_cast<float>(c), 3.0f, 0.2f));
     EXPECT_TRUE(nearEqual(static_cast<float>(d), 4.0f, 0.5f));
+    EXPECT_EQ(static_cast<float>(e), 4.0f);
 }
 
 TEST_F(TestUserDefinedLiterals, LiteralCopyAssignment)
@@ -290,11 +338,13 @@ TEST_F(TestUserDefinedLiterals, AutoTypeDeduction)
     auto h = 1.0_h;
     auto e4m3 = 1.0_e4m3;
     auto e5m2 = 1.0_e5m2;
+    auto e8m0 = 1.0_e8m0;
 
     static_assert(std::is_same_v<decltype(bf), bfloat16>);
     static_assert(std::is_same_v<decltype(h), half>);
     static_assert(std::is_same_v<decltype(e4m3), fp8_e4m3>);
     static_assert(std::is_same_v<decltype(e5m2), fp8_e5m2>);
+    static_assert(std::is_same_v<decltype(e8m0), fp8_e8m0>);
 }
 
 // ============================================================================
