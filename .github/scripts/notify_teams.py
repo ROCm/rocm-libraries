@@ -11,15 +11,20 @@ Usage:
         --failure-stage build \
         --log-path TheRock/build/logs \
         --webhook-url "$WEBHOOK_URL" \
-        --run-url "$RUN_URL" \
         [--pr-number NUM] \
         [--pr-title "TITLE"] \
         [--job-name "Test name"] \
         [--dry-run]
+
+Note: The GitHub Actions run URL is constructed automatically from
+GITHUB_REPOSITORY and GITHUB_RUN_ID environment variables. For local
+testing, these environment variables are optional and will use placeholder
+values if not set.
 """
 
 import argparse
 import json
+import os
 import platform
 import re
 import subprocess
@@ -358,9 +363,6 @@ def main():
         "--webhook-url", required=True, help="Microsoft Teams webhook URL"
     )
     parser.add_argument(
-        "--run-url", required=True, help="URL to the GitHub Actions run"
-    )
-    parser.add_argument(
         "--pr-number", default="", help="Pull request number (optional)"
     )
     parser.add_argument("--pr-title", default="", help="Pull request title (optional)")
@@ -376,6 +378,17 @@ def main():
     # Detect platform automatically
     detected_platform = platform.system().lower()
 
+    # Construct GitHub Actions run URL from environment variables
+    # Use defaults for local testing when environment variables are not set
+    github_repository = os.getenv("GITHUB_REPOSITORY", "local/testing")
+    github_run_id = os.getenv("GITHUB_RUN_ID", "0")
+
+    run_url = f"https://github.com/{github_repository}/actions/runs/{github_run_id}"
+
+    if github_repository == "local/testing":
+        print("Warning: Running in local test mode (GITHUB_REPOSITORY not set)")
+        print(f"Using placeholder run URL: {run_url}")
+
     # Extract error context
     extractor = ErrorExtractor(args.log_path, args.failure_stage)
     error_context, issue_type = extractor.extract()
@@ -386,7 +399,7 @@ def main():
         project=args.project,
         platform=detected_platform,
         failure_stage=args.failure_stage,
-        run_url=args.run_url,
+        run_url=run_url,
         error_context=error_context,
         issue_type=issue_type,
         pr_number=args.pr_number if args.pr_number else None,

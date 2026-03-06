@@ -109,7 +109,6 @@ jobs:
             --platform "${{ inputs.platform }}" \
             --log-path ./test_logs/test_output.log \
             --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
-            --run-url "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
             --pr-number "${{ github.event.pull_request.number }}" \
             --pr-title "${{ github.event.pull_request.title }}" \
             --job-name "${{ fromJSON(inputs.component).job_name }} (shard ${{ matrix.shard }}/${{ fromJSON(inputs.component).total_shards }})"

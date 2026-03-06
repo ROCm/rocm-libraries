@@ -167,7 +167,6 @@ jobs:
             --platform windows \
             --log-path "${{ env.BUILD_DIR }}/logs" \
             --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
-            --run-url "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
             --pr-number "${{ github.event.pull_request.number }}" \
             --pr-title "${{ github.event.pull_request.title }}"
 
