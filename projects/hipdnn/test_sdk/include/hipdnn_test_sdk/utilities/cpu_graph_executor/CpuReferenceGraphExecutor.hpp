@@ -13,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
@@ -115,6 +116,8 @@ private:
             return detail::ConvolutionBwdSignatureKey(node, tensorMap, computeType);
         case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
             return detail::ConvolutionWrwSignatureKey(node, tensorMap, computeType);
+        case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
+            return detail::LayernormFpropSignatureKey(node, tensorMap);
         case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
             return detail::MatmulSignatureKey(node, tensorMap, computeType);
         case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:

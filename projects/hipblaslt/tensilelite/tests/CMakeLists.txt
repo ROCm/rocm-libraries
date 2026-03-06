@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 find_package(GTest REQUIRED)
-find_package(Boost REQUIRED COMPONENTS filesystem)
 
 add_executable(tensilelite-tests)
 add_subdirectory(configs)
@@ -40,7 +39,6 @@ target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(tensilelite-tests
     PUBLIC
         tensilelite::tensilelite-host
-        Boost::filesystem
     PRIVATE
         hip::device
         ${CMAKE_DL_LIBS}
