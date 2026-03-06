@@ -13,7 +13,6 @@ add_executable(
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleQuantize.cpp
     IntegrationConvForward.cpp
-    IntegrationRMSNormForward.cpp
     IntegrationConvolutionBackwardData.cpp
     IntegrationConvolutionBackwardWeight.cpp
     IntegrationFrontendUserLogging.cpp
@@ -22,7 +21,13 @@ add_executable(
     IntegrationConvFpropDescriptorLowering.cpp
     IntegrationMatmul.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationBatchnormInferenceDescriptorLowering.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
+    IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationLayernormForward.cpp
+    IntegrationMatmul.cpp
+    IntegrationRMSNormForward.cpp
 )
 
 target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

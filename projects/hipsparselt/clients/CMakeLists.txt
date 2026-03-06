@@ -13,11 +13,6 @@ elseif(HIPSPARSELT_ENABLE_BLIS)
     # consolidate the vendoring strategy of BLAS/LAPACK, but remains for historical purposes
     find_package(BLIS REQUIRED)
 endif()
-# find_package(LAPACK) and conditionally fetch it if not found (there is an implicit
-# find_package(BLAS) when finding lapack)
-if(NOT HIPSPARSELT_ENABLE_THEROCK)
-    include(fetch_lapack)
-endif()
 
 add_library(hipsparselt-clients-common OBJECT)
 
