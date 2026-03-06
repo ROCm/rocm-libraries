@@ -1235,6 +1235,12 @@ int main(int argc, const char* argv[])
                     ScopedTimer timer("pre_problem");
                     listeners.preProblem(problem);
                 }
+                // Discard any pending async reset from the previous problem —
+                // it prepared buffers for a different problem's data.
+                {
+                    ScopedTimer timer("cancel_async_reset");
+                    dataInit->cancelAsyncReset();
+                }
                 std::shared_ptr<ProblemInputs> inputs;
                 {
                     ScopedTimer timer("gpu_input_preparation");
@@ -1371,7 +1377,7 @@ int main(int argc, const char* argv[])
                                 if(resetInput)
                                 {
                                     ScopedTimer timer("gpu_input_reset");
-                                    auto inputs = dataInit->prepareGPUInputs(problem);
+                                    inputs = dataInit->prepareGPUInputs(problem);
                                     inputArr[0] = inputs;
                                 }
                                 resetInput = true;
@@ -1413,6 +1419,13 @@ int main(int argc, const char* argv[])
                                     adapter.selectRotationCopy(
                                         (int)(rotationLaunchIdx++ % (size_t)nRotationModules));
                                 };
+
+                                // Ensure any pending async reset is complete
+                                // before the first kernel launch (warmup or benchmark).
+                                {
+                                    ScopedTimer timer("wait_copy_done");
+                                    dataInit->waitCopyDone(stream);
+                                }
 
                                 if(warmupInvocations > 0)
                                 {
@@ -1497,6 +1510,18 @@ int main(int argc, const char* argv[])
                                 if(useUserArgs)
                                 {
                                     solution->relaseDeviceUserArgs(dUA, dUAHost);
+                                }
+
+                                // Kick off async reset after benchmark completes.
+                                // DMA on m_copyStream overlaps with the next
+                                // iteration's prepareGPUInputs, kernel_solving,
+                                // and warmup — synced before the next benchmark_runs.
+                                // With triple-buffering, fill two slots ahead so
+                                // each DMA gets a full extra solution of overlap.
+                                {
+                                    ScopedTimer timer("async_reset_submit");
+                                    dataInit->beginAsyncReset(problem);
+                                    dataInit->beginAsyncReset(problem);
                                 }
                             }
                         }
