@@ -12,7 +12,7 @@ formats: []
 
 python:
    install:
-   - requirements: docs/sphinx/requirements.txt
+   - requirements: projects/hipdnn/docs/sphinx/requirements.txt
 
 # Defines build environment
 build:
