@@ -21,6 +21,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
@@ -150,7 +151,7 @@ rocblas_status rocblas_her2_launcher(rocblas_handle handle,
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
-    static constexpr int HER2_DIM_X = 512;
+    static constexpr int HER2_DIM_X = rocblas::conditional_v<rocblas_enable_asan, 256, 512>;
 
     size_t nitems = (size_t)n * (n + 1) / 2;
 
