@@ -209,8 +209,8 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Prepare compilation options
     std::vector<std::string> options;
-
-    auto rocmPath = hipdnn_data_sdk::utilities::getEnv("ROCM_PATH");
+    auto rocmPath
+        = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
     if(!rocmPath.empty())
     {
         auto rocmIncludeArg = "-I" + rocmPath + "/include";
