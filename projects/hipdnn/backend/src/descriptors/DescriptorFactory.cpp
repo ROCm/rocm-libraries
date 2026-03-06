@@ -14,6 +14,7 @@
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
 #include "KnobSettingDescriptor.hpp"
+#include "LayernormOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
@@ -68,6 +69,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionBwdOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<LayernormOperationDescriptor>();
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

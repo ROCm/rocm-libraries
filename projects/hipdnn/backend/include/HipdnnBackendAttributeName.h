@@ -34,6 +34,7 @@
  * - 1000-1099: Engine attributes
  * - 1100-1199: Kernel cache attributes
  * - 1200-1299: Device properties attributes
+ * - 2400-2499: Layernorm operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -426,6 +427,41 @@ typedef enum
 
     /** @brief Compute data type for batchnorm inference */
     HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT = 1806,
+
+    /** @} */
+
+    /**
+     * @name Layernorm Operation Attributes (2400-2499)
+     * Attributes for HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_X_EXT = 2400,
+
+    /** @brief Scale tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_SCALE_EXT = 2401,
+
+    /** @brief Bias tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BIAS_EXT = 2402,
+
+    /** @brief Epsilon tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_EPSILON_EXT = 2403,
+
+    /** @brief Output tensor for layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_Y_EXT = 2404,
+
+    /** @brief Mean output tensor for layernorm (optional) */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_MEAN_EXT = 2405,
+
+    /** @brief Inverse variance output tensor for layernorm (optional) */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT = 2406,
+
+    /** @brief Forward phase for layernorm */
+    HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT = 2407,
+
+    /** @brief Compute data type for layernorm */
+    HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT = 2408,
 
     /** @} */
 

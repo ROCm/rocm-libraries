@@ -24,6 +24,7 @@ add_executable(
     IntegrationBatchnormInferenceDescriptorLowering.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
+    IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
     IntegrationRMSNormForward.cpp

@@ -176,4 +176,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR,
 
+    /**
+     * @brief Layer normalization operation descriptor
+     *
+     * Represents a layer normalization operation with input (X),
+     * scale, bias, epsilon tensors, output (Y), and optional
+     * mean and inverse variance outputs plus a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT,
+
 } hipdnnBackendDescriptorType_t;
