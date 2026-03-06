@@ -368,10 +368,10 @@ private:
     };
 
     bool test_passed;
-    std::unordered_map<std::string, TVerify> failure_errors{};
-    ErrorAnalysisInfo info{};
+    std::unordered_map<std::string, TVerify> failure_errors;
+    ErrorAnalysisInfo info;
 
-    constexpr static int verify_block_size = 1024;
+    static constexpr int verify_block_size = 1024;
 
     inline static ChecksResult* res_dev = nullptr;
     inline static TVerify* rms_dev      = nullptr;
@@ -397,9 +397,15 @@ public:
     friend void TearDownSharedVerifyData();
 
 protected:
-    AdaptiveTest() : test_passed(true) {}
+    TestReference current_REF;
 
-    TestReference current_REF = REF;
+    AdaptiveTest() : test_passed(true)
+    {
+        failure_errors = std::unordered_map<std::string, TVerify>{};
+        info           = ErrorAnalysisInfo{};
+        current_REF    = REF;
+    }
+
     /**
      * Invoking corresponding implementation. These should be able to be called several times
      * without invoking SetUp again.
