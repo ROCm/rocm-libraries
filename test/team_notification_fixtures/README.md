@@ -27,7 +27,6 @@ python3 .github/scripts/notify_teams.py \
   --failure-stage build \
   --log-path test/fixtures/sample_build_error.log \
   --webhook-url "test" \
-  --run-url "http://example.com/run/123" \
   --dry-run
 
 # Test test failure notification
@@ -36,10 +35,10 @@ python3 .github/scripts/notify_teams.py \
   --failure-stage test \
   --log-path test/fixtures/sample_test_error.log \
   --webhook-url "test" \
-  --run-url "http://example.com/run/123" \
   --pr-number "123" \
   --pr-title "Fix convolution backward pass" \
   --dry-run
 ```
+Replace "test" in `--webhook-url` with the actual webhook url if you want to test sending to teams
 
 The `--dry-run` flag will print the formatted message without actually sending it to Teams.
