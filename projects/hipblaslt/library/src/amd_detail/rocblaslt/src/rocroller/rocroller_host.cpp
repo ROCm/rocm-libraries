@@ -382,13 +382,15 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
 {
     KernelType kernelType;
 
-    kernelType.typeA   = hipDataType_to_rocRoller_type(prob.a_type);
-    kernelType.typeB   = hipDataType_to_rocRoller_type(prob.b_type);
-    kernelType.typeC   = hipDataType_to_rocRoller_type(prob.c_type);
-    kernelType.typeD   = hipDataType_to_rocRoller_type(prob.d_type);
-    kernelType.typeAcc = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
-    kernelType.transA  = prob.trans_a == HIPBLAS_OP_T;
-    kernelType.transB  = prob.trans_b == HIPBLAS_OP_T;
+    kernelType.typeA    = hipDataType_to_rocRoller_type(prob.a_type);
+    kernelType.typeB    = hipDataType_to_rocRoller_type(prob.b_type);
+    kernelType.typeC    = hipDataType_to_rocRoller_type(prob.c_type);
+    kernelType.typeD    = hipDataType_to_rocRoller_type(prob.d_type);
+    kernelType.typeAcc  = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
+    kernelType.transA   = prob.trans_a == HIPBLAS_OP_T;
+    kernelType.transB   = prob.trans_b == HIPBLAS_OP_T;
+    kernelType.swizzleA = prob.swizzleA;
+    kernelType.swizzleB = prob.swizzleB;
 
     if(isBlockScaling(prob.scaleAType))
     {
@@ -423,6 +425,10 @@ rocblaslt_status
                                          int                          solutionIndex,
                                          std::shared_ptr<GemmKernel>& kernel)
 {
+    // TODO: Remove once rocRoller supports swizzleA and swizzleB
+    if (kernelType.swizzleA || kernelType.swizzleB)
+        return rocblaslt_status_not_implemented;
+
     auto params = genSolutionParameters(kernelType, solutionIndexParameter);
     try
     {
@@ -525,7 +531,7 @@ rocblaslt_status
                 continue;  // Skip this solution entirely
             }
         }
-        
+
         auto existingSolution
             = rocroller_handle->cache.getKernel(kernelType, solutionIndexParameter);
         std::shared_ptr<GemmKernel> kernel;
