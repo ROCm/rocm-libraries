@@ -8,6 +8,7 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider
@@ -208,7 +209,15 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Prepare compilation options
     std::vector<std::string> options;
-    options.emplace_back("-I/opt/rocm/include");
+
+    auto rocmPath = hipdnn_data_sdk::utilities::getEnv("ROCM_PATH");
+    if(!rocmPath.empty())
+    {
+        auto rocmIncludeArg = "-I" + rocmPath + "/include";
+        options.emplace_back(rocmIncludeArg);
+        HIPDNN_PLUGIN_LOG_INFO(
+            "BatchnormFwdInferencePlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
+    }
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP32=") + (useFp32 ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_FP16=") + (useFp16Mix ? "1" : "0"));
     options.emplace_back(std::string("-DHIP_PLUGIN_USE_BFP16=") + (useBfp16Mix ? "1" : "0"));
