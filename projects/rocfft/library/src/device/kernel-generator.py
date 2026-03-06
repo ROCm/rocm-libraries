@@ -48,7 +48,8 @@ from operator import mul
 
 from generator import (ArgumentList, BaseNode, Call, CommentBlock, Function,
                        Include, LineBreak, Map, StatementList, Variable,
-                       Assign, name_args, write, ForwardDeclaration, Declaration)
+                       Assign, name_args, write, ForwardDeclaration,
+                       Declaration)
 
 from collections import namedtuple
 
@@ -538,23 +539,27 @@ def list_3d_partial_pass_kernels():
 
         k.runtime_compile = True
 
-        if k.type == 'r2c' or k.type == 'c2r':
-            k_cpy = copy.copy(k)
-            k_cpy.scheme = "CS_REAL_3D_PP"
-            k_cpy.transform_type = k_cpy.type
-            del k_cpy.type
-            pp_3d_kernels.append(copy.copy(k_cpy))
-        elif k.type == 'c2c':
-            for transform_type in complex_transform_types:
+        if not isinstance(k.type, list):
+            k.type = [k.type]
+
+        for t in k.type:
+            if t == 'r2c' or t == 'c2r':
                 k_cpy = copy.copy(k)
-                k_cpy.scheme = "CS_3D_PP"
-                k_cpy.transform_type = transform_type
+                k_cpy.scheme = "CS_REAL_3D_PP"
+                k_cpy.transform_type = t
                 del k_cpy.type
-                pp_3d_kernels.append(k_cpy)
-        else:
-            err_msg = "Error: invalid partial-pass transform type: \n"
-            print(err_msg + str(k))
-            sys.exit(1)
+                pp_3d_kernels.append(copy.copy(k_cpy))
+            elif t == 'c2c':
+                for transform_type in complex_transform_types:
+                    k_cpy = copy.copy(k)
+                    k_cpy.scheme = "CS_3D_PP"
+                    k_cpy.transform_type = transform_type
+                    del k_cpy.type
+                    pp_3d_kernels.append(k_cpy)
+            else:
+                err_msg = "Error: invalid partial-pass transform type: \n"
+                print(err_msg + str(k))
+                sys.exit(1)
 
     return pp_3d_kernels
 
