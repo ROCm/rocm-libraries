@@ -240,7 +240,6 @@ inline size_t get_llc_cache_bytes(const std::string& arch)
 
 inline std::optional<ck_tile::index_t> get_head_group_size(ck_tile::index_t nhead_q,
                                                            ck_tile::index_t nhead_k,
-                                                           ck_tile::index_t batch,
                                                            ck_tile::index_t seqlen_k,
                                                            ck_tile::index_t hdim_q,
                                                            ck_tile::index_t hdim_v,
@@ -260,7 +259,7 @@ inline std::optional<ck_tile::index_t> get_head_group_size(ck_tile::index_t nhea
 
     if(nhead_k <= 0 || nhead_q <= 0 || (nhead_q % nhead_k) != 0)
         return std::nullopt;
-    if(seqlen_k <= 0 || hdim_q <= 0 || hdim_v <= 0 || batch <= 0)
+    if(seqlen_k <= 0 || hdim_q <= 0 || hdim_v <= 0)
         return std::nullopt;
 
     const size_t kv_bytes_per_head =
@@ -287,17 +286,6 @@ inline std::optional<ck_tile::index_t> get_head_group_size(ck_tile::index_t nhea
     ck_tile::index_t group = static_cast<ck_tile::index_t>(target_llc_bytes / kv_bytes_per_head);
     if(group < 1)
         group = 1;
-
-    const ck_tile::index_t min_group_size = std::max<ck_tile::index_t>(1, nhead_q / 16);
-    if(group < min_group_size)
-        group = min_group_size;
-
-    // Cap the number of groups to avoid excessive launch overhead.
-    constexpr ck_tile::index_t kMaxGroups = 8;
-    const ck_tile::index_t min_group_for_max_groups =
-        ck_tile::integer_divide_ceil(nhead_q, kMaxGroups);
-    if(group < min_group_for_max_groups)
-        group = min_group_for_max_groups;
 
     const ck_tile::index_t gqa_ratio = nhead_q / nhead_k;
     if(gqa_ratio > 1)

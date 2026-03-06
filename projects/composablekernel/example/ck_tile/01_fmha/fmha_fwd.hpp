@@ -632,20 +632,17 @@ CK_TILE_HOST ck_tile::index_t fmha_fwd_resolve_head_group_size_q(const fmha_fwd_
     }
 
 #if CK_TILE_FMHA_ENABLE_HEAD_GROUPING
-    if(fmha_fwd_head_grouping::disabled_by_env())
-        return 0;
-
-    if(args.nhead_k <= 0 || (args.nhead_q % args.nhead_k) != 0)
-        return 0;
-
     // Apply implicit single-launch grouping only for bshd.
     const bool is_bshd_layout =
         (args.nhead_stride_q == args.hdim_q) && (args.stride_q > args.hdim_q);
     if(!is_bshd_layout)
         return 0;
 
+    if(args.batch <= 0)
+        return 0;
+
     ck_tile::index_t seqlen_k_for_policy = args.seqlen_k;
-    if(args.batch > 0 && args.seqstart_k_ptr != nullptr && args.seqlen_k_ptr == nullptr)
+    if(args.seqstart_k_ptr != nullptr && args.seqlen_k_ptr == nullptr)
     {
         // group-mode without explicit per-batch seqlen: use per-batch average as policy input.
         seqlen_k_for_policy = ck_tile::integer_divide_ceil(args.seqlen_k, args.batch);
@@ -654,7 +651,6 @@ CK_TILE_HOST ck_tile::index_t fmha_fwd_resolve_head_group_size_q(const fmha_fwd_
     const auto group_size_opt =
         fmha_fwd_head_grouping::get_head_group_size(args.nhead_q,
                                                     args.nhead_k,
-                                                    args.batch,
                                                     seqlen_k_for_policy,
                                                     args.hdim_q,
                                                     args.hdim_v,
@@ -664,8 +660,6 @@ CK_TILE_HOST ck_tile::index_t fmha_fwd_resolve_head_group_size_q(const fmha_fwd_
         return 0;
 
     const ck_tile::index_t group_size = group_size_opt.value();
-    if(group_size <= 0 || group_size >= args.nhead_q)
-        return 0;
 
     if(fmha_fwd_head_grouping::log_enabled())
     {
