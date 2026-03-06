@@ -176,4 +176,13 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR,
 
+    /**
+     * @brief SDPA forward propagation operation descriptor (extension)
+     *
+     * Represents a scaled dot-product attention forward operation with
+     * query (Q), key (K), value (V), and output (O) tensors plus
+     * attention parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT,
+
 } hipdnnBackendDescriptorType_t;

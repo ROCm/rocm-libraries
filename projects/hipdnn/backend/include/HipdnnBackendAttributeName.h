@@ -430,6 +430,140 @@ typedef enum
     /** @} */
 
     /**
+     * @name SDPA Forward Propagation Operation Attributes (1900-1999)
+     * Attributes for HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Q (query) tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT = 1900,
+
+    /** @brief K (key) tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT = 1901,
+
+    /** @brief V (value) tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT = 1902,
+
+    /** @brief O (output) tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT = 1903,
+
+    /** @brief Attention mask tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT = 1904,
+
+    /** @brief Scale tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT = 1905,
+
+    /** @brief Sequence length Q tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT = 1906,
+
+    /** @brief Sequence length KV tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT = 1907,
+
+    /** @brief Seed tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT = 1908,
+
+    /** @brief Offset tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT = 1909,
+
+    /** @brief Dropout mask tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT = 1910,
+
+    /** @brief Dropout scale tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT = 1911,
+
+    /** @brief Page table K tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT = 1912,
+
+    /** @brief Page table V tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT = 1913,
+
+    /** @brief Block mask tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT = 1914,
+
+    /** @brief Sink token tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT = 1915,
+
+    /** @brief Descale Q tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT = 1916,
+
+    /** @brief Descale K tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT = 1917,
+
+    /** @brief Descale V tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT = 1918,
+
+    /** @brief Descale S tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT = 1919,
+
+    /** @brief Scale S tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT = 1920,
+
+    /** @brief Scale O tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT = 1921,
+
+    /** @brief Stats output tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT = 1922,
+
+    /** @brief Max output tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT = 1923,
+
+    /** @brief Sum exp output tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT = 1924,
+
+    /** @brief RNG dump output tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT = 1925,
+
+    /** @brief Amax S output tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT = 1926,
+
+    /** @brief Amax O output tensor for SDPA forward */
+    HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT = 1927,
+
+    /** @brief Whether to generate statistics (bool) */
+    HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT = 1928,
+
+    /** @brief Whether to use ALiBi mask (bool) */
+    HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT = 1929,
+
+    /** @brief Whether to use padding mask (bool) */
+    HIPDNN_ATTR_SDPA_FPROP_PADDING_MASK_EXT = 1930,
+
+    /** @brief Whether to use causal mask (bool, deprecated) */
+    HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_EXT = 1931,
+
+    /** @brief Whether to use causal mask bottom-right (bool, deprecated) */
+    HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT = 1932,
+
+    /** @brief Dropout probability (float) */
+    HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT = 1933,
+
+    /** @brief Attention scale value (float) */
+    HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT = 1934,
+
+    /** @brief Left bound for sliding window (int64) */
+    HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT = 1935,
+
+    /** @brief Right bound for sliding window (int64) */
+    HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT = 1936,
+
+    /** @brief Maximum sequence length KV (int64) */
+    HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT = 1937,
+
+    /** @brief Diagonal alignment mode (DiagonalAlignment as int64) */
+    HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT = 1938,
+
+    /** @brief MMA core mode (DataType as int64) */
+    HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT = 1939,
+
+    /** @brief Attention implementation mode (AttentionImplementation as int64) */
+    HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT = 1940,
+
+    /** @brief Compute data type for SDPA forward */
+    HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT = 1941,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
