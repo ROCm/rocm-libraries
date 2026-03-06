@@ -4,7 +4,7 @@
 version: 2
 
 sphinx:
-   configuration: docs/conf.py
+   configuration: projects/hipdnn/docs/conf.py
 
 # RTD by default builds html only
 # Additional formats available for extra build time: htmlzip, pdf, epub
