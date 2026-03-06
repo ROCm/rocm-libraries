@@ -161,6 +161,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
 
     /**
+     * @brief Batch normalization inference operation descriptor
+     *
+     * Represents a batch normalization inference operation with input (X),
+     * mean, inverse variance, scale, bias, and output (Y) tensors.
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT,
+
+    /**
      * @brief Convolution backward data (Dgrad) operation descriptor
      *
      * Represents a backward data convolution operation with output gradient (DY),
