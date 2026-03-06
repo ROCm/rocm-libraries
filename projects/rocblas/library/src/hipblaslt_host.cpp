@@ -517,7 +517,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             = (hipblaslt_ext::UserArguments*)((char*)(prob.handle->gsu_workspace)
                                               + (workspace_size - userArgsSize));
         RETURN_IF_HIP_ERROR(hipMemcpy(d_userArgs, userArgs, userArgsSize, hipMemcpyHostToDevice));
-        RETURN_IF_HIP_ERROR(hipFree(userArgs));
+        RETURN_IF_HIP_ERROR(hipHostFree(userArgs));
 
         if(gemm.run(d_userArgs, prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
         {

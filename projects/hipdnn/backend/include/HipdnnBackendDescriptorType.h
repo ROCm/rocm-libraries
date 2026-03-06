@@ -151,4 +151,21 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
 
+    /**
+     * @brief Convolution backward filter operation descriptor
+     *
+     * Represents a backward filter convolution operation with input (X),
+     * output gradient (DY), and weight gradient (DW) tensors plus
+     * convolution parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
+
+    /**
+     * @brief Convolution backward data (Dgrad) operation descriptor
+     *
+     * Represents a backward data convolution operation with output gradient (DY),
+     * weight (W), and input gradient (DX) tensors plus convolution parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR,
+
 } hipdnnBackendDescriptorType_t;

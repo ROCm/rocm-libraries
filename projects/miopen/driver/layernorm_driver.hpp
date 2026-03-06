@@ -38,6 +38,7 @@
 #include <cfloat>
 #include <cstdlib>
 #include <memory>
+#include <miopen/errors.hpp>
 #include <miopen/tensor.hpp>
 #include <vector>
 
@@ -689,52 +690,45 @@ void LayerNormDriver<T>::ValidateLayout()
     else if(layout_value != "NCHW" && layout_value != "NHWC" && layout_value != "NCDHW" &&
             layout_value != "NDHWC" && layout_value != "NW")
     {
-        std::cerr << "Invalid layout parameter value: " << layout_value << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid layout parameter value: " + layout_value);
     }
     else if((in_d == 0 || in_c == 0 || in_h == 0) &&
             (layout_value == "NCDHW" || layout_value == "NDHWC"))
     {
-        std::cerr << "The input depth (in_d), channels (in_c) and height (in_h) must be greater "
-                     "than zero for layouts NCDHW and NDHWC"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The input depth (in_d), channels (in_c) and height (in_h) must be greater "
+                     "than zero for layouts NCDHW and NDHWC");
     }
     else if(in_d != 0 && (layout_value == "NCHW" || layout_value == "NHWC"))
     {
-        std::cerr << "The input depth (in_d) must be zero and the input channels (in_c) and height "
-                     "(in_h) must be greater than zero for layouts NCHW and NHWC"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The input depth (in_d) must be zero and the input channels (in_c) and height "
+                     "(in_h) must be greater than zero for layouts NCHW and NHWC");
     }
     else if((in_d != 0 || in_c != 0 || in_h != 0) && layout_value == "NW")
     {
-        std::cerr
-            << "The input depth (in_d), channels (in_c) and height (in_h) be zero for layout NW"
-            << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The input depth (in_d), channels (in_c) and height (in_h) must be zero for "
+                     "layout NW");
     }
 
     int normalized_dim = inflags.GetValueInt("normalized_dim");
     if(normalized_dim >= 5 && (layout_value == "NCDHW" || layout_value == "NDHWC"))
     {
-        std::cerr << "The normalized dimension (normalized_dim) must be less than 5 for layouts "
-                     "NCDHW and NDHWC"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The normalized dimension (normalized_dim) must be less than 5 for layouts "
+                     "NCDHW and NDHWC");
     }
     else if(normalized_dim >= 4 && (layout_value == "NCHW" || layout_value == "NHWC"))
     {
-        std::cerr << "The normalized dimension (normalized_dim) must be less than 4 for layouts "
-                     "NCHW and NHWC"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The normalized dimension (normalized_dim) must be less than 4 for layouts "
+                     "NCHW and NHWC");
     }
     else if(normalized_dim >= 2 && layout_value == "NW")
     {
-        std::cerr << "The normalized dimension (normalized_dim) must be less than 2 for layout NW"
-                  << std::endl;
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "The normalized dimension (normalized_dim) must be less than 2 for layout NW");
     }
 }
 

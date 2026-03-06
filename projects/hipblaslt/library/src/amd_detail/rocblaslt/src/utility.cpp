@@ -119,6 +119,10 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "f32_r";
     case HIP_R_64F:
         return "f64_r";
+    case HIP_C_32F:
+        return "f32_c";
+    case HIP_C_64F:
+        return "f64_c";    
     case HIP_R_16F:
         return "f16_r";
     case HIP_R_16BF:

@@ -704,6 +704,13 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
     // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
     bool alpha_A_B_violation
         = (!alpha || ((matmul_descr->pointermode || (*((float*)alpha))) && (!A || !B)));
+
+    hipDataType alpha_type = matA->type;
+    hipDataType beta_type  = matD->type;
+
+    auto alpha_scalar = get_alpha_beta_scalar(alpha_type, alpha);
+    auto beta_scalar  = get_alpha_beta_scalar(beta_type, beta);
+
     // Check if pointer is valid
     if(alpha == nullptr || beta == nullptr || C == nullptr || D == nullptr || alpha_A_B_violation)
     {
@@ -755,36 +762,36 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
 
     if(get_logger_layer_mode() != rocblaslt_layer_mode_none)
     {
-        log_trace(__func__,
-                  "A",
-                  A,
-                  "Adesc",
-                  rocblaslt_matrix_layout_to_string(matA),
-                  "B",
-                  B,
-                  "Bdesc",
-                  rocblaslt_matrix_layout_to_string(matB),
-                  "C",
-                  C,
-                  "Cdesc",
-                  rocblaslt_matrix_layout_to_string(matC),
-                  "D",
-                  D,
-                  "Ddesc",
-                  rocblaslt_matrix_layout_to_string(matD),
-                  "computeDesc",
-                  rocblaslt_matmul_desc_to_string(matmul_descr),
-                  "workSpace",
-                  workspace,
-                  "workSpaceSizeInBytes",
-                  workspaceSizeInBytes,
-                  (matmul_descr->pointermode) ? "alphaVector" : "alpha",
-                  *(reinterpret_cast<const float*>(
-                      alpha)), // TODO: Add casts for f16 and int types of alpha.
-                  "beta",
-                  *(reinterpret_cast<const float*>(beta)),
-                  "stream",
-                  stream);
+        log_trace(
+            __func__,
+            "A",
+            A,
+            "Adesc",
+            rocblaslt_matrix_layout_to_string(matA),
+            "B",
+            B,
+            "Bdesc",
+            rocblaslt_matrix_layout_to_string(matB),
+            "C",
+            C,
+            "Cdesc",
+            rocblaslt_matrix_layout_to_string(matC),
+            "D",
+            D,
+            "Ddesc",
+            rocblaslt_matrix_layout_to_string(matD),
+            "computeDesc",
+            rocblaslt_matmul_desc_to_string(matmul_descr),
+            "workSpace",
+            workspace,
+            "workSpaceSizeInBytes",
+            workspaceSizeInBytes,
+            (matmul_descr->pointermode) ? "alphaVector" : "alpha",
+            alpha_scalar, 
+            "beta",
+            beta_scalar,
+            "stream",
+            stream);
     }
     return rocblaslt_matmul_impl(handle,
                                  matmul_descr,

@@ -7,6 +7,7 @@
 #include "descriptors/EngineConfigDescriptor.hpp"
 #include "descriptors/EngineDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
+#include "descriptors/KnobSettingDescriptor.hpp"
 #include "descriptors/ScopedDescriptor.hpp"
 #include "hipdnn_backend.h"
 #include "mocks/MockDescriptor.hpp"
@@ -431,4 +432,108 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceOnFinalizedDescriptor)
                                    1,
                                    &knobData),
         HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+// Helper to create a finalized KnobSettingDescriptor
+static std::unique_ptr<HipdnnBackendDescriptor>
+    createFinalizedKnobSettingDescriptor(const std::string& knobId, int64_t value)
+{
+    auto wrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
+    auto desc = wrapper->asDescriptor<KnobSettingDescriptor>();
+    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE,
+                       HIPDNN_TYPE_CHAR,
+                       static_cast<int64_t>(knobId.size()),
+                       knobId.c_str());
+    desc->setAttribute(HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE, HIPDNN_TYPE_INT64, 1, &value);
+    desc->finalize();
+    return wrapper;
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorSuccess)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+
+    ASSERT_NO_THROW(engineConfig->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
+
+    auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob_100", 42);
+    auto* knobPtr = knobWrapper.get();
+
+    ASSERT_NO_THROW(engineConfig->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &knobPtr));
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorMultiple)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+
+    ASSERT_NO_THROW(engineConfig->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
+
+    auto knobWrapper1 = createFinalizedKnobSettingDescriptor("knob_1", 10);
+    auto knobWrapper2 = createFinalizedKnobSettingDescriptor("knob_2", 20);
+    std::array<HipdnnBackendDescriptor*, 2> knobPtrs = {knobWrapper1.get(), knobWrapper2.get()};
+
+    ASSERT_NO_THROW(engineConfig->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, knobPtrs.data()));
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectNotFinalized)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+
+    ASSERT_NO_THROW(engineConfig->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
+
+    // Create a non-finalized knob descriptor
+    auto knobWrapper = test_utilities::createDescriptor<KnobSettingDescriptor>();
+    auto* knobPtr = knobWrapper.get();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(
+            HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &knobPtr),
+        HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectWrongType)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob", 42);
+    auto* knobPtr = knobWrapper.get();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(
+            HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_INT64, 1, &knobPtr),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectExceedsMaxCount)
+{
+    auto engineConfig = getEngineConfigDescriptor();
+
+    EXPECT_CALL(*getMockEngine(), isFinalized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+
+    ASSERT_NO_THROW(engineConfig->setAttribute(
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_mockEngineWrapper));
+
+    auto knobWrapper = createFinalizedKnobSettingDescriptor("test_knob", 42);
+    auto* knobPtr = knobWrapper.get();
+
+    ASSERT_THROW_HIPDNN_STATUS(
+        engineConfig->setAttribute(HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES,
+                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                   EngineConfigDescriptor::MAX_KNOB_CHOICES + 1,
+                                   &knobPtr),
+        HIPDNN_STATUS_BAD_PARAM);
 }
