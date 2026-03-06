@@ -27,9 +27,39 @@
 #pragma once
 
 #include <cmath>
+#include <cstddef>
+#include <functional>
 
 namespace origami {
 namespace math {
+
+/**
+ * @brief Combines a hash value into a seed using the golden ratio method.
+ *
+ * This is a standard technique for combining hash values, similar to boost::hash_combine.
+ * The golden ratio constant helps distribute bits evenly across the hash space.
+ *
+ * @param seed The running hash seed (modified in place)
+ * @param value The hash value to combine
+ */
+inline void hash_combine(std::size_t& seed, std::size_t value) {
+  constexpr std::size_t golden_ratio = 0x9e3779b9;
+  seed ^= value + golden_ratio + (seed << 6) + (seed >> 2);
+}
+
+/**
+ * @brief Combines a hashable value into a seed.
+ *
+ * Convenience overload that hashes the value before combining.
+ *
+ * @tparam T Type of value to hash (must be hashable via std::hash)
+ * @param seed The running hash seed (modified in place)
+ * @param value The value to hash and combine
+ */
+template <typename T>
+inline void hash_combine(std::size_t& seed, const T& value) {
+  hash_combine(seed, std::hash<T>{}(value));
+}
 
 /**
  * @brief Performs `(n + d - 1) / d`, but is robust against the case where

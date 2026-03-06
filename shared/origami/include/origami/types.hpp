@@ -396,6 +396,32 @@ struct tensile_params_t {
            global_split_u_coalesced == o.global_split_u_coalesced &&
            global_split_u_wgm_round_robin == o.global_split_u_wgm_round_robin;
   }
+
+  std::size_t hash() const {
+    std::size_t seed = 0;
+    math::hash_combine(seed, depth_u);
+    math::hash_combine(seed, static_cast<int>(global_split_u));
+    math::hash_combine(seed, static_cast<int>(global_accumulation));
+    math::hash_combine(seed, static_cast<int>(local_split_u));
+    math::hash_combine(seed, static_cast<int>(direct_to_vgpr_a));
+    math::hash_combine(seed, static_cast<int>(direct_to_vgpr_b));
+    math::hash_combine(seed, static_cast<int>(direct_to_lds_a));
+    math::hash_combine(seed, static_cast<int>(direct_to_lds_b));
+    math::hash_combine(seed, num_loads_coalesced_a);
+    math::hash_combine(seed, num_loads_coalesced_b);
+    math::hash_combine(seed, wave_num);
+    math::hash_combine(seed, wave_group_m);
+    math::hash_combine(seed, wave_group_n);
+    math::hash_combine(seed, prefetch_global_read);
+    math::hash_combine(seed, math_clocks_unrolled_loop);
+    math::hash_combine(seed, static_cast<int>(swizzle_a));
+    math::hash_combine(seed, static_cast<int>(swizzle_b));
+    math::hash_combine(seed, workgroup_mapping_xcc);
+    math::hash_combine(seed, workgroup_mapping_xcc_group);
+    math::hash_combine(seed, static_cast<int>(global_split_u_coalesced));
+    math::hash_combine(seed, static_cast<int>(global_split_u_wgm_round_robin));
+    return seed;
+  }
 };
 
 /// Variant holding backend-specific parameters.
@@ -490,23 +516,33 @@ struct config_t {
   }
 
   std::size_t hash() const {
-    std::size_t backend_hash = 0;
-    if (has_tensile_params()) {
-      const auto& t = std::get<tensile_params_t>(backend);
-      backend_hash = std::hash<std::size_t>()(t.depth_u) ^
-                     std::hash<std::int16_t>()(t.global_split_u) ^
-                     std::hash<std::size_t>()(t.wave_num);
-    }
-    return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
-           std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
-           std::hash<int>()(hand_optimized_main_loop) ^ std::hash<int>()(cache_hints_a) ^
-           std::hash<int>()(cache_hints_b) ^ std::hash<int>()(workgroup_mapping) ^
-           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(prediction_mode)) ^
-           std::hash<std::uint32_t>()(static_cast<std::uint32_t>(target)) ^
-           std::hash<std::size_t>()(grvw_a) ^ std::hash<std::size_t>()(grvw_b) ^
-           std::hash<std::size_t>()(gwvw_d) ^ std::hash<int>()(vector_width_a) ^
-           std::hash<int>()(vector_width_b) ^
-           backend_hash;
+    std::size_t seed = 0;
+    math::hash_combine(seed, mt.m);
+    math::hash_combine(seed, mt.n);
+    math::hash_combine(seed, mt.k);
+    math::hash_combine(seed, mi.m);
+    math::hash_combine(seed, mi.n);
+    math::hash_combine(seed, mi.k);
+    math::hash_combine(seed, static_cast<int>(hand_optimized_main_loop));
+    math::hash_combine(seed, cache_hints_a);
+    math::hash_combine(seed, cache_hints_b);
+    math::hash_combine(seed, workgroup_mapping);
+    math::hash_combine(seed, static_cast<std::uint32_t>(prediction_mode));
+    math::hash_combine(seed, static_cast<std::uint32_t>(target));
+    math::hash_combine(seed, grvw_a);
+    math::hash_combine(seed, grvw_b);
+    math::hash_combine(seed, gwvw_d);
+    math::hash_combine(seed, vector_width_a);
+    math::hash_combine(seed, vector_width_b);
+    // Hash backend-specific parameters if present. The visitor pattern allows
+    // automatic handling of any backend type that provides a hash() method,
+    // while std::monostate (no backend params) is a no-op.
+    std::visit([&seed](const auto& params) {
+      if constexpr (!std::is_same_v<std::decay_t<decltype(params)>, std::monostate>) {
+        math::hash_combine(seed, params.hash());
+      }
+    }, backend);
+    return seed;
   }
 
   void validate() const {
