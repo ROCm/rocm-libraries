@@ -11,9 +11,12 @@ template <index_t ScaleGranularity,
           index_t MLane,
           typename DstTensor,
           typename DstScaleTensor,
-          typename SrcTensor>
-CK_TILE_DEVICE void
-cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcTensor& src_tensor)
+          typename SrcTensor,
+          typename ScaleFunc>
+CK_TILE_DEVICE void cast_tile_mx(DstTensor& dst_tensor,
+                                 DstScaleTensor& dst_scale_tensor,
+                                 const SrcTensor& src_tensor,
+                                 const ScaleFunc& scale_func = identity{})
 {
     using DstDataType      = remove_cv_t<typename DstTensor::DataType>;
     using DstScaleDataType = remove_cv_t<typename DstScaleTensor::DataType>;
@@ -30,19 +33,18 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
         static_for<0, size / 32, 1>{}([&](auto i) {
             // Maximum of consecutive ScaleGranularity values
             // (1 lane, 32 per lane for fp4)
-            float max_abs = 0;
+            float max_value = 0;
             static_for<0, 32, 1>{}([&](auto j) {
-                max_abs = max(max_abs, abs(src_thread_buffer[number<i * 32 + j>{}]));
+                max_value = max(max_value, abs(src_thread_buffer[number<i * 32 + j>{}]));
             });
 
             static_assert(std::is_same_v<DstScaleDataType, e8m0_t>);
-            // Use literal because type_convert<float>(numeric<DstDataType>::max()) is not constexpr
-            // causing the result of div to be stored in a VGPR
-            constexpr float rcp_dst_max = 1.0f / 6.0f;
-            // For e8m0 scales round up to the next power of 2, equivalent of exp2(ceil(log2(x)))
-            float scale = bit_cast<float>(
-                (bit_cast<uint32_t>(max_abs * rcp_dst_max) + numeric_traits<float>::mant_mask) &
-                numeric_traits<float>::head_mask);
+            // For e8m0 round up to the next power of 2, equivalent of exp2(ceil(log2(max_value)))
+            float scale =
+                bit_cast<float>((bit_cast<uint32_t>(max_value) + numeric_traits<float>::mant_mask) &
+                                numeric_traits<float>::head_mask);
+
+            scale = scale_func(scale);
 
             // Convert using scales
 
@@ -95,22 +97,20 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
         static_for<0, size / 16, 1>{}([&](auto i) {
             // Maximum of consecutive ScaleGranularity values
             // (2 lanes, 16 per lane for fp8/bf8)
-            float max_abs = 0;
+            float max_value = 0;
             static_for<0, 16, 1>{}([&](auto j) {
-                max_abs = max(max_abs, abs(src_thread_buffer[number<i * 16 + j>{}]));
+                max_value = max(max_value, abs(src_thread_buffer[number<i * 16 + j>{}]));
             });
             // 2 lanes, 16 values per lane share one scale
-            max_abs = max(max_abs, warp_shuffle(max_abs, lane ^ MLane));
+            max_value = max(max_value, warp_shuffle(max_value, lane ^ MLane));
 
             static_assert(std::is_same_v<DstScaleDataType, e8m0_t>);
-            // Use literal because type_convert<float>(numeric<DstDataType>::max()) is not constexpr
-            // causing the result of div to be stored in a VGPR
-            constexpr float rcp_dst_max =
-                1.0f / (std::is_same_v<DstDataType, ck_tile::fp8_t> ? 448.0f : 57344.0f);
-            // For e8m0 scales round up to the next power of 2, equivalent of exp2(ceil(log2(x)))
-            float scale = bit_cast<float>(
-                (bit_cast<uint32_t>(max_abs * rcp_dst_max) + numeric_traits<float>::mant_mask) &
-                numeric_traits<float>::head_mask);
+            // For e8m0 round up to the next power of 2, equivalent of exp2(ceil(log2(max_value)))
+            float scale =
+                bit_cast<float>((bit_cast<uint32_t>(max_value) + numeric_traits<float>::mant_mask) &
+                                numeric_traits<float>::head_mask);
+
+            scale = scale_func(scale);
 
             // Convert using scales
 
@@ -137,7 +137,7 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
                         scale,
                         true); // true -> WORD1
                 }
-                else
+                else if constexpr(std::is_same_v<DstDataType, bf8_t>)
                 {
                     x = __builtin_amdgcn_cvt_scalef32_pk_bf8_f32(
                         x,
