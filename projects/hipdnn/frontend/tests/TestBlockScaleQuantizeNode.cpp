@@ -399,6 +399,19 @@ TEST(TestBlockScaleQuantizeNode, InferPropertiesNodeMissingY)
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
+TEST(TestBlockScaleQuantizeNode, InferPropertiesNodeMissingScale)
+{
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_x(std::make_shared<TensorAttributes>());
+    attrs.set_y(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
+}
+
 TEST(TestBlockScaleQuantizeNode, PackNode)
 {
     BlockScaleQuantizeAttributes attrs;
@@ -581,6 +594,8 @@ TEST(TestBlockScaleQuantizeNode, InferPropertiesTransposedYStridesWithAxis)
     EXPECT_EQ(error.code, ErrorCode::OK);
 
     EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{2, 64, 32, 32}));
+    // Derivation: sort indices by X strides ascending → [3,2,1,0], rotate axis=1 to front
+    // → [1,0,3,2], inverse permutation gives strideOrder=[1,0,3,2], so dim 1 gets stride 1.
     EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{64, 1, 4096, 128}));
 }
 
@@ -750,6 +765,70 @@ TEST(TestBlockScaleQuantizeNode, InferPropertiesNonTransposeScaleStrides)
     // Non-transpose: Y gets X strides, scale gets stride order from extractStrideOrder
     EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{65536, 1024, 32, 1}));
     EXPECT_EQ(scaleTensor->get_dim(), (std::vector<int64_t>{2, 2, 32, 32}));
+    EXPECT_EQ(scaleTensor->get_stride(), (std::vector<int64_t>{2048, 1024, 32, 1}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesYStridesFallbackNoXStrides)
+{
+    // When X has dims but no strides, Y strides fall back to generateStrides(y->get_dim())
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32}); // No strides set
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    attrs.set_scale(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    EXPECT_EQ(yTensor->get_dim(), (std::vector<int64_t>{2, 64, 32, 32}));
+    // Default generateStrides produces row-major strides
+    EXPECT_EQ(yTensor->get_stride(), (std::vector<int64_t>{65536, 1024, 32, 1}));
+}
+
+TEST(TestBlockScaleQuantizeNode, InferPropertiesScaleStridesFallbackNoXStrides)
+{
+    // When X has dims but no strides, scale strides fall back to generateStrides(scale->get_dim())
+    BlockScaleQuantizeAttributes attrs;
+    attrs.set_block_size(32);
+    attrs.set_axis(1);
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_uid(1)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim({2, 64, 32, 32}); // No strides set
+    attrs.set_x(xTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_uid(2).set_name("Y");
+    attrs.set_y(yTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_uid(3).set_name("Scale");
+    attrs.set_scale(scaleTensor);
+
+    GraphAttributes graphAttributes;
+    BlockScaleQuantizeNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+
+    // Scale dims inferred: axis=1 → dim[1]/32 = 64/32 = 2
+    EXPECT_EQ(scaleTensor->get_dim(), (std::vector<int64_t>{2, 2, 32, 32}));
+    // Default generateStrides produces row-major strides
     EXPECT_EQ(scaleTensor->get_stride(), (std::vector<int64_t>{2048, 1024, 32, 1}));
 }
 
