@@ -129,6 +129,27 @@ inline std::vector<size_t> preTileSizeForScaleB(hipblaslt_scaling_format s)
     }
 }
 
+// Compute scale buffer size accounting for padding by preSwizzleScalesGFX950.
+// dataRow, dataCol are the raw data matrix dimensions (A_row/A_col or B_row/B_col).
+// When pre-swizzle is active, the output may be larger than the unpadded size
+// because rows are padded to a multiple of 32 and cols to a multiple of 8.
+inline size_t scaleBufferSize(int64_t dataRow, int64_t dataCol, hipblaslt_scaling_format s)
+{
+    auto   bs        = blockSize(s);
+    size_t scaleRows = dataRow / bs;
+    size_t scaleCols = dataCol;
+
+    auto preSwizzle = preSwizzleSizeForScale(s);
+    if(preSwizzle.empty())
+        return scaleRows * scaleCols;
+
+    // preSwizzleScalesGFX950 is called with {scaleCols, scaleRows}.
+    // It pads numRows (=scaleCols) to multiple of 32, numCols (=scaleRows) to multiple of 8.
+    size_t paddedNumRows = ((scaleCols + 31) / 32) * 32;
+    size_t paddedNumCols = ((scaleRows + 7) / 8) * 8;
+    return paddedNumRows * paddedNumCols;
+}
+
 inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
                                               hipblaslt_activation_type   act)
 {
