@@ -308,7 +308,6 @@ hipdnnBackendDescriptorType_t PointwiseOperationDescriptor::getStaticType()
 
 std::string PointwiseOperationDescriptor::toString() const
 {
-    using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "PointwiseOperationDescriptor: {";
     str += "in_0_uid=" + std::to_string(_data.in_0_tensor_uid);
     str += ", out_0_uid=" + std::to_string(_data.out_0_tensor_uid);
