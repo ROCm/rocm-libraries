@@ -39,8 +39,8 @@ using accumulator_t = ::cuda::std::__accumulator_t<Invokable, InputT, InitT>;
 
 } // namespace detail
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Equality
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::equal_to<T> instead.") Equality
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE
@@ -50,8 +50,8 @@ struct Equality
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Inequality
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::not_equal_to<T> instead.") Inequality
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE
@@ -61,8 +61,8 @@ struct Inequality
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Sum
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::plus<T> instead.") Sum
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE
@@ -72,8 +72,8 @@ struct Sum
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Difference
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::minus<T> instead.") Difference
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE
@@ -83,8 +83,8 @@ struct Difference
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Division
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::std::divides<T> instead") Division
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE
@@ -94,8 +94,8 @@ struct Division
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
-struct Max
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum<T> instead.") Max
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE
@@ -107,7 +107,8 @@ struct Max
     }
 };
 
-struct Min
+//! deprecated [Since 5.0]
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum<T> instead") Min
 {
     template<class T, class U>
     HIPCUB_HOST_DEVICE
@@ -119,7 +120,6 @@ struct Min
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
 struct ArgMax
 {
     template<class Key, class Value>
@@ -132,7 +132,6 @@ struct ArgMax
     }
 };
 
-// TODO: this is deprecated in cub, we should also mark this as deprecated when we have libhipcxx
 struct ArgMin
 {
     template<class Key, class Value>
