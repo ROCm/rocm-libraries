@@ -993,8 +993,8 @@ public:
 
         MIOPEN_LOG_CUSTOM(LoggingLevel::Default, "Test", "Launching test processes...");
         {
-            auto& file_lock = LockFile::Get(lock_file_path);
-            std::shared_lock<LockFile> lock(file_lock);
+            auto& file_lock = miopen::LockFile::Get(lock_file_path);
+            std::shared_lock<miopen::LockFile> lock(file_lock);
 
             auto id = 0;
 
@@ -1045,8 +1045,8 @@ public:
     static void WorkItem(unsigned int id, const fs::path& db_path, bool write)
     {
         {
-            auto& file_lock = LockFile::Get(LockFilePath(db_path));
-            std::lock_guard<LockFile> lock(file_lock);
+            auto& file_lock = miopen::LockFile::Get(LockFilePath(db_path));
+            std::lock_guard<miopen::LockFile> lock(file_lock);
         }
 
         const auto c = [&db_path]()
@@ -1082,8 +1082,8 @@ public:
 
         MIOPEN_LOG_CUSTOM(LoggingLevel::Default, "Test", "Launching test processes...");
         {
-            auto& file_lock = LockFile::Get(lock_file_path);
-            std::shared_lock<LockFile> lock(file_lock);
+            auto& file_lock = miopen::LockFile::Get(lock_file_path);
+            std::shared_lock<miopen::LockFile> lock(file_lock);
 
             auto id = 0;
 
@@ -1128,8 +1128,8 @@ public:
     static void WorkItem(unsigned int id, const fs::path& db_path)
     {
         {
-            auto& file_lock = LockFile::Get(LockFilePath(db_path));
-            std::lock_guard<LockFile> lock(file_lock);
+            auto& file_lock = miopen::LockFile::Get(LockFilePath(db_path));
+            std::lock_guard<miopen::LockFile> lock(file_lock);
         }
 
         const auto c = [&db_path]() { return TDb(db_path, false); };
