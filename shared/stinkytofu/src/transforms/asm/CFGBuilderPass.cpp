@@ -158,10 +158,7 @@ namespace
                         std::string targetLabel = getBranchTarget(*termInst);
                         auto        targetIt    = labelMap.find(targetLabel);
                         if(targetIt != labelMap.end())
-                        {
-                            bb.addSuccessor(targetIt->second);
-                            targetIt->second->addPredecessor(&bb);
-                        }
+                            func.addEdge(&bb, targetIt->second);
                     }
                 }
 
@@ -184,10 +181,7 @@ namespace
                     }
 
                     if(shouldFallThrough)
-                    {
-                        prevBB->addSuccessor(&bb);
-                        bb.addPredecessor(prevBB);
-                    }
+                        func.addEdge(prevBB, &bb);
                 }
 
                 prevBB = &bb;

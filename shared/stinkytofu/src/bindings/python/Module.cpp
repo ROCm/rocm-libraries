@@ -86,8 +86,11 @@ namespace stinkytofu
         }
     };
 
-    StinkyAsmModule::StinkyAsmModule(const std::string& name, const std::array<int, 3>& arch)
+    StinkyAsmModule::StinkyAsmModule(const std::string&        name,
+                                     const std::array<int, 3>& arch,
+                                     const ModuleOptions&      moduleOptions)
         : pImpl(std::make_unique<Impl>(name, arch))
+        , moduleOptions(moduleOptions)
     {
     }
 
@@ -186,6 +189,22 @@ namespace stinkytofu
                 groupRange.last = IntrusiveListIterator<IRBase>(bb.rbegin().getNodePtr());
             }
         }
+    }
+
+    void StinkyAsmModule::setGroupRange(const std::string&            groupName,
+                                        IntrusiveListIterator<IRBase> first,
+                                        IntrusiveListIterator<IRBase> last)
+    {
+        fprintf(stderr,
+                "[Module] setGroupRange groupName=%s, first=%p, last=%p\n",
+                groupName.c_str(),
+                first.getNodePtr(),
+                last.getNodePtr());
+        if(!hasGroup(groupName))
+            return;
+        auto& groupRange = pImpl->instructionGroups.at(groupName);
+        groupRange.first = first;
+        groupRange.last  = last;
     }
 
     const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const

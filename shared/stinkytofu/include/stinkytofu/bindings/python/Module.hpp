@@ -102,8 +102,11 @@ namespace stinkytofu
          * @brief Construct a new StinkyAsmModule
          * @param name Module/kernel name
          * @param arch Target GPU architecture [major, minor, stepping]
+         * @param moduleOptions Module options
          */
-        StinkyAsmModule(const std::string& name, const std::array<int, 3>& arch);
+        StinkyAsmModule(const std::string&        name,
+                        const std::array<int, 3>& arch,
+                        const ModuleOptions&      moduleOptions);
 
         /**
          * @brief Destructor - cleans up owned instructions
@@ -181,6 +184,16 @@ namespace stinkytofu
          */
         void updateInstructionGroups(const std::vector<const std::string*>& groups,
                                      size_t                                 instsCountBefore);
+
+        /**
+        * @brief Set the stored range for a group
+        * @param groupName Group name
+        * @param first First instruction in the range
+        * @param last Last instruction in the range
+        */
+        void setGroupRange(const std::string&            groupName,
+                           IntrusiveListIterator<IRBase> first,
+                           IntrusiveListIterator<IRBase> last);
 
         /**
          * @brief Get the ModuleOptions

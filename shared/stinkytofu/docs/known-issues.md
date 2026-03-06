@@ -4,24 +4,13 @@ This document describes known limitations of StinkyTofu that users and developer
 
 ---
 
-## Use-Def Chain: Cross-Block Not Tracked Properly
+## Def-Use Chain
 
-**Status:** Known limitation
+**Status:** Resolved (cross-block support added)
 
-**Description:** The use-def chain (`buildUseDefChain`, `inst->sources`, `inst->users`) is built **per basic block**. Cross-block def-use is tracked but **not tracked properly** -- definitions and uses that span block boundaries may be missing or incorrect.
+**Description:** The def-use chain (`buildUseDefChain(Function&)`, `inst->getOperandDefs()`, `inst->getUsers()`) now supports **cross-block** tracking. Pseudo PHI instructions are inserted at block boundaries when a register is defined in multiple predecessor blocks. Call `buildUseDefChain(Function&)` for full cross-block chains; `buildUseDefChain(BasicBlock&)` for block-local only.
 
-**Current advice:** Treat each block edge as a side-effect. When a value flows across a block boundary (e.g., defined in block A, used in block B), conservatively assume it may be used and avoid optimizations that rely on accurate cross-block use-def information.
-
-**Impact:**
-- Peephole optimizations (e.g., Add+FMA fusion) only see definitions within the same block
-- `getDefMapBefore()`, `getUseCountForDef()`, and similar APIs return results scoped to the current block
-- Cross-block def-use links may be missing or unreliable
-
-**Affected components:**
-- [Peephole Pattern System](design/peephole-pattern-system.md) -- patterns cannot match def-use pairs spanning blocks
-- [Dead Code Elimination](design/dead-code-elimination.md) -- operates per-block only
-- [Redundant Mov Elimination](design/redundant-mov-elimination.md) -- operates per-block only
-- DelayAluInsertionPass, DAG Scheduler -- use block-local use-def chains
+**Note:** Pseudo PHI instructions are not emitted to assembly. AsmEmitter ignores them.
 
 ---
 

@@ -299,29 +299,6 @@ namespace stinkytofu
         return os;
     }
 
-    // Helper function to check if a register is a pseudo register
-    // Pseudo registers (BARRIER, DS_WRITE, TENSOR_LOAD, etc.) are used internally
-    // for dependency tracking but should not appear in assembly output
-    // All pseudo registers are defined after PSEUDO_START in RegisterType.def
-    static bool isPseudoRegister(const StinkyRegister& reg)
-    {
-        if(reg.dataType != StinkyRegister::Type::Register)
-            return false;
-
-        return reg.reg.type >= RegType::PSEUDO_START;
-    }
-
-    // Helper function to check if a register is an implicit register
-    // Implicit registers (SCC, VCC, EXEC, etc.) are set implicitly by instructions
-    // and should not be printed in assembly output
-    static bool isImplicitRegister(const StinkyRegister& reg)
-    {
-        if(reg.dataType != StinkyRegister::Type::Register)
-            return false;
-
-        return reg.reg.type == RegType::SCC;
-    }
-
     static void
         emitRegister(std::ostream& os, const StinkyRegister& reg, const AsmEmitterOptions& options)
     {
@@ -458,7 +435,7 @@ namespace stinkytofu
         for(const auto& dest : inst.getDestRegs())
         {
             // Skip pseudo registers and implicit registers
-            if(isPseudoRegister(dest) || isImplicitRegister(dest))
+            if(isPseudoReg(dest) || isImplicitRegister(dest))
                 continue;
 
             if(!firstOperand)
@@ -498,7 +475,7 @@ namespace stinkytofu
         for(size_t i = 0; i < srcRegs.size(); ++i)
         {
             // Skip pseudo registers and implicit registers
-            if(isPseudoRegister(srcRegs[i]) || isImplicitRegister(srcRegs[i]))
+            if(isPseudoReg(srcRegs[i]) || isImplicitRegister(srcRegs[i]))
                 continue;
 
             if(!firstOperand)
@@ -759,7 +736,7 @@ namespace stinkytofu
 
     void StinkyAsmEmitter::emit(std::ostream& os, const StinkyInstruction& inst)
     {
-        // Check if this is a label
+        // Check if this is a label or pseudo PHI (do not emit)
         if(inst.getUnifiedOpcode() == GFX::LABEL)
         {
             const LabelData* labelData = inst.getModifier<LabelData>();
@@ -785,6 +762,9 @@ namespace stinkytofu
             os << "\n";
             return;
         }
+
+        if(isPseudoInst(&inst))
+            return; // Pseudo instruction: do not emit
 
         // Track current column position for comment alignment
         std::ostringstream instrStream;
@@ -835,7 +815,7 @@ namespace stinkytofu
             if(const StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&ir))
             {
                 emitter->emit(os, *inst);
-                if(options.emitBlankLines && inst->getUnifiedOpcode() != GFX::LABEL)
+                if(options.emitBlankLines && !isPseudoInst(inst))
                     os << "\n";
             }
             else if(const AsmDirective* directive = dyn_cast<AsmDirective>(&ir))

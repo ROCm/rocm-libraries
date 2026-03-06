@@ -266,7 +266,7 @@ Currently, modifiers (SDWA, DPP, VOP3P, etc.) are **not cloned** by 'cloneAndRem
 
 ### Dependency Tracking
 
-The 'users' and 'sources' fields (dependency tracking) are **not copied** during cloning. This is intentional as dependencies should be rebuilt in the context where the cloned instructions are used.
+The 'users' and 'operandDefs' fields (dependency tracking) are **not copied** during cloning. This is intentional as dependencies should be rebuilt in the context where the cloned instructions are used.
 
 ### Register Overflow
 

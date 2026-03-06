@@ -21,7 +21,7 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/DelayAluInsertionPass.hpp"
-#include "stinkytofu/ir/asm/DefUseChain.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -43,17 +43,18 @@ protected:
 
     void SetUp() override
     {
-        // Create function
-        func = std::make_unique<Function>("test_delay_alu");
-        bb   = func->createBasicBlock("entry");
-
-        // Create pass
-        pass = createDelayAluInsertionPass();
-
         arch           = getGfxArchID(12, 5, 0); // gfx1250
         config.arch[0] = 12;
         config.arch[1] = 5;
         config.arch[2] = 0;
+
+        // Create function
+        func = std::make_unique<Function>("test_delay_alu");
+        func->setGemmTileConfig(config);
+        bb = func->createBasicBlock("entry");
+
+        // Create pass
+        pass = createDelayAluInsertionPass();
     }
 
     void TearDown() override

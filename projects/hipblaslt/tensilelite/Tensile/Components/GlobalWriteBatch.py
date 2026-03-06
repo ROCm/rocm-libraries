@@ -219,10 +219,7 @@ class GlobalWriteBatchWriter:
       else:
         dscnt = -1
       # Get vscnt
-      if vlcnt != -1:
-        if self.parentWriter.states.asmCaps["SeparateVscnt"] or self.parentWriter.states.asmCaps["SeparateVMcnt"]:
-          vscnt = 0
-        else:
+      if vlcnt != -1 and not (self.parentWriter.states.asmCaps["SeparateVscnt"] or self.parentWriter.states.asmCaps["SeparateVMcnt"]):
           vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
       if (vlcnt != -1) or (vscnt != -1) or (dscnt != -1):
         # Get comment

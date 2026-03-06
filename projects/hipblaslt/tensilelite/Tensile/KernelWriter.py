@@ -2956,6 +2956,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("iter %u%s"%(u,extraComment))
       plrIdx = (u+pflr) % self.states.numVgprBuffer
       plrIdxDTV = (u+pflr) % kernel["LoopIters"]
+      packPreIdx = (u+pflr) % self.states.numPackBuffer # pack store and pack pre read
+      packIdx = u % self.states.numPackBuffer # pack read
+      # hack: full pack prefetch case, move local read for next loop 1 iter ahead (no change for CMS)
+      uNext = u
+      if kernel["ForceUnrollSubIter"] and self.states.doFullPackCodePrefetch and u >= self.states.numVgprBuffer and not kernel["UseCustomMainLoopSchedule"]:
+        if u == kernel["LoopIters"] - 2:
+          uNext = kernel["LoopIters"] - 1
+          self.states.SubTileIdx = 0 # hack: force to idx0 for next loop
+        elif u == kernel["LoopIters"] - 1:
+          uNext = kernel["LoopIters"] - 2
+      packStoreIdx = (uNext+pflr) % self.states.numPackBuffer
+
       localReads = Module("local read")
 
       pointerLWCode = Module()
@@ -4391,7 +4403,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       dsWriteBA = True if isULSGRO else False
       # second GR buffer check for DTV
       isDTVGRSecondBuf = True if isDTV else False
-      loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, 0, loopCopies, False , dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, skipClose=True))
+      loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, 0, loopCopies, False , dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, skipClose=True))
 
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       loop.add(SSubU32(dst=loopCounter, src0=loopCounter, \
@@ -4404,14 +4416,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       loop.add(SCBranchSCC1(labelName=loopLabelToNoGRloopAfterABLoop.getLabelName(), comment="exit LoopL" ))
       # grBA check for UnrollLoopSwapGlobalReadOrder
       grBA = True if isULSGRO else False
-      loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, 1, loopCopies, True , grBA=grBA))
+      loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, 1, loopCopies, True , grBA=grBA))
     else:
       for lc in range(0, loopCopies):
         # second GR buffer check for DTV
         isDTVGRSecondBuf = True if isDTV and lc == 0 else False
         # loop body code generation
         finalLoop = lc == loopCopies - 1
-        loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf ))
+        loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf ))
     pgr.add(loop)
     module.add(pgr)
 
@@ -5228,45 +5240,37 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
         t3_start = time.perf_counter()
-        # Find the next available sequential number starting from 0
+        import hashlib, fcntl
         os.makedirs("cmpasm/orig", exist_ok=True)
         os.makedirs("cmpasm/st", exist_ok=True)
 
-        # Atomically find and create files to avoid race condition
-        file_id = 0
-        while True:
-          fd_orig = None
-          fd_st = None
-          try:
-            # Attempt to exclusively create both files (atomic operation)
-            # This ensures no other process can claim this file_id
-            fd_orig = os.open(f"cmpasm/orig/{file_id}.s", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            fd_st = os.open(f"cmpasm/st/{file_id}.s", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        kernel_name = self.states.kernelName
+        name_hash = hashlib.sha256(kernel_name.encode()).hexdigest()[:8]
+        base_name = f"{name_hash}"
 
-            # Write content and close file descriptors
-            t_str_start = time.perf_counter()
-            orig_asm_str = str(moduleKernelBody)
-            t_str_end = time.perf_counter()
-            print(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
-            os.write(fd_orig, orig_asm_str.encode('utf-8'))
-            os.write(fd_st, st_asm.encode('utf-8'))
-            os.close(fd_orig)
-            os.close(fd_st)
-            break
-          except FileExistsError:
-            # File already exists, cleanup and try next ID
-            if fd_orig is not None:
-              os.close(fd_orig)
-              os.remove(f"cmpasm/orig/{file_id}.s")
-            file_id += 1
-          except OSError as e:
-            # Handle other errors (permissions, etc.)
-            if fd_orig is not None:
-              os.close(fd_orig)
-              os.remove(f"cmpasm/orig/{file_id}.s")
-            if fd_st is not None:
-              os.close(fd_st)
-            raise RuntimeError(f"Failed to create debug file {file_id}.s: {e}")
+        orig_path = f"cmpasm/orig/{base_name}.s"
+        st_path = f"cmpasm/st/{base_name}.s"
+        suffix = 0
+        while os.path.exists(orig_path) or os.path.exists(st_path):
+          orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
+          st_path = f"cmpasm/st/{base_name}_{suffix}.s"
+          suffix += 1
+
+        t_str_start = time.perf_counter()
+        orig_asm_str = str(moduleKernelBody)
+        t_str_end = time.perf_counter()
+        print(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+
+        with open(orig_path, "w") as f:
+          f.write(orig_asm_str)
+        with open(st_path, "w") as f:
+          f.write(st_asm)
+
+        manifest = f"cmpasm/manifest.txt"
+        with open(manifest, "a") as f:
+          fcntl.flock(f, fcntl.LOCK_EX)
+          f.write(f"{os.path.basename(orig_path)} -> {kernel_name}\n")
+          fcntl.flock(f, fcntl.LOCK_UN)
 
         t3_end = time.perf_counter()
         print(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")

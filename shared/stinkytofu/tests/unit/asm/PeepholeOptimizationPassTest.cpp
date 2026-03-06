@@ -25,12 +25,12 @@
 #include <memory>
 #include <sstream>
 
-#include "stinkytofu/ir/asm/DefUseChain.hpp"
-#include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
+#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
 
 using namespace stinkytofu;
 
@@ -53,7 +53,8 @@ protected:
 
         // Create a Function with a single BasicBlock for testing
         func = std::make_unique<Function>("test_peephole");
-        bb   = func->createBasicBlock("entry");
+        func->setGemmTileConfig(gemmConfig);
+        bb = func->createBasicBlock("entry");
 
         // Create the peephole optimization pass
         peepholePass = createPeepholeOptimizationPass();
@@ -77,13 +78,12 @@ protected:
     StinkyInstruction* createVFmaF32(int destReg, int aReg, int bReg, int cReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", cReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
+        inst->addSrcReg(StinkyRegister("v", cReg, 1));
         return inst;
     }
 
@@ -92,18 +92,17 @@ protected:
     StinkyInstruction* createVFmaF32WithConst(int destReg, int aReg, int bReg, float constVal)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
 
         // Add constant operand
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constReg);
+        inst->addSrcReg(constReg);
         return inst;
     }
 
@@ -111,17 +110,16 @@ protected:
     StinkyInstruction* createVFmaF16WithConst(int destReg, int aReg, int bReg, float constVal)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_fma_f16, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f16, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
 
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constReg);
+        inst->addSrcReg(constReg);
         return inst;
     }
 
@@ -129,12 +127,11 @@ protected:
     StinkyInstruction* createVAddF32(int destReg, int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src0Reg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src1Reg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -142,16 +139,15 @@ protected:
     StinkyInstruction* createVAddF32WithConst(int destReg, float constVal, int srcReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constRegister);
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -159,16 +155,15 @@ protected:
     StinkyInstruction* createVAddF16WithConst(int destReg, float constVal, int srcReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_add_f16, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f16, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constRegister);
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -177,16 +172,15 @@ protected:
     StinkyInstruction* createVAddF32WithConstSwapped(int destReg, int srcReg, float constVal)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constRegister);
+        inst->addSrcReg(constRegister);
         return inst;
     }
 
@@ -194,12 +188,11 @@ protected:
     StinkyInstruction* createVMulF32(int destReg, int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src0Reg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src1Reg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -207,16 +200,15 @@ protected:
     StinkyInstruction* createVMulF32WithConst(int destReg, float constVal, int srcReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constRegister);
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -224,12 +216,11 @@ protected:
     StinkyInstruction* createVMulF16(int destReg, int src0Reg, int src1Reg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_mul_f16, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f16, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src0Reg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", src1Reg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", src0Reg, 1));
+        inst->addSrcReg(StinkyRegister("v", src1Reg, 1));
         return inst;
     }
 
@@ -237,16 +228,15 @@ protected:
     StinkyInstruction* createVMulF16WithConst(int destReg, float constVal, int srcReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_mul_f16, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mul_f16, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constRegister);
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -254,13 +244,12 @@ protected:
     StinkyInstruction* createVFmaF16(int destReg, int aReg, int bReg, int cReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_fma_f16, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f16, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", cReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
+        inst->addSrcReg(StinkyRegister("v", cReg, 1));
         return inst;
     }
 
@@ -268,11 +257,10 @@ protected:
     StinkyInstruction* createVMovB32(int destReg, int srcReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -296,7 +284,7 @@ protected:
 
         // Build use-def chains before running the pass (standalone test mode)
         // In production, OptimizationPipeline builds this once at the start
-        buildUseDefChain(*func);
+        buildUseDefChain(*func, true);
 
         peepholePass->run(*func, ctx);
     }
@@ -734,9 +722,9 @@ class PeepholePassManagerTest : public ::testing::Test, public stinkytofu::PassM
 {
 protected:
     stinkytofu::Function func{"kernel"};
-    GemmTileConfig      gemmConfig;
-    GfxArchID           arch;
-    BasicBlock*         bb;
+    GemmTileConfig       gemmConfig;
+    GfxArchID            arch;
+    BasicBlock*          bb;
 
     void SetUp() override
     {
@@ -745,6 +733,7 @@ protected:
         gemmConfig.arch[1] = 5;
         gemmConfig.arch[2] = 0;
 
+        func.setGemmTileConfig(gemmConfig);
         bb = func.createBasicBlock("entry");
 
         setGemmTileConfig(gemmConfig);
@@ -763,33 +752,31 @@ protected:
     StinkyInstruction* createVFmaF32WithConst(int destReg, int aReg, int bReg, float constVal)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_fma_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", aReg, 1));
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", bReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
+        inst->addSrcReg(StinkyRegister("v", aReg, 1));
+        inst->addSrcReg(StinkyRegister("v", bReg, 1));
 
         StinkyRegister constReg;
         constReg.dataType      = StinkyRegister::Type::LiteralDouble;
         constReg.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constReg);
+        inst->addSrcReg(constReg);
         return inst;
     }
 
     StinkyInstruction* createVAddF32WithConst(int destReg, float constVal, int srcReg)
     {
         auto               builder = getIRBuilder();
-        StinkyInstruction* inst
-            = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        StinkyInstruction* inst    = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
 
-        inst->addDestRegAndUpdateUD(StinkyRegister("v", destReg, 1));
+        inst->addDestReg(StinkyRegister("v", destReg, 1));
 
         StinkyRegister constRegister;
         constRegister.dataType      = StinkyRegister::Type::LiteralDouble;
         constRegister.literalDouble = constVal;
-        inst->addSrcRegAndUpdateUD(constRegister);
-        inst->addSrcRegAndUpdateUD(StinkyRegister("v", srcReg, 1));
+        inst->addSrcReg(constRegister);
+        inst->addSrcReg(StinkyRegister("v", srcReg, 1));
         return inst;
     }
 
@@ -1505,6 +1492,7 @@ TEST_F(PeepholePassManagerTest, IntegrationWithPassManager)
 
     ASSERT_EQ(countInstructions(), 2);
 
+    addPass(createBuildUseDefChainPass(true));
     addPass(createPeepholeOptimizationPass());
     run(func);
 

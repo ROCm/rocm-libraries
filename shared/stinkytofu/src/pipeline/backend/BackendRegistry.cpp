@@ -30,8 +30,8 @@ namespace stinkytofu
 {
     struct BackendRegistry::Registry
     {
-        // Map from arch key to vector of pipeline factories
-        std::unordered_map<std::string, std::vector<PipelineFactory>> pipelines;
+        // Map from arch key to single pipeline spec populator per arch
+        std::unordered_map<std::string, PipelineSpecPopulator> populators;
     };
 
     BackendRegistry::Registry& BackendRegistry::getRegistry()
@@ -40,29 +40,21 @@ namespace stinkytofu
         return registry;
     }
 
-    void BackendRegistry::addArchPipeline(const std::array<int, 3>& arch,
-                                          PipelineConfigBuilder     builder,
-                                          const std::string&        groupName)
+    void BackendRegistry::setArchPipeline(const std::array<int, 3>& arch,
+                                          PipelineSpecPopulator     populator)
     {
-        auto& reg = getRegistry();
-        reg.pipelines[makeArchKey(arch)].push_back(PipelineFactory{builder, groupName});
+        auto& reg                         = getRegistry();
+        reg.populators[makeArchKey(arch)] = std::move(populator);
     }
 
-    void BackendRegistry::setArchPipelines(const std::array<int, 3>&           arch,
-                                           const std::vector<PipelineFactory>& factories)
-    {
-        auto& reg                        = getRegistry();
-        reg.pipelines[makeArchKey(arch)] = factories;
-    }
-
-    std::vector<BackendRegistry::PipelineFactory>
-        BackendRegistry::getPipelineFactories(const std::array<int, 3>& arch)
+    BackendRegistry::PipelineSpecPopulator
+        BackendRegistry::getArchPopulator(const std::array<int, 3>& arch)
     {
         auto& reg = getRegistry();
-        auto  it  = reg.pipelines.find(makeArchKey(arch));
-        if(it != reg.pipelines.end())
+        auto  it  = reg.populators.find(makeArchKey(arch));
+        if(it != reg.populators.end())
         {
-            return it->second; // Return copy of pipeline factories
+            return it->second;
         }
         return {};
     }
@@ -70,27 +62,20 @@ namespace stinkytofu
     bool BackendRegistry::hasPipelines(const std::array<int, 3>& arch)
     {
         auto& reg = getRegistry();
-        auto  it  = reg.pipelines.find(makeArchKey(arch));
-        return it != reg.pipelines.end() && !it->second.empty();
-    }
-
-    size_t BackendRegistry::getPipelineCount(const std::array<int, 3>& arch)
-    {
-        auto& reg = getRegistry();
-        auto  it  = reg.pipelines.find(makeArchKey(arch));
-        return (it != reg.pipelines.end()) ? it->second.size() : 0;
+        auto  it  = reg.populators.find(makeArchKey(arch));
+        return it != reg.populators.end() && it->second;
     }
 
     void BackendRegistry::clear()
     {
         auto& reg = getRegistry();
-        reg.pipelines.clear();
+        reg.populators.clear();
     }
 
     void BackendRegistry::clearArch(const std::array<int, 3>& arch)
     {
         auto& reg = getRegistry();
-        reg.pipelines.erase(makeArchKey(arch));
+        reg.populators.erase(makeArchKey(arch));
     }
 
     std::string BackendRegistry::makeArchKey(const std::array<int, 3>& arch)

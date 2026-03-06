@@ -330,27 +330,25 @@ namespace stinkytofu
 
         void dump() const;
 
+        // Implicit register: SCC, VCC, EXEC, etc.
         static StinkyRegister getSCCRegister()
         {
-            // SCC register is a special register, it is not a physical register.
             return StinkyRegister(RegType::SCC, 0, 1);
         }
 
+        // Pseudo register: BARRIER, DS_WRITE, TENSOR_LOAD, etc.
         static StinkyRegister getBarrierRegister()
         {
-            // Barrier register is a special register, it is not a physical register.
             return StinkyRegister(RegType::BARRIER, 0, 1);
         }
 
         static StinkyRegister getDSWriteRegister()
         {
-            // DS write register is a special register, it is not a physical register.
             return StinkyRegister(RegType::DS_WRITE, 0, 1);
         }
 
         static StinkyRegister getTensorLoadRegister()
         {
-            // Tensor load register is a special register, it is not a physical register.
             return StinkyRegister(RegType::TENSOR_LOAD, 0, 1);
         }
 
@@ -460,19 +458,48 @@ namespace stinkytofu
         }
     };
 
+    /// Check if register is a pseudo register (BARRIER, DS_WRITE, TENSOR_LOAD, etc.).
+    /// Pseudo registers are used internally for dependency tracking but should not
+    /// appear in assembly output. All pseudo registers are defined after PSEUDO_START
+    /// in RegisterType.def.
+    inline bool isPseudoReg(const StinkyRegister& reg)
+    {
+        if(reg.dataType != StinkyRegister::Type::Register)
+            return false;
+
+        return reg.reg.type >= RegType::PSEUDO_START;
+    }
+
+    /// Check if register is an implicit register (SCC, VCC, EXEC, etc.).
+    /// Implicit registers are set implicitly by instructions and should not be
+    /// printed in assembly output.
+    inline bool isImplicitRegister(const StinkyRegister& reg)
+    {
+        if(reg.dataType != StinkyRegister::Type::Register)
+            return false;
+
+        return reg.reg.type == RegType::SCC;
+    }
+
     // Represents a single assembly instruction.
     struct StinkyInstruction : public IRBase
     {
         friend class IRBase;
-
-        // Instructions that use this instruction's output.
-        std::vector<StinkyInstruction*> users;
-        std::vector<StinkyInstruction*> sources;
+        friend class AsmIRBuilder;
 
         int issueCycles;
         int latencyCycles;
 
     private:
+        // Def-use chain:
+        // instructions that USE the value DEFINED by this instruction
+        // (consumers of this instruction's output).
+        std::vector<StinkyInstruction*> users;
+
+        // instructions that DEFINE the values USED by this instruction
+        // (producers of this instruction's operands).
+        std::vector<StinkyInstruction*> sources;
+
         const HwInstDesc* hwInstDesc;
 
         // Modifiers are extra bits/fields in the instruction encoding that
@@ -503,13 +530,16 @@ namespace stinkytofu
             unlinkFromUsers();
 
             // Verify that this instruction is no longer referenced by any sources
-            // After unlinkFromSources(), no source should have this in their users list
+            // After unlinkFromSources(), no operand def should have this in their users list
             for(StinkyInstruction* source : sources)
             {
-                // Check that this instruction is not in source's users list
-                auto it = std::find(source->users.begin(), source->users.end(), this);
-                assert(it == source->users.end()
-                       && "Destructor: source still references this instruction in users list");
+                if(source != nullptr)
+                {
+                    // Check that this instruction is not in source's users list
+                    auto it = std::find(source->users.begin(), source->users.end(), this);
+                    assert(it == source->users.end()
+                           && "Destructor: source still references this instruction in users list");
+                }
             }
         }
 
@@ -546,6 +576,52 @@ namespace stinkytofu
         size_t getNumSrcRegs() const
         {
             return srcRegs.size();
+        }
+
+        /// Get instructions that use the value defined by this instruction (def-use chain)
+        const std::vector<StinkyInstruction*>& getUsers() const
+        {
+            return users;
+        }
+        std::vector<StinkyInstruction*>& getUsers()
+        {
+            return users;
+        }
+
+        /// Get instructions that define the operands used by this instruction (def-use chain)
+        const std::vector<StinkyInstruction*>& getSources() const
+        {
+            return sources;
+        }
+        std::vector<StinkyInstruction*>& getSources()
+        {
+            return sources;
+        }
+
+        /// Link this instruction (user) to the instruction that defines an operand.
+        /// Adds def to sources and adds this to def's users. No-op if def is null.
+        void addOperandDef(StinkyInstruction* def)
+        {
+            if(def == nullptr)
+                return;
+            sources.push_back(def);
+            def->getUsers().push_back(this);
+        }
+
+        /// Set sources[i] to def.
+        /// removes this from old def's users (if any), adds this to def's users if def != nullptr.
+        void setOperandDef(size_t i, StinkyInstruction* def)
+        {
+            assert(i < sources.size() && "sources index out of bounds");
+            StinkyInstruction* oldDef = sources[i];
+            if(oldDef != nullptr)
+            {
+                auto& u = oldDef->getUsers();
+                u.erase(std::remove(u.begin(), u.end(), this), u.end());
+            }
+            sources[i] = def;
+            if(def != nullptr)
+                def->getUsers().push_back(this);
         }
 
         /// Get destination register by index
@@ -715,96 +791,10 @@ namespace stinkytofu
             cloned->issueCycles   = issueCycles;
             cloned->latencyCycles = latencyCycles;
 
-            // Deep copy modifiers - this works because all current modifier structs
-            // are copyable (POD types, std::vector, std::string)
+            // Deep copy modifiers via virtual clone() (TypedModifier implements it per type).
             for(const auto& mod : modifiers)
             {
-                // We can't use mod->clone() without adding virtual clone() to Modifier base
-                // Instead, we rely on the fact that all modifiers are copyable
-                // This requires type-specific handling
-                switch(mod->getType())
-                {
-                case Modifier::Type::DS:
-                    cloned->modifiers.push_back(
-                        std::make_unique<DSModifiers>(*static_cast<DSModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::FLAT:
-                    cloned->modifiers.push_back(
-                        std::make_unique<FLATModifiers>(*static_cast<FLATModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::GLOBAL:
-                    cloned->modifiers.push_back(std::make_unique<GLOBALModifiers>(
-                        *static_cast<GLOBALModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::MUBUF:
-                    cloned->modifiers.push_back(
-                        std::make_unique<MUBUFModifiers>(*static_cast<MUBUFModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::SMEM:
-                    cloned->modifiers.push_back(
-                        std::make_unique<SMEMModifiers>(*static_cast<SMEMModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::SDWA:
-                    cloned->modifiers.push_back(
-                        std::make_unique<SDWAModifiers>(*static_cast<SDWAModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::DPP:
-                    cloned->modifiers.push_back(
-                        std::make_unique<DPPModifiers>(*static_cast<DPPModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::VOP3:
-                    cloned->modifiers.push_back(
-                        std::make_unique<VOP3Modifiers>(*static_cast<VOP3Modifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::VOP3P:
-                    cloned->modifiers.push_back(
-                        std::make_unique<VOP3PModifiers>(*static_cast<VOP3PModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::TRUE16:
-                    cloned->modifiers.push_back(std::make_unique<True16Modifiers>(
-                        *static_cast<True16Modifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::EXEC:
-                    cloned->modifiers.push_back(
-                        std::make_unique<EXEC>(*static_cast<EXEC*>(mod.get())));
-                    break;
-                case Modifier::Type::VCC:
-                    cloned->modifiers.push_back(
-                        std::make_unique<VCC>(*static_cast<VCC*>(mod.get())));
-                    break;
-                case Modifier::Type::SWAITCNT_DATA:
-                    cloned->modifiers.push_back(
-                        std::make_unique<SWaitCntData>(*static_cast<SWaitCntData*>(mod.get())));
-                    break;
-                case Modifier::Type::SWAITTENSORCNT_DATA:
-                    cloned->modifiers.push_back(std::make_unique<SWaitTensorCntData>(
-                        *static_cast<SWaitTensorCntData*>(mod.get())));
-                    break;
-                case Modifier::Type::SWAITSTORECNT_DATA:
-                    cloned->modifiers.push_back(std::make_unique<SWaitStoreCntData>(
-                        *static_cast<SWaitStoreCntData*>(mod.get())));
-                    break;
-                case Modifier::Type::SDELAYALU_DATA:
-                    cloned->modifiers.push_back(
-                        std::make_unique<SDelayAluData>(*static_cast<SDelayAluData*>(mod.get())));
-                    break;
-                case Modifier::Type::SWAITALU_DATA:
-                    cloned->modifiers.push_back(
-                        std::make_unique<SWaitAluData>(*static_cast<SWaitAluData*>(mod.get())));
-                    break;
-                case Modifier::Type::MFMA_DATA:
-                    cloned->modifiers.push_back(
-                        std::make_unique<MFMAModifiers>(*static_cast<MFMAModifiers*>(mod.get())));
-                    break;
-                case Modifier::Type::LABEL_NAME:
-                    cloned->modifiers.push_back(
-                        std::make_unique<LabelData>(*static_cast<LabelData*>(mod.get())));
-                    break;
-                case Modifier::Type::COMMENT:
-                    cloned->modifiers.push_back(
-                        std::make_unique<CommentData>(*static_cast<CommentData*>(mod.get())));
-                    break;
-                }
+                cloned->modifiers.push_back(mod->clone());
             }
 
             // Note: users/sources are intentionally NOT copied
@@ -813,55 +803,14 @@ namespace stinkytofu
             return cloned;
         }
 
-        /**
-         * @brief Remap virtual registers to physical registers
-         *
-         * This method applies register offsets to all virtual registers in the instruction.
-         * Used when instantiating instruction templates with actual register allocations.
-         *
-         * @param vgprOffset Offset to add to VGPR virtual registers
-         * @param sgprOffset Offset to add to SGPR virtual registers
-         *
-         * Example:
-         *   // Template instruction: v_add_u32 v0, v1, v2 (using virtual registers)
-         *   StinkyInstruction* inst = ...;
-         *   inst->remapRegisters(10, 0);  // Remaps to: v_add_u32 v10, v11, v12
-         */
-        void remapRegisters(int vgprOffset, int sgprOffset)
-        {
-            // Remap destination registers
-            for(auto& reg : destRegs)
-            {
-                if(!reg.isVirtualRegister())
-                    continue;
-
-                if(reg.reg.type == RegType::V)
-                    reg = reg.withOffset(vgprOffset);
-                else if(reg.reg.type == RegType::S)
-                    reg = reg.withOffset(sgprOffset);
-            }
-
-            // Remap source registers
-            for(auto& reg : srcRegs)
-            {
-                if(!reg.isVirtualRegister())
-                    continue;
-
-                if(reg.reg.type == RegType::V)
-                    reg = reg.withOffset(vgprOffset);
-                else if(reg.reg.type == RegType::S)
-                    reg = reg.withOffset(sgprOffset);
-            }
-        }
-
         //----------------------------------------------------------------------
         // Use-Def Chain Maintenance API (Public for passes that delete instructions)
         //----------------------------------------------------------------------
-        /// Remove this instruction from all its sources' user lists.
+        /// Remove this instruction from all its operand-defs' user lists.
         /// Must be called before deleting an instruction to prevent dangling pointers.
         void unlinkFromSources();
 
-        /// Remove this instruction from all its users' source lists.
+        /// Remove this instruction from all its users' operand-def lists.
         /// Must be called before deleting an instruction to prevent dangling pointers.
         void unlinkFromUsers();
 
@@ -911,7 +860,29 @@ namespace stinkytofu
         /// Creates a LABEL instruction. TODO: remove when basic-block labels are supported.
         StinkyInstruction* createLabel(const std::string& label, uint16_t alignment = 1);
 
-        AsmIRBuilder(BasicBlock& bb, const GfxArchID& arch)
+        /// PHI instruction properties:
+        /// - Must appear at the beginning of a basic block
+        /// - Defines a single register (DWORD only)
+        /// - One incoming value per predecessor
+        ///   * For a basic block B:
+        ///     . If B has N predecessors, each PHI in B must have exactly N incoming
+        ///       pairs, and each predecessor appears exactly once
+        /// - Operand is nullptr if undefined on that edge
+        ///
+        /// PHI instruction format:
+        /// def = PHI(pred0_def, pred1_def, ..., predN_def)
+
+        /// Creates and inserts a PHI instruction at the beginning of the block.
+        /// The PHI defines one DWORD register and has one placeholder srcReg per
+        /// predecessor. sources and users are NOT initialized — the caller
+        /// (PhiPlacement / BuildDefUseChain) is responsible for linking chains.
+        ///
+        /// If \p insertPt is non-null, the PHI is inserted before \p insertPt
+        /// instead of before bb->begin(). This allows callers to build PHIs in
+        /// a stable order by passing a fixed anchor point.
+        StinkyInstruction* createPhi(RegType type, unsigned regIdx, IRBase* insertPt = nullptr);
+
+        AsmIRBuilder(BasicBlock& bb, GfxArchID arch)
             : IRBuilder(bb)
             , arch(arch)
         {
@@ -980,6 +951,13 @@ namespace stinkytofu
     inline bool isSMemStore(const StinkyInstruction& inst)
     {
         return inst.is(InstFlag::IF_SMemStore);
+    }
+
+    /// Check if instruction is a pseudo instruction (LABEL or PHI) that should be
+    /// skipped for def-use chain processing of "real" instructions.
+    inline bool isPseudoInst(const StinkyInstruction* inst)
+    {
+        return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI;
     }
 
     inline bool isGlobalMemLoad(const StinkyInstruction& inst)

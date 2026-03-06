@@ -44,14 +44,12 @@ namespace stinkytofu
     {
         if(!label.empty())
         {
-            out << "BasicBlock: " << label << "\n";
+            out << label << ":\n";
         }
         else
         {
-            out << "BasicBlock (unlabeled)\n";
+            out << "(unlabeled):";
         }
-
-        out << "  Number of instructions: " << ir.size() << "\n";
 
         for(const IRBase& irNode : ir)
         {
@@ -61,7 +59,7 @@ namespace stinkytofu
 
         if(!successors.empty())
         {
-            out << "  Successors: ";
+            out << "  ; successors: ";
             for(size_t i = 0; i < successors.size(); ++i)
             {
                 if(i > 0)

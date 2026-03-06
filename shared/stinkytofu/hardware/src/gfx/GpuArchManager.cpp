@@ -97,6 +97,7 @@ namespace stinkytofu
 
         // The pseudo opcodes for all architectures.
         allOpcodes.push_back("LABEL");
+        allOpcodes.push_back("PHI");
 
         // Add invalid unified opcode to the end of the list.
         allOpcodes.push_back("INVALID");

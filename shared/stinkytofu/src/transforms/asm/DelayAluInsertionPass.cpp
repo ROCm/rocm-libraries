@@ -22,11 +22,11 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/DelayAluInsertionPass.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/ir/asm/DefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
 #include <iostream>
 #include <map>
@@ -160,7 +160,7 @@ namespace
                                           passCtx.getGemmTileConfig().arch[2]);
 
             // Use-def chains are already built by OptimizationPipeline
-            // inst->sources and inst->users are ready to use
+            // inst->getSources() and inst->getUsers() are ready to use
 
             // Collect all instructions in this basic block
             std::vector<StinkyInstruction*> instructions;
@@ -206,7 +206,7 @@ namespace
             for(StinkyInstruction* inst : instructions)
             {
                 // Check each source instruction (dependencies are already computed!)
-                for(StinkyInstruction* srcInst : inst->sources)
+                for(StinkyInstruction* srcInst : inst->getSources())
                 {
                     auto srcInfoIt = instDelayInfo.find(srcInst);
                     if(srcInfoIt == instDelayInfo.end())

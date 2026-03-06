@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/OptimizationPipeline.hpp"
 
 #include <array>
@@ -37,21 +38,21 @@ namespace stinkytofu
     /// Architecture-specific optimization entry point.
     ///
     /// Bound to a single StinkyAsmModule (the member module). At construction, loads
-    /// pipeline factories for module.getArch() from BackendRegistry, invokes them,
-    /// and stores the resulting PipelineConfig sequence. runOptimization() runs that
-    /// sequence in order. Use clearPipelines() or setPipelines(configs) to replace
-    /// the instance's sequence. Register per-arch defaults via BackendRegistry.
+    /// pipeline spec populators for module.getArch() from BackendRegistry, invokes them
+    /// to fill a sequence of PipelineSpec, and runs that sequence in runOptimization().
+    /// Use clearPipelines() or setPipelines(configs) to replace the instance's sequence.
+    /// Register per-arch populators via BackendRegistry.
     ///
     /// @code
     /// StinkyAsmModule module("kernel", {12, 5, 0});
-    /// Backend backend(module);  // loads factories for 12.5.0 from BackendRegistry
+    /// Backend backend(module);  // loads populators for 12.5.0 from BackendRegistry
     /// backend.runOptimization();
     /// // Or: backend.setPipelines(myConfigs); backend.runOptimization();
     /// @endcode
     class Backend
     {
     public:
-        /// Construct backend for \p module; loads pipeline factories for module.getArch() from BackendRegistry.
+        /// Construct backend for \p module; loads pipeline spec populators for module.getArch() from BackendRegistry.
         explicit Backend(StinkyAsmModule& module);
 
         ~Backend();
@@ -67,14 +68,17 @@ namespace stinkytofu
         /// True if this backend has a non-empty pipeline config sequence.
         bool hasPipelines() const;
 
-        /// Number of pipeline configs in the current sequence.
+        /// Number of pipelines in the current sequence.
         size_t getPipelineCount() const;
 
-        /// Remove all pipeline configs (sequence becomes empty).
+        /// Remove all pipelines (sequence becomes empty).
         void clearPipelines();
 
         /// Replace the pipeline sequence with \p configs; they are run in order.
         void setPipelines(std::vector<PipelineConfig> configs);
+
+        /// Get the pipelines
+        const std::vector<BackendRegistry::PipelineSpec>& getPipelines() const;
 
         /// Run the full pipeline sequence on the member module.
         bool runOptimization();

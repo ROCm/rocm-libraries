@@ -21,10 +21,10 @@
  *
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
-#include "stinkytofu/ir/asm/DefUseChain.hpp"
-#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 
 #include <climits>
 #include <iostream>
@@ -59,7 +59,7 @@ namespace
             instructions.clear();
 
             // Use-def chains are already built by OptimizationPipeline
-            // inst->sources and inst->users are ready to use
+            // inst->getSources() and inst->getUsers() are ready to use
 
             // Build instruction position map for ordering queries
             int pos = 0;
@@ -92,12 +92,12 @@ namespace
 
             int beforePos = beforePosIt->second;
 
-            // Search through beforeInst->sources for a def of the requested register
-            // inst->sources already contains the defining instructions (from buildUseDefChain)
+            // Search through beforeInst->getSources() for a def of the requested register
+            // inst->getSources() already contains the defining instructions (from buildUseDefChain)
             StinkyInstruction* mostRecentDef = nullptr;
             int                mostRecentPos = -1;
 
-            for(StinkyInstruction* srcInst : beforeInst->sources)
+            for(StinkyInstruction* srcInst : beforeInst->getSources())
             {
                 // Check if this source instruction defines the requested register
                 bool definesReg = false;
@@ -167,7 +167,7 @@ namespace
 
             // Count uses from defInst->users that are in the live range [defPos+1, nextDefPos]
             int count = 0;
-            for(auto* userInst : defInst->users)
+            for(auto* userInst : defInst->getUsers())
             {
                 auto usePosIt = instPosition.find(userInst);
                 if(usePosIt == instPosition.end())
@@ -205,8 +205,8 @@ namespace
         {
             std::unordered_map<StinkyRegister, StinkyInstruction*> result;
 
-            // Use inst->sources which already has the defining instructions
-            for(StinkyInstruction* srcInst : beforeInst->sources)
+            // Use inst->getSources() which already has the defining instructions
+            for(StinkyInstruction* srcInst : beforeInst->getSources())
             {
                 // Add all registers defined by this source instruction
                 for(const auto& destReg : srcInst->getDestRegs())

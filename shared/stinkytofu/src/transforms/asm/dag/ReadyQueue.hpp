@@ -27,7 +27,7 @@
 #include <queue>
 
 #include "stinkytofu/core/Function.hpp"
-#include "stinkytofu/ir/asm/DefUseChain.hpp"
+#include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace
@@ -35,7 +35,7 @@ namespace
     using namespace stinkytofu;
 
     // REMOVED: Local buildUseDefChain() has been replaced by stinkytofu::buildUseDefChain()
-    // from DefUseChain.hpp. All callers now use the shared implementation.
+    // from BuildDefUseChain.hpp. All callers now use the shared implementation.
 
     struct DAGNode
     {
@@ -61,33 +61,6 @@ namespace
     };
 
     using DAGNodeList = std::vector<DAGNode>;
-
-    static void dumpUseDefChain(const BasicBlock& bb)
-    {
-        std::cerr << "*** Use-Def Chain Dump: ***\n";
-        for(const IRBase& ir : bb)
-        {
-            const StinkyInstruction& inst = *cast<StinkyInstruction>(&ir);
-
-            std::cerr << "Instruction:\n";
-            inst.dump(std::cerr, true, "  ");
-
-            for(const StinkyInstruction* src : inst.sources)
-            {
-                std::cerr << "    Source:\n";
-                src->dump(std::cerr, true, "      ");
-                std::cerr << "\n";
-            }
-
-            for(const StinkyInstruction* user : inst.users)
-            {
-                std::cerr << "    User:\n";
-                user->dump(std::cerr, true, "      ");
-                std::cerr << "\n";
-            }
-        }
-        std::cerr << "\n\n";
-    }
 
     static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGraph,
                              const DAGNodeList&                               dagNodes)

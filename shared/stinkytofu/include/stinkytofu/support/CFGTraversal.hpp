@@ -22,16 +22,16 @@
  * ************************************************************************ */
 #pragma once
 
+#include <deque>
 #include <functional>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "stinkytofu/core/Function.hpp"
+
 namespace stinkytofu
 {
-    // Forward declarations
-    class Function;
-    class BasicBlock;
-
     //----------------------------------------------------------------------
     // CFG Traversal Utilities
     //----------------------------------------------------------------------
@@ -49,23 +49,13 @@ namespace stinkytofu
     //       processBlock(bb);
     //   });
     template <typename Visitor>
-    void traverseCFGInRPO(Function& func, Visitor&& visitor);
-
-} // namespace stinkytofu
-
-// Include Function.hpp for full definition (provides Function and BasicBlock)
-#include "stinkytofu/core/Function.hpp"
-
-namespace stinkytofu
-{
-    template <typename Visitor>
     void traverseCFGInRPO(Function& func, Visitor&& visitor)
     {
         if(!func.getEntryBlock())
             return;
 
         // Post-order DFS traversal
-        std::vector<BasicBlock*> postOrder;
+        std::vector<BasicBlock*>        postOrder;
         std::unordered_set<BasicBlock*> visited;
 
         std::function<void(BasicBlock*)> dfs = [&](BasicBlock* bb) {
@@ -91,4 +81,3 @@ namespace stinkytofu
     }
 
 } // namespace stinkytofu
-

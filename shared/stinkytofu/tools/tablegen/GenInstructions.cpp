@@ -116,16 +116,27 @@ namespace stinkytofu
         char regType      = 'S'; // S=SGPR, V=VGPR, A=AGPR, etc.
     };
 
+    // Cost override: when modifier matches (e.g. MatrixFmtData(FP4, FP4)), use (cycle, latency)
+    struct CostOverrideEntry
+    {
+        std::string              modifierType; // e.g. "MatrixFmtData"
+        std::vector<std::string> args; // e.g. {"FP4", "FP4"}
+        int                      cycle   = 1;
+        int                      latency = 1;
+    };
+
     // Instruction definition
     struct InstructionDef
     {
         std::string instClass; // e.g., "FloatAddInst"
         std::string mnemonic; // e.g., "v_add_f32"
+        int         lineNumber = 0; // 1-based source line for error reporting
 
         // Optional fields (inherit from format if not specified)
         std::string                    format; // e.g., "VOP3"
         int                            cycle   = 1; // Default cost
         int                            latency = 1; // Default latency
+        std::vector<CostOverrideEntry> costOverrides; // modifier-keyed overrides
         std::vector<OperandSpec>       operands; // Operand specifications
         std::vector<OperandWidthEntry> operandWidths; // Register width/type for verifier
         std::vector<std::string>       flags; // Instruction-specific flags
@@ -168,7 +179,11 @@ namespace stinkytofu
             std::string content((std::istreambuf_iterator<char>(ifs)),
                                 std::istreambuf_iterator<char>());
 
-            return parseFormatContent(content);
+            if(!parseFormatContent(content, formatFile))
+                return false;
+            std::cout << std::filesystem::path(formatFile).filename().string() << ": parsed "
+                      << formats_.size() << " formats\n";
+            return true;
         }
 
         // Parse instruction definitions file
@@ -184,7 +199,12 @@ namespace stinkytofu
             std::string content((std::istreambuf_iterator<char>(ifs)),
                                 std::istreambuf_iterator<char>());
 
-            return parseInstructionContent(content);
+            lastInstFile_ = instFile;
+            if(!parseInstructionContent(content, instFile))
+                return false;
+            std::cout << std::filesystem::path(instFile).filename().string() << ": parsed "
+                      << instructions_.size() << " instructions\n";
+            return true;
         }
 
         // Resolve a format by merging with its parent (e.g. MFMA -> VOP3P). Single level only.
@@ -218,7 +238,7 @@ namespace stinkytofu
         }
 
         // Apply format inheritance to all instructions
-        void applyFormatDefaults()
+        bool applyFormatDefaults()
         {
             for(auto& inst : instructions_)
             {
@@ -235,13 +255,11 @@ namespace stinkytofu
                 FormatDef fmt = getResolvedFormat(inst.format);
                 if(fmt.name.empty())
                 {
-                    std::cerr << "Warning: Unknown format '" << inst.format << "' for instruction '"
+                    if(!lastInstFile_.empty() && inst.lineNumber > 0)
+                        std::cerr << lastInstFile_ << ":" << inst.lineNumber << ": ";
+                    std::cerr << "Error: Unknown format '" << inst.format << "' for instruction '"
                               << inst.mnemonic << "'\n";
-                    inst.finalFlags     = inst.flags;
-                    inst.finalUnit      = inst.unit;
-                    inst.finalPipeline  = inst.pipeline;
-                    inst.finalModifiers = inst.modifiers;
-                    continue;
+                    return false;
                 }
 
                 // Merge flags: format flags + instance flags
@@ -257,6 +275,7 @@ namespace stinkytofu
                 // Apply modifiers (instance overrides format)
                 inst.finalModifiers = inst.modifiers.empty() ? fmt.modifiers : inst.modifiers;
             }
+            return true;
         }
 
         // Get parsed data
@@ -278,8 +297,19 @@ namespace stinkytofu
         ArchDef                          arch_;
         std::map<std::string, FormatDef> formats_;
         std::vector<InstructionDef>      instructions_;
+        std::string lastInstFile_; // for error reporting in applyFormatDefaults
 
-        bool parseFormatContent(const std::string& content)
+        static int getLineNumber(const std::string& content, size_t pos)
+        {
+            int line = 1;
+            for(size_t i = 0; i < pos && i < content.size(); ++i)
+                if(content[i] == '\n')
+                    ++line;
+            return line;
+        }
+
+        bool parseFormatContent(const std::string& content,
+                                const std::string& formatFile = std::string())
         {
             // Parse DEF_ARCH(...) first (optional; overrides arch name and metadata)
             size_t defArchPos = content.find("DEF_ARCH(");
@@ -326,13 +356,37 @@ namespace stinkytofu
             size_t pos = 0;
             while((pos = content.find("DEF_FORMAT(", pos)) != std::string::npos)
             {
-                size_t nameStart = pos + 11; // After "DEF_FORMAT("
-                size_t nameEnd   = content.find(",", nameStart);
-                if(nameEnd == std::string::npos)
-                    break;
+                size_t nameStart  = pos + 11; // After "DEF_FORMAT("
+                size_t firstComma = content.find(",", nameStart);
+                size_t firstDot   = content.find(".", nameStart);
+                // Comma must appear before any field (.xxx = ...)
+                if(firstDot != std::string::npos
+                   && (firstComma == std::string::npos || firstDot < firstComma))
+                {
+                    size_t end = firstDot;
+                    while(end > nameStart && (content[end - 1] == ' ' || content[end - 1] == '\t'))
+                        --end;
+                    std::string formatName = content.substr(nameStart, end - nameStart);
+                    formatName.erase(0, formatName.find_first_not_of(" \t\n\r"));
+                    formatName.erase(formatName.find_last_not_of(" \t\n\r") + 1);
+                    int line = getLineNumber(content, nameStart);
+                    if(!formatFile.empty())
+                        std::cerr << formatFile << ":" << line << ": ";
+                    std::cerr << "Error: DEF_FORMAT(" << formatName
+                              << "): missing ',' after format name.\n";
+                    return false;
+                }
+                if(firstComma == std::string::npos)
+                {
+                    int line = getLineNumber(content, nameStart);
+                    if(!formatFile.empty())
+                        std::cerr << formatFile << ":" << line << ": ";
+                    std::cerr << "Error: DEF_FORMAT(...): missing ',' after format name.\n";
+                    return false;
+                }
+                size_t nameEnd = firstComma;
 
                 std::string formatName = content.substr(nameStart, nameEnd - nameStart);
-                // Trim whitespace
                 formatName.erase(0, formatName.find_first_not_of(" \t\n\r"));
                 formatName.erase(formatName.find_last_not_of(" \t\n\r") + 1);
 
@@ -343,6 +397,9 @@ namespace stinkytofu
                 size_t blockEnd = findMatchingParen(content, nameEnd);
                 if(blockEnd == std::string::npos)
                 {
+                    int line = getLineNumber(content, nameStart);
+                    if(!formatFile.empty())
+                        std::cerr << formatFile << ":" << line << ": ";
                     std::cerr << "Error: No matching paren for DEF_FORMAT " << formatName << "\n";
                     return false;
                 }
@@ -359,17 +416,18 @@ namespace stinkytofu
                 pos                  = blockEnd;
             }
 
-            std::cout << "Parsed " << formats_.size() << " formats\n";
             return true;
         }
 
-        bool parseInstructionContent(const std::string& content)
+        bool parseInstructionContent(const std::string& content,
+                                     const std::string& instFile = std::string())
         {
             // Minimal parser for proof-of-concept
             // Parse DEF_T(...) blocks
             size_t pos = 0;
             while((pos = content.find("DEF_T(", pos)) != std::string::npos)
             {
+                int    defLine    = getLineNumber(content, pos);
                 size_t argsStart  = pos + 6; // After "DEF_T("
                 size_t firstComma = content.find(",", argsStart);
                 if(firstComma == std::string::npos)
@@ -389,13 +447,16 @@ namespace stinkytofu
                     = content.substr(mnemonicStart + 1, mnemonicEnd - mnemonicStart - 1);
 
                 InstructionDef inst;
-                inst.instClass = instClass;
-                inst.mnemonic  = mnemonic;
+                inst.instClass  = instClass;
+                inst.mnemonic   = mnemonic;
+                inst.lineNumber = defLine;
 
                 // Find the closing paren
                 size_t blockEnd = findMatchingParen(content, mnemonicEnd);
                 if(blockEnd == std::string::npos)
                 {
+                    if(!instFile.empty())
+                        std::cerr << instFile << ":" << defLine << ": ";
                     std::cerr << "Error: No matching paren for DEF_T " << mnemonic << "\n";
                     return false;
                 }
@@ -405,6 +466,7 @@ namespace stinkytofu
                 // Parse optional fields
                 parseField(block, ".format", inst.format);
                 parseFieldCost(block, ".cost", inst.cycle, inst.latency);
+                parseFieldCostOverrides(block, inst.costOverrides);
                 parseFieldFlags(block, ".flags", inst.flags);
                 parseFieldOperandWidths(block, inst.operandWidths);
                 parseFieldLogical(block, inst.logical);
@@ -413,7 +475,6 @@ namespace stinkytofu
                 pos = blockEnd;
             }
 
-            std::cout << "Parsed " << instructions_.size() << " instructions\n";
             return true;
         }
 
@@ -489,6 +550,101 @@ namespace stinkytofu
             {
                 cycle   = std::stoi(costStr.substr(0, comma));
                 latency = std::stoi(costStr.substr(comma + 1));
+            }
+        }
+
+        // Helper: Find matching '}' for '{' at start (skips nested braces)
+        size_t findMatchingBrace(const std::string& s, size_t start) const
+        {
+            int depth = 1;
+            for(size_t i = start + 1; i < s.size(); ++i)
+            {
+                if(s[i] == '{')
+                    depth++;
+                else if(s[i] == '}')
+                {
+                    depth--;
+                    if(depth == 0)
+                        return i;
+                }
+            }
+            return std::string::npos;
+        }
+
+        // Helper: Parse .costOverrides = { { MatrixFmtData(FP4, FP4), 6, 24 }, ... }
+        void parseFieldCostOverrides(const std::string& block, std::vector<CostOverrideEntry>& out)
+        {
+            size_t pos = block.find(".costOverrides");
+            if(pos == std::string::npos)
+                return;
+            size_t eqPos = block.find("=", pos);
+            if(eqPos == std::string::npos)
+                return;
+            size_t lbrace = block.find("{", eqPos);
+            if(lbrace == std::string::npos)
+                return;
+            size_t rbrace = findMatchingBrace(block, lbrace);
+            if(rbrace == std::string::npos)
+                return;
+            std::string content    = block.substr(lbrace + 1, rbrace - lbrace - 1);
+            size_t      entryStart = 0;
+            while(entryStart < content.size())
+            {
+                size_t entryL = content.find("{", entryStart);
+                if(entryL == std::string::npos)
+                    break;
+                size_t entryR = findMatchingBrace(content, entryL);
+                if(entryR == std::string::npos)
+                    break;
+                std::string entry = content.substr(entryL + 1, entryR - entryL - 1);
+                // entry is "MatrixFmtData(FP4, FP4), 6, 24"
+                size_t sep = entry.find("),");
+                if(sep == std::string::npos)
+                {
+                    entryStart = entryR + 1;
+                    continue;
+                }
+                std::string modPart  = entry.substr(0, sep + 1); // include ')'
+                std::string costPart = entry.substr(sep + 2);
+                size_t      lparen   = modPart.find("(");
+                if(lparen == std::string::npos)
+                {
+                    entryStart = entryR + 1;
+                    continue;
+                }
+                size_t rparen = findMatchingParen(modPart, lparen + 1);
+                if(rparen == std::string::npos)
+                {
+                    entryStart = entryR + 1;
+                    continue;
+                }
+                CostOverrideEntry e;
+                e.modifierType = modPart.substr(0, lparen);
+                e.modifierType.erase(0, e.modifierType.find_first_not_of(" \t\n\r"));
+                e.modifierType.erase(e.modifierType.find_last_not_of(" \t\n\r") + 1);
+                std::string argsStr = modPart.substr(lparen + 1, rparen - lparen - 1);
+                size_t      as      = 0;
+                while(as < argsStr.size())
+                {
+                    size_t ac = argsStr.find(",", as);
+                    if(ac == std::string::npos)
+                        ac = argsStr.size();
+                    std::string arg = argsStr.substr(as, ac - as);
+                    arg.erase(0, arg.find_first_not_of(" \t\n\r"));
+                    arg.erase(arg.find_last_not_of(" \t\n\r") + 1);
+                    if(!arg.empty())
+                        e.args.push_back(arg);
+                    as = ac + 1;
+                }
+                costPart.erase(0, costPart.find_first_not_of(" \t\n\r"));
+                size_t cc = costPart.find(",");
+                if(cc != std::string::npos)
+                {
+                    e.cycle   = std::stoi(costPart.substr(0, cc));
+                    e.latency = std::stoi(costPart.substr(cc + 1));
+                }
+                out.push_back(e);
+                entryStart = entryR + 1;
             }
         }
 
@@ -693,6 +849,45 @@ namespace stinkytofu
             }
 
             out << "};\n\n";
+
+            // Emit cost overrides keyed by modifier (e.g. MatrixFmtData(a, b)); runtime uses for modifier-dependent cost
+            std::vector<const InstructionDef*> withOverrides;
+            for(const auto& inst : instructions_)
+            {
+                if(!inst.costOverrides.empty())
+                    withOverrides.push_back(&inst);
+            }
+            if(!withOverrides.empty())
+            {
+                out << "// Cost overrides: when modifier matches (e.g. MatrixFmtData), use (cycle, "
+                       "latency). fmtA/fmtB: 0=FP4, 1=FP6, 2=FP8 (stinkytofu::MatrixFmt)\n";
+                out << "struct InstructionCostOverrideMatrixFmt { const char* mnemonic; uint8_t "
+                       "fmtA; uint8_t fmtB; uint16_t cycle; uint16_t latency; };\n";
+                out << "constexpr InstructionCostOverrideMatrixFmt " << arch_
+                    << "_COST_OVERRIDES_MATRIX_FMT[] = {\n";
+                for(const auto* inst : withOverrides)
+                {
+                    for(const auto& ov : inst->costOverrides)
+                    {
+                        if(ov.modifierType != "MatrixFmtData" || ov.args.size() < 2)
+                            continue;
+                        auto toFmt = [](const std::string& s) -> int {
+                            if(s == "FP4")
+                                return 0;
+                            if(s == "FP6")
+                                return 1;
+                            if(s == "FP8")
+                                return 2;
+                            return 0;
+                        };
+                        out << "    {\"" << inst->mnemonic << "\", " << toFmt(ov.args[0]) << ", "
+                            << toFmt(ov.args[1]) << ", " << ov.cycle << ", " << ov.latency
+                            << "},\n";
+                    }
+                }
+                out << "};\n\n";
+            }
+
             out << "// Total generated instructions: " << instructions_.size() << "\n";
             return true;
         }
@@ -1254,7 +1449,8 @@ namespace stinkytofu
         }
 
         // Apply format inheritance
-        parser.applyFormatDefaults();
+        if(!parser.applyFormatDefaults())
+            return false;
 
         // Generate output files
         InstructionCodeGen codegen(normArch, parser.getInstructions());
@@ -1295,7 +1491,8 @@ namespace stinkytofu
                 std::cerr << "Error: Failed to parse instruction file " << instFile << "\n";
                 return false;
             }
-            parser.applyFormatDefaults();
+            if(!parser.applyFormatDefaults())
+                return false;
             archInstructions[arch] = parser.getInstructions();
             archDefs[arch]         = parser.getArch();
         }
@@ -1308,6 +1505,7 @@ namespace stinkytofu
         std::vector<std::string> unifiedList(allMnemonics.begin(), allMnemonics.end());
         std::sort(unifiedList.begin(), unifiedList.end());
         unifiedList.push_back("LABEL");
+        unifiedList.push_back("PHI");
         unifiedList.push_back("INVALID");
         std::unordered_map<std::string, int> unifiedOpcodeMap;
         for(size_t i = 0; i < unifiedList.size(); ++i)

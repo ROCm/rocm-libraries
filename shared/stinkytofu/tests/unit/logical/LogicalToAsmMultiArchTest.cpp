@@ -3,13 +3,14 @@
  */
 
 #include "TestHelpers.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/ir/logical/LogicalOpcode.hpp"
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
-#include "stinkytofu/core/PassManager.hpp"
 #include <gtest/gtest.h>
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <vector>
@@ -606,12 +607,71 @@ LogicalInstruction* createTestInstruction(logical::Opcode opcode)
     }
 }
 
+// ==============================================================================
+// Expected lowering: per-arch (opcode -> asm mnemonic) for precise lowering tests
+// ==============================================================================
+//
+// One table per architecture. Add (opcode, "expected_asm_mnemonic") to the arch(s)
+// you want to assert. Lowering can differ per arch, so each table is independent.
+// Instructions not listed are still tested for "lowering succeeds"; only listed
+// ones get the precise mnemonic check on that arch.
+//
+using OpcodeMnemonicPair = std::pair<logical::Opcode, std::string>;
+
+// Gfx942 / Gfx950 ISA use ds_read_* / ds_write_* (not ds_load_* / ds_store_*)
+static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX942 = {
+    {logical::DSLoadB32, "ds_read_b32"},
+    {logical::DSLoadB64, "ds_read_b64"},
+    {logical::DSStoreB32, "ds_write_b32"},
+    {logical::DSStoreB64, "ds_write_b64"},
+    // Add more: {logical::YourOpcode, "expected_mnemonic"},
+};
+
+static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX950 = {
+    {logical::DSLoadB32, "ds_read_b32"},
+    {logical::DSLoadB64, "ds_read_b64"},
+    {logical::DSStoreB32, "ds_write_b32"},
+    {logical::DSStoreB64, "ds_write_b64"},
+    // Add more: {logical::YourOpcode, "expected_mnemonic"},
+};
+
+static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
+    {logical::BufferAtomicAddF32, "buffer_atomic_add_f32"},
+    {logical::DSLoadB32, "ds_load_b32"},
+    {logical::DSLoadB64, "ds_load_b64"},
+    {logical::DSStoreB32, "ds_store_b32"},
+    {logical::DSStoreB64, "ds_store_b64"},
+    // Add more: {logical::YourOpcode, "expected_mnemonic"},
+};
+
+/** Returns expected asm mnemonic for (opcode, arch) if we have one; else nullopt. */
+static std::optional<std::string> getExpectedMnemonic(logical::Opcode opcode, const char* archName)
+{
+    const std::vector<OpcodeMnemonicPair>* table = nullptr;
+    if(std::string(archName) == "Gfx942")
+        table = &EXPECTED_LOWERING_GFX942;
+    else if(std::string(archName) == "Gfx950")
+        table = &EXPECTED_LOWERING_GFX950;
+    else if(std::string(archName) == "Gfx1250")
+        table = &EXPECTED_LOWERING_GFX1250;
+    if(!table)
+        return std::nullopt;
+    for(const auto& p : *table)
+    {
+        if(p.first == opcode)
+            return p.second;
+    }
+    return std::nullopt;
+}
+
 /**
  * @brief Comprehensive test: Coverage guard + lowering test for ALL instructions
  *
  * This test does TWO things:
  * 1. Coverage Guard: Ensures all logical opcodes have a factory case
  * 2. Lowering Test: Tests each instruction lowers correctly on all architectures
+ * 3. When the arch's expected-lowering table (EXPECTED_LOWERING_GFX942 etc.) has an
+ *    entry for opcode, checks that the emitted asm instruction has the correct mnemonic.
  */
 TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
 {
@@ -740,7 +800,7 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
             Function    func("kernel");
             BasicBlock* bb = func.createBasicBlock("test");
 
-            PassManager pm;
+            PassManager    pm;
             GemmTileConfig config;
             config.arch     = {arch.major, arch.minor, arch.stepping};
             config.TileA0   = 16;
@@ -773,7 +833,34 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
                 << arch.name << ": " << opName << " failed to lower (produced 0 instructions)";
 
             if(stinkyInsts > 0)
+            {
                 passedTests++;
+                // Only check mnemonic when (opcode, arch) is in the expected map; never touch
+                // getHwInstDesc() for instructions we are not asserting on.
+                std::optional<std::string> expected = getExpectedMnemonic(opcode, arch.name);
+                if(expected.has_value())
+                {
+                    std::string firstMnemonic;
+                    for(BasicBlock& block : func)
+                    {
+                        for(IRBase& ir : block)
+                        {
+                            if(ir.getType() == IRBase::IRType::StinkyTofu)
+                            {
+                                auto* stinky = static_cast<StinkyInstruction*>(&ir);
+                                if(stinky->getHwInstDesc())
+                                    firstMnemonic = stinky->getHwInstDesc()->mnemonic;
+                                break;
+                            }
+                        }
+                        if(!firstMnemonic.empty())
+                            break;
+                    }
+                    EXPECT_EQ(firstMnemonic, *expected)
+                        << arch.name << ": " << opName << " expected mnemonic \"" << *expected
+                        << "\", got \"" << firstMnemonic << "\"";
+                }
+            }
         }
     }
 
@@ -817,7 +904,7 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions)
         Function    func("kernel");
         BasicBlock* bb = func.createBasicBlock("test");
 
-        PassManager pm;
+        PassManager    pm;
         GemmTileConfig config;
         config.arch     = {12, 5, 0};
         config.TileA0   = 16;
@@ -881,7 +968,7 @@ TEST(LogicalToAsmComprehensive, Gfx1250SpecificInstructions)
         Function    func("kernel");
         BasicBlock* bb = func.createBasicBlock("test");
 
-        PassManager pm;
+        PassManager    pm;
         GemmTileConfig config;
         config.arch     = {12, 5, 0};
         config.TileA0   = 16;
@@ -1096,7 +1183,7 @@ TEST(LogicalToAsmComprehensive, MfmaInstructionLowering)
             Function    func("kernel");
             BasicBlock* bb = func.createBasicBlock("test");
 
-            PassManager pm;
+            PassManager    pm;
             GemmTileConfig config;
             config.arch = {archTest.major, archTest.minor, archTest.stepping};
             pm.setGemmTileConfig(config);
@@ -1240,7 +1327,7 @@ TEST(LogicalToAsmComprehensive, SmfmaInstructionLowering)
             Function    func("kernel");
             BasicBlock* bb = func.createBasicBlock("test");
 
-            PassManager pm;
+            PassManager    pm;
             GemmTileConfig config;
             config.arch = {archTest.major, archTest.minor, archTest.stepping};
             pm.setGemmTileConfig(config);

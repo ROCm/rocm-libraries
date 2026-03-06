@@ -24,33 +24,23 @@
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace stinkytofu
 {
     struct Backend::Impl
     {
-        // Pipelines for the member module's architecture only (run in order)
-        std::vector<PipelineConfig> pipelines;
-        std::vector<std::string>    groupNames;
+        // Pipeline specs for the member module's architecture (run in order)
+        std::vector<BackendRegistry::PipelineSpec> pipelineSpecs;
     };
 
     Backend::Backend(StinkyAsmModule& module)
         : pImpl(std::make_unique<Impl>())
         , module(module)
     {
-        // Load pipelines for member module's arch from BackendRegistry
-        auto arch      = module.getArch();
-        auto factories = BackendRegistry::getPipelineFactories(arch);
-        if(!factories.empty())
+        auto populator = BackendRegistry::getArchPopulator(module.getArch());
+        if(populator)
         {
-            pImpl->pipelines.reserve(factories.size());
-            pImpl->groupNames.reserve(factories.size());
-            for(const auto& factory : factories)
-            {
-                pImpl->pipelines.push_back(factory.builder(module));
-                pImpl->groupNames.push_back(factory.groupName);
-            }
+            populator(module, pImpl->pipelineSpecs);
         }
     }
 
@@ -65,24 +55,32 @@ namespace stinkytofu
 
     bool Backend::hasPipelines() const
     {
-        return !pImpl->pipelines.empty();
+        return !pImpl->pipelineSpecs.empty();
     }
 
     size_t Backend::getPipelineCount() const
     {
-        return pImpl->pipelines.size();
+        return pImpl->pipelineSpecs.size();
     }
 
     void Backend::clearPipelines()
     {
-        pImpl->pipelines.clear();
-        pImpl->groupNames.clear();
+        pImpl->pipelineSpecs.clear();
     }
 
     void Backend::setPipelines(std::vector<PipelineConfig> configs)
     {
-        pImpl->pipelines = std::move(configs);
-        pImpl->groupNames.assign(configs.size(), "");
+        pImpl->pipelineSpecs.clear();
+        pImpl->pipelineSpecs.reserve(configs.size());
+        for(auto& c : configs)
+        {
+            pImpl->pipelineSpecs.push_back({std::move(c), ""});
+        }
+    }
+
+    const std::vector<BackendRegistry::PipelineSpec>& Backend::getPipelines() const
+    {
+        return pImpl->pipelineSpecs;
     }
 
     bool Backend::runOptimization()
@@ -110,10 +108,8 @@ namespace stinkytofu
         }
         else if(auto groupRange = module.findGroupRange(groupName))
         {
-            auto [begin, end] = groupRange.value();
-
+            auto [begin, end]  = groupRange.value();
             BasicBlock* origBB = begin->getParent();
-
             // Move StinkyInstructions from module to temporary function
             for(auto it = begin; it != end;)
             {
@@ -136,6 +132,9 @@ namespace stinkytofu
             // Move IR from temporary function back to module
             assert(module.getFunction().size() == 1
                    && "Current module should have only one basic block.");
+
+            IRBase* firstInserted = nullptr;
+            IRBase* lastInserted  = nullptr;
             for(auto bbIt = tempFunc.begin(); bbIt != tempFunc.end(); bbIt++)
             {
                 for(auto it = bbIt->begin(); it != bbIt->end();)
@@ -145,7 +144,20 @@ namespace stinkytofu
                     // FIXME: currently we insert IR to the range end, which
                     // assumes the Module has only one basic block.
                     origBB->insertIR(end, ir);
+                    if(!firstInserted)
+                        firstInserted = ir;
+                    lastInserted = ir;
                 }
+            }
+            if(firstInserted && lastInserted)
+            {
+                module.setGroupRange(groupName,
+                                     IntrusiveListIterator<IRBase>(firstInserted),
+                                     IntrusiveListIterator<IRBase>(lastInserted));
+            }
+            else
+            {
+                printf("No IR inserted for group %s\n", groupName.c_str());
             }
         }
 
@@ -155,18 +167,13 @@ namespace stinkytofu
     /* private methods */
     bool Backend::runPipelineSequence()
     {
-        if(!pImpl->pipelines.empty())
+        for(const auto& spec : pImpl->pipelineSpecs)
         {
-            for(size_t i = 0; i < pImpl->pipelines.size(); ++i)
+            if(!runOptimizationWithConfig(spec.config, spec.groupName))
             {
-                if(!runOptimizationWithConfig(pImpl->pipelines[i], pImpl->groupNames[i]))
-                {
-                    return false;
-                }
+                return false;
             }
-            return true;
         }
-
         return true;
     }
 

@@ -40,7 +40,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
-#include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
@@ -681,6 +681,15 @@ namespace
             setMsbFromReg(msbDst, srcRegs[0]);
             setMsbFromReg(msbSrc[0], srcRegs[1]);
         }
+        // VDS: DST=VDST, SRC0=ADDR, SRC1=DATA0, SRC2=DATA1
+        // ds_permute_b32 vgpr_rtn (VDST) , vgpr_a (ADDR) , vgpr_d0 (DATA0)
+        // ds_bpermute_b32 vgpr_rtn (VDST) , vgpr_a (ADDR) , vgpr_d0 (DATA0)
+        else if(inst->getUnifiedOpcode() == GFX::ds_bpermute_b32)
+        {
+            setMsbFromReg(msbDst, destRegs[0]);
+            setMsbFromReg(msbSrc[0], srcRegs[0]);
+            setMsbFromReg(msbSrc[1], srcRegs[1]);
+        }
         else if(isDSRead(*inst))
         {
             setMsbFromReg(msbDst, destRegs[0]);
@@ -699,7 +708,7 @@ namespace
             for(size_t i = 0; i < srcRegs.size() && i < 3; i++)
                 setMsbFromReg(msbSrc[i], srcRegs[i]);
         }
-        // VOP1, VOP2, VOP3, VOP3P, VOPD, VOPD3, VDS, VFLAT, VGLOBAL, VSCRATCH:
+        // VOP1, VOP2, VOP3, VOP3P, VOPD, VOPD3, VFLAT, VGLOBAL, VSCRATCH:
         // Standard mapping: DST=destRegs[0], SRC0=srcRegs[0], SRC1=srcRegs[1], SRC2=srcRegs[2]
         else
         {
@@ -1005,24 +1014,25 @@ namespace
 
 namespace stinkytofu
 {
-    std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(const rocisa::Module& module,
-                                                        std::array<int, 3>    arch,
-                                                        const std::string&    moduleName)
+    std::shared_ptr<StinkyAsmModule>
+        toStinkyTofuModule(const rocisa::Module&                 module,
+                           std::array<int, 3>                    arch,
+                           const std::string&                    moduleName,
+                           const StinkyAsmModule::ModuleOptions& moduleOptions)
     {
         // Get GfxArchID from architecture array
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
-        StinkyAsmModule stinkyAsmModule(moduleName, arch);
+        StinkyAsmModule stinkyAsmModule(moduleName, arch, moduleOptions);
+
+        Backend backend(stinkyAsmModule);
+        for(const auto& spec : backend.getPipelines())
+        {
+            stinkyAsmModule.addGroup(spec.groupName);
+        }
 
         // TODO: We can create BasicBlocks when visiting Labels.
         BasicBlock* currentBB = stinkyAsmModule.getFunction().getEntryBlock();
-
-        // Get group names from BackendRegistry
-        auto pipelineFactories = BackendRegistry::getPipelineFactories(arch);
-        for(const auto& pipelineFactory : pipelineFactories)
-        {
-            stinkyAsmModule.addGroup(pipelineFactory.groupName);
-        }
 
         // Create IRBuilder for lower-level instruction creation
         AsmIRBuilder irBuilder(*currentBB, archId);
@@ -1292,9 +1302,6 @@ void init_stinkytofu(nb::module_ m)
             // Convert architecture to std::array<int, 3> [major, minor, stepping]
             std::array<int, 3> archArray = convertArch(arch_obj);
 
-            // Convert module to StinkyAsmModule
-            auto stinkyModule = stinkytofu::toStinkyTofuModule(module, archArray, moduleName);
-
             // Override with options dict if provided
             StinkyAsmModule::ModuleOptions moduleOptions;
             if(nb::isinstance<nb::dict>(options_obj))
@@ -1318,12 +1325,11 @@ void init_stinkytofu(nb::module_ m)
                 MODULE_OPTIONS_LIST(SET_MODULE_OPTION)
 #undef SET_MODULE_OPTION
 #undef DEBUG_SET_MODULE_OPTION
-
-                if(hasSetOptions)
-                {
-                    stinkyModule->setModuleOptions(moduleOptions);
-                }
             }
+
+            // Convert module to StinkyAsmModule
+            auto stinkyModule
+                = stinkytofu::toStinkyTofuModule(module, archArray, moduleName, moduleOptions);
 
             // Convert signature to StinkyTofu format, using the wavefrontSize passed from Python
             auto stinkySig = toStinkySignature(signature, archArray, moduleOptions.wavefrontSize);

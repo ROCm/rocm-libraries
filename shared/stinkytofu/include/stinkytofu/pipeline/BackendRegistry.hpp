@@ -33,58 +33,46 @@ namespace stinkytofu
 {
     class StinkyAsmModule;
 
-    /// Global registry of pipeline factories per architecture.
+    /// Global registry of pipeline spec populators per architecture.
     ///
-    /// Stores, per architecture [major, minor, stepping], an ordered sequence of
-    /// PipelineFactory entries. Backend(module) calls getPipelineFactories(module.getArch())
-    /// at construction and invokes each factory to build its PipelineConfig sequence.
-    /// Register factories with addArchPipeline() or setArchPipelines(); typically from
-    /// a static initializer in a backend TU (e.g. Gfx1250Backend.cpp). Query with
-    /// getPipelineFactories(), hasPipelines(), getPipelineCount(); clear with
-    /// clearArch() or clear().
+    /// Stores one PipelineSpecPopulator per architecture [major, minor, stepping].
+    /// Backend(module) calls getArchPopulator(module.getArch()) at construction and, if set,
+    /// invokes it to fill a vector of PipelineSpec. Register with setArchPipeline(); typically
+    /// from a static initializer in a backend TU (e.g. Gfx1250Backend.cpp). Query with
+    /// getArchPopulator(), hasPipelines(), getPipelineCount(); clear with clearArch() or clear().
     ///
     /// @code
     /// // Static registrar (runs when TU is linked)
-    /// BackendRegistry::addArchPipeline({12, 5, 0}, createGfx1250PeepholePipeline);
-    /// // Or replace the full factory sequence for an arch:
-    /// BackendRegistry::setArchPipelines({12, 5, 0}, {factory1, factory2});
+    /// BackendRegistry::setArchPipeline({12, 5, 0}, myPipelineSpecPopulator);
     /// @endcode
     class BackendRegistry
     {
     public:
-        /// Function type: build a PipelineConfig from a StinkyAsmModule.
-        using PipelineConfigBuilder = std::function<PipelineConfig(const StinkyAsmModule&)>;
-
-        /// One pipeline factory: builder + optional group name for filtering.
-        struct PipelineFactory
+        /// Specification for an optimization pipeline.
+        struct PipelineSpec
         {
-            PipelineConfigBuilder builder; ///< Builds PipelineConfig from a module.
-            std::string
-                groupName; ///< Group name this pipeline applies to (e.g. for runOptimizationWithConfig).
+            PipelineConfig config; ///< Pipeline configuration.
+            std::string    groupName; ///< Group name this pipeline applies to (optional).
         };
 
-        /// Append a pipeline factory to the sequence for \p arch.
-        static void addArchPipeline(const std::array<int, 3>& arch,
-                                    PipelineConfigBuilder     builder,
-                                    const std::string&        groupName = "");
+        /// Function type: populate pipeline specifications from a StinkyAsmModule.
+        using PipelineSpecPopulator
+            = std::function<void(const StinkyAsmModule&, std::vector<PipelineSpec>&)>;
 
-        /// Set the full pipeline factory sequence for \p arch (replaces any existing).
-        static void setArchPipelines(const std::array<int, 3>&           arch,
-                                     const std::vector<PipelineFactory>& factories);
+        /// Set the pipeline spec populator for \p arch (one per arch).
+        static void setArchPipeline(const std::array<int, 3>& arch,
+                                    PipelineSpecPopulator     populator);
 
-        /// Return the pipeline factories registered for \p arch (copy).
-        static std::vector<PipelineFactory> getPipelineFactories(const std::array<int, 3>& arch);
+        /// Return the pipeline spec populator for \p arch, or empty if none registered.
+        static PipelineSpecPopulator getArchPopulator(const std::array<int, 3>& arch);
 
-        /// True if any pipeline factories are registered for \p arch.
+        /// True if a pipeline spec populator is registered for \p arch.
         static bool hasPipelines(const std::array<int, 3>& arch);
 
-        /// Number of pipeline factories registered for \p arch.
-        static size_t getPipelineCount(const std::array<int, 3>& arch);
-
-        /// Remove all registered pipeline factories (all architectures). Mainly for tests.
+        /// Remove all registered populators (all architectures). Mainly for tests.
         static void clear();
 
-        /// Remove pipeline factories for \p arch only.
+        /// Remove the pipeline spec populator for \p arch.
         static void clearArch(const std::array<int, 3>& arch);
 
         /// Format arch as arch name.
