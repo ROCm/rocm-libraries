@@ -113,6 +113,17 @@ void HipKernelEngine::initializeExecutionContext(
 {
     HipKernelSettings executionSettings;
     initializeHipKernelSettings(engineConfig, executionSettings);
+
+    for(const auto& planBuilder : _planBuilders)
+    {
+        if(planBuilder->isApplicable(handle, opGraph))
+        {
+            planBuilder->initializeExecutionSettings(
+                handle, opGraph, engineConfig, executionSettings);
+            break;
+        }
+    }
+
     executionContext.setExecutionSettings(executionSettings);
 
     for(const auto& planBuilder : _planBuilders)

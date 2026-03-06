@@ -239,11 +239,17 @@ TEST(TestHipKernelEngine, InitializeExecutionContextInvokesFirstApplicablePlanBu
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(true));
+        .WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder1,
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
     EXPECT_CALL(*mockPlanBuilder1,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_)).Times(0);
+    EXPECT_CALL(*mockPlanBuilder2,
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder2,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
@@ -268,12 +274,18 @@ TEST(TestHipKernelEngine, InitializeExecutionContextSkipsNonApplicableBuilders)
 
     // First plan builder not applicable, second is
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(false));
+        .WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*mockPlanBuilder1,
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder1,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(true));
+        .WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*mockPlanBuilder2,
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
     EXPECT_CALL(*mockPlanBuilder2,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(1);
@@ -297,12 +309,18 @@ TEST(TestHipKernelEngine, InitializeExecutionContextDoesNotCallBuildPlanIfNoAppl
     auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
 
     EXPECT_CALL(*mockPlanBuilder1, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(false));
+        .WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*mockPlanBuilder1,
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder1,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
     EXPECT_CALL(*mockPlanBuilder2, isApplicable(::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(false));
+        .WillRepeatedly(::testing::Return(false));
+    EXPECT_CALL(*mockPlanBuilder2,
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
     EXPECT_CALL(*mockPlanBuilder2,
                 buildPlan(::testing::_, ::testing::_, ::testing::_, ::testing::_))
         .Times(0);
