@@ -236,7 +236,7 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
-if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+if(${LINK_HIP_DEVICE_LIBS})
   fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
 
   if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
