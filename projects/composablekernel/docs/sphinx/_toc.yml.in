@@ -5,12 +5,14 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/Composable-Kernel-prerequisites.rst
-    title: Prerequisites
-  - file: install/Composable-Kernel-install.rst
-    title: Build and install Composable Kernel
-  - file: install/Composable-Kernel-Docker.rst
-    title: Docker images
+  - file: conceptual/Composable-Kernel-structure.rst
+    title: Structure
+  - file: conceptual/Composable-Kernel-math.rst
+    title: Mathematical basis
+  - file: conceptual/CK-Tile-intra-inter-wave.rst
+    title: Intrawave and interwave scheduling  
+  - file: conceptual/ck_tile/CK-tile-index.rst
+    title: CK Tile conceptual documentation
 
 - caption: Conceptual
   entries:
