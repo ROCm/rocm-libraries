@@ -162,6 +162,7 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
     TensorDescriptor in_desc, out_desc;
     bool gfx90aaltimpl = false;
 
+    std::cout << "AllocateBuffersAndMakeFusionInvokeParams:\n";
     if(conv_id != -1)
     {
         const auto conv_problem =
@@ -193,6 +194,7 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
 
         if(activ_fwd_id != -1)
         {
+            std::cout << "activ_fwd_id: ActivFwdFusionOpDescriptor\n";
             const auto& activ_op =
                 dynamic_cast<ActivFwdFusionOpDescriptor&>(*plan.op_map[activ_fwd_id]);
 
@@ -202,6 +204,7 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
         }
         else if(activ_bwd_id != -1)
         {
+            std::cout << "activ_bwd_id: ActivBwdFusionOpDescriptor\n";
             const auto& activ_op =
                 dynamic_cast<ActivBwdFusionOpDescriptor&>(*plan.op_map[activ_bwd_id]);
 
@@ -217,6 +220,7 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
 
     if(tensor_add_op_id != -1)
     {
+        std::cout << "tensor_add_op_id: TensorScaleAddOpDescriptor\n";
         const auto& tensor_add_op =
             dynamic_cast<const TensorScaleAddOpDescriptor&>(*plan.op_map[tensor_add_op_id]);
         assert(&tensor_add_op);
@@ -238,6 +242,7 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
 
         if(bn_inf_id != -1)
         {
+            std::cout << "bn_inf_id: BatchNormInferenceFusionOpDescriptor\n";
             const auto& bn_op =
                 dynamic_cast<BatchNormInferenceFusionOpDescriptor&>(*plan.op_map[bn_inf_id]);
 
@@ -258,6 +263,7 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
         }
         else if(bn_fwd_id != -1)
         {
+            std::cout << "bn_fwd_id: BatchNormFwdTrainFusionOpDescriptor\n";
             const auto& bn_op =
                 dynamic_cast<BatchNormFwdTrainFusionOpDescriptor&>(*plan.op_map[bn_fwd_id]);
 
@@ -290,6 +296,7 @@ AllocateBuffersAndMakeFusionInvokeParams(const Handle& handle,
         }
         else if(bn_bwd_id != -1)
         {
+            std::cout << "bn_bwd_id: BatchNormBwdTrainFusionOpDescriptor\n";
             const auto& bn_op =
                 dynamic_cast<BatchNormBwdTrainFusionOpDescriptor&>(*plan.op_map[bn_bwd_id]);
 
