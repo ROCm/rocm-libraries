@@ -467,11 +467,19 @@ CK_TILE_HOST_DEVICE constexpr fp32x2_t bf16x2_to_fp32x2(bf16x2_t x)
 #define CK_TILE_TF32_USE_PACKED_CVT 1
 #endif
 
+namespace impl {
+template <typename T, int N>
+struct bf16_ext_vec
+{
+    using type = T __attribute__((ext_vector_type(N)));
+};
+} // namespace impl
+
 template <int VecSize>
 CK_TILE_DEVICE void
-convert_float_to_bf16_pairs(const float __attribute__((ext_vector_type(VecSize))) & reg_f32,
-                            bfloat16_t __attribute__((ext_vector_type(VecSize))) & reg_bf16_big,
-                            bfloat16_t __attribute__((ext_vector_type(VecSize))) & reg_bf16_small)
+convert_float_to_bf16_pairs(const typename impl::bf16_ext_vec<float, VecSize>::type& reg_f32,
+                            typename impl::bf16_ext_vec<bfloat16_t, VecSize>::type& reg_bf16_big,
+                            typename impl::bf16_ext_vec<bfloat16_t, VecSize>::type& reg_bf16_small)
 {
 #if defined(__gfx94__) && CK_TILE_TF32_USE_PACKED_CVT && CK_TILE_USE_LLVM_BUILTIN_BF16
     static_assert(VecSize % 2 == 0, "VecSize must be even for packed operations");
