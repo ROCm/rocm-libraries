@@ -5,9 +5,8 @@
 
 import argparse
 import difflib
-import pathlib
 import subprocess
-from typing import List
+from pathlib import Path
 
 
 def color_node(line: str, is_addition: bool):
@@ -23,7 +22,7 @@ def color_node(line: str, is_addition: bool):
     return line
 
 
-def diff_dots(dots: List[str]) -> List[str]:
+def diff_dots(dots: list[str]) -> list[str]:
     dots_diff = []
     for i, dot in enumerate(dots):
         if i + 1 == len(dots):
@@ -77,11 +76,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     dots_in = []
     for fname in args.fnames:
-        dots_in.append(pathlib.Path(fname).read_text())
+        dots_in.append(Path(fname).read_text())
 
     dots = diff_dots(dots_in)
     for i, dot in enumerate(dots):
-        out_fname = pathlib.Path(args.output + f"_{i:04d}")
+        out_fname = Path(args.output + f"_{i:04d}")
         out_fname.with_suffix(".dot").write_text(dot)
         if not args.dot_only:
             with out_fname.with_suffix(".pdf").open("w") as out:

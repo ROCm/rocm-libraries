@@ -43,6 +43,12 @@ extern std::thread::id g_main_thread_id;
 extern thread_local hipblaslt_rng_t t_hipblaslt_rng;
 extern thread_local int             t_hipblaslt_rand_idx;
 
+
+template <typename T>
+constexpr bool is_std_complex_v
+    = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
+
+
 // optimized helper
 float hipblaslt_uniform_int_1_10();
 
@@ -350,7 +356,15 @@ inline void random_run_generator_small(T* ptr, size_t num)
 {
     for(size_t i = 0; i < num; i++)
     {
-        ptr[i] = random_generator<T>() / 10.f;
+        if constexpr(is_std_complex_v<T>)
+        {
+            using RealT = typename T::value_type;
+            ptr[i] = random_generator<T>() / static_cast<RealT>(10.0);
+        }
+        else
+        {
+            ptr[i] = random_generator<T>() / static_cast<double>(10.0);
+        }
     }
 }
 

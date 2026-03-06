@@ -8,11 +8,14 @@
 #include <variant>
 #include <vector>
 
+#include <optional>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operations.hpp>
 
 namespace rocRoller
 {
@@ -209,9 +212,19 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Tiled const& tload)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
+                Log::debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
 
-                auto tensor = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
+                auto srcTag = tload.getSrcTag();
+
+                std::optional<Operations::SubTileTranspose> subTile;
+                if(std::holds_alternative<Operations::SubTileTranspose>(
+                       *m_command->findTag(srcTag)))
+                {
+                    subTile = m_command->getOperation<Operations::SubTileTranspose>(srcTag);
+                    srcTag  = subTile->input();
+                }
+
+                auto tensor = m_command->getOperation<Operations::Tensor>(srcTag);
 
                 auto const sizes          = tensor.sizes();
                 auto const literalSizes   = tensor.literalSizes();
@@ -249,8 +262,65 @@ namespace rocRoller
                     dims.push_back(dim);
                 }
 
-                auto tiled
-                    = m_graph.coordinates.addElement(MacroTile(tload.getTag(), sizes.size()));
+                if(subTile)
+                {
+                    // A is MxK and TransposeType::T (row-major),
+                    // therefore: M is slow, K is fast.
+                    //
+                    // Let K' = K/32.
+                    //
+                    // Let AScale be MxK'.  Let T_M and T_K be the
+                    // pre-tile sizes.
+                    //
+                    // Then pre-tiled AScale is; slow-to-fast:
+                    //
+                    //   tileM * ((K / T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
+                    //
+                    // Therefore: strides = {(K' / T_K) * T_M * T_K, T_M * T_K, T_K, 1};
+                    //
+                    // B is KxN and TransposeType::N (col-major),
+                    // therefore: K is fast, N is slow.
+                    //
+                    // Let BScale be K'xN.  Let T_K and T_N be the
+                    // pre-tile sizes.
+                    //
+                    // Then pre-tiled BScale is; slow-to-fast:
+                    //
+                    //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
+                    //
+                    // Therefore: strides = {T_N * T_K, (K' / T_N) * T_N * T_K, 1, T_K};
+                    //
+                    // Then pre-tiled B is; slow-to-fast:
+                    //
+                    //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
+                    //
+                    // Therefore: strides = {T_N * T_K, (K / T_N) * T_N * T_K, 1, T_K};
+
+                    auto const strideDataType = DataType::UInt32;
+
+                    auto sizes   = subTile->tileDimensions();
+                    auto strides = std::vector<uint32_t>{1, static_cast<uint32_t>(sizes[0])};
+                    if(subTile->isTranspose())
+                    {
+                        strides = {static_cast<uint32_t>(sizes[1]), 1};
+                    }
+
+                    dims.push_back(m_graph.coordinates.addElement(
+                        SubDimension(dims.size(),
+                                     Expression::literal(sizes[0]),
+                                     Expression::literal(strides[0]))));
+                    dims.push_back(m_graph.coordinates.addElement(
+                        SubDimension(dims.size(),
+                                     Expression::literal(sizes[1]),
+                                     Expression::literal(strides[1]))));
+
+                    // TODO: Audit pretile-scale and pretile-B paths
+                    // to make this intuitive.  Ideally the unit tests
+                    // and client would not have to muck around with
+                    // strides.
+                }
+
+                auto tiled = m_graph.coordinates.addElement(MacroTile(tload.getTag(), dims.size()));
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
                 m_graph.coordinates.addElement(ConstructMacroTile(), dims, std::vector<int>{tiled});
