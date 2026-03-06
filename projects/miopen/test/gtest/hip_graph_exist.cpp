@@ -197,9 +197,6 @@ protected:
                          const std::string& test_name,
                          bool expect_graph)
     {
-        // Capture stderr to reduce test noise and allow verification
-        testing::internal::CaptureStderr();
-
         // Skip test if rocprof is not available
         std::string rocprof_check = ExecuteCommand(rocprof_cmd + " --version 2>&1");
         if(rocprof_check.empty() || rocprof_check.find("rocprof") == std::string::npos)
@@ -212,6 +209,12 @@ protected:
         {
             GTEST_SKIP() << "MIOpenDriver not found at: " << driver_path;
         }
+
+        // Capture stderr to reduce test noise and allow verification
+        // NOTE: CaptureStderr must be called AFTER all GTEST_SKIP() checks,
+        // otherwise GetCapturedStderr() won't be called and stderr will remain
+        // redirected, causing issues for subsequent tests.
+        testing::internal::CaptureStderr();
 
         // Construct rocprof command
         std::string driver_output = temp_dir + PATH_SEPARATOR + test_name + "_output.txt";
