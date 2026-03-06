@@ -527,10 +527,11 @@ void SdpaFpropOperationDescriptor::setMmaCoreMode(hipdnnBackendAttributeType_t a
                    "SdpaFpropOperationDescriptor::setAttribute(): elementCount is not 1");
     auto mode = static_cast<hipdnn_data_sdk::data_objects::DataType>(
         *static_cast<const int64_t*>(arrayOfElements));
-    THROW_IF_TRUE(mode < hipdnn_data_sdk::data_objects::DataType::MIN
-                      || mode > hipdnn_data_sdk::data_objects::DataType::MAX,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "SdpaFpropOperationDescriptor::setAttribute(): invalid MMA core mode (DataType) value");
+    THROW_IF_TRUE(
+        mode < hipdnn_data_sdk::data_objects::DataType::MIN
+            || mode > hipdnn_data_sdk::data_objects::DataType::MAX,
+        HIPDNN_STATUS_BAD_PARAM,
+        "SdpaFpropOperationDescriptor::setAttribute(): invalid MMA core mode (DataType) value");
     _data.mma_core_mode = mode;
 }
 
