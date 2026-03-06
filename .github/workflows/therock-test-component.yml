@@ -105,7 +105,7 @@ jobs:
         run: |
           python3 .github/scripts/notify_teams.py \
             --project miopen \
-            --failure-type test \
+            --failure_stage test \
             --platform "${{ inputs.platform }}" \
             --log-path ./test_logs/test_output.log \
             --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \

@@ -163,7 +163,7 @@ jobs:
         run: |
           python3 .github/scripts/notify_teams.py \
             --project miopen \
-            --failure-type build \
+            --failure_stage build \
             --platform windows \
             --log-path "${{ env.BUILD_DIR }}/logs" \
             --webhook-url "${{ secrets.MIOPEN_CI_WEBHOOK_URL }}" \
