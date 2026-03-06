@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,15 +51,16 @@
 #include "ResultFileReporter.hpp"
 #include "ResultReporter.hpp"
 
+#include "ProgramOptions.hpp"
 #include "Utility.hpp"
-
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
-#include <boost/program_options.hpp>
 
 #include <chrono>
 #include <cstddef>
+#include <fstream>
+#include <iostream>
+#include <map>
 #include <memory>
+#include <sstream>
 
 namespace TensileLite
 {
@@ -371,6 +372,245 @@ namespace TensileLite
             return options;
         }
 
+        /** Dump parsed program options to a text file for comparison (Boost vs replacement).
+         *  Set env TENSILE_DUMP_OPTIONS=1 to enable. Writes to /tmp/tensilelite_program_options_dump.txt */
+        void DumpProgramOptionsToFile(po::variables_map const& args, char const* path)
+        {
+            std::ofstream out(path);
+            if(!out)
+            {
+                std::cerr << "TENSILE_DUMP_OPTIONS: failed to open " << path << " for write\n";
+                return;
+            }
+            out << "# program_options dump (one key=value per line; vectors as size then "
+                   "elements)\n";
+#define DUMP_OPT(K, T)                                          \
+    do                                                          \
+    {                                                           \
+        if(args.count(K))                                       \
+        {                                                       \
+            try                                                 \
+            {                                                   \
+                out << (K) << "=" << args[(K)].as<T>() << "\n"; \
+            }                                                   \
+            catch(...)                                          \
+            {                                                   \
+                out << (K) << "=(as<" #T "> failed)\n";         \
+            }                                                   \
+        }                                                       \
+    } while(0)
+#define DUMP_VEC(K, T)                                          \
+    do                                                          \
+    {                                                           \
+        if(args.count(K))                                       \
+        {                                                       \
+            try                                                 \
+            {                                                   \
+                auto const& v = args[(K)].as<std::vector<T>>(); \
+                out << (K) << ".size=" << v.size();             \
+                for(size_t i = 0; i < v.size(); ++i)            \
+                    out << " " << v[i];                         \
+                out << "\n";                                    \
+            }                                                   \
+            catch(...)                                          \
+            {                                                   \
+                out << (K) << "=(vector as failed)\n";          \
+            }                                                   \
+        }                                                       \
+    } while(0)
+#define DUMP_VECVEC(K)                                                            \
+    do                                                                            \
+    {                                                                             \
+        if(args.count(K))                                                         \
+        {                                                                         \
+            try                                                                   \
+            {                                                                     \
+                auto const& v = args[(K)].as<std::vector<std::vector<size_t>>>(); \
+                out << (K) << ".size=" << v.size() << "\n";                       \
+                for(size_t i = 0; i < v.size(); ++i)                              \
+                {                                                                 \
+                    out << (K) << "[" << i << "]=";                               \
+                    for(size_t j = 0; j < v[i].size(); ++j)                       \
+                        out << (j ? " " : "") << v[i][j];                         \
+                    out << "\n";                                                  \
+                }                                                                 \
+            }                                                                     \
+            catch(...)                                                            \
+            {                                                                     \
+                out << (K) << "=(vecvec failed)\n";                               \
+            }                                                                     \
+        }                                                                         \
+    } while(0)
+            if(args.count("config-file"))
+            {
+                try
+                {
+                    auto const& v = args["config-file"].as<std::vector<std::string>>();
+                    out << "config-file.size=" << v.size() << "\n";
+                    for(size_t i = 0; i < v.size(); ++i)
+                        out << "config-file[" << i << "]=" << v[i] << "\n";
+                }
+                catch(...)
+                {
+                    out << "config-file=(failed)\n";
+                }
+            }
+            DUMP_OPT("library-file", std::string);
+            if(args.count("code-object"))
+            {
+                try
+                {
+                    auto const& v = args["code-object"].as<std::vector<std::string>>();
+                    out << "code-object.size=" << v.size() << "\n";
+                    for(size_t i = 0; i < v.size(); ++i)
+                        out << "code-object[" << i << "]=" << v[i] << "\n";
+                }
+                catch(...)
+                {
+                    out << "code-object=(failed)\n";
+                }
+            }
+            DUMP_OPT("performance-metric", PerformanceMetric);
+            DUMP_OPT("problem-identifier", std::string);
+            DUMP_OPT("type", rocisa::DataType);
+            DUMP_OPT("a-type", rocisa::DataType);
+            DUMP_OPT("b-type", rocisa::DataType);
+            DUMP_OPT("c-type", rocisa::DataType);
+            DUMP_OPT("d-type", rocisa::DataType);
+            DUMP_OPT("e-type", rocisa::DataType);
+            DUMP_OPT("amaxD-type", rocisa::DataType);
+            DUMP_OPT("alpha-type", rocisa::DataType);
+            DUMP_OPT("beta-type", rocisa::DataType);
+            DUMP_OPT("compute-input-type", rocisa::DataType);
+            DUMP_OPT("f32-xdl-math-op", rocisa::DataType);
+            DUMP_OPT("swizzle-tensor-a", bool);
+            DUMP_OPT("swizzle-tensor-b", bool);
+            DUMP_OPT("activation-compute-type", rocisa::DataType);
+            DUMP_OPT("high-precision-accumulate", bool);
+            DUMP_OPT("sparse", int);
+            DUMP_OPT("strided-batched", bool);
+            DUMP_OPT("grouped-gemm", bool);
+            DUMP_OPT("kernel-language", KernelLanguage);
+            DUMP_OPT("deterministic-mode", bool);
+            DUMP_OPT("init-seed", unsigned int);
+            DUMP_OPT("init-a", InitMode);
+            DUMP_OPT("init-b", InitMode);
+            DUMP_OPT("init-c", InitMode);
+            DUMP_OPT("init-d", InitMode);
+            DUMP_OPT("init-e", InitMode);
+            DUMP_OPT("init-alpha", InitMode);
+            DUMP_OPT("init-beta", InitMode);
+            DUMP_OPT("init-bias", InitMode);
+            DUMP_OPT("init-scaleA", InitMode);
+            DUMP_OPT("init-scaleB", InitMode);
+            DUMP_OPT("init-scaleC", InitMode);
+            DUMP_OPT("init-scaleD", InitMode);
+            DUMP_OPT("init-scaleAlphaVec", InitMode);
+            DUMP_OPT("pristine-on-gpu", bool);
+            DUMP_OPT("c-equal-d", bool);
+            DUMP_OPT("num-elements-to-validate", int);
+            DUMP_OPT("bounds-check", BoundsCheckMode);
+            DUMP_OPT("prune-mode", PruneSparseMode);
+            DUMP_OPT("device-idx", int);
+            DUMP_OPT("use-default-stream", bool);
+            DUMP_OPT("num-warmups", int);
+            DUMP_OPT("sync-after-warmups", bool);
+            DUMP_OPT("num-benchmarks", int);
+            DUMP_OPT("num-enqueues-per-sync", int);
+            DUMP_OPT("max-enqueues-per-sync", int);
+            DUMP_OPT("num-syncs-per-benchmark", int);
+            DUMP_OPT("skip-slow-solution-ratio", float);
+            DUMP_OPT("min-flops-per-sync", size_t);
+            DUMP_OPT("use-gpu-timer", bool);
+            DUMP_OPT("sleep-percent", int);
+            DUMP_OPT("hardware-monitor", bool);
+            DUMP_OPT("perf-l2-read-hits", double);
+            DUMP_OPT("perf-l2-write-hits", double);
+            DUMP_OPT("perf-l2-read-bw-mul", double);
+            DUMP_OPT("perf-read-efficiency", double);
+            DUMP_OPT("csv-export-extra-cols", bool);
+            DUMP_OPT("csv-merge-same-problems", bool);
+            DUMP_OPT("PrintWinnersOnly", bool);
+            DUMP_VECVEC("problem-size");
+            if(args.count("prob-sol-map"))
+            {
+                try
+                {
+                    auto const& m = args["prob-sol-map"].as<std::map<int, int>>();
+                    out << "prob-sol-map.size=" << m.size() << "\n";
+                    for(auto const& p : m)
+                        out << "prob-sol-map " << p.first << "=" << p.second << "\n";
+                }
+                catch(...)
+                {
+                    out << "prob-sol-map=(failed)\n";
+                }
+            }
+            DUMP_VECVEC("a-strides");
+            DUMP_VECVEC("b-strides");
+            DUMP_VECVEC("c-strides");
+            DUMP_VECVEC("d-strides");
+            DUMP_VECVEC("e-strides");
+            DUMP_VECVEC("bias-strides");
+            DUMP_OPT("problem-start-idx", int);
+            DUMP_OPT("num-problems", int);
+            DUMP_OPT("solution-start-idx", int);
+            DUMP_OPT("num-solutions", int);
+            DUMP_OPT("best-solution", bool);
+            DUMP_OPT("results-file", std::string);
+            DUMP_OPT("log-file", std::string);
+            DUMP_OPT("log-file-append", bool);
+            DUMP_OPT("log-level", LogLevel);
+            DUMP_OPT("library-update-file", std::string);
+            DUMP_OPT("library-update-comment", bool);
+            DUMP_OPT("exit-on-error", bool);
+            DUMP_OPT("selection-only", bool);
+            DUMP_OPT("max-workspace-size", size_t);
+            DUMP_OPT("granularity-threshold", double);
+            DUMP_OPT("activation-type", ActivationType);
+            DUMP_OPT("activation-no-guard", bool);
+            if(args.count("activation-additional-args"))
+            {
+                try
+                {
+                    auto const& v
+                        = args["activation-additional-args"].as<std::vector<std::vector<double>>>();
+                    out << "activation-additional-args.size=" << v.size() << "\n";
+                    for(size_t i = 0; i < v.size(); ++i)
+                    {
+                        out << "activation-additional-args[" << i << "]=";
+                        for(size_t j = 0; j < v[i].size(); ++j)
+                            out << (j ? "," : "") << v[i][j];
+                        out << "\n";
+                    }
+                }
+                catch(...)
+                {
+                    out << "activation-additional-args=(failed)\n";
+                }
+            }
+            DUMP_VEC("activation-enum-args", ActivationType);
+            DUMP_OPT("use-bias", int);
+            DUMP_OPT("bias-source", int);
+            DUMP_OPT("use-scaleAB", std::string);
+            DUMP_OPT("use-scaleCD", bool);
+            DUMP_OPT("use-scaleAlphaVec", int);
+            DUMP_VEC("bias-type-args", rocisa::DataType);
+            DUMP_VEC("factor-dim-args", int);
+            DUMP_VEC("icache-flush-args", bool);
+            DUMP_OPT("use-e", bool);
+            DUMP_OPT("use-gradient", bool);
+            DUMP_OPT("use-user-args", bool);
+            DUMP_OPT("rotating-buffer-size", int32_t);
+            DUMP_OPT("rotating-buffer-mode", int32_t);
+            DUMP_OPT("output-amaxD", bool);
+            DUMP_OPT("timing-instrumentation", bool);
+#undef DUMP_OPT
+#undef DUMP_VEC
+#undef DUMP_VECVEC
+            std::cerr << "TENSILE_DUMP_OPTIONS: wrote " << path << "\n";
+        }
+
         std::shared_ptr<Hardware> GetHardware(po::variables_map const& args)
         {
             int deviceCount = 0;
@@ -453,18 +693,25 @@ namespace TensileLite
         }
 
         template <typename T>
+        T parse_num(std::string const& s)
+        {
+            T                  t{};
+            std::istringstream ss(s);
+            ss >> t;
+            if(!ss && !ss.eof())
+                throw std::runtime_error("Failed to parse number: " + s);
+            return t;
+        }
+
+        template <typename T>
         std::vector<T> split_nums(std::string const& value)
         {
-            std::vector<std::string> parts;
-            boost::split(parts, value, boost::algorithm::is_any_of(",;"));
-
-            std::vector<T> rv;
+            std::vector<std::string> parts = po::split_string(value);
+            std::vector<T>           rv;
             rv.reserve(parts.size());
-
             for(auto const& part : parts)
-                if(part != "")
-                    rv.push_back(boost::lexical_cast<T>(part));
-
+                if(!part.empty())
+                    rv.push_back(parse_num<T>(part));
             return rv;
         }
 
@@ -478,15 +725,13 @@ namespace TensileLite
             for(auto const& str : inValue)
                 outValue.push_back(split_nums<T>(str));
 
-            boost::any v(outValue);
-
-            args.at(name).value() = v;
+            args.at(name).value() = std::any(outValue);
         }
 
         void parse_arg_bools(po::variables_map& args, std::string const& name)
         {
             auto opts             = args[name].as<std::vector<bool>>();
-            args.at(name).value() = boost::any(opts);
+            args.at(name).value() = std::any(opts);
         }
 
         void parse_arg_ints(po::variables_map& args, std::string const& name)
@@ -502,20 +747,19 @@ namespace TensileLite
         void parse_bias_type_args(po::variables_map& args, std::string const& name)
         {
             auto type             = args[name].as<std::vector<rocisa::DataType>>();
-            args.at(name).value() = boost::any(type);
+            args.at(name).value() = std::any(type);
         }
 
         void parse_activation_enum_args(po::variables_map& args, std::string const& name)
         {
             auto type             = args[name].as<std::vector<ActivationType>>();
-            args.at(name).value() = boost::any(type);
+            args.at(name).value() = std::any(type);
         }
 
         void parse_activation_int(po::variables_map& args, std::string const& name)
         {
-            auto type = args[name].as<ActivationType>();
-
-            args.at(name).value() = boost::any(type);
+            auto type             = args[name].as<ActivationType>();
+            args.at(name).value() = std::any(type);
         }
 
         template <typename T>
@@ -530,9 +774,7 @@ namespace TensileLite
                 outValue[vec[0]] = vec[1];
             }
 
-            boost::any v(outValue);
-
-            args.at(name).value() = v;
+            args.at(name).value() = std::any(outValue);
         }
 
         void parse_arg_ints_map(po::variables_map& args, std::string const& name)
@@ -550,12 +792,12 @@ namespace TensileLite
                || type == rocisa::DataType::ComplexFloat || type == rocisa::DataType::ComplexDouble
                || type == rocisa::DataType::Int32)
             {
-                args.at("a-type").value()     = boost::any(type);
-                args.at("b-type").value()     = boost::any(type);
-                args.at("c-type").value()     = boost::any(type);
-                args.at("d-type").value()     = boost::any(type);
-                args.at("alpha-type").value() = boost::any(type);
-                args.at("beta-type").value()  = boost::any(type);
+                args.at("a-type").value()     = std::any(type);
+                args.at("b-type").value()     = std::any(type);
+                args.at("c-type").value()     = std::any(type);
+                args.at("d-type").value()     = std::any(type);
+                args.at("alpha-type").value() = std::any(type);
+                args.at("beta-type").value()  = std::any(type);
             }
         }
 
