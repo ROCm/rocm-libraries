@@ -49,6 +49,14 @@ public:
                         = nullptr,
                         bool causalMask = false)
     {
+    if(q.dims().size() != 4)
+    throw std::invalid_argument("CpuFpReferenceSdpa: q must be rank-4 [B, H, Sq, D]");
+if(k.dims().size() != 4)
+    throw std::invalid_argument("CpuFpReferenceSdpa: k must be rank-4 [B, Hkv, Skv, D]");
+if(v.dims().size() != 4)
+    throw std::invalid_argument("CpuFpReferenceSdpa: v must be rank-4 [B, Hkv, Skv, Dv]");
+if(o.dims().size() != 4)
+    throw std::invalid_argument("CpuFpReferenceSdpa: o must be rank-4 [B, H, Sq, Dv]");
         const auto batch = q.dims()[0];
         const auto numHeads = q.dims()[1];
         const auto seqQ = q.dims()[2];
