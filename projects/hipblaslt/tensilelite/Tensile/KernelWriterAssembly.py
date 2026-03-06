@@ -11162,6 +11162,7 @@ class KernelWriterAssembly(KernelWriter):
                   else:
                     dst_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
                     localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=new_src, sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                else:
                   for vi in range(0, int(newBlockWidth)):
                     if ti.getArchCaps()["NoSDWA"]:
                       dst_sel = (vi % 2)
