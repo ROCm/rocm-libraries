@@ -266,8 +266,8 @@ struct block_merge_impl<
         const bool is_incomplete_tile = flat_block_id == (input_size / items_per_block);
 
         // Read global partition indices for current block.
-        // The items in merge_partitions point are indices to items in keys_input, these indices are
-        // partition point in Left Run, the indices of those in Right Run will be computed later.
+        // merge_partitions contains the indices of the partition point items in keys_input
+        // for the Left Run. The indices for the Right Run will be computed later.
         const OffsetT partition_beg = merge_partitions[flat_block_id];
         const OffsetT partition_end = merge_partitions[flat_block_id + 1];
 

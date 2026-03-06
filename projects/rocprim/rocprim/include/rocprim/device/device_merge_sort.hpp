@@ -48,11 +48,11 @@ namespace detail
 
 template<class KeysInputIterator, class OffsetT, class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-OffsetT compute_global_partition_point(KeysInputIterator keys_input,
-                                       const OffsetT     size,
-                                       const OffsetT     current_run_len,
-                                       const OffsetT     global_offset,
-                                       BinaryFunction    compare_function)
+OffsetT compute_global_partition_point(const KeysInputIterator keys_input,
+                                       const OffsetT           size,
+                                       const OffsetT           current_run_len,
+                                       const OffsetT           global_offset,
+                                       const BinaryFunction    compare_function)
 {
     // The total length of two merged runs.
     const OffsetT merged_run_length = 2 * current_run_len;
@@ -61,14 +61,10 @@ OffsetT compute_global_partition_point(KeysInputIterator keys_input,
     const OffsetT group_base = (global_offset / merged_run_length) * merged_run_length;
 
     // Left Run starts at the group base, Right Run starts immediately after Left Run.
-    const OffsetT run_base_L = group_base;
+    const OffsetT run_beg_L = rocprim::min(size, group_base);
+    const OffsetT run_end_L = rocprim::min(size, group_base + current_run_len);
 
-    // Calculate bounds, clamping to input size
-    const OffsetT run_beg_L = rocprim::min(size, run_base_L);
-    const OffsetT run_end_L = rocprim::min(size, run_base_L + current_run_len);
-
-    const OffsetT run_beg_R = run_end_L; // Start of R is End of L
-    const OffsetT run_end_R = rocprim::min(size, run_beg_R + current_run_len);
+    const OffsetT run_end_R = rocprim::min(size, run_end_L + current_run_len);
 
     // Calculate how many items we need to consume from this group to reach the current partition point.
     // diag = Current_Global_Position - Group_Start_Position
@@ -76,13 +72,13 @@ OffsetT compute_global_partition_point(KeysInputIterator keys_input,
 
     // Clamp diagonal to the total number of available items in this pair.
     const OffsetT count_L = run_end_L - run_beg_L;
-    const OffsetT count_R = run_end_R - run_beg_R;
+    const OffsetT count_R = run_end_R - run_end_L;
 
     const OffsetT diag_clamped = rocprim::min(count_L + count_R, diag_local);
 
     // Calculate the partition point using binary search
     const OffsetT consumed_L = ::rocprim::detail::merge_path(keys_input + run_beg_L,
-                                                             keys_input + run_beg_R,
+                                                             keys_input + run_end_L,
                                                              count_L,
                                                              count_R,
                                                              diag_clamped,
@@ -100,18 +96,18 @@ template<class Config,
          class ValuesOutputIterator,
          class OffsetT,
          class BinaryFunction>
-inline hipError_t launch_mergepath_kernels(KeysInputIterator    keys_input_,
-                                           KeysOutputIterator   keys_output_,
-                                           ValuesInputIterator  values_input_,
-                                           ValuesOutputIterator values_output_,
-                                           const OffsetT        size,
-                                           const OffsetT        current_run_len,
-                                           const unsigned int   merge_num_partitions,
+inline hipError_t launch_mergepath_kernels(const KeysInputIterator    keys_input_,
+                                           const KeysOutputIterator   keys_output_,
+                                           const ValuesInputIterator  values_input_,
+                                           const ValuesOutputIterator values_output_,
+                                           const OffsetT              size,
+                                           const OffsetT              current_run_len,
+                                           const unsigned int         merge_num_partitions,
                                            const unsigned int   merge_partition_number_of_blocks,
                                            const unsigned int   merge_partition_block_size,
                                            const unsigned int   merge_mergepath_number_of_blocks,
                                            const unsigned int   merge_mergepath_block_size,
-                                           BinaryFunction       compare_function,
+                                           const BinaryFunction compare_function,
                                            OffsetT*             d_merge_partitions,
                                            detail::vsmem_t      vsmem,
                                            const target&        current_target,
@@ -230,19 +226,19 @@ template<class Config,
          class ValuesOutputIterator,
          class OffsetT,
          class BinaryFunction>
-inline hipError_t launch_mergepath_fused_kernel(KeysInputIterator    keys_input_,
-                                                KeysOutputIterator   keys_output_,
-                                                ValuesInputIterator  values_input_,
-                                                ValuesOutputIterator values_output_,
-                                                const OffsetT        size,
-                                                const OffsetT        current_run_len,
+inline hipError_t launch_mergepath_fused_kernel(const KeysInputIterator    keys_input_,
+                                                const KeysOutputIterator   keys_output_,
+                                                const ValuesInputIterator  values_input_,
+                                                const ValuesOutputIterator values_output_,
+                                                const OffsetT              size,
+                                                const OffsetT              current_run_len,
                                                 const unsigned int merge_mergepath_number_of_blocks,
                                                 const unsigned int merge_mergepath_block_size,
-                                                BinaryFunction     compare_function,
-                                                detail::vsmem_t    vsmem,
-                                                const target&      current_target,
-                                                const hipStream_t  stream,
-                                                bool               debug_synchronous)
+                                                const BinaryFunction compare_function,
+                                                detail::vsmem_t      vsmem,
+                                                const target&        current_target,
+                                                const hipStream_t    stream,
+                                                bool                 debug_synchronous)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
