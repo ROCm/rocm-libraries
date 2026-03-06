@@ -86,8 +86,8 @@ inline GroupedConvKernelInstance::RunFn make_conv_fwd_run_fn()
         sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
         sc.time_kernel_ = true;
         sc.log_level_   = 0;
-        sc.cold_niters_ = 3;
-        sc.nrepeat_     = 10;
+        sc.cold_niters_ = ctx.warmup;
+        sc.nrepeat_     = ctx.repeat;
         return LauncherType::launch(args, sc);
     };
 }
@@ -112,8 +112,8 @@ inline GroupedConvKernelInstance::RunFn make_conv_bwdd_run_fn()
         sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
         sc.time_kernel_ = true;
         sc.log_level_   = 0;
-        sc.cold_niters_ = 3;
-        sc.nrepeat_     = 10;
+        sc.cold_niters_ = ctx.warmup;
+        sc.nrepeat_     = ctx.repeat;
         return LauncherType::launch(args, sc);
     };
 }
@@ -137,8 +137,8 @@ inline GroupedConvKernelInstance::RunFn make_conv_bwdw_run_fn()
         sc.stream_id_   = reinterpret_cast<hipStream_t>(stream);
         sc.time_kernel_ = true;
         sc.log_level_   = 0;
-        sc.cold_niters_ = 3;
-        sc.nrepeat_     = 10;
+        sc.cold_niters_ = ctx.warmup;
+        sc.nrepeat_     = ctx.repeat;
         return LauncherType::launch(args, sc);
     };
 }

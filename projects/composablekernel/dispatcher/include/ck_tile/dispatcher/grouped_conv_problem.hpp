@@ -38,9 +38,9 @@ struct GroupedConvProblem
     std::int64_t G; // Number of groups (1 for standard conv)
 
     // Spatial dimensions (supports 1D, 2D, 3D)
-    std::array<std::int64_t, 3> input_spatial;  // {D, H, W} or {H, W, 1} for 2D
-    std::array<std::int64_t, 3> filter_spatial; // {Z, Y, X} or {R, S, 1} for 2D
-    std::array<std::int64_t, 3> output_spatial; // {Do, Ho, Wo}
+    std::array<std::int64_t, 3> input_spatial;  // {D, H, W} or {1, H, W} for 2D
+    std::array<std::int64_t, 3> filter_spatial; // {Z, Y, X} or {1, Y, X} for 2D
+    std::array<std::int64_t, 3> output_spatial; // {Do, Ho, Wo} or {1, Ho, Wo} for 2D
 
     // Convolution parameters
     std::array<std::int64_t, 3> stride;   // Stride in each dimension

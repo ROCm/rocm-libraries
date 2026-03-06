@@ -38,6 +38,8 @@ struct ConvDispatchBuffers
     const void* input_ptr  = nullptr;
     const void* weight_ptr = nullptr;
     void* output_ptr       = nullptr;
+    int warmup             = 3;
+    int repeat             = 10;
 };
 
 inline thread_local ConvDispatchBuffers g_conv_dispatch_buffers;
@@ -544,12 +546,13 @@ class GroupedConvDispatcher
 
     /// Run convolution with buffer pointers and automatic kernel selection.
     /// Sets the thread-local buffer context before dispatching to the kernel.
-    /// Requires generated_conv_backend.hpp to be included (for set_conv_buffers).
     float run(const void* input_ptr,
               const void* weight_ptr,
               void* output_ptr,
               const GroupedConvProblem& problem,
-              void* stream = nullptr)
+              void* stream = nullptr,
+              int warmup   = 3,
+              int repeat   = 10)
     {
         const auto* kernel = select_kernel(problem);
         if(!kernel)
@@ -560,6 +563,8 @@ class GroupedConvDispatcher
         g_conv_dispatch_buffers.input_ptr  = input_ptr;
         g_conv_dispatch_buffers.weight_ptr = weight_ptr;
         g_conv_dispatch_buffers.output_ptr = output_ptr;
+        g_conv_dispatch_buffers.warmup     = warmup;
+        g_conv_dispatch_buffers.repeat     = repeat;
         return kernel->run(problem, stream);
     }
 

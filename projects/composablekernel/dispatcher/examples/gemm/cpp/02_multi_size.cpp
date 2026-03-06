@@ -117,7 +117,7 @@ int main(int argc, char* argv[])
     .scheduler("*")             -> expands to valid schedulers = 1
 
   Expanded: 3 x 2 = 6 configs, but arch filter validates each:
-    - wavexwarp must divide tile: (4,1,1)x(32,32,16) invalid for 64x64
+    - wave x warp must divide tile: (4,1,1)x(32,32,16) invalid for 64x64
     - Result: 4 valid kernels from wildcard + 1 explicit = 5 total
 )";
 

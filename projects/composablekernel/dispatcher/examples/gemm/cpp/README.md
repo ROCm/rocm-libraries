@@ -29,14 +29,14 @@ cd examples
 
 ## Examples
 
-| Example | Description | Complexity |
-|---------|-------------|------------|
-| [01_basic_gemm.cpp](01_basic_gemm.cpp) | Basic GEMM with declarative API, autofill, autocorrect | ***** |
-| [02_multi_size.cpp](02_multi_size.cpp) | Wildcard expansion for multiple configurations | ***** |
-| [03_benchmark_validation.cpp](03_benchmark_validation.cpp) | Performance benchmarking with CPU reference validation | ***** |
-| [04_heuristics.cpp](04_heuristics.cpp) | Heuristic-based kernel selection | ***** |
-| [05_json_export.cpp](05_json_export.cpp) | Registry JSON export for external tools | ***** |
-| [06_multi_registry.cpp](06_multi_registry.cpp) | Multiple registries with named kernel sets | ***** |
+| Example | Description |
+|---------|-------------|
+| [01_basic_gemm.cpp](01_basic_gemm.cpp) | Basic GEMM with declarative API, autofill, autocorrect |
+| [02_multi_size.cpp](02_multi_size.cpp) | Wildcard expansion for multiple configurations |
+| [03_benchmark_validation.cpp](03_benchmark_validation.cpp) | Performance benchmarking with CPU reference validation |
+| [04_heuristics.cpp](04_heuristics.cpp) | Heuristic-based kernel selection |
+| [05_json_export.cpp](05_json_export.cpp) | Registry JSON export for external tools |
+| [06_multi_registry.cpp](06_multi_registry.cpp) | Multiple registries with named kernel sets |
 
 ## Example Details
 
