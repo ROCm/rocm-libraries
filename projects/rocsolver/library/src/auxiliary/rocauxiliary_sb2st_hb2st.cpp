@@ -73,11 +73,13 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
     size_t size_work;
     rocsolver_sb2st_hb2st_getMemorySize<false, T, S>(
         n, kd, batch_count, &size_work );
+    assert( size_work == 0 );
 
     if (rocblas_is_device_memory_size_query( handle ) )
         return rocblas_set_optimal_device_memory_size( handle, size_work );
 
     // memory workspace allocation
+    /*
     void* work;
     rocblas_device_malloc mem( handle, size_work );
 
@@ -85,16 +87,19 @@ rocblas_status rocsolver_sb2st_hb2st_impl(
         return rocblas_status_memory_error;
 
     work = mem[0];
+    */
 
     // todo: for what matrices do we need shift and when not?
+    // todo: if there is no workspace, do we still put it for consistency and
+    // future compatability?
     // execution
     return rocsolver_sb2st_hb2st_template<false, false, T>(
         handle, n, kd,
         Aband, shiftA, ldab, strideA,
+        V, ldv, strideV,
         D, strideD,
         E, strideE,
-        V, ldv, strideV,
-        batch_count, (T*)work );
+        batch_count );
 }
 
 ROCSOLVER_END_NAMESPACE

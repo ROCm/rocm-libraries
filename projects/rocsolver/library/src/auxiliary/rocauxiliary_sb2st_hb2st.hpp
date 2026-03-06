@@ -38,6 +38,7 @@
 #include "lapack_device_functions.hpp"
 #include "lib_device_helpers.hpp"
 #include "rocsolver_hybrid_storage.hpp"
+#include "laset.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -46,6 +47,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define DIMX 32
 #define DIMY 32
 
+/*
 //------------------------------------------------------------------------------
 // todo: should these be static to avoid one definition rule violations?
 // or namespaced? or in some general utility header?
@@ -68,6 +70,7 @@ __device__ __inline__ T shift_left( T& value, int lane_delta )
     i = __shfl_down( i, lane_delta );
     return rocblas_complex_num<S>( r, i );
 }
+*/
 
 //------------------------------------------------------------------------------
 // Generate Householder reflector.
@@ -80,11 +83,11 @@ __device__ __inline__ T shift_left( T& value, int lane_delta )
 // whereas this will set tau = 2 and H = [ -1 0 ].
 //                                       [  0 I ]
 //, std::enable_if_t<! rocblas_is_complex<T>, int> = 0>
-template <typename T, typename I
+template <typename T, typename I, typename S=decltype(std::real(T{}))>
 __device__ void sb2st_larfg(
     const I xid, I n, T* x, T& tau, S* s_work )
 {
-    using S = decltype( std::real( T{} ) );
+    //using S = decltype( std::real( T{} ) );
 
     const S one = 1;
 
@@ -103,37 +106,37 @@ __device__ void sb2st_larfg(
     __threadfence_block();
     norm2 = s_work[0];
 
-    S ar = real( alpha );
-    S ai = imag( alpha );  // In real, ai = 0. Compiler can eliminate it.
+    S alpha_r = std::real( x[0] );
+    S alpha_i = std::imag( x[0] );  // In real, alpha_i = 0. Compiler can eliminate it.
 
     __shared__ T s_scale;
 
     // The way we do norm2 above, it already includes alpha.
     // In LAPACK, at this point norm is just x (== x[1:n]), excluding alpha (== x[0]).
-    if (norm2 > 0 || ai > 0)
+    if (norm2 > 0 || alpha_i > 0)
     {
         if (xid == 0)
         {
-            S norm = alpha >= 0 ? -std::sqrt( norm2 ) : std::sqrt( norm2 );
+            S norm = alpha_r >= 0 ? -std::sqrt( norm2 ) : std::sqrt( norm2 );
 
             if constexpr (rocblas_is_complex<T>)
             {
                 // scaling factor
-                S r = (ar - norm) * (ar - norm) + ai * ai;
-                S rr = (ar - norm) / r;
-                S ri = -ai / r;
+                S r = (alpha_r - norm) * (alpha_r - norm) + alpha_i * alpha_i;
+                S rr = (alpha_r - norm) / r;
+                S ri = -alpha_i / r;
                 s_scale = rocblas_complex_num<S>( rr, ri );
 
                 // tau
-                rr = (norm - ar) / norm;
-                ri = -ai / norm;
+                rr = (norm - alpha_r) / norm;
+                ri = -alpha_i / norm;
                 tau = rocblas_complex_num<S>( rr, ri );
             }
             else
             {
-                s_scale = one / (alpha - norm);
-                tau = (norm - alpha) / norm;
-                alpha = norm;
+                s_scale = one / (alpha_r - norm);
+                tau = (norm - alpha_r) / norm;
+                alpha_r = norm;
             }
         }
         __threadfence_block();  // for s_scale; was missing
@@ -216,7 +219,8 @@ __device__ void sb2st_larf(
 // Apply H on left and right of Hermitian block:
 // C := H^H C H
 // Assumes the whole Hermitian block is set, both upper and lower.
-// (In LAPACK, this is larfy, which is an odd name. I guess y comes from sy.)
+// (In LAPACK, this is larfy, which doesn't fit well into LAPACK's naming
+// conventions. I guess y comes from sy.)
 template <typename T, typename I>
 __device__ void sb2st_helarf(
     const I xid, const I yid, rocblas_side side, I n,
@@ -231,7 +235,7 @@ __device__ void sb2st_helarf(
         /// Why not do wj = v^H * Cj, i.e., conj( v )?
         T value = 0;
         for (I i = xid; i < n; i += DIMX)
-            value += C[i + j*dc] * v[i];
+            value += C[i + j*ldc] * v[i];
         value += shift_left( value, 16 );
         value += shift_left( value, 8 );
         value += shift_left( value, 4 );
@@ -266,7 +270,7 @@ __device__ void sb2st_helarf(
     {
         for (I i = xid; i < n; i += DIMX)
         {
-            s_work[xid] -= alpha*v[xid];
+            s_work[xid] -= s_alpha*v[xid];
         }
     }
     __syncthreads();
@@ -274,9 +278,9 @@ __device__ void sb2st_helarf(
     // ger2/her2: C := C - tau v w^H - conj(tau) w v^H
     for (I j = yid; j < n; j += DIMY)
     {
-        for (I i = xid; i < m; i += DIMX)
+        for (I i = xid; i < n; i += DIMX)
             C[i + j*ldc] -= tau * v[i] * conj( s_work[yid] )
-                          + conj( tau ) * s_work[yid] * conj( v[i] );
+                + conj( tau ) * s_work[yid] * conj( v[i] );
     }
 }
 
@@ -291,164 +295,116 @@ __device__ inline void get_vindex(
 {
     rocblas_int k, kindex;
     rocblas_int nt = ceildiv( n, kd );  // todo: compute once & pass?
-    vi = sweep % band;              // row within V trapezoid
-    k  = sweep / band;              // block k
-    kindex = k*nt - k*(k-1)/2;      // index of diagonal V{k,k} block
-    vj = vi + (kindex + task)*kd;   // col within V
+    vi = sweep % kd;               // row within V trapezoid
+    k  = sweep / kd;               // block k
+    kindex = k*nt - k*(k-1)/2;     // index of diagonal V{k,k} block
+    vj = vi + (kindex + task)*kd;  // col within V
 }
 
 //------------------------------------------------------------------------------
 template <typename T, typename S>
-__device__ void sb2st_hb2st_sweep_step(
+__device__ void sb2st_hb2st_task(
     const rocblas_int xid,
     const rocblas_int yid,
     rocblas_int n,
     rocblas_int kd,
     rocblas_int sweep,
     rocblas_int task,
-    //rocblas_int sm_i,
-    T* A,
+    T* Aband,
     rocblas_int ldab,
-    S* D,
+    T* V,
+    rocblas_int ldv,
     S* E,
     T* s_housev,
     T* s_work)
 {
     const rocblas_int tid = xid + yid * DIMX;
+    const rocblas_int idiag = kd - 1;
 
     // row, col index for current Householder vector vc within V.
     rocblas_int vi, vj;
-    get_vindex( n, kd, sweep, task, &vi, &vj );
+    get_vindex( n, kd, sweep, task, vi, vj );
 
-    __shared__ T tau;
+    __shared__ T s_tau;
 
-    //if (sm_i == s + 1)
+    // `vp` is Householder vector generated in previous task.
+    // `vc` is Householder vector generated in current  task.
+    //
+    // `jp` is left col of previous diagonal tile and current off-diagonal tile.
+    // `jc` is left col of current  diagonal tile.
+    // `jn` is left col of next     diagonal tile; end of update.
+    rocblas_int jc = sweep + 1 + task*kd;
+    rocblas_int jn = std::min( jc + kd, n );
+    rocblas_int nc = jn -jc;
+    if (jc >= n)
+        return;
+
     if (task == 0)
     {
-        // first step of the sweep
-        // `vp` is Householder vector generated in previous task.
-        // `vc` is Householder vector generated in current  task.
-        //
-        // `jp` is left col of previous diagonal tile and current off-diagonal tile.
-        // `jc` is left col of current  diagonal tile.
-        // `jn` is left col of next     diagonal tile.
-        rocblas_int jc = sweep + 1;
-        rocblas_int jn = std::min( jc + kd, n );
-
-        //rocblas_int sm_e = std::min( sm_i + kd, n );
-        //rocblas_int su_i = sm_e;
-        //rocblas_int su_e = std::min( su_i + kd, n );
-        //
-        //rocblas_int mm = sm_e - sm_i;
-
-        rocblas_int nc = jn - jc;
+        // first task of the sweep
         if (yid == 0)
         {
             // copy column s to shared memory, A[j+1:j+1+nc, s]
             for (rocblas_int i = xid; i < nc; i += DIMX)
-                s_housev[i] = Aband[(idiag + 1 + i) + s * ldab];
+                s_housev[i] = Aband[(idiag + 1 + i) + sweep*ldab];
 
             // generate Householder reflector
-            sb2st_larfg( xid, nc, s_housev, tau, s_work );
+            sb2st_larfg( xid, nc, s_housev, s_tau, (S*) s_work );
 
             // Copy Householder vector and tau to V, and subdiagonal element to E.
-            // todo: copy diagonal to D? A[sweep+1, sweep+1] is computed below in larfy.
             if (xid == 0)
             {
                 // Bottom row of V stores tau.
-                V[ldab - 1 + vj*ldv] = tau;  // was A[sm_i + s * ldab]
-                E[s] = std::real( s_housev[0] );
+                E[sweep] = std::real( s_housev[0] );
                 s_housev[0] = T( 1 );
+                V[ldv - 1 + vj*ldv] = s_tau;
             }
             // was starting from 1, for (i = 1 + xid; ...
             for (rocblas_int i = xid; i < nc; i += DIMX)
-                V[vi + i + vj*ldv] = s_housev[i];  // A[(sm_i + i) + s * ldab]
+                V[vi + i + vj*ldv] = s_housev[i];
         }
         __syncthreads();
 
         // apply Householder reflector
-        if (tau != 0)
+        if (s_tau != 0)
         {
-            // todo: larfy:
-            // hemv( C, v, work )
-            // alpha = -0.5 tau dotc( work, v )
-            // work -= alpha*v
-            // C := C - tau*v*work^H - conj(tau)*work*v^H  // her2
-
             // Apply H on both sides to diagonal block, A{i,i} := H^H A{i,i} H.
             // Using ldab-1 adjusts for band format.
             #if 1
-                sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, tau,
-                              A + idiag + (sweep + 1)*ldab, ldab-1, s_work );
+                sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, s_tau,
+                              Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
             #else
-                sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( tau ),
-                            A + idiag + (sweep + 1)*ldab, ldab-1, s_work );
+                sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
+                            Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work );
                 __syncthreads();
-                sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, tau,
-                            A + idiag + (sweep + 1)*ldab, ldab-1, s_work);
+                sb2st_larf( xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
+                            Aband + idiag + (sweep + 1)*ldab, ldab-1, s_work);
             #endif
 
             // todo: copy A[ idiag + (sweep + 1)*ldab ] to D[s+1]?
-
-            /*
-            // Apply H^H on left to diagonal block, A{i,i} := H^H A{i,i},
-            // and upper off-diagonal block, A{i,i+1} = H^H A{i,i+1}.
-            rocblas_int nn = su_e - sm_i;
-            sb2st_larf( xid, yid, rocblas_side_left, mm, m, s_housev, conj( tau ),
-                        A + sm_i + sm_i * ldab, ldab, s_work );
-            __syncthreads();
-
-            // Apply H^H on right to diagonal block, A{i,i} := A{i,i} H.
-            sb2st_larf( xid, yid, rocblas_side_right, mm, mm, s_housev, tau,
-                        A + sm_i + sm_i * ldab, ldab, s_work);
-
-            // Copy & transpose upper off-diagonal block A{i,i+1}
-            // to lower off-diagonal block A{i+1,i}.
-            // Don't need to do this.
-            nn = su_e - su_i;
-            for (rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
-            {
-                rocblas_int i = su_i + idx1d % nn;
-                rocblas_int j = sm_i + idx1d / nn;
-                A[i + j * ldab] = conj( A[j + i * ldab] );
-            }
-            */
         }
     }
     else
     {
         // bulge chasing
-        rocblas_int jc = sweep + 1 + task*kd;
         rocblas_int jp = jc - kd;
-        rocblas_int jn = std::min( jc + kd, n );
-        rocblas_int nc = jn -jc;
-
-        /*
-        rocblas_int sm_e = std::min( sm_i + kd, n );    // diag end
-        rocblas_int su_i = sm_e;                        // upper begin
-        rocblas_int su_e = std::min( su_i + kd, n );    // upper end
-        rocblas_int sd_i = sm_i - kd;                   // lower begin
-        rocblas_int sd_e = sm_i;                        // lower end
-
-        rocblas_int mm = sm_e - sm_i;
-        */
 
         if (yid == 0)
         {
             // Copy previous Householder vector, vp, to shared memory.
-            for (rocblas_int i = xid; i < mm; i += DIMX)
-                s_housev[i] = V[vi + i + (vj - kd)*ldab];
+            for (rocblas_int i = xid; i < kd; i += DIMX)
+                s_housev[i] = V[vi + i + (vj - kd)*ldv];
             if (xid == 0)
-                tau = V[ldv - 1 + (vj - kd)*ldab];
+                s_tau = V[ldv - 1 + (vj - kd)*ldv];
         }
         __syncthreads();
 
         // Apply vp on right to lower off-diagonal tile,
         // A{jc, jp} := A{jc, jp} H.
-        if (tau != 0)
+        if (s_tau != 0)
         {
-            sb2st_larf( xid, yid, rocblas_side_right, nc, kd, s_housev, conj( tau ),
-                        A + sm_i + (sd_i + 1) * ldab, ldab, s_work );
+            sb2st_larf( xid, yid, rocblas_side_right, nc, kd, s_housev, s_tau,
+                        Aband + idiag + kd + jp*ldab, ldab-1, s_work );
             __syncthreads();
         }
 
@@ -457,20 +413,19 @@ __device__ void sb2st_hb2st_sweep_step(
             if (yid == 0)
             {
                 // copy column s to shared memory
-                for (rocblas_int i = xid; i < mm; i += DIMX)
+                for (rocblas_int i = xid; i < nc; i += DIMX)
                     s_housev[i] = Aband[idiag + kd + i + jp*ldab];
 
                 // generate Householder reflector
-                sb2st_larfg( xid, mm, s_housev, tau, s_work );
+                sb2st_larfg( xid, nc, s_housev, s_tau, (S*) s_work );
 
-                /// TODO: copy to V storage. The larfg kernel could do this during scaling.
-                // copy Householder vector to column s of A,
+                // copy Householder vector and tau to column V, and 1st element of larfg back to A.
                 if (xid == 0)
                 {
-                    V[ldab - 1 + vc*ldv] = tau;  // was A[sm_i + s * ldab]
-                    A[idiag + kd + jp*ldab] = s_housev[0];
+                    Aband[idiag + kd + jp*ldab] = s_housev[0];
                     s_housev[0] = T( 1 );
                     V[vi + vj*ldv] = s_housev[0];
+                    V[ldv - 1 + vj*ldv] = s_tau;
                 }
                 // hmm... if I did i = xid; then it copies the whole s_housev,
                 // but 0's whole column of A; need to preserve the top element
@@ -480,64 +435,32 @@ __device__ void sb2st_hb2st_sweep_step(
                 for (rocblas_int i = xid+1; i < nc; i += DIMX)
                 {
                     V[vi + i + vj*ldv] = s_housev[i];
-                    A[idiag + kd + i + jp*ldab] = T( 0 );
+                    Aband[idiag + kd + i + jp*ldab] = T( 0 );
                 }
             }
             __syncthreads();
 
             // apply Householder reflector
-            if (tau != 0)
+            if (s_tau != 0)
             {
                 // Apply on left of lower off-diagonal, A{jc, jp} := H^H A{jc, jp}.
-                sb2st_larf( xid, yid, rocblas_side_left, nc, kd, s_housev, conj( tau ),
-                            A + idiag + kd + jp*ldab, ldab-1, s_work );
+                sb2st_larf( xid, yid, rocblas_side_left, nc, kd, s_housev, conj( s_tau ),
+                            Aband + idiag + kd + jp*ldab, ldab-1, s_work );
                 __syncthreads();
 
                 // Apply on left and right of diagonal, A{jc, jc} := H^H A{jc, jc} H.
                 // todo: larfy
                 #if 1
-                    sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, tau,
-                                  A + idiag + jc*ldab, ldab-1, s_work );
+                    sb2st_helarf( xid, yid, rocblas_side_left, nc, s_housev, s_tau,
+                                  Aband + idiag + jc*ldab, ldab-1, s_work );
                 #else
-                    sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( tau ),
-                                A + idiag + jc*ldab, ldab-1, s_work );
+                    sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, conj( s_tau ),
+                                Aband + idiag + jc*ldab, ldab-1, s_work );
                     __syncthreads();
 
-                    sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, tau,
-                                A + idiag + jc*ldab, ldab-1, s_work );
+                    sb2st_larf( xid, yid, rocblas_side_left, nc, nc, s_housev, s_tau,
+                                Aband + idiag + jc*ldab, ldab-1, s_work );
                 #endif
-
-                /*
-                // Apply on left of (prev) off-diagonal and diagonal block, A{i, i-1:i} = H^H A{i, i-1:i}.
-                rocblas_int nn = su_e - sd_i - 1;
-                sb2st_larf( xid, yid, rocblas_side_left, mm, nn, s_housev, conj( tau ),
-                            A + sm_i + (sd_i + 1) * ldab, ldab, s_work );
-                __syncthreads();
-                // Apply on right of diagonal and (next) off-diagonal block, A{i:i+1, i} = A{i:i+1, i} H.
-                /// Isn't this a race condition with the thread block updating the
-                /// left off-diagonal of next block? Or are they not packing the
-                /// tasks as tightly, skipping every other task to avoid races?
-                sb2st_larf( xid, yid, rocblas_side_right, mm, mm, s_housev, tau,
-                            A + sm_i + sm_i * ldab, ldab, s_work);
-
-                /// I think there's no reason to copy transpose blocks.
-                /// Are they ever used for anything?
-                // copy transpose blocks
-                nn = su_e - su_i;
-                for (rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
-                {
-                    rocblas_int i = su_i + idx1d % nn;
-                    rocblas_int j = sm_i + idx1d / nn;
-                    A[i + j * ldab] = conj( A[j + i * ldab] );
-                }
-                nn = sd_e - sd_i;
-                for (rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
-                {
-                    rocblas_int i = sd_i + idx1d % nn;
-                    rocblas_int j = sm_i + idx1d / nn;
-                    A[i + j * ldab] = conj( A[j + i * ldab] );
-                }
-                */
             }
         }
     }
@@ -582,7 +505,7 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
 
     // select batch instance
     T* Aband = load_ptr_batch<T>( AAband, bid, shiftA, strideA );
-    T* V = load_ptr_batch<S>( VV, bid, 0, strideV );
+    T* V = load_ptr_batch<T>( VV, bid, 0, strideV );
     S* E = load_ptr_batch<S>( EE, bid, 0, strideE );
 
     // shared memory setup
@@ -591,22 +514,21 @@ ROCSOLVER_KERNEL void sb2st_hb2st_round_kernel(
     T* s_work   = reinterpret_cast<T*>(s_housev + kd);
 
     // get sweep parameters
-    rocblas_int last_sweep = round / 3;
+    rocblas_int last_sweep = round / 2;
     rocblas_int sweep = last_sweep - sid;
-    rocblas_int step = round - (2 * sweep);
-    rocblas_int sm_i = sweep + 1 + step_in_sweep * kd;
+    rocblas_int task = round - (2 * sweep);
+    assert( task >= 0 );
 
-    if (sweep < 0 || sm_i >= n)
+    if (sweep < 0)
         return;
 
-    // execute sweep step
-    sb2st_hb2st_sweep_step<T, S>(
-        xid, yid, n, kd, sweep, sm_i, Aband, ldab, V, ldv, E,
+    // execute sweep task
+    sb2st_hb2st_task<T, S>(
+        xid, yid, n, kd, sweep, task, Aband, ldab, V, ldv, E,
         s_housev, s_work );
 }
 
 //------------------------------------------------------------------------------
-/*
 template <typename T, typename S>
 ROCSOLVER_KERNEL void sb2st_hb2st_copy_diag(
     rocblas_int n,
@@ -620,15 +542,16 @@ ROCSOLVER_KERNEL void sb2st_hb2st_copy_diag(
     const rocblas_int tid = blockIdx.x * blockDim.x + threadIdx.x;
     const rocblas_int bid = blockIdx.z;
 
-    // select batch instance
-    T* Aband = load_ptr_batch<T>( AAband, bid, shiftA, strideA );
-    S* D = load_ptr_batch<S>( DD, bid, 0, strideD );
-
-    // copy diag
     if (tid < n)
-        D[tid] = std::real( A[tid + tid * ldab] );
+    {
+        // select batch instance
+        T* Aband = load_ptr_batch<T>( AAband, bid, shiftA, strideA );
+        S* D = load_ptr_batch<S>( DD, bid, 0, strideD );
+
+        // copy diag
+        D[tid] = std::real( Aband[tid*ldab] );
+    }
 }
-*/
 
 //------------------------------------------------------------------------------
 template <bool BATCHED, typename T, typename S>
@@ -638,13 +561,7 @@ void rocsolver_sb2st_hb2st_getMemorySize(
     const rocblas_int batch_count,
     size_t* size_work)
 {
-    if (n <= 1)
-    {
-        *size_work = 0;
-        return;
-    }
-
-    *size_work = sizeof( T ) * (3 * kd) * batch_count;
+    *size_work = 0;
 }
 
 //------------------------------------------------------------------------------
@@ -675,7 +592,7 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    if ((n > 0 && ! A) || (n > 0 && ! D) || (n > 0 && ! E) || (n > 0 && ! V))
+    if ((n > 0 && ! Aband) || (n > 0 && ! V) || (n > 0 && ! D) || (n > 0 && ! E))
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
@@ -710,25 +627,16 @@ rocblas_status rocsolver_sb2st_hb2st_template(
     hipStream_t stream;
     rocblas_get_stream( handle, &stream );
 
-    // quick return for n = 1 (scalar case)
-    /// Nothing to do: already real (tri)diagonal. Don't need to solve eig, just
-    /// trd. Maybe copy A => D, set E = 0, set tau = 0 (identity).
-    // Or just let the algorithm work. Who solves n=1 case? Does it need to be fast?
-    /*
-    if (n == 1)
-    {
-        rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
-        dim3 gridReset( blocksReset, 1, 1 );
-        dim3 threadsReset( BS1, 1, 1 );
+    const T zero = 0;
 
-        /// TODO: rename `scalar_case`, perhaps `stev_scalar_case`?
-        ROCSOLVER_LAUNCH_KERNEL(
-            scalar_case<T>,
-            gridReset, threadsReset, 0, stream,
-            rocblas_evect_none, A, strideA, D, strideD, batch_count);
-        return rocblas_status_success;
-    }
-    */
+    // Set V = 0.
+    // Ideally, set each Vk = I, but need to iterate over Vk.
+    // Strided batch laset, with stride = kd*ldv?
+    rocblas_int nt = ceildiv( n, kd );
+    rocblas_int nv = nt*(nt + 1)/2 * kd;
+    rocblas_stride shiftV = 0;
+    laset( handle, 'g', 3*kd, nv, zero, zero, V, shiftV, ldv, strideV,
+           batch_count );
 
     // rocblas_pointer_mode old_mode;
     // rocblas_get_pointer_mode( handle, &old_mode );
@@ -750,33 +658,49 @@ rocblas_status rocsolver_sb2st_hb2st_template(
         return rocblas_status_internal_error;
     }
 
-    /// Must be max. steps per sweep, and max. sweeps in parallel?
-    const rocblas_int max_steps_per_sweep = ceildiv( n - 1, kd ) - 1;
-    const rocblas_int max_parallel_sweeps = ceildiv( max_steps_per_sweep, 2 );  // ???
-    const rocblas_int num_rounds = 2*(n - 2) + 1;
+    // Sweep s starts in round r/2 and has ceil( (n - s - 1) / kd ) - 1 tasks,
+    // so it finishes after round 2*s + ceil( (n - s - 1) / kd ) - 1.
+    // At the end, there are kd - 1 empty rounds, where a sweep has finished but
+    // the next sweep hasn't started per these formulas; skip those rounds.
+    rocblas_int sweep_begin = 0;
+    rocblas_int sweep_begin_finishes
+        = 2*sweep_begin + ceildiv( n - sweep_begin - 1, kd ) - 1;
+    rocblas_int num_rounds = 2*(n - 2) + 1;
 
     // execute sweeps
-    for (rocblas_int round = 0; round < num_rounds; round++)
+    for (rocblas_int round = 0; round < num_rounds; ++round)
     {
-        ROCSOLVER_LAUNCH_KERNEL(
-            sb2st_hb2st_round_kernel<T>,
-            dim3( 1, sweeps_in_parallel, batch_count ),
-            dim3( DIMX, DIMY, 1 ), s_mem_size, stream,
-            n, kd, round,
-            Aband, shiftA, ldab, strideA,
-            D, strideD, E, strideE,
-            V, ldv, strideV );
+        // Run sweeps in half-open interval [begin, ..., end).
+        rocblas_int sweep_end = rocblas_int( round / 2 ) + 1;
+        rocblas_int parallel_sweeps = sweep_end - sweep_begin;
+        if (parallel_sweeps > 0)
+        {
+            ROCSOLVER_LAUNCH_KERNEL(
+                sb2st_hb2st_round_kernel<T>,
+                dim3( 1, parallel_sweeps, batch_count ),
+                dim3( DIMX, DIMY, 1 ), s_mem_size, stream,
+                n, kd, round,
+                Aband, shiftA, ldab, strideA,
+                V, ldv, strideV,
+                E, strideE );
+        }
+        if (round == sweep_begin_finishes)
+        {
+            sweep_begin += 1;
+            sweep_begin_finishes
+                = 2*sweep_begin + ceildiv( n - sweep_begin - 1, kd ) - 1;
+        }
     }
 
-    /// Why copy diagonal? Need both D and E. Ah, E set during kernel.
-    /// Why not set D during kernel, too?
     // copy diagonal
-    // can we call BLAS copy( Aband[idiag, 0], ldab, D, 1 )?
+    // todo: can we call BLAS copy( Aband[idiag, 0], ldab, D, 1 )?
+    // todo: should this be done in sb2st_hb2st_task when E is set?
+    rocblas_int idiag = kd - 1;
     const rocblas_int copyblocks = ceildiv( n, BS1 );
     ROCSOLVER_LAUNCH_KERNEL(
         (sb2st_hb2st_copy_diag<T>),
         dim3( copyblocks, 1, batch_count ), dim3( BS1 ), 0, stream,
-        n, idiag, Aband, shiftA, ldab, strideA, D, strideD );
+        n, Aband, shiftA + idiag, ldab, strideA, D, strideD );
 
     // rocblas_set_pointer_mode( handle, old_mode );
 
