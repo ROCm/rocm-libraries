@@ -1422,11 +1422,42 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
+                    auto ret = problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
                            && problem.c().dataType() == value[2]
-                           && problem.d().dataType() == value[3]
-                           && problem.computeInputTypeA() == value[4]
-                           && problem.computeInputTypeB() == value[5];
+                           && problem.d().dataType() == value[3];
+
+                    using MyType = std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2>;
+                    std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2> ciA =
+                    {{
+                        {rocisa::DataType::BFloat8_fnuz, rocisa::DataType::BFloat8Float8_fnuz},
+                        {rocisa::DataType::Float8_fnuz,  rocisa::DataType::Float8BFloat8_fnuz},
+                    }};
+
+                    std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2> ciB =
+                    {{
+                        {rocisa::DataType::Float8_fnuz,  rocisa::DataType::BFloat8Float8_fnuz},
+                        {rocisa::DataType::BFloat8_fnuz, rocisa::DataType::Float8BFloat8_fnuz},
+                    }};
+
+                    auto check = [](MyType const& arr, rocisa::DataType const& t1, rocisa::DataType const& t2){
+                        if(t1 == t2)
+                            return true;
+                        return std::any_of(arr.begin(), arr.end(), [&](const auto& p){
+                                return (p == std::make_pair(t1, t2)) or (p == std::make_pair(t2, t1));
+                        });
+                    };
+
+                    ret = ret &&
+                          check(ciA, problem.computeInputTypeA(), value[4]) &&
+                          check(ciB, problem.computeInputTypeB(), value[5]);
+
+                    return ret;
+
+                    //return problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
+                    //       && problem.c().dataType() == value[2]
+                    //       && problem.d().dataType() == value[3]
+                    //       && problem.computeInputTypeA() == value[4]
+                    //       && problem.computeInputTypeB() == value[5];
                 }
 
                 virtual std::string toString() const override
