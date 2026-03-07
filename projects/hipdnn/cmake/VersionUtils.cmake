@@ -27,7 +27,7 @@ function(hipdnn_setup_version COMPONENT_NAME)
     # Get git commit hash for tweak version
     execute_process(
         COMMAND git rev-parse --short HEAD
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         OUTPUT_VARIABLE ${COMPONENT_NAME_UPPER}_VERSION_TWEAK
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET

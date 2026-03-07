@@ -71,6 +71,8 @@
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleDequantizeAttributes.hpp>
+#include <hipdnn_frontend/attributes/BlockScaleQuantizeAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
@@ -79,16 +81,21 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/EngineOverrideUtils.hpp>
 #include <hipdnn_frontend/detail/GraphDetail.hpp>
+#include <hipdnn_frontend/detail/GraphPacker.hpp>
+#include <hipdnn_frontend/detail/KnobPacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
 #include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
 #include <hipdnn_frontend/node/BatchnormNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleDequantizeNode.hpp>
+#include <hipdnn_frontend/node/BlockScaleQuantizeNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
@@ -97,6 +104,7 @@
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
+#include <hipdnn_frontend/node/SdpaFpropNode.hpp>
 #include <hipdnn_frontend/node/detail/TopologicalSortingUtils.hpp>
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 #include <hipdnn_data_sdk/utilities/json/Graph.hpp>
@@ -145,6 +153,66 @@ private:
             return engineId;
         }();
         return s_defaultId;
+    }
+
+    // TODO: Remove this feature flag once all operation types support descriptor-based
+    // lowering and the flatbuffer path is no longer needed.
+    static bool useDescriptorApi()
+    {
+        static const bool s_useDescriptorApi
+            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_USE_DESCRIPTOR_API") == "1";
+        return s_useDescriptorApi;
+    }
+
+    /// Apply validated knob settings to the engine config descriptor, using
+    /// either the descriptor-based or FlatBuffer serialization path depending
+    /// on the HIPDNN_USE_DESCRIPTOR_API feature flag.
+    Error applyKnobSettingsToEngineConfig(const std::vector<KnobSetting>& validatedSettings)
+    {
+        if(validatedSettings.empty())
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        if(useDescriptorApi())
+        {
+            HIPDNN_FE_LOG_INFO("Using descriptor-based API for knob settings");
+            return detail::applyKnobSettingsViaDescriptors(_engineConfigDesc->get(),
+                                                           validatedSettings);
+        }
+
+        // FlatBuffer serialization path (existing default)
+        std::vector<flatbuffers::DetachedBuffer> knobBuffers;
+        knobBuffers.reserve(validatedSettings.size());
+
+        for(const auto& setting : validatedSettings)
+        {
+            flatbuffers::FlatBufferBuilder builder;
+            auto knobSettingOffset = setting.packKnobSetting(builder);
+            builder.Finish(knobSettingOffset);
+            knobBuffers.push_back(builder.Release());
+        }
+
+        std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray;
+        flatbufferDataArray.reserve(knobBuffers.size());
+
+        for(const auto& buffer : knobBuffers)
+        {
+            hipdnnBackendFlatbufferData_t fbData;
+            fbData.ptr = buffer.data();
+            fbData.size = buffer.size();
+            flatbufferDataArray.push_back(fbData);
+        }
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             _engineConfigDesc->get(),
+                                             HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
+                                             HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+                                             static_cast<int64_t>(flatbufferDataArray.size()),
+                                             flatbufferDataArray.data()),
+                                         "Failed to set knob settings on engine config.");
+
+        return {ErrorCode::OK, ""};
     }
 
     void assignUnsetTensorUids()
@@ -621,6 +689,18 @@ private:
                         std::make_shared<MatmulNode>(std::move(attr), graph_attributes));
                     break;
                 }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
+                {
+                    auto attr = SdpaAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_SdpaAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(
+                        std::make_shared<SdpaFpropNode>(std::move(attr), graph_attributes));
+                    break;
+                }
                 case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
                 {
                     auto attr = LayernormAttributes::fromFlatBuffer(
@@ -643,6 +723,30 @@ private:
                     }
                     _sub_nodes.emplace_back(
                         std::make_shared<RMSNormNode>(std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
+                {
+                    auto attr = BlockScaleDequantizeAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_BlockScaleDequantizeAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(std::make_shared<BlockScaleDequantizeNode>(
+                        std::move(attr), graph_attributes));
+                    break;
+                }
+                case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+                {
+                    auto attr = BlockScaleQuantizeAttributes::fromFlatBuffer(
+                        fbNode->attributes_as_BlockScaleQuantizeAttributes(), tensorMap);
+                    if(fbNode->name() != nullptr)
+                    {
+                        attr.set_name(fbNode->name()->str());
+                    }
+                    _sub_nodes.emplace_back(std::make_shared<BlockScaleQuantizeNode>(
+                        std::move(attr), graph_attributes));
                     break;
                 }
                 default:
@@ -677,6 +781,11 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Creating new Graph instance");
     }
+
+    // Copy operations disabled via INode base class
+    // Move operations defaulted - automatically handles all members
+    Graph(Graph&&) = default;
+    Graph& operator=(Graph&&) = default;
 
     /**
      * @brief Validate the graph structure and tensor configurations
@@ -820,6 +929,11 @@ public:
      */
     Error build_operation_graph(hipdnnHandle_t handle) // NOLINT(readability-identifier-naming)
     {
+        if(useDescriptorApi())
+        {
+            return build_operation_graph_via_descriptors(handle);
+        }
+
         HIPDNN_FE_LOG_INFO("Building operation graph " << graph_attributes.get_name());
 
         if(!_preferredEngineId.has_value())
@@ -853,6 +967,71 @@ public:
         return {ErrorCode::OK, ""};
     }
 
+protected:
+    // Returns the raw backend graph descriptor, or nullptr if the graph has not been built.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    hipdnnBackendDescriptor_t get_raw_graph_descriptor() const
+    {
+        return _graphDesc ? _graphDesc->get() : nullptr;
+    }
+
+    /// Builds the operation graph using the backend descriptor C API.
+    /// Each node creates its operation descriptor(s) via virtual dispatch,
+    /// then the GraphDescriptor is assembled and finalized.
+    ///
+    /// NOTE: This method is intentionally not yet exposed publicly. It will replace
+    /// the FlatBuffer-based build_operation_graph() once all operation types are implemented.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error build_operation_graph_via_descriptors(hipdnnHandle_t handle)
+    {
+        HIPDNN_FE_LOG_INFO("Building operation graph via descriptors "
+                           << graph_attributes.get_name());
+
+        assignUnsetTensorUids();
+
+        if(!_preferredEngineId.has_value())
+        {
+            _preferredEngineId
+                = hipdnn_frontend::engine_override::getPreferredIdFromOverrideConfig(*this);
+        }
+
+        // Collect all tensor descriptors (keyed by UID for deduplication)
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+
+        // Collect operation descriptors
+        std::vector<detail::ScopedHipdnnBackendDescriptor> operations;
+
+        // Each node creates its operation descriptor(s) via virtual dispatch
+        for(const auto& node : _sub_nodes)
+        {
+            HIPDNN_CHECK_ERROR(node->create_operation(tensorDescs, operations));
+        }
+
+        if(operations.empty())
+        {
+            return {ErrorCode::INVALID_VALUE, "No operations created for graph"};
+        }
+
+        // Assemble the graph descriptor from operations
+        auto computeDt = toHipdnnDataType(graph_attributes.get_compute_data_type());
+        auto intermediateDt = toHipdnnDataType(graph_attributes.get_intermediate_data_type());
+        auto ioDt = toHipdnnDataType(graph_attributes.get_io_data_type());
+        if(!computeDt || !intermediateDt || !ioDt)
+        {
+            return {ErrorCode::INVALID_VALUE, "Unsupported data type in graph attributes"};
+        }
+        HIPDNN_CHECK_ERROR(detail::assembleGraphDescriptor(operations,
+                                                           handle,
+                                                           *computeDt,
+                                                           *intermediateDt,
+                                                           *ioDt,
+                                                           _preferredEngineId,
+                                                           _graphDesc));
+
+        return {ErrorCode::OK, ""};
+    }
+
+public:
     /**
      * @brief Get available configuration knobs for a specific engine
      * @param engineId The engine ID to query
@@ -959,7 +1138,7 @@ public:
     /**
      * @brief Create an execution plan with specific engine and knob settings
      * @param engineId The engine ID to use
-     * @param settings Vector of KnobSetting objects to configure the engine
+     * @param settings Vector of KnobSetting objects to configure the engine (max 1024)
      * @return Error indicating success or failure
      *
      * This method allows fine-grained control over engine selection and
@@ -1008,38 +1187,7 @@ public:
             validatedSettings.emplace_back(setting);
         }
 
-        if(!validatedSettings.empty())
-        {
-            std::vector<flatbuffers::DetachedBuffer> knobBuffers;
-            knobBuffers.reserve(validatedSettings.size());
-
-            for(const auto& setting : validatedSettings)
-            {
-                flatbuffers::FlatBufferBuilder builder;
-                auto knobSettingOffset = setting.packKnobSetting(builder);
-                builder.Finish(knobSettingOffset);
-                knobBuffers.push_back(builder.Release());
-            }
-
-            std::vector<hipdnnBackendFlatbufferData_t> flatbufferDataArray;
-            flatbufferDataArray.reserve(knobBuffers.size());
-
-            for(const auto& buffer : knobBuffers)
-            {
-                hipdnnBackendFlatbufferData_t fbData;
-                fbData.ptr = buffer.data();
-                fbData.size = buffer.size();
-                flatbufferDataArray.push_back(fbData);
-            }
-
-            HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
-                                                 _engineConfigDesc->get(),
-                                                 HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT,
-                                                 HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-                                                 static_cast<int64_t>(flatbufferDataArray.size()),
-                                                 flatbufferDataArray.data()),
-                                             "Failed to set knob settings on engine config.");
-        }
+        HIPDNN_CHECK_ERROR(applyKnobSettingsToEngineConfig(validatedSettings));
 
         // Finalize engine config after knobs have been set
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -1311,7 +1459,8 @@ public:
     /**
      * @brief Execute the graph with tensor pointers mapped by tensor handles
      * @param handle The hipDNN handle
-     * @param tensorLookup Map from std::shared_ptr<TensorAttributes> (tensor handles) to device memory pointers
+     * @param tensorLookup Map from std::shared_ptr<TensorAttributes> (tensor handles) to device
+     * memory pointers
      * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
      * @return Error indicating success or failure
      *
@@ -1682,6 +1831,54 @@ public:
         return {y, invRmsOut};
     }
 
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        block_scale_dequantize(std::shared_ptr<TensorAttributes> x,
+                               std::shared_ptr<TensorAttributes> scale,
+                               BlockScaleDequantizeAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BlockScaleDequantize_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_y(y);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<BlockScaleDequantizeNode>(std::move(attributes), graph_attributes));
+
+        return y;
+    }
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 2>
+        block_scale_quantize(std::shared_ptr<TensorAttributes> x,
+                             BlockScaleQuantizeAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("BlockScaleQuantize_" + std::to_string(_sub_nodes.size()));
+        }
+
+        auto y = outputTensor(attributes.get_name() + "::Y");
+        auto scale = outputTensor(attributes.get_name() + "::Scale");
+
+        attributes.set_x(std::move(x));
+        attributes.set_y(y);
+        attributes.set_scale(scale);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<BlockScaleQuantizeNode>(std::move(attributes), graph_attributes));
+
+        return {y, scale};
+    }
+
     std::shared_ptr<TensorAttributes> pointwise(std::shared_ptr<TensorAttributes> in0,
                                                 PointwiseAttributes attributes)
 
@@ -1796,6 +1993,52 @@ public:
             std::make_shared<MatmulNode>(std::move(attributes), graph_attributes));
 
         return c;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 2> sdpa(std::shared_ptr<TensorAttributes> q,
+                                                          std::shared_ptr<TensorAttributes> k,
+                                                          std::shared_ptr<TensorAttributes> v,
+                                                          SdpaAttributes attributes)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("SdpaFprop_" + std::to_string(_sub_nodes.size()));
+        }
+        if(q->get_name().empty())
+        {
+            q->set_name(attributes.get_name() + "::Q");
+        }
+        if(k->get_name().empty())
+        {
+            k->set_name(attributes.get_name() + "::K");
+        }
+        if(v->get_name().empty())
+        {
+            v->set_name(attributes.get_name() + "::V");
+        }
+
+        auto o = outputTensor(attributes.get_name() + "::O");
+        std::array<std::shared_ptr<TensorAttributes>, 2> ret = {o, nullptr};
+
+        attributes.set_q(std::move(q));
+        attributes.set_k(std::move(k));
+        attributes.set_v(std::move(v));
+        attributes.set_o(o);
+
+        if(attributes.generate_stats.has_value() && attributes.generate_stats.value())
+        {
+            HIPDNN_FE_LOG_INFO("SDPA node '" << attributes.get_name()
+                                             << "' is configured to generate stats output.");
+            auto stats = outputTensor(attributes.get_name() + "::STATS");
+            attributes.set_stats(stats);
+            ret[1] = stats;
+        }
+
+        _sub_nodes.emplace_back(
+            std::make_shared<SdpaFpropNode>(std::move(attributes), graph_attributes));
+
+        return ret;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

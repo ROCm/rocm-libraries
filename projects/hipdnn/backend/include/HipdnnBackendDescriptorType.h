@@ -151,4 +151,45 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
 
+    /**
+     * @brief Convolution backward filter operation descriptor
+     *
+     * Represents a backward filter convolution operation with input (X),
+     * output gradient (DY), and weight gradient (DW) tensors plus
+     * convolution parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
+
+    /**
+     * @brief Batch normalization inference operation descriptor
+     *
+     * Represents a batch normalization inference operation with input (X),
+     * mean, inverse variance, scale, bias, and output (Y) tensors.
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT,
+
+    /**
+     * @brief Convolution backward data (Dgrad) operation descriptor
+     *
+     * Represents a backward data convolution operation with output gradient (DY),
+     * weight (W), and input gradient (DX) tensors plus convolution parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR,
+
+    /**
+     * @brief Batchnorm backward operation descriptor (extension)
+     *
+     * Represents a backward batch normalization operation computing gradients
+     * with respect to input (DX), scale (DScale), and bias (DBias).
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT,
+
+    /**
+     * @brief Batchnorm inference variance ext operation descriptor
+     *
+     * Represents a batch normalization inference operation (variance ext variant)
+     * with input (X), mean, variance, scale, bias, epsilon, and output (Y) tensors.
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT,
+
 } hipdnnBackendDescriptorType_t;

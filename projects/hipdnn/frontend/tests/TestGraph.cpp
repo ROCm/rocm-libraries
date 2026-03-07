@@ -9,21 +9,46 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
+#include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
+#include "fake_backend/BackendTestMatchers.hpp"
 #include "fake_backend/MockHipdnnBackend.hpp"
+
+#include <algorithm>
+#include <cstring>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using namespace hipdnn_frontend::test;
+using namespace hipdnn_tests::constants;
+using hipdnn_tests::toVec;
 using namespace ::testing;
 
 namespace hipdnn_frontend
 {
 
-// Utility class to access private members of Graph for testing purposes
+// Static assert checks to verify Move and Copy semantics
+// Ensure INode cannot be copied, only moved
+static_assert(!std::is_copy_constructible_v<INode>, "INode must not be copy constructible");
+static_assert(!std::is_copy_assignable_v<INode>, "INode must not be copy assignable");
+
+// Ensure Graph cannot be copied, only moved (inherits deleted copy from INode or explicitly deleted)
+static_assert(!std::is_copy_constructible_v<Graph>, "Graph must not be copy constructible");
+static_assert(!std::is_copy_assignable_v<Graph>, "Graph must not be copy assignable");
+
+// Optional: Explicitly verify that move semantics ARE available
+static_assert(std::is_move_constructible_v<Graph>, "Graph must be move constructible");
+static_assert(std::is_move_assignable_v<Graph>, "Graph must be move assignable");
+
+// Utility class to access private/protected members of Graph for testing purposes
 class GraphTestUtils : public Graph
 {
 public:
     GraphTestUtils() = default;
+
+    using Graph::build_operation_graph_via_descriptors;
 
     std::vector<std::shared_ptr<INode>>& getPrivateGraphSubnodes()
     {
@@ -1994,6 +2019,110 @@ TEST_F(TestGraph, WillCorrectlyBuildOperationGraphDescriptor)
 
     auto result = graph.build_operation_graph(_handle);
     EXPECT_TRUE(result.is_good());
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenNodeFails)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.set_name("FailTest").set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_TENSOR_X_UID)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_X_DIMS))
+        .set_stride(toVec(K_TENSOR_X_STRIDES));
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(K_TENSOR_W_UID)
+        .set_name("W")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_W_DIMS))
+        .set_stride(toVec(K_TENSOR_W_STRIDES));
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_x(x);
+    convAttrs.set_w(w);
+    convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+
+    graph.conv_fprop(x, w, convAttrs);
+
+    // All descriptor creation fails
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsWhenGraphCreateFails)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    graph.set_name("GraphCreateFail")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_TENSOR_X_UID)
+        .set_name("X")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_X_DIMS))
+        .set_stride(toVec(K_TENSOR_X_STRIDES));
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(K_TENSOR_W_UID)
+        .set_name("W")
+        .set_data_type(DataType::FLOAT)
+        .set_dim(toVec(K_TENSOR_W_DIMS))
+        .set_stride(toVec(K_TENSOR_W_STRIDES));
+
+    ConvFpropAttributes convAttrs;
+    convAttrs.set_x(x);
+    convAttrs.set_w(w);
+    convAttrs.set_compute_data_type(DataType::FLOAT);
+    convAttrs.set_pre_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+
+    graph.conv_fprop(x, w, convAttrs);
+
+    // Validate graph to propagate graph-level attributes (e.g. io_data_type)
+    // to node/tensor attributes, matching the real build() flow
+    ASSERT_TRUE(graph.validate().is_good());
+
+    // Tensor/operation descriptors succeed, but graph descriptor creation fails
+    EXPECT_CALL(*_mockBackend,
+                backendCreateDescriptor(Ne(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR), _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, BuildOperationGraphViaDescriptorsFailsOnEmptyGraph)
+{
+    GraphTestUtils graph;
+    graph.set_name("EmptyGraph").set_compute_data_type(DataType::FLOAT);
+
+    auto result = graph.build_operation_graph_via_descriptors(_handle);
+    EXPECT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST_F(TestGraph, CreatingExecutionPlansFailsWithNoGraph)
@@ -6103,6 +6232,145 @@ TEST_F(TestGraph, GetRankedEngineIdsFailsWhenHeuristicCreationFails)
               std::string::npos);
 }
 
+// ============================================================================
+// Move Semantics Tests
+// ============================================================================
+
+TEST_F(TestGraph, MoveConstruction)
+{
+    Graph originalGraph;
+    originalGraph.set_name("OriginalGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Move construct
+    Graph movedGraph(std::move(originalGraph));
+
+    // Verify moved graph has the original state
+    EXPECT_EQ(movedGraph.get_name(), "OriginalGraph");
+    EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
+    EXPECT_EQ(originalGraph.get_name(), "");
+    EXPECT_TRUE(originalGraph.getTensorsByName().empty());
+}
+
+TEST_F(TestGraph, MoveAssignment)
+{
+    Graph originalGraph;
+    originalGraph.set_name("OriginalGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::HALF)
+        .set_io_data_type(DataType::FLOAT);
+
+    Graph movedGraph;
+    movedGraph.set_name("TargetGraph");
+
+    // Move assign
+    movedGraph = std::move(originalGraph);
+
+    // Verify moved graph has the original state
+    EXPECT_EQ(movedGraph.get_name(), "OriginalGraph");
+    EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
+}
+
+TEST_F(TestGraph, MoveConstructionWithNodes)
+{
+    Graph originalGraph;
+    originalGraph.set_name("GraphWithNodes")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Add a batchnorm node to the graph
+    auto y = createBasicBatchnormGraph(originalGraph);
+    EXPECT_NE(y, nullptr);
+
+    // Get tensor count before move
+    auto tensorsBeforeMove = originalGraph.getTensorsByName();
+    size_t tensorCountBeforeMove = tensorsBeforeMove.size();
+    EXPECT_GT(tensorCountBeforeMove, 0);
+
+    // Move construct
+    Graph movedGraph(std::move(originalGraph));
+
+    // Verify moved graph has the nodes
+    auto tensorsAfterMove = movedGraph.getTensorsByName();
+    EXPECT_EQ(tensorsAfterMove.size(), tensorCountBeforeMove);
+
+    // Verify graph name was moved
+    EXPECT_EQ(movedGraph.get_name(), "SerializedGraphTest");
+}
+
+TEST_F(TestGraph, MoveAssignmentWithNodes)
+{
+    Graph originalGraph;
+    originalGraph.set_name("GraphWithNodes")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    // Add a batchnorm node to the graph
+    auto y = createBasicBatchnormGraph(originalGraph);
+    EXPECT_NE(y, nullptr);
+
+    // Get tensor count before move
+    auto tensorsBeforeMove = originalGraph.getTensorsByName();
+    size_t tensorCountBeforeMove = tensorsBeforeMove.size();
+    EXPECT_GT(tensorCountBeforeMove, 0);
+
+    Graph movedGraph;
+    movedGraph.set_name("TargetGraph");
+
+    // Move assign
+    movedGraph = std::move(originalGraph);
+
+    // Verify moved graph has the nodes
+    auto tensorsAfterMove = movedGraph.getTensorsByName();
+    EXPECT_EQ(tensorsAfterMove.size(), tensorCountBeforeMove);
+
+    // Verify graph name was moved
+    EXPECT_EQ(movedGraph.get_name(), "SerializedGraphTest");
+}
+
+TEST_F(TestGraph, MoveConstructionWithPreferredEngineId)
+{
+    Graph originalGraph;
+    originalGraph.set_name("GraphWithEngineId")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_preferred_engine_id_ext(42);
+
+    EXPECT_TRUE(originalGraph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(originalGraph.get_preferred_engine_id_ext().value(), 42);
+
+    // Move construct
+    Graph movedGraph(std::move(originalGraph));
+
+    // Verify preferred engine id was moved
+    EXPECT_TRUE(movedGraph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(movedGraph.get_preferred_engine_id_ext().value(), 42);
+}
+
+TEST_F(TestGraph, MoveAssignmentToEmptyGraph)
+{
+    Graph sourceGraph;
+    sourceGraph.set_name("SourceGraph").set_compute_data_type(DataType::FLOAT);
+
+    Graph targetGraph;
+    // Target starts empty
+    EXPECT_EQ(targetGraph.get_name(), "");
+
+    // Move assign
+    targetGraph = std::move(sourceGraph);
+
+    // Target now has source's state
+    EXPECT_EQ(targetGraph.get_name(), "SourceGraph");
+    EXPECT_EQ(targetGraph.get_compute_data_type(), DataType::FLOAT);
+}
+
 // ── Engine Override Config integration ───────────────────────────────────────
 
 // Helper: build a conv_fprop graph with fixed tensor dims (x={1,3,32,32}, w={64,3,3,3})
@@ -6229,4 +6497,202 @@ TEST_F(TestGraph, EngineOverrideConfigFromContentMatchesConvFpropGraph)
     auto x8 = std::make_shared<TensorAttributes>();
     x8->set_dim({8, 3, 32, 32}).set_data_type(DataType::FLOAT);
     EXPECT_FALSE(config->matchOperation("conv_fprop", {x8, w}).has_value());
+}
+
+TEST_F(TestGraph, SdpaFpropNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNode");
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+
+    EXPECT_EQ(o->get_name(), "SdpaNode::O");
+    EXPECT_TRUE(o->get_is_virtual());
+    EXPECT_EQ(stats, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, SdpaFpropNodeCreationWithStats)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNodeStats");
+    attributes.set_generate_stats(true);
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+
+    EXPECT_EQ(o->get_name(), "SdpaNodeStats::O");
+    EXPECT_TRUE(o->get_is_virtual());
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(stats->get_name(), "SdpaNodeStats::STATS");
+    EXPECT_TRUE(stats->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraph)
+{
+    Graph graph;
+    graph.set_name("SerializedSdpaGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_uid(1)
+        .set_name("Q")
+        .set_dim({2, 8, 16, 64})
+        .set_stride({8192, 1024, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_uid(2)
+        .set_name("K")
+        .set_dim({2, 8, 32, 64})
+        .set_stride({16384, 2048, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_uid(3)
+        .set_name("V")
+        .set_dim({2, 8, 32, 64})
+        .set_stride({16384, 2048, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaNode");
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedSdpaGraph");
+    EXPECT_EQ(deserializedGraph->compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
+    // 4 tensors: Q, K, V, O (no stats since generate_stats not set)
+    EXPECT_EQ(deserializedGraph->tensors.size(), 4);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::data_objects::TensorAttributesT> tensorLookup;
+    for(auto& tensor : deserializedGraph->tensors)
+    {
+        tensorLookup[tensor->uid] = *tensor;
+    }
+
+    validateTensor(*q, tensorLookup[q->get_uid()]);
+    validateTensor(*k, tensorLookup[k->get_uid()]);
+    validateTensor(*v, tensorLookup[v->get_uid()]);
+    validateTensor(*o, tensorLookup[o->get_uid()]);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "SdpaNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes);
+    auto deserializedSdpaAttributes = deserializedGraph->nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(deserializedSdpaAttributes, nullptr);
+    EXPECT_EQ(deserializedSdpaAttributes->q_tensor_uid, q->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->k_tensor_uid, k->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->v_tensor_uid, v->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->o_tensor_uid, o->get_uid());
+    EXPECT_FALSE(deserializedSdpaAttributes->stats_tensor_uid.has_value());
+}
+
+TEST_F(TestGraph, BuildAndSerializeSdpaFpropGraphWithStats)
+{
+    Graph graph;
+    graph.set_name("SerializedSdpaStatsGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_uid(1)
+        .set_name("Q")
+        .set_dim({2, 8, 16, 64})
+        .set_stride({8192, 1024, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_uid(2)
+        .set_name("K")
+        .set_dim({2, 8, 32, 64})
+        .set_stride({16384, 2048, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_uid(3)
+        .set_name("V")
+        .set_dim({2, 8, 32, 64})
+        .set_stride({16384, 2048, 64, 1})
+        .set_data_type(DataType::FLOAT);
+
+    SdpaAttributes attributes;
+    attributes.set_name("SdpaStatsNode");
+    attributes.set_generate_stats(true);
+
+    auto [o, stats] = graph.sdpa(q, k, v, attributes);
+    ASSERT_NE(stats, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+
+    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> deserializedGraph;
+    expectGraphSerializedToBackendDescriptor(deserializedGraph);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_EQ(deserializedGraph->name, "SerializedSdpaStatsGraph");
+    // 5 tensors: Q, K, V, O, STATS
+    EXPECT_EQ(deserializedGraph->tensors.size(), 5);
+    EXPECT_EQ(deserializedGraph->nodes.size(), 1);
+
+    EXPECT_EQ(deserializedGraph->nodes[0]->name, "SdpaStatsNode");
+    EXPECT_EQ(deserializedGraph->nodes[0]->attributes.type,
+              hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes);
+    auto deserializedSdpaAttributes = deserializedGraph->nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(deserializedSdpaAttributes, nullptr);
+    EXPECT_EQ(deserializedSdpaAttributes->q_tensor_uid, q->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->k_tensor_uid, k->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->v_tensor_uid, v->get_uid());
+    EXPECT_EQ(deserializedSdpaAttributes->o_tensor_uid, o->get_uid());
+    ASSERT_TRUE(deserializedSdpaAttributes->stats_tensor_uid.has_value());
+    EXPECT_EQ(deserializedSdpaAttributes->stats_tensor_uid.value(), stats->get_uid());
+    ASSERT_TRUE(deserializedSdpaAttributes->generate_stats.has_value());
+    EXPECT_TRUE(deserializedSdpaAttributes->generate_stats.value());
 }

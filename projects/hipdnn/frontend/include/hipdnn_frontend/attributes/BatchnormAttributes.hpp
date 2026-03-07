@@ -30,8 +30,14 @@ namespace hipdnn_frontend::graph
  * This operation normalizes the input tensor across the batch dimension and
  * computes running statistics for inference.
  *
+ * **Tensor Shapes:**
+ * - **X** (input): `(N, C, H, W)` or `(N, C, D, H, W)` — batch, channels, spatial dims
+ * - **Scale, Bias**: `(1, C, 1, 1)` or `(1, C, 1, 1, 1)` — per-channel parameters
+ * - **Y** (output): Same shape as X
+ * - **Mean, Inv_variance**: `(1, C, 1, 1)` or `(1, C, 1, 1, 1)` — per-channel statistics
+ *
  * **Required inputs:**
- * - X: Input tensor to normalize (NCHW format)
+ * - X: Input tensor to normalize
  * - Scale: Per-channel scale (gamma) tensor
  * - Bias: Per-channel bias (beta) tensor
  *

@@ -39,6 +39,7 @@
 #include "../test/random.hpp"
 #include "../test/fusionHost.hpp"
 
+#include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
@@ -305,8 +306,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::GetandSetData()
     }
     else
     {
-        std::cout << "\nUnknown batch norm state!\n";
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Unknown batch norm state");
     }
     return miopenStatusSuccess;
 }
@@ -425,8 +425,7 @@ bool BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::ChkLayout_ShortName(
     }
     else
     {
-        std::cerr << "Error:Invalid Short Name for layout!" << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Short Name for layout!");
     }
 }
 
@@ -436,14 +435,13 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::ValidateLayoutInputP
 {
     if(!ChkLayout_ShortName())
     {
-        std::cerr << "Invalid Layout Short Name = " << inflags.FindShortName("layout") << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     std::string("Invalid Layout Short Name = ") + inflags.FindShortName("layout"));
     }
     if((layout_value.compare("NCHW") != 0) && (layout_value.compare("NHWC") != 0) &&
        (layout_value.compare("NCDHW") != 0) && (layout_value.compare("NDHWC") != 0))
     {
-        std::cerr << "Invalid Layout Parameter Value - " << layout_value << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Layout Parameter Value - " + layout_value);
     }
 }
 
@@ -489,8 +487,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     }
     else
     {
-        std::cout << "Cannot handle layout : " << layout << "\n";
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Cannot handle layout: " + layout);
     }
 
     // batch norm mode type
@@ -504,8 +501,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     }
     else
     {
-        printf("Incorrect Batch Normalization Mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization Mode");
     }
 
     // save off mean and variance?
@@ -519,8 +515,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     }
     else
     {
-        printf("Incorrect Batch Normalization Save mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization Save mode");
     }
 
     // keep running mean and variance
@@ -534,22 +529,20 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     }
     else
     {
-        printf("Incorrect Batch Normalization Running mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization Running mode");
     }
 
     forw = inflags.GetValueInt("forw");
     if(forw > 2)
     {
-        printf("Incorrect Batch Normalization forward mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization forward mode");
     }
 
     back = inflags.GetValueInt("back");
     if(back > 1)
     {
-        printf("Incorrect Batch Normalization backwards propagation mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Incorrect Batch Normalization backwards propagation mode");
     }
 
     if(back && forw)
@@ -915,14 +908,14 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrain(Tref 
         if(usePingPongBuffers)
         {
             // copy data from current running mean/var to previous running mean/var
-            hipMemcpy(prevRunMean.GetDevicePtr(),
-                      runMean.GetDevicePtr(),
-                      runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
-                      hipMemcpyDeviceToDevice);
-            hipMemcpy(prevRunVariance.GetDevicePtr(),
-                      runVariance.GetDevicePtr(),
-                      runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
-                      hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunMean.GetDevicePtr(),
+                            runMean.GetDevicePtr(),
+                            runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunVariance.GetDevicePtr(),
+                            runVariance.GetDevicePtr(),
+                            runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
             // not required, but just in case for consistency
             prevRunMean.CopyFromDeviceToHost(GetStream());
             prevRunVariance.CopyFromDeviceToHost(GetStream());
@@ -1001,14 +994,14 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrain(Tref 
         if(usePingPongBuffers)
         {
             // copy data from current running mean/var to previous running mean/var
-            hipMemcpy(prevRunMean.GetDevicePtr(),
-                      runMean.GetDevicePtr(),
-                      runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
-                      hipMemcpyDeviceToDevice);
-            hipMemcpy(prevRunVariance.GetDevicePtr(),
-                      runVariance.GetDevicePtr(),
-                      runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
-                      hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunMean.GetDevicePtr(),
+                            runMean.GetDevicePtr(),
+                            runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunVariance.GetDevicePtr(),
+                            runVariance.GetDevicePtr(),
+                            runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
             // not required, but just in case for consistency
             prevRunMean.CopyFromDeviceToHost(GetStream());
             prevRunVariance.CopyFromDeviceToHost(GetStream());
@@ -1437,9 +1430,8 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runCPUFwdInference(T
     }
     else
     {
-        printf("Something went wrong.\nBad batch normalization mode in host kernel "
-               "selection.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Bad batch normalization mode in host kernel selection");
     }
     return;
 }
@@ -1516,9 +1508,8 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runCPUFwdTrain(Tref 
     }
     else
     {
-        printf("Something went wrong.\nBad batch normalization mode in host kernel "
-               "selection.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Bad batch normalization mode in host kernel selection");
     }
 }
 
@@ -1544,8 +1535,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardCPU()
     }
     else
     {
-        printf("Unsupported forward cpu run state.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Unsupported forward cpu run state");
     }
 
     return miopenStatusSuccess;
@@ -2068,9 +2058,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
     }
     else
     {
-        printf("Something went wrong.\nBad batch normalization mode in host kernel "
-               "selection.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Bad batch normalization mode in host kernel selection");
     }
 
     return miopenStatusSuccess;

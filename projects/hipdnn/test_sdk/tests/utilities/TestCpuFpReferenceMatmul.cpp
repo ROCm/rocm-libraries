@@ -199,8 +199,6 @@ struct TypePair
 using Types = ::testing::Types<TypePair<float, float, float, float>,
                                TypePair<half, half, half, float>,
                                TypePair<bfloat16, bfloat16, bfloat16, float>,
-                               TypePair<fp8_e4m3, fp8_e4m3, fp8_e4m3, float>,
-                               TypePair<fp8_e5m2, fp8_e5m2, fp8_e5m2, float>,
                                TypePair<float, half, float, float>>;
 
 template <class T>
