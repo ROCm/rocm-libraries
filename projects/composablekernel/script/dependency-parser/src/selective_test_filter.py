@@ -34,10 +34,8 @@ import os
 def get_changed_files(ref1, ref2, project: str = None):
     """Return a set of files changed between two git refs."""
     try:
+        # Don't use git path filter - it can miss files when running from subdirectories
         cmd = ["git", "diff", "--name-only", ref1, ref2]
-        if project:
-            # Scope git diff to only this project's subtree for efficiency
-            cmd += ["--", f"projects/{project}/"]
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -51,6 +49,7 @@ def get_changed_files(ref1, ref2, project: str = None):
             files = raw_files
             print(f"Identified {len(files)} modified files")
         else:
+            # Strip projects/{project}/ prefix from changed files
             root = f"projects/{project}/"
             root_len = len(root)
             files = set()
@@ -73,8 +72,15 @@ def load_depmap(depmap_json):
         data = json.load(f)
     # Support both old and new formats
     json_project = None
-    if "repo" in data and data["repo"]["type"] == "monorepo":
-        json_project = data["repo"]["project"]
+    if "repo" in data:
+        if data["repo"]["type"] == "monorepo":
+            json_project = data["repo"]["project"]
+        elif "workspace_root" in data["repo"]:
+            # Extract project from workspace_root path
+            workspace_root = data["repo"]["workspace_root"]
+            # If workspace_root is like /path/to/projects/composablekernel, extract composablekernel
+            if "/projects/" in workspace_root:
+                json_project = workspace_root.split("/projects/")[1].rstrip("/")
     if "file_to_executables" in data:
         return data["file_to_executables"], json_project
     return data, json_project
@@ -88,7 +94,7 @@ def select_tests(file_to_executables, changed_files, filter_mode):
             for exe in file_to_executables[f]:
                 if filter_mode == "all":
                     affected.add(exe)
-                elif filter_mode == "test_prefix" and exe.startswith("test_"):
+                elif filter_mode == "test_prefix" and ("test_" in exe or exe.startswith("test_")):
                     affected.add(exe)
     return sorted(affected)
 
