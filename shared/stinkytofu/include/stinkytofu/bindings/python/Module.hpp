@@ -34,25 +34,28 @@
  * @brief Define the options for the ModuleOptions struct
  * @note This macro is used to define the options for the ModuleOptions struct
  */
-#define MODULE_OPTIONS_LIST(X)     \
-    X(dumpIRBetweenPasses, bool)   \
-    X(OptLevel, int)               \
-    X(TileA0, int)                 \
-    X(TileB0, int)                 \
-    X(TileM0, int)                 \
-    X(NumGRA, uint32_t)            \
-    X(NumGRB, uint32_t)            \
-    X(NumGRM, uint32_t)            \
-    X(wavefrontSize, int)          \
-    X(SubGroup0, int)              \
-    X(SubGroup1, int)              \
-    X(VectorWidthA, int)           \
-    X(VectorWidthB, int)           \
-    X(GlobalReadVectorWidthA, int) \
-    X(GlobalReadVectorWidthB, int) \
-    X(DirectToLdsA, bool)          \
-    X(DirectToLdsB, bool)          \
-    X(UseSgprForGRO, int)
+#define MODULE_OPTIONS_LIST(X)      \
+    X(DebugLevel, int)              \
+    X(OptLevel, int)                \
+    X(TileA0, int)                  \
+    X(TileB0, int)                  \
+    X(TileM0, int)                  \
+    X(NumGRA, uint32_t)             \
+    X(NumGRB, uint32_t)             \
+    X(NumGRM, uint32_t)             \
+    X(wavefrontSize, int)           \
+    X(SubGroup0, int)               \
+    X(SubGroup1, int)               \
+    X(VectorWidthA, int)            \
+    X(VectorWidthB, int)            \
+    X(GlobalReadVectorWidthA, int)  \
+    X(GlobalReadVectorWidthB, int)  \
+    X(DirectToLdsA, bool)           \
+    X(DirectToLdsB, bool)           \
+    X(UseSgprForGRO, int)           \
+    X(PrintBeforePass, std::string) \
+    X(PrintAfterPass, std::string)  \
+    X(DebugPass, std::string)
 
 namespace stinkytofu
 {

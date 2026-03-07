@@ -35,8 +35,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_CorrectWidths)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
+    StinkyRegister s2 = sgpr(12, 4);
+    StinkyRegister s3 = sgpr(16, 4);
     bb->appendIR(static_cast<IRBase*>(
-        stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 8)) // group0=4 regs, group1=8 regs
+        stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), &s2, &s3)
         ));
 
     pm.addPass(createToStinkyAsmPass());
@@ -63,8 +65,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectSrc0Width)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
+    StinkyRegister s2 = sgpr(10, 4);
+    StinkyRegister s3 = sgpr(14, 4);
     bb->appendIR(static_cast<IRBase*>(
-        stinkytofu::TensorLoadToLds(sgpr(0, 2), sgpr(2, 8)) // group0=2 regs (WRONG!), group1=8 regs
+        stinkytofu::TensorLoadToLds(sgpr(0, 2), sgpr(2, 8), &s2, &s3) // group0=2 regs (WRONG!), group1=8 regs
         ));
 
     pm.addPass(createToStinkyAsmPass());
@@ -95,9 +99,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectSrc1Width)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
-    // Create tensor_load_to_lds with INCORRECT src1 width: src1=4 (should be 8)
+    StinkyRegister s2 = sgpr(8, 4);
+    StinkyRegister s3 = sgpr(12, 4);
     bb->appendIR(static_cast<IRBase*>(
-        stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 4)) // group0=4 regs, group1=4 regs (WRONG!)
+        stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 4), &s2, &s3) // group0=4 regs, group1=4 regs (WRONG!)
         ));
 
     pm.addPass(createToStinkyAsmPass());
@@ -154,8 +159,10 @@ TEST(RegisterWidthValidationTest, DisableWidthChecks)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
+    StinkyRegister s2 = sgpr(2, 1);
+    StinkyRegister s3 = sgpr(3, 1);
     bb->appendIR(static_cast<IRBase*>(
-        stinkytofu::TensorLoadToLds(sgpr(0, 1), sgpr(1, 1)) // Both WRONG widths (should be 4 and 8)
+        stinkytofu::TensorLoadToLds(sgpr(0, 1), sgpr(1, 1), &s2, &s3) // All WRONG widths
         ));
 
     pm.addPass(createToStinkyAsmPass());
@@ -189,8 +196,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_CorrectRegisterType)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
+    StinkyRegister s2 = sgpr(12, 4);
+    StinkyRegister s3 = sgpr(16, 4);
     bb->appendIR(static_cast<IRBase*>(
-        stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 8)) // Both SGPRs, correct widths
+        stinkytofu::TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), &s2, &s3)
         ));
 
     pm.addPass(createToStinkyAsmPass());
@@ -217,8 +226,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectRegisterType_Src0)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
+    StinkyRegister s2 = sgpr(12, 4);
+    StinkyRegister s3 = sgpr(16, 4);
     bb->appendIR(static_cast<IRBase*>(
-        stinkytofu::TensorLoadToLds(vgpr(0, 4), sgpr(4, 8)) // src0=VGPR (WRONG!), src1=SGPR
+        stinkytofu::TensorLoadToLds(vgpr(0, 4), sgpr(4, 8), &s2, &s3) // src0=VGPR (WRONG!), src1=SGPR
         ));
 
     pm.addPass(createToStinkyAsmPass());
@@ -250,8 +261,10 @@ TEST(RegisterWidthValidationTest, TensorLoadToLds_IncorrectRegisterType_Src1)
     config.NumWaves = 1;
     pm.setGemmTileConfig(config);
 
+    StinkyRegister s2 = sgpr(12, 4);
+    StinkyRegister s3 = sgpr(16, 4);
     bb->appendIR(static_cast<IRBase*>(
-        stinkytofu::TensorLoadToLds(sgpr(0, 4), vgpr(4, 8)) // src0=SGPR, src1=VGPR (WRONG!)
+        stinkytofu::TensorLoadToLds(sgpr(0, 4), vgpr(4, 8), &s2, &s3) // src0=SGPR, src1=VGPR (WRONG!)
         ));
 
     pm.addPass(createToStinkyAsmPass());

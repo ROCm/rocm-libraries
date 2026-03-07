@@ -109,15 +109,22 @@ endif()
 # Installation (Optional)
 # ============================================================================
 
+# Use a relative path so the install respects CMAKE_INSTALL_PREFIX.
+# Python_SITEARCH is absolute (e.g. /usr/local/lib/python3.12/dist-packages)
+# which would bypass CMAKE_INSTALL_PREFIX and require root.
+set(STINKYTOFU_PYTHON_SITE_DIR
+    "lib/python${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}/dist-packages"
+    CACHE PATH "Python module install directory (relative to CMAKE_INSTALL_PREFIX)")
+
 # Install C++ module (_stinkytofu.so)
 install(TARGETS stinkytofu_python
-    LIBRARY DESTINATION ${Python_SITEARCH}/stinkytofu
+    LIBRARY DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
     COMPONENT python_bindings
 )
 
 # Install Python wrapper (__init__.py)
 install(FILES stinkytofu/__init__.py
-    DESTINATION ${Python_SITEARCH}/stinkytofu
+    DESTINATION ${STINKYTOFU_PYTHON_SITE_DIR}/stinkytofu
     COMPONENT python_bindings
 )
 

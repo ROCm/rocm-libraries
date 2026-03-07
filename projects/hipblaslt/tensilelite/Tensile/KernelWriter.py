@@ -845,17 +845,30 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Default schedule is other, local reads, then local writes:
     if scheduleIterAlg == 0:
       # simple schedule, just add the modules in-order
-      iterCode.add(globalReadCode)
-      iterCode.add(waitLWCode)
-      iterCode.add(syncCode)
-      iterCode.add(localReadCode)
-      iterCode.add(localWriteCode)
-      iterCode.add(pointerLWCode)
-      iterCode.add(pointerLRCode)
-      iterCode.add(waitCode)
-      iterCode.add(packPreCode)
-      iterCode.add(packCode)
-      iterCode.add(macIterCode)
+      if(kernel["PrefetchGlobalRead"] == 2):
+        iterCode.add(waitLWCode)
+        iterCode.add(syncCode)
+        iterCode.add(localReadCode)
+        iterCode.add(localWriteCode)
+        iterCode.add(pointerLWCode)
+        iterCode.add(pointerLRCode)
+        iterCode.add(globalReadCode)
+        iterCode.add(waitCode)
+        # iterCode.add(packPreCode)
+        iterCode.add(packCode)
+        iterCode.add(macIterCode)
+      else:
+        iterCode.add(globalReadCode)
+        iterCode.add(waitLWCode)
+        iterCode.add(syncCode)
+        iterCode.add(localReadCode)
+        iterCode.add(localWriteCode)
+        iterCode.add(pointerLWCode)
+        iterCode.add(pointerLRCode)
+        iterCode.add(waitCode)
+        iterCode.add(packPreCode)
+        iterCode.add(packCode)
+        iterCode.add(macIterCode)
     elif scheduleIterAlg == 1:
       iterCode.add(waitLWCode)
       iterCode.add(syncCode)
@@ -3259,7 +3272,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         tP = tensorParametersA if kernel["ProblemType"]["BiasSrc"] == "A" else tensorParametersB
         macIterCode.add(self.exclasses.biasSumUnroll.loopSum(self, kernel, tP, u, kernel["InnerUnroll"]))
-
+      if(isNGLL and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2):
+            self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
                       module, NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True)
@@ -3317,7 +3331,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if isNGLL:
       self.codes.perIterLocalWrite = self.codes.perIterLocalWriteCodeNGLL
       self.states.perIterLocalWriteCanSkip = [ 0 for i in range (kernel["LoopIters"]) ]
-      if kernel["ExpandPointerSwap"] == 1:
+      if kernel["ExpandPointerSwap"] == 1 or self.states.scheduleIterAlg==0:
         self.codes.globalReadA = StructuredModule() # empty
         self.codes.globalReadMXSA = StructuredModule() # empty
         self.codes.globalReadMXSB = StructuredModule() # empty
@@ -3872,7 +3886,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isSwapAndResetLwoIter: # ResetLroIter
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLWCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
-
+          if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"] == 2:
+            pointerLWCode.add(SWaitCnt(dscnt=0, comment="Waiting curren LR finish for next GR(TDM)"))
+            pointerLWCode.add(SBarrier(comment="Waiting curren LR finish for next GR(TDM)"))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
@@ -5185,15 +5201,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       moduleKernelBody.body.setParent()
 
-      # convert globalParameters["StinkyTofuOptLevel"] to int, if fail set to 0
-      try:
-        stinky_opt_level = int(globalParameters["StinkyTofuOptLevel"])
-      except:
-        stinky_opt_level = 0
+      stinky_opt_level = int(globalParameters.get("StinkyTofuOptLevel") or 0)
 
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
-                               "dumpIRBetweenPasses": False,
+                               "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
+                               "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
+                               "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
+                               "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
                                "TileA0": kernel["ThreadTile0"],
                                "TileB0": kernel["ThreadTile1"],
                                "TileM0": kernel["MacroTile0"],

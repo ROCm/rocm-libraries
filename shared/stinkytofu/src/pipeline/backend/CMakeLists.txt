@@ -5,5 +5,6 @@
 target_sources(stinkytofu PRIVATE
     Backend.cpp
     BackendRegistry.cpp
+    Gfx942Backend.cpp
     Gfx1250Backend.cpp
 )

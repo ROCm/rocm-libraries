@@ -20,11 +20,11 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-/// @file Gfx1250Backend.cpp
-/// @brief Registers the gfx1250 (RDNA4, arch 12.5.0) optimization pipeline with BackendRegistry.
+/// @file Gfx942Backend.cpp
+/// @brief Registers the gfx942 (CDNA3, arch 9.4.2) optimization pipeline with BackendRegistry.
 ///
-/// When this translation unit is linked, the gfx1250 pipelines are registered globally
-/// so that Backend(module) automatically picks them up for modules with arch {12, 5, 0}.
+/// When this translation unit is linked, the gfx942 pipelines are registered globally
+/// so that Backend(module) automatically picks them up for modules with arch {9, 4, 2}.
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
@@ -35,7 +35,7 @@ namespace stinkytofu
 {
     namespace
     {
-        constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
+        constexpr std::array<int, 3> GFX942_ARCH{9, 4, 2};
 
         // Will enable after milestone 1
         PipelineConfig createDefaultPipeline(const StinkyAsmModule& module,
@@ -52,7 +52,7 @@ namespace stinkytofu
 
             // Configure GEMM-specific tile parameters
             const auto& moduleOptions = module.getModuleOptions();
-            config.withGemmTileConfig(GFX1250_ARCH,
+            config.withGemmTileConfig(GFX942_ARCH,
                                       moduleOptions.TileA0,
                                       moduleOptions.TileB0,
                                       moduleOptions.TileM0,
@@ -80,7 +80,7 @@ namespace stinkytofu
         }
 
         /**
-         * @brief Populate the pipeline specifications for the GFX1250 architecture.
+         * @brief Populate the pipeline specifications for the GFX942 architecture.
          * @param module The StinkyAsmModule to populate the pipeline specifications for.
          * @param specs The vector of pipeline specifications to populate.
          */
@@ -108,13 +108,13 @@ namespace stinkytofu
                 /* groupName */ "noLoadLoopBody");
         }
 
-        struct Gfx1250BackendRegistrar
+        struct Gfx942BackendRegistrar
         {
-            Gfx1250BackendRegistrar()
+            Gfx942BackendRegistrar()
             {
-                BackendRegistry::setArchPipeline(GFX1250_ARCH, pipelineSpecPopulator);
+                BackendRegistry::setArchPipeline(GFX942_ARCH, pipelineSpecPopulator);
             }
         };
-        static Gfx1250BackendRegistrar s_gfx1250BackendRegistrar;
+        static Gfx942BackendRegistrar s_gfx942BackendRegistrar;
     } // namespace
 } // namespace stinkytofu

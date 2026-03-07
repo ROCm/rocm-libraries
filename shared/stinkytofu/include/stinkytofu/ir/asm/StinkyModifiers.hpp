@@ -144,17 +144,21 @@ namespace stinkytofu
     {
         static constexpr Modifier::Type Type = Modifier::Type::FLAT;
 
-        FLATModifiers(int  offset12 = 0,
-                      bool glc      = false,
-                      bool slc      = false,
-                      bool lds      = false,
-                      bool isStore  = false)
+        FLATModifiers(int  offset12       = 0,
+                      bool glc            = false,
+                      bool slc            = false,
+                      bool lds            = false,
+                      bool isStore        = false,
+                      bool hasGLCModifier = false,
+                      bool hasSC0Modifier = false)
             : TypedModifier<FLATModifiers>()
             , offset12(offset12)
             , glc(glc)
             , slc(slc)
             , lds(lds)
             , isStore(isStore)
+            , hasGLCModifier(hasGLCModifier)
+            , hasSC0Modifier(hasSC0Modifier)
         {
         }
 
@@ -163,6 +167,8 @@ namespace stinkytofu
         uint32_t slc : 1;
         uint32_t lds : 1;
         uint32_t isStore : 1;
+        uint32_t hasGLCModifier : 1;
+        uint32_t hasSC0Modifier : 1;
     };
 
     struct GLOBALModifiers : public TypedModifier<GLOBALModifiers>
@@ -182,13 +188,16 @@ namespace stinkytofu
     {
         static constexpr Modifier::Type Type = Modifier::Type::MUBUF;
 
-        MUBUFModifiers(bool offen    = false,
-                       int  offset12 = 0,
-                       bool glc      = false,
-                       bool slc      = false,
-                       bool nt       = false,
-                       bool lds      = false,
-                       bool isStore  = false)
+        MUBUFModifiers(bool offen          = false,
+                       int  offset12       = 0,
+                       bool glc            = false,
+                       bool slc            = false,
+                       bool nt             = false,
+                       bool lds            = false,
+                       bool isStore        = false,
+                       bool hasMUBUFConst  = false,
+                       bool hasGLCModifier = false,
+                       bool hasSC0Modifier = false)
             : TypedModifier<MUBUFModifiers>()
             , offset12(offset12)
             , offen(offen)
@@ -197,6 +206,9 @@ namespace stinkytofu
             , nt(nt)
             , lds(lds)
             , isStore(isStore)
+            , hasMUBUFConst(hasMUBUFConst)
+            , hasGLCModifier(hasGLCModifier)
+            , hasSC0Modifier(hasSC0Modifier)
         {
         }
 
@@ -207,23 +219,31 @@ namespace stinkytofu
         uint32_t nt : 1;
         uint32_t lds : 1;
         uint32_t isStore : 1;
+        uint32_t hasMUBUFConst : 1;
+        uint32_t hasGLCModifier : 1;
+        uint32_t hasSC0Modifier : 1;
     };
 
     struct SMEMModifiers : public TypedModifier<SMEMModifiers>
     {
         static constexpr Modifier::Type Type = Modifier::Type::SMEM;
 
-        SMEMModifiers(bool glc = false, bool nv = false, int offset = 0)
+        SMEMModifiers(bool glc              = false,
+                      bool nv               = false,
+                      int  offset           = 0,
+                      bool hasSCOPEModifier = false)
             : TypedModifier<SMEMModifiers>()
             , glc(glc)
             , nv(nv)
             , offset(offset) // 20u 21s shaes the same
+            , hasSCOPEModifier(hasSCOPEModifier)
         {
         }
 
         uint32_t glc : 1;
         uint32_t nv : 1;
         int      offset;
+        uint32_t hasSCOPEModifier : 1;
     };
 
     struct SDWAModifiers : public TypedModifier<SDWAModifiers>
@@ -486,17 +506,21 @@ namespace stinkytofu
     {
         static constexpr Modifier::Type Type = Modifier::Type::SWAITCNT_DATA;
 
-        SWaitCntData(int8_t vlcnt = -1,
-                     int8_t vscnt = -1,
-                     int8_t dlcnt = -1,
-                     int8_t dscnt = -1,
-                     int8_t kmcnt = -1)
+        SWaitCntData(int vlcnt      = -1,
+                     int vscnt      = -1,
+                     int dlcnt      = -1,
+                     int dscnt      = -1,
+                     int kmcnt      = -1,
+                     int maxLgkmcnt = -1,
+                     int maxVmcnt   = -1)
             : TypedModifier<SWaitCntData>()
             , vlcnt(vlcnt)
             , vscnt(vscnt)
             , dlcnt(dlcnt)
             , dscnt(dscnt)
             , kmcnt(kmcnt)
+            , maxLgkmcnt(maxLgkmcnt)
+            , maxVmcnt(maxVmcnt)
         {
         }
 
@@ -518,11 +542,13 @@ namespace stinkytofu
         //
         //     If the target ISA has a single counter for load and store, use SWaitCnt(vlcnt=1, vscnt=1),
         //     which means vs_0, vl_2 are not completed yet.
-        int8_t vlcnt;
-        int8_t vscnt;
-        int8_t dlcnt;
-        int8_t dscnt;
-        int8_t kmcnt;
+        int vlcnt;
+        int vscnt;
+        int dlcnt;
+        int dscnt;
+        int kmcnt;
+        int maxLgkmcnt;
+        int maxVmcnt;
     };
 
     struct LabelData : public TypedModifier<LabelData>
@@ -728,7 +754,7 @@ namespace stinkytofu
         {
             switch(field)
             {
-            // clang-format off
+                // clang-format off
             case VA_VDST: return fieldsValue.va_vdst;
             case VA_SDST: return fieldsValue.va_sdst;
             case VA_SSRC: return fieldsValue.va_ssrc;

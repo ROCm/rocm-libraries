@@ -68,6 +68,7 @@ namespace stinkytofu
     PassManagerDebugConfig::PassManagerDebugConfig()
         : printAfterAll(false)
         , printBeforeAll(false)
+        , dumpInitialIR(false)
     {
     }
 
@@ -92,6 +93,11 @@ namespace stinkytofu
     void PassManagerDebugConfig::setPrintBeforeAll(bool v)
     {
         printBeforeAll = v;
+    }
+
+    void PassManagerDebugConfig::setDumpInitialIR(bool v)
+    {
+        dumpInitialIR = v;
     }
 
     void PassManagerDebugConfig::addOnlyPrintBefore(const std::string& passName)
@@ -164,6 +170,13 @@ namespace stinkytofu
         if(dbgCfg)
         {
             dbgCfg->prepareDumpOutputStream();
+        }
+
+        if(dbgCfg && dbgCfg->dumpInitialIR)
+        {
+            dbgCfg->getOutputStreamInBefore() << "\n*** Initial IR (before all passes) ***\n";
+            F.dump(dbgCfg->getOutputStreamInBefore());
+            dbgCfg->getOutputStreamInBefore().flush();
         }
 
         for(const auto& pass : passes)

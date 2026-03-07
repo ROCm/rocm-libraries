@@ -37,11 +37,9 @@ DEF_ARCH(Gfx950,
 // Instructions using a format inherit its defaults and can optionally override them.
 //
 // Each DEF_FORMAT defines:
-//   - modifiers: List of allowed instruction modifiers
 //   - unit: Default execution unit (VALU, SALU, MatrixUnit, etc.)
 //   - encoding: Instruction encoding size in bits
 //   - maxOperands: Maximum number of operands
-//   - pipeline: Pipeline stage (optional, e.g., VP0, VP1)
 //   - flags: Instruction classification flags (optional)
 //
 // NOTE: Only existing flags from include/stinkytofu/hardware/Flags.def are used.
@@ -54,7 +52,6 @@ DEF_ARCH(Gfx950,
 // Vector 1-operand (32-bit encoding)
 // Used for: v_mov, v_not, v_cvt_*, etc.
 DEF_FORMAT(VOP1,
-    .modifiers = {},
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 2,  // dst + src
@@ -64,17 +61,15 @@ DEF_FORMAT(VOP1,
 // Vector 2-operand (32-bit encoding)
 // Used for: v_add_f32, v_mul_f32, etc.
 DEF_FORMAT(VOP2,
-    .modifiers = {},
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 3,  // dst + src0 + src1
     .flags = {VALU},
 )
 
-// Vector 3-operand (64-bit encoding with modifiers)
+// Vector 3-operand (64-bit encoding)
 // Used for: v_fma_f32, v_mad_f32, etc.
 DEF_FORMAT(VOP3,
-    .modifiers = {},  // TODO: Implement modifier system
     .unit = VALU,
     .encoding = {64},
     .maxOperands = 4,  // dst + src0 + src1 + src2
@@ -84,7 +79,6 @@ DEF_FORMAT(VOP3,
 // Vector compare (32-bit encoding)
 // Used for: v_cmp_eq_f32, v_cmp_lt_i32, etc.
 DEF_FORMAT(VOPC,
-    .modifiers = {},
     .unit = VALU,
     .encoding = {32},
     .maxOperands = 2,  // src0 + src1 (result to VCC)
@@ -94,7 +88,6 @@ DEF_FORMAT(VOPC,
 // Vector 3-operand packed (64-bit encoding) - hardware ISA format
 // Used as encoding base for MFMA/SMFMA on CDNA
 DEF_FORMAT(VOP3P,
-    .modifiers = {},
     .unit = VALU,
     .encoding = {64},
     .maxOperands = 4,
@@ -108,7 +101,6 @@ DEF_FORMAT(VOP3P,
 // Scalar 1-operand (32-bit encoding)
 // Used for: s_mov_b32, s_not_b32, etc.
 DEF_FORMAT(SOP1,
-    .modifiers = {},
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // dst + src
@@ -118,7 +110,6 @@ DEF_FORMAT(SOP1,
 // Scalar 2-operand (32-bit encoding)
 // Used for: s_add_u32, s_and_b32, etc.
 DEF_FORMAT(SOP2,
-    .modifiers = {},
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 3,  // dst + src0 + src1
@@ -128,7 +119,6 @@ DEF_FORMAT(SOP2,
 // Scalar compare (32-bit encoding)
 // Used for: s_cmp_eq_i32, s_cmp_lt_u32, etc.
 DEF_FORMAT(SOPC,
-    .modifiers = {},
     .unit = SALU,
     .encoding = {32},
     .maxOperands = 2,  // src0 + src1 (result to SCC)
@@ -138,7 +128,6 @@ DEF_FORMAT(SOPC,
 // Scalar program flow (32-bit encoding)
 // Used for: s_branch, s_cbranch_*, s_waitcnt, s_barrier, etc.
 DEF_FORMAT(SOPP,
-    .modifiers = {},
     .unit = BranchUnit,
     .encoding = {32},
     .maxOperands = 1,  // label or immediate
@@ -170,7 +159,6 @@ DEF_FORMAT(SMFMA,
 
 // MUBUF - untyped buffer (hardware encoding)
 DEF_FORMAT(MUBUF,
-    .modifiers = {},
     .unit = BufferMemory,
     .encoding = {64},
     .maxOperands = 5,
@@ -179,7 +167,6 @@ DEF_FORMAT(MUBUF,
 
 // DS - Data Share / LDS (hardware encoding)
 DEF_FORMAT(DS,
-    .modifiers = {},
     .unit = LDS,
     .encoding = {64},
     .maxOperands = 3,
@@ -188,7 +175,6 @@ DEF_FORMAT(DS,
 
 // FLAT - flat memory (hardware encoding)
 DEF_FORMAT(FLAT,
-    .modifiers = {},
     .unit = GlobalMemory,
     .encoding = {64},
     .maxOperands = 3,
@@ -197,7 +183,6 @@ DEF_FORMAT(FLAT,
 
 // SMRD - Scalar Memory Read/Write (hardware encoding, 32-bit on CDNA3.5)
 DEF_FORMAT(SMRD,
-    .modifiers = {},
     .unit = ScalarMemory,
     .encoding = {32},
     .maxOperands = 3,

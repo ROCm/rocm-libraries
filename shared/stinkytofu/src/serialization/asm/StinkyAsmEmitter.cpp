@@ -25,6 +25,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
+#include <algorithm>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -198,11 +199,17 @@ namespace stinkytofu
         }
         if(flatMod.glc)
         {
-            os << " glc";
+            if(flatMod.hasGLCModifier)
+                os << " glc";
+            else if(flatMod.hasSC0Modifier)
+                os << " sc0";
         }
         if(flatMod.slc)
         {
-            os << " slc";
+            if(flatMod.hasGLCModifier)
+                os << " slc";
+            else if(flatMod.hasSC0Modifier)
+                os << " sc1";
         }
         if(flatMod.lds)
         {
@@ -217,17 +224,19 @@ namespace stinkytofu
         {
             os << " offen offset:" << mubufMod.offset12;
         }
-        if(mubufMod.glc || mubufMod.slc || mubufMod.lds)
-        {
-            os << ",";
-        }
         if(mubufMod.glc)
         {
-            os << " glc";
+            if(mubufMod.hasGLCModifier)
+                os << " glc";
+            else if(mubufMod.hasSC0Modifier)
+                os << " sc0";
         }
         if(mubufMod.slc)
         {
-            os << " slc";
+            if(mubufMod.hasGLCModifier)
+                os << " slc";
+            else if(mubufMod.hasSC0Modifier)
+                os << " sc1";
         }
         if(mubufMod.nt)
         {
@@ -246,7 +255,7 @@ namespace stinkytofu
         {
             os << " offset:" << smemMod.offset;
         }
-        if(smemMod.glc)
+        if(!smemMod.hasSCOPEModifier && smemMod.glc)
         {
             os << " glc";
         }
@@ -254,6 +263,67 @@ namespace stinkytofu
         {
             os << " nv";
         }
+        return os;
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const SDWAModifiers& sdwaMod)
+    {
+        auto selectBitToString = [](SDWAModifiers::SelectBit sel) -> const char* {
+            switch(sel)
+            {
+            case SDWAModifiers::SelectBit::DWORD:
+                return "DWORD";
+            case SDWAModifiers::SelectBit::BYTE_0:
+                return "BYTE_0";
+            case SDWAModifiers::SelectBit::BYTE_1:
+                return "BYTE_1";
+            case SDWAModifiers::SelectBit::BYTE_2:
+                return "BYTE_2";
+            case SDWAModifiers::SelectBit::BYTE_3:
+                return "BYTE_3";
+            case SDWAModifiers::SelectBit::WORD_0:
+                return "WORD_0";
+            case SDWAModifiers::SelectBit::WORD_1:
+                return "WORD_1";
+            default:
+                return nullptr;
+            }
+        };
+
+        auto unusedBitToString = [](SDWAModifiers::UnusedBit unused) -> const char* {
+            switch(unused)
+            {
+            case SDWAModifiers::UnusedBit::UNUSED_PAD:
+                return "UNUSED_PAD";
+            case SDWAModifiers::UnusedBit::UNUSED_SEXT:
+                return "UNUSED_SEXT";
+            case SDWAModifiers::UnusedBit::UNUSED_PRESERVE:
+                return "UNUSED_PRESERVE";
+            default:
+                return nullptr;
+            }
+        };
+
+        if(const char* s = selectBitToString(sdwaMod.dst_sel))
+            os << " dst_sel:" << s;
+        if(const char* s = unusedBitToString(sdwaMod.dst_unused))
+            os << " dst_unused:" << s;
+        if(const char* s = selectBitToString(sdwaMod.src0_sel))
+            os << " src0_sel:" << s;
+        if(const char* s = selectBitToString(sdwaMod.src1_sel))
+            os << " src1_sel:" << s;
+
+        return os;
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const DPPModifiers& dppMod)
+    {
+        if(dppMod.row_shr != -1)
+            os << " row_shr:" << dppMod.row_shr;
+        if(dppMod.row_bcast != -1)
+            os << " row_bcast:" << dppMod.row_bcast;
+        if(dppMod.bound_ctrl != -1)
+            os << " bound_ctrl:" << dppMod.bound_ctrl;
         return os;
     }
 
@@ -309,6 +379,11 @@ namespace stinkytofu
             // Check if we should use symbolic name
             bool        useSymbolic  = options.useSymbolicNames && reg.hasSymbolicName();
             std::string symbolicName = useSymbolic ? reg.getSymbolicName() : "";
+
+            if(reg.reg.isAbs)
+                os << "abs(";
+            if(reg.reg.isMinus)
+                os << "-";
 
             // Emit register: v0, v[0:3], s1, acc0, etc. or v[vgprName+0]
             const std::string regTypeStr = regTypeToString(reg.reg.type);
@@ -371,6 +446,9 @@ namespace stinkytofu
                     }
                 }
             }
+
+            if(reg.reg.isAbs)
+                os << ")";
             break;
         }
 
@@ -483,17 +561,12 @@ namespace stinkytofu
                 os << ", ";
             }
 
-            // Check if this is the last source operand of a MUBUF instruction
-            // and it's a literal zero. In that case, emit "null" instead of "0" for the soffset parameter
-            // This matches the AMDGPU ISA convention where buffer instructions use "null" for zero soffset
-            bool isMUBUFLastOperand = (mubufMod && i == srcRegs.size() - 1);
-
-            if(isMUBUFLastOperand)
+            // Check if this is the last visible source operand of a MUBUF instruction
+            // and it's a literal zero. When HasMUBUFConst is false (e.g. gfx1250),
+            // emit "null" instead of "0" for the soffset parameter.
+            // When HasMUBUFConst is true (e.g. gfx942), emit the raw value as-is.
+            if(mubufMod && !mubufMod->hasMUBUFConst && i == srcRegs.size() - 1)
             {
-                assert(srcRegs[i].dataType == StinkyRegister::Type::LiteralInt
-                       || srcRegs[i].dataType == StinkyRegister::Type::Register
-                              && "MUBUF last operand must be an integer or register.");
-
                 if(srcRegs[i].dataType == StinkyRegister::Type::LiteralInt
                    && srcRegs[i].literalInt == 0)
                 {
@@ -597,6 +670,68 @@ namespace stinkytofu
             return true;
         }
 
+        case GFX::s_waitcnt:
+        {
+            const SWaitCntData* waitData = inst.getModifier<SWaitCntData>();
+            if(!waitData)
+                return false;
+
+            // Reconstruct lgkmcnt and vmcnt from semantic fields.
+            // Conversion stores: vlcnt, vscnt, dlcnt(-1), dscnt, kmcnt
+            // lgkmcnt = dscnt + kmcnt (only counting fields != -1)
+            // vmcnt   = vlcnt + vscnt (only counting fields != -1)
+            auto accumulate = [](std::initializer_list<int> vals) -> int {
+                bool anySet = false;
+                int  sum    = 0;
+                for(int v : vals)
+                {
+                    if(v != -1)
+                    {
+                        sum += v;
+                        anySet = true;
+                    }
+                }
+                return anySet ? sum : -1;
+            };
+            int lgkmcnt = accumulate({waitData->dlcnt, waitData->dscnt, waitData->kmcnt});
+            // Note: vlcnt + vscnt is correct for gfx942 (combined vmcnt counter).
+            // For SeparateVscnt archs (e.g. gfx1030, gfx1100), vscnt should go
+            // to a separate s_waitcnt_vscnt instruction. This works today because
+            // _SWaitCnt and _SWaitCntVscnt are converted into separate
+            // GFX::s_waitcnt instructions, so vlcnt and vscnt never coexist in
+            // the same SWaitCntData. If they are ever merged, this would be
+            // incorrect for SeparateVscnt archs.
+            int vmcnt = accumulate({waitData->vlcnt, waitData->vscnt});
+
+            // Cap to hardware max values (matching rocisa behavior)
+            if(lgkmcnt != -1 && waitData->maxLgkmcnt != -1)
+                lgkmcnt = std::min(lgkmcnt, waitData->maxLgkmcnt);
+            if(vmcnt != -1 && waitData->maxVmcnt != -1)
+                vmcnt = std::min(vmcnt, waitData->maxVmcnt);
+
+            if(lgkmcnt == 0 && vmcnt == 0)
+            {
+                os << " 0";
+            }
+            else
+            {
+                os << " ";
+                bool first = true;
+                if(lgkmcnt != -1)
+                {
+                    os << "lgkmcnt(" << lgkmcnt << ")";
+                    first = false;
+                }
+                if(vmcnt != -1)
+                {
+                    if(!first)
+                        os << ", ";
+                    os << "vmcnt(" << vmcnt << ")";
+                }
+            }
+            return true;
+        }
+
         default:
             return false;
         }
@@ -617,6 +752,8 @@ namespace stinkytofu
                 EMIT_TRAILING_MODIFIER(FLAT, FLAT);
                 EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
                 EMIT_TRAILING_MODIFIER(SMEM, SMEM);
+                EMIT_TRAILING_MODIFIER(SDWA, SDWA);
+                EMIT_TRAILING_MODIFIER(DPP, DPP);
                 EMIT_TRAILING_MODIFIER(MFMA_DATA, MFMA);
             default:
                 break;

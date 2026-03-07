@@ -276,12 +276,13 @@ namespace stinkytofu
      * SignatureArgument
      ***************************************/
     const std::unordered_map<std::string, int> SignatureArgument::ValueTypeSizeDict
-        = {{"i8", 1},     {"u8", 1},    {"i16", 2},   {"u16", 2},   {"f16", 2},   {"i32", 4},
-           {"u32", 4},    {"f32", 4},   {"i64", 8},   {"u64", 8},   {"f64", 8},   {"pkf16", 4},
-           {"struct", 8}, {"void", 8},  {"FP8", 1},   {"fp8", 1},   {"BF8", 1},   {"bf8", 1},
-           {"i8x4", 4},   {"u8x4", 4},  {"i16x2", 4}, {"u16x2", 4}, {"f16x2", 4}, {"f32x2", 8},
-           {"f64x2", 16}, {"bf16", 2},  {"f8", 1},    {"b8", 1},    {"b16", 2},   {"b32", 4},
-           {"b64", 8},    {"b128", 16}, {"half", 2},  {"float", 4}, {"double", 8}};
+        = {{"i8", 1},    {"u8", 1},    {"i16", 2},    {"u16", 2},   {"f16", 2},   {"i32", 4},
+           {"u32", 4},   {"f32", 4},   {"f32c", 8},   {"i64", 8},   {"u64", 8},   {"f64", 8},
+           {"f64c", 16}, {"pkf16", 4}, {"struct", 8}, {"void", 8},  {"FP8", 1},   {"fp8", 1},
+           {"BF8", 1},   {"bf8", 1},   {"i8x4", 4},   {"u8x4", 4},  {"i16x2", 4}, {"u16x2", 4},
+           {"f16x2", 4}, {"f32x2", 8}, {"f64x2", 16}, {"bf16", 2},  {"f8", 1},    {"b8", 1},
+           {"b16", 2},   {"b32", 4},   {"b64", 8},    {"b128", 16}, {"half", 2},  {"float", 4},
+           {"double", 8}};
 
     SignatureArgument::SignatureArgument(int                offset,
                                          const std::string& name,
@@ -372,11 +373,13 @@ namespace stinkytofu
         , isaVersion(isaVersion)
         , wavefrontSize(wavefrontSize)
     {
-        // Check if this architecture has unified register file (CDNA3+: gfx94x with x >= 2)
-        bool hasUnifiedRegs = (isaVersion[0] == 9 && isaVersion[1] == 4 && isaVersion[2] >= 2)
-                              || (isaVersion[0] >= 10); // GFX10+ also has unified regs
+        bool hasArchAccUnifiedRegs
+            = (isaVersion[0] == 9 && isaVersion[1] == 0 && isaVersion[2] == 10)
+              || (isaVersion[0] == 9 && isaVersion[1] == 4 && isaVersion[2] >= 2)
+              || (isaVersion[0] == 9 && isaVersion[1] == 5 && isaVersion[2] == 0);
+        bool hasUnifiedRegs = hasArchAccUnifiedRegs || (isaVersion[0] >= 10);
 
-        if(hasUnifiedRegs && totalAgprs > 0)
+        if(hasArchAccUnifiedRegs || (hasUnifiedRegs && totalAgprs > 0))
         {
             accumOffset      = static_cast<int>(std::ceil(totalVgprs / 8.0) * 8);
             this->totalVgprs = accumOffset + totalAgprs;
@@ -390,10 +393,13 @@ namespace stinkytofu
 
     void SignatureKernelDescriptor::setGprs(int totalVgprs, int totalAgprs, int totalSgprs)
     {
-        bool hasUnifiedRegs = (isaVersion[0] == 9 && isaVersion[1] == 4 && isaVersion[2] >= 2)
-                              || (isaVersion[0] >= 10);
+        bool hasArchAccUnifiedRegs
+            = (isaVersion[0] == 9 && isaVersion[1] == 0 && isaVersion[2] == 10)
+              || (isaVersion[0] == 9 && isaVersion[1] == 4 && isaVersion[2] >= 2)
+              || (isaVersion[0] == 9 && isaVersion[1] == 5 && isaVersion[2] == 0);
+        bool hasUnifiedRegs = hasArchAccUnifiedRegs || (isaVersion[0] >= 10);
 
-        if(hasUnifiedRegs && totalAgprs > 0)
+        if(hasArchAccUnifiedRegs || (hasUnifiedRegs && totalAgprs > 0))
         {
             accumOffset      = static_cast<int>(std::ceil(totalVgprs / 8.0) * 8);
             this->totalVgprs = accumOffset + totalAgprs;

@@ -42,16 +42,19 @@ namespace
         int globalReadCounter = 0; // tracking global read count during WMMA
         int globalReadPerWMMA = 1; // global read issue count per WMMA
 
-        int wmmaCounter = 0;
-        // For wmma latency tracking per register
+        // Per-WMMA issue interval: cycles until this WMMA node can be issued (0 = ready).
+        std::map<DAGNode*, int> wmmaNodeCounters;
+        // ds_read latency per destination VGPR; when counter reaches 0 the VGPR is ready for WMMA.
         std::map<int, int> wmmaRegisterLatencyCounters;
 
         WMMAIssueConfig wmmaIssueConfig;
 
-        void     updateWMMALatencyCounters(DAGNode* node);
-        bool     isWMMALatencyFree();
+        // Force interleave: do not issue WMMA back-to-back when other instructions are available.
+        bool lastPickedWasWMMA = false;
+
+        void     updateWMMAStatus(DAGNode* node);
+        bool     isWMMALatencyFree(DAGNode* node);
         DAGNode* pickOneFromWMMA();
-        void     WMMAIssueUpdate(DAGNode* node);
 
     public:
         explicit CDNA5ReadyQueue(const PassContext& passCtx)
@@ -68,19 +71,37 @@ namespace
         void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd) override;
     };
 
-    void CDNA5ReadyQueue::updateWMMALatencyCounters(DAGNode* node)
+    void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node)
     {
-        // decrement the latency counters
-        for(auto& [reg, counter] : wmmaRegisterLatencyCounters)
+        const int cycles = node->inst->issueCycles;
+
+        wmmaIssueConfig.totalIssuedCycles -= cycles;
+
+        // Decrement per-WMMA issue interval counters.
+        for(auto& [n, counter] : wmmaNodeCounters)
         {
             if(counter > 0)
-                counter -= node->inst->issueCycles;
+                counter -= cycles;
+        }
+
+        // Decrement ds_read latency per VGPR; remove when latency reaches 0 (VGPR ready).
+        for(auto it = wmmaRegisterLatencyCounters.begin(); it != wmmaRegisterLatencyCounters.end();)
+        {
+            if(it->second > 0)
+            {
+                it->second -= cycles;
+                if(it->second <= 0)
+                    it = wmmaRegisterLatencyCounters.erase(it);
+                else
+                    ++it;
+            }
+            else
+                ++it;
         }
     }
 
-    bool CDNA5ReadyQueue::isWMMALatencyFree()
+    bool CDNA5ReadyQueue::isWMMALatencyFree(DAGNode* node)
     {
-        DAGNode* node = wmmaQueue.top();
         for(const StinkyRegister& dstReg : node->inst->getSrcRegs())
         {
             if(!dstReg.isRegister())
@@ -103,51 +124,54 @@ namespace
         assert(!wmmaQueue.empty() && "The WMMA queue must not be empty");
         DAGNode* node = wmmaQueue.top();
         wmmaQueue.pop();
-        // Use the original latency to avoid wmma issued continuously
+
+        // Compute issue interval for this WMMA; apply to other WMMA nodes still in queue.
+        int  delay;
         auto rest
             = (int)((wmmaIssueConfig.totalIssuedCycles - wmmaIssueConfig.totalWmmaIssuedCycles)
                     / wmmaIssueConfig.issuedCount);
         if(wmmaIssueConfig.issuedCount <= 0
            || (wmmaIssueConfig.issuedCount > 0 && rest < node->inst->latencyCycles))
         {
-            // interleave wmma with other instructions if possible
-            // wmma inst1 wmma inst2 wmma inst3
             if(node->inst->latencyCycles >= wmmaIssueConfig.avgIssueInterval)
-            {
-                wmmaCounter = std::max(rest, 1);
-            }
+                delay = std::max(rest, 1);
             else
-            {
-                wmmaCounter = node->inst->latencyCycles;
-            }
+                delay = node->inst->latencyCycles;
         }
         else
+            delay = wmmaIssueConfig.avgIssueInterval;
+
+        for(auto& [n, counter] : wmmaNodeCounters)
         {
-            wmmaCounter = wmmaIssueConfig.avgIssueInterval;
+            if(n != node)
+                counter = std::max(counter, delay);
         }
+        wmmaNodeCounters.erase(node);
+
         wmmaIssueConfig.issuedCount--;
         wmmaIssueConfig.totalWmmaIssuedCycles -= node->inst->issueCycles;
-        WMMAIssueUpdate(node);
-        updateWMMALatencyCounters(node);
+        updateWMMAStatus(node);
         globalReadCounter = 0;
         return node;
     }
 
-    void CDNA5ReadyQueue::WMMAIssueUpdate(DAGNode* node)
-    {
-        // Use issue for all instructions
-        wmmaCounter -= node->inst->issueCycles;
-        wmmaIssueConfig.totalIssuedCycles -= node->inst->issueCycles;
-    }
-
     DAGNode* CDNA5ReadyQueue::pickOne()
     {
-        // Priority 1: Try to schedule WMMA if counter allows
-        // TODO: Need to check if ds_read completes are done for the WMMA
-        // wmmaRegisterLatencyCounters
-        if(!wmmaQueue.empty() && wmmaCounter <= 0 && isWMMALatencyFree())
+        // Priority 1: Try to schedule WMMA if this node's counter allows and ds_read latencies are satisfied.
+        // Force interleave: if we just issued a WMMA and there is work in other queues, skip WMMA and fall
+        // through so priorities 2-5 can issue it (avoids back-to-back WMMAs when ds_reads etc. are still pending).
+        bool otherQueuesHaveWork
+            = !globalReadQueue.empty() || !localReadQueue.empty() || !otherQueue.empty();
+        if(!wmmaQueue.empty())
         {
-            return pickOneFromWMMA();
+            DAGNode* top = wmmaQueue.top();
+            int      c   = wmmaNodeCounters.count(top) ? wmmaNodeCounters.at(top) : 0;
+            if(c <= 0 && isWMMALatencyFree(top) && (!lastPickedWasWMMA || !otherQueuesHaveWork))
+            {
+                DAGNode* node     = pickOneFromWMMA();
+                lastPickedWasWMMA = true;
+                return node;
+            }
         }
 
         // Priority 2: Schedule global reads first to hide latency
@@ -157,9 +181,9 @@ namespace
             {
                 DAGNode* globalRead = globalReadQueue.top();
                 globalReadQueue.pop();
-                WMMAIssueUpdate(globalRead);
-                updateWMMALatencyCounters(globalRead);
+                updateWMMAStatus(globalRead);
                 globalReadCounter++;
+                lastPickedWasWMMA = false;
                 return globalRead;
             }
         }
@@ -169,8 +193,8 @@ namespace
         {
             DAGNode* localRead = localReadQueue.top();
             localReadQueue.pop();
-            WMMAIssueUpdate(localRead);
-            updateWMMALatencyCounters(localRead);
+            updateWMMAStatus(localRead);
+            lastPickedWasWMMA = false;
             return localRead;
         }
 
@@ -179,25 +203,19 @@ namespace
         {
             DAGNode* node = otherQueue.top();
             otherQueue.pop();
-            WMMAIssueUpdate(node);
-            // If ds read, add its latency to the counter to wmmaRegisterLatencyCounters
-            // Ignore global read for now
             if(isDSRead(*node->inst))
             {
                 for(const StinkyRegister& dstReg : node->inst->getDestRegs())
                 {
                     if(!dstReg.isRegister())
                         continue;
-
                     for(unsigned off = 0; off < dstReg.reg.num; ++off)
-                    {
                         wmmaRegisterLatencyCounters[dstReg.reg.idx + off]
                             = node->inst->latencyCycles;
-                    }
                 }
             }
-            updateWMMALatencyCounters(node);
-
+            updateWMMAStatus(node);
+            lastPickedWasWMMA = false;
             return node;
         }
 
@@ -206,18 +224,21 @@ namespace
         {
             DAGNode* barrier = barrierQueue.top();
             barrierQueue.pop();
-            WMMAIssueUpdate(barrier);
-            updateWMMALatencyCounters(barrier);
+            updateWMMAStatus(barrier);
+            lastPickedWasWMMA = false;
             return barrier;
         }
 
-        return pickOneFromWMMA();
+        DAGNode* node     = pickOneFromWMMA();
+        lastPickedWasWMMA = true;
+        return node;
     }
 
     void CDNA5ReadyQueue::push(DAGNode* node)
     {
         if(isWMMA(*node->inst))
         {
+            wmmaNodeCounters[node] = 0; // per-WMMA counter: ready to issue when <= 0
             wmmaQueue.push(node);
             return;
         }
@@ -266,6 +287,7 @@ namespace
 
     void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd)
     {
+        lastPickedWasWMMA = false;
         // For for loop only optimization
         if(getPassContext().getPassFeatureConfig().loopConfig.unrollGemm == false)
             return;
@@ -273,18 +295,11 @@ namespace
         wmmaIssueConfig.totalIssuedCycles     = 0;
         wmmaIssueConfig.totalWmmaIssuedCycles = 0;
         wmmaIssueConfig.issuedCount           = 0;
-        int totalDSLatency                    = 0;
-        // Get total issued cycles and total ds latency in the region
         for(IRList::iterator it = regionStart; it != regionEnd; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
 
             wmmaIssueConfig.totalIssuedCycles += inst.issueCycles;
-
-            if(isDSRead(inst))
-            {
-                totalDSLatency += inst.latencyCycles;
-            }
 
             if(isWMMA(inst) || isSWMMA(inst))
             {
@@ -292,12 +307,8 @@ namespace
                 wmmaIssueConfig.totalWmmaIssuedCycles += inst.issueCycles;
             }
         }
-        // Get possible longest average latency
-        // The total issued cycles and total ds latency are in parallel
-        // So we take the larger one to calculate average latency
-        auto totalAvgLatency
-            = (int)std::ceil((float)std::max(wmmaIssueConfig.totalIssuedCycles, totalDSLatency)
-                             / wmmaIssueConfig.issuedCount);
+        auto totalAvgLatency = (int)std::ceil((float)wmmaIssueConfig.totalIssuedCycles
+                                              / wmmaIssueConfig.issuedCount);
         // Use the larger one as the wmma average counter
         // If wmma original latency is larger, then we don't have
         // to split the non-wmma instructions between wmma instructions
@@ -310,11 +321,7 @@ namespace
             wmmaIssueConfig.avgIssueInterval = wmmaIssueConfig.latency;
         }
 
-        // Only init in the beginning of the loop
         if(!isInit)
-        {
-            wmmaCounter = wmmaIssueConfig.avgIssueInterval;
-            isInit      = true;
-        }
+            isInit = true;
     }
 }

@@ -97,26 +97,43 @@ namespace
             rocMod.na, rocMod.offset, rocMod.offset0, rocMod.offset1, rocMod.gds);
     }
 
-    stinkytofu::FLATModifiers convertFLATModifiers(const rocisa::FLATModifiers& rocMod)
+    stinkytofu::FLATModifiers convertFLATModifiers(const rocisa::FLATModifiers&      rocMod,
+                                                   const std::map<std::string, int>& asmCaps)
     {
-        return stinkytofu::FLATModifiers(
-            rocMod.offset12, rocMod.glc, rocMod.slc, rocMod.lds, rocMod.isStore);
+        bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
+        bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
+        return stinkytofu::FLATModifiers(rocMod.offset12,
+                                         rocMod.glc,
+                                         rocMod.slc,
+                                         rocMod.lds,
+                                         rocMod.isStore,
+                                         hasGLCModifier,
+                                         hasSC0Modifier);
     }
 
-    stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& rocMod)
+    stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers&     rocMod,
+                                                     const std::map<std::string, int>& asmCaps)
     {
+        bool hasMUBUFConst  = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
+        bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
+        bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
         return stinkytofu::MUBUFModifiers(rocMod.offen,
                                           rocMod.offset12,
                                           rocMod.glc,
                                           rocMod.slc,
                                           rocMod.nt,
                                           rocMod.lds,
-                                          rocMod.isStore);
+                                          rocMod.isStore,
+                                          hasMUBUFConst,
+                                          hasGLCModifier,
+                                          hasSC0Modifier);
     }
 
-    stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocMod)
+    stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers&      rocMod,
+                                                   const std::map<std::string, int>& asmCaps)
     {
-        return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv, rocMod.offset);
+        bool hasSCOPEModifier = asmCaps.count("HasSCOPEModifier") && asmCaps.at("HasSCOPEModifier");
+        return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv, rocMod.offset, hasSCOPEModifier);
     }
 
     stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst)
@@ -175,11 +192,26 @@ namespace
         return stinkytofu::VOP3PModifiers(rocMod.op_sel, rocMod.op_sel_hi, rocMod.byte_sel);
     }
 
+    stinkytofu::DPPModifiers convertDPPModifiers(const rocisa::DPPModifiers& rocMod)
+    {
+        return stinkytofu::DPPModifiers(rocMod.row_shr, rocMod.row_bcast, rocMod.bound_ctrl);
+    }
+
+    stinkytofu::SDWAModifiers convertSDWAModifiers(const rocisa::SDWAModifiers& rocMod)
+    {
+        return stinkytofu::SDWAModifiers(
+            static_cast<stinkytofu::SDWAModifiers::SelectBit>(rocMod.dst_sel),
+            static_cast<stinkytofu::SDWAModifiers::UnusedBit>(rocMod.dst_unused),
+            static_cast<stinkytofu::SDWAModifiers::SelectBit>(rocMod.src0_sel),
+            static_cast<stinkytofu::SDWAModifiers::SelectBit>(rocMod.src1_sel));
+    }
+
     Legalized legalizeInstruction(StinkyInstruction*                inst,
                                   rocisa::Instruction*              rocisaInst,
                                   AsmIRBuilder&                     irBuilder,
                                   GfxArchID                         archId,
                                   const std::map<std::string, int>& asmCaps,
+                                  const std::map<std::string, int>& archCaps,
                                   bool                              hasVgprMsb)
     {
         if(isBranch(*inst))
@@ -194,7 +226,7 @@ namespace
 
         if(inst->is(InstFlag::IF_VCmpX))
         {
-            return legalizeVCmpX(inst, irBuilder, archId, asmCaps);
+            return legalizeVCmpX(inst, irBuilder, archId, archCaps);
         }
 
         switch(inst->getUnifiedOpcode())
@@ -207,6 +239,9 @@ namespace
 
         case GFX::ds_store_b192:
             return legalizeDSStoreB192(inst, irBuilder, archId, hasVgprMsb);
+
+        case GFX::ds_store_b256:
+            return legalizeDSStoreB256(inst, irBuilder, archId, hasVgprMsb);
 
         case GFX::s_waitcnt:
             return legalizeWaitCnt(inst, irBuilder, archId);
@@ -478,10 +513,21 @@ namespace
     }
 
     /// Helper to handle SWaitCnt instruction modifiers
-    void handleSWaitCntModifiers(StinkyInstruction* stinkyInst, const rocisa::SWaitCnt* waitCntInst)
+    void handleSWaitCntModifiers(StinkyInstruction*                stinkyInst,
+                                 const rocisa::SWaitCnt*           waitCntInst,
+                                 const std::map<std::string, int>& asmCaps)
     {
-        SWaitCntData waitCntData(
-            waitCntInst->vlcnt, waitCntInst->vscnt, -1, waitCntInst->dscnt, waitCntInst->kmcnt);
+        auto         itLgkm     = asmCaps.find("MaxLgkmcnt");
+        int          maxLgkmcnt = itLgkm != asmCaps.end() ? itLgkm->second : -1;
+        auto         itVm       = asmCaps.find("MaxVmcnt");
+        int          maxVmcnt   = itVm != asmCaps.end() ? itVm->second : -1;
+        SWaitCntData waitCntData(waitCntInst->vlcnt,
+                                 waitCntInst->vscnt,
+                                 -1,
+                                 waitCntInst->dscnt,
+                                 waitCntInst->kmcnt,
+                                 maxLgkmcnt,
+                                 maxVmcnt);
         stinkyInst->addModifier<SWaitCntData>(waitCntData);
     }
 
@@ -591,17 +637,26 @@ namespace
         // Chain all memory instruction types (mutually exclusive)
         TRY_ADD_MOD(DSLoadInstruction, ds, stinkytofu::DSModifiers, convertDSModifiers)
         else TRY_ADD_MOD(DSStoreInstruction, ds, stinkytofu::DSModifiers, convertDSModifiers)
-        else TRY_ADD_MOD(FLATReadInstruction, flat, stinkytofu::FLATModifiers,convertFLATModifiers)
-        else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers, convertFLATModifiers)
-        else TRY_ADD_MOD(MUBUFReadInstruction, mubuf, stinkytofu::MUBUFModifiers, convertMUBUFModifiers)
-        else TRY_ADD_MOD(MUBUFStoreInstruction, mubuf, stinkytofu::MUBUFModifiers, convertMUBUFModifiers)
-        else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
-        else TRY_ADD_MOD(SMemStoreInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
-        else TRY_ADD_MOD(SMemAtomicDecInstruction, smem, stinkytofu::SMEMModifiers, convertSMEMModifiers)
+        else TRY_ADD_MOD(FLATReadInstruction, flat, stinkytofu::FLATModifiers,
+            [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
+            [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(MUBUFReadInstruction, mubuf, stinkytofu::MUBUFModifiers,
+            [&](const auto& mod) { return convertMUBUFModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(MUBUFStoreInstruction, mubuf, stinkytofu::MUBUFModifiers,
+            [&](const auto& mod) { return convertMUBUFModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(SMemLoadInstruction, smem, stinkytofu::SMEMModifiers,
+            [&](const auto& mod) { return convertSMEMModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(SMemStoreInstruction, smem, stinkytofu::SMEMModifiers,
+            [&](const auto& mod) { return convertSMEMModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(SMemAtomicDecInstruction, smem, stinkytofu::SMEMModifiers,
+            [&](const auto& mod) { return convertSMEMModifiers(mod, asmCaps); })
         else
         {
             // No memory modifier matched
             TRY_ADD_MOD(CommonInstruction, vop3, stinkytofu::VOP3PModifiers, convertVOP3PModifiers)
+            TRY_ADD_MOD(CommonInstruction, sdwa, stinkytofu::SDWAModifiers, convertSDWAModifiers)
+            TRY_ADD_MOD(CommonInstruction, dpp, stinkytofu::DPPModifiers, convertDPPModifiers)
 
             // VOP/SOP instructions - these can overlap with CommonInstruction base class
             HANDLE_INST_TYPE(rocisa::MXMFMAInstruction, handleMXMFMAModifiers(stinkyInst, typedInst, itemToString(inst)))
@@ -612,7 +667,7 @@ namespace
             // Control/Synchronization instructions, separate from VOP/SOP
             else HANDLE_INST_TYPE(rocisa::SDelayAlu,
                                 stinkyInst->addModifier<SDelayAluData>(convertSDelayAluData(typedInst)))
-            else HANDLE_INST_TYPE(rocisa::SWaitCnt, handleSWaitCntModifiers(stinkyInst, typedInst))
+            else HANDLE_INST_TYPE(rocisa::SWaitCnt, handleSWaitCntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitDscnt, handleSWaitDscntModifiers(stinkyInst, typedInst, asmCaps))
             else HANDLE_INST_TYPE(rocisa::_SWaitLoadcnt, handleSWaitLoadcntModifiers(stinkyInst, typedInst, asmCaps))
         }
@@ -643,79 +698,98 @@ namespace
         return getMsbFromStinkyVgpr(reg) * (-256);
     }
 
-    /// Map StinkyInstruction operands to VGPR_OFF MSB slots per encoding type.
-    /// Fills msbSrc[3], msbDst and returns hasVgpr.
+    /// Map EncodeField to VGPR_OFF slot index: 0=SRC0, 1=SRC1, 2=SRC2, 3=DST.
+    /// Returns -1 for fields that don't participate in VGPR_OFF (SGPRs, immediates).
+    int encodeFieldToVgprOffSlot(EncodeField ef)
+    {
+        switch(ef)
+        {
+        // DST slot (bits [7:6])
+        case EncodeField::vdst:
+        case EncodeField::vdata:
+            return 3;
+        // SRC0 slot (bits [1:0])
+        case EncodeField::src0:
+        case EncodeField::addr:
+        case EncodeField::vaddr:
+        case EncodeField::vaddr0:
+            return 0;
+        // SRC1 slot (bits [3:2])
+        case EncodeField::src1:
+        case EncodeField::vsrc1:
+        case EncodeField::data0:
+        case EncodeField::vsrc:
+        case EncodeField::vaddr1:
+            return 1;
+        // SRC2 slot (bits [5:4])
+        case EncodeField::src2:
+        case EncodeField::data1:
+        case EncodeField::vaddr2:
+            return 2;
+        // Non-VGPR fields -- no VGPR_OFF slot
+        case EncodeField::None:
+        case EncodeField::rsrc:
+        case EncodeField::soffset:
+        case EncodeField::saddr:
+        case EncodeField::sdst:
+        case EncodeField::ssrc0:
+        case EncodeField::ssrc1:
+        case EncodeField::literal:
+        case EncodeField::sdata:
+        case EncodeField::sbase:
+        case EncodeField::simm16:
+        case EncodeField::simm32:
+        case EncodeField::scale_src0:
+        case EncodeField::scale_src1:
+        case EncodeField::vaddr3:
+            return -1;
+        default:
+            assert(false && "Unhandled EncodeField in VGPR_OFF slot mapping");
+            return -1;
+        }
+    }
+
+    /// Map StinkyInstruction operands to VGPR_OFF MSB slots using HwInstDesc::operandFields.
+    /// Fills msbSrc[3], msbDst and sets hasVgpr.
     void collectVgprMsbFromStinkyInst(const StinkyInstruction* inst,
                                       int                      msbSrc[3],
                                       int&                     msbDst,
                                       bool&                    hasVgpr)
     {
+        const auto& fields   = inst->getHwInstDesc()->operandFields;
         const auto& srcRegs  = inst->getSrcRegs();
         const auto& destRegs = inst->getDestRegs();
 
-        auto setMsbFromReg = [&](int& slot, const StinkyRegister& reg) {
-            int msb = getMsbFromStinkyVgpr(reg);
-            if(msb >= 0)
+        int srcIdx = 0, dstIdx = 0;
+        for(const auto& field : fields)
+        {
+            const StinkyRegister* reg = nullptr;
+            if(field.isDest || field.isReadWrite)
             {
-                slot    = msb;
-                hasVgpr = true;
+                if(dstIdx < static_cast<int>(destRegs.size()))
+                    reg = &destRegs[dstIdx++];
             }
-        };
+            else
+            {
+                if(srcIdx < static_cast<int>(srcRegs.size()))
+                    reg = &srcRegs[srcIdx++];
+            }
+            if(!reg)
+                continue;
 
-        // VOPC: No DST, SRC0=srcRegs[0], SRC1=srcRegs[1]
-        if(inst->is(InstFlag::IF_VCmp))
-        {
-            setMsbFromReg(msbSrc[0], srcRegs[0]);
-            setMsbFromReg(msbSrc[1], srcRegs[1]);
-        }
-        // VBUFFER (MUBUF): immediate layout {dst, src2, src1, src0}
-        // Load:  DST=VDATA, SRC0=VADDR (srcRegs[0]), SRC1=RSRC (srcRegs[1])
-        // Store: SRC0=DATA (srcRegs[0]), SRC1=VADDR (srcRegs[1]), SRC2=RSRC (srcRegs[2])
-        else if(isMUBUFLoad(*inst))
-        {
-            setMsbFromReg(msbDst, destRegs[0]);
-            setMsbFromReg(msbSrc[0], srcRegs[0]);
-        }
-        else if(isMUBUFStore(*inst))
-        {
-            setMsbFromReg(msbDst, srcRegs[0]);
-            setMsbFromReg(msbSrc[0], srcRegs[1]);
-        }
-        // VDS: DST=VDST, SRC0=ADDR, SRC1=DATA0, SRC2=DATA1
-        // ds_permute_b32 vgpr_rtn (VDST) , vgpr_a (ADDR) , vgpr_d0 (DATA0)
-        // ds_bpermute_b32 vgpr_rtn (VDST) , vgpr_a (ADDR) , vgpr_d0 (DATA0)
-        else if(inst->getUnifiedOpcode() == GFX::ds_bpermute_b32)
-        {
-            setMsbFromReg(msbDst, destRegs[0]);
-            setMsbFromReg(msbSrc[0], srcRegs[0]);
-            setMsbFromReg(msbSrc[1], srcRegs[1]);
-        }
-        else if(isDSRead(*inst))
-        {
-            setMsbFromReg(msbDst, destRegs[0]);
-            setMsbFromReg(msbSrc[0], srcRegs[0]);
-        }
-        else if(isDSWrite(*inst))
-        {
-            setMsbFromReg(msbSrc[1], srcRegs[1]);
-            setMsbFromReg(msbSrc[0], srcRegs[0]);
-        }
-        // VIMAGE (Tensor DMA): DST=VDATA, SRC0=VADDR0, SRC1=VADDR1, SRC2=VADDR2
-        else if(isTensorLoad(*inst))
-        {
-            if(!destRegs.empty())
-                setMsbFromReg(msbDst, destRegs[0]);
-            for(size_t i = 0; i < srcRegs.size() && i < 3; i++)
-                setMsbFromReg(msbSrc[i], srcRegs[i]);
-        }
-        // VOP1, VOP2, VOP3, VOP3P, VOPD, VOPD3, VFLAT, VGLOBAL, VSCRATCH:
-        // Standard mapping: DST=destRegs[0], SRC0=srcRegs[0], SRC1=srcRegs[1], SRC2=srcRegs[2]
-        else
-        {
-            if(!destRegs.empty())
-                setMsbFromReg(msbDst, destRegs[0]);
-            for(size_t i = 0; i < srcRegs.size() && i < 3; i++)
-                setMsbFromReg(msbSrc[i], srcRegs[i]);
+            int slot = encodeFieldToVgprOffSlot(field.encodeField);
+            if(slot < 0)
+                continue;
+
+            int msb = getMsbFromStinkyVgpr(*reg);
+            if(msb < 0)
+                continue;
+
+            hasVgpr = true;
+            if(slot == 3)
+                msbDst = msb;
+            else
+                msbSrc[slot] = msb;
         }
     }
 
@@ -825,6 +899,9 @@ namespace
             StinkyRegister reg{regType,
                                static_cast<uint32_t>(physicalIdx),
                                static_cast<uint16_t>(regCont->regNum)};
+
+            reg.reg.isMinus = regCont->isMinus ? 1 : 0;
+            reg.reg.isAbs   = regCont->isAbs ? 1 : 0;
 
             // TODO: This is a hack to set the offset of the register for use case such as msb, etc.
             // Set offset for VGPR MSB when supported (use case: vgpr > 255)
@@ -957,7 +1034,7 @@ namespace
                                                                      kd.vgprWorkItem,
                                                                      cm.flatWgSize,
                                                                      wavefrontSize,
-                                                                     kd.totalVgprs,
+                                                                     kd.originalTotalVgprs,
                                                                      kd.totalAgprs,
                                                                      kd.totalSgprs,
                                                                      kd.enablePreloadKernArgs);
@@ -1038,12 +1115,13 @@ namespace stinkytofu
         AsmIRBuilder irBuilder(*currentBB, archId);
 
         // Process each item
-        std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+        std::map<std::string, int> asmCaps  = rocisa::rocIsa::getInstance().getAsmCaps();
+        std::map<std::string, int> archCaps = rocisa::rocIsa::getInstance().getArchCaps();
         bool hasVgprMsb = asmCaps.count("HasVgprMSB") && asmCaps.at("HasVgprMSB");
 
         int  currentVgprMsb = VgprMsbValue::NOT_REQUIRED;
         auto processItem    = [&](rocisa::Item*                          item,
-                               const std::vector<const std::string*>& moduleNames) {
+                                  const std::vector<const std::string*>& moduleNames) {
             const auto instsCountBefore = currentBB->size();
 
             // Handle text blocks
@@ -1136,6 +1214,18 @@ namespace stinkytofu
                 return;
             }
 
+            // Handle macro instruction calls
+            if(auto* macroInst = dynamic_cast<rocisa::MacroInstruction*>(item))
+            {
+                AsmDirective* directive = IRBase::createIR<AsmDirective>();
+                directive->kind         = AsmDirectiveKind::TEXTBLOCK;
+                directive->comment      = macroInst->comment;
+                directive->value        = itemToString(item);
+                currentBB->appendIR(directive);
+                stinkyAsmModule.updateInstructionGroups(moduleNames, instsCountBefore);
+                return;
+            }
+
             // Handle instructions
             rocisa::Instruction* inst = dynamic_cast<rocisa::Instruction*>(item);
             if(inst == nullptr)
@@ -1161,8 +1251,8 @@ namespace stinkytofu
             // Add modifiers (DS, FLAT, MUBUF, SMEM, WaitCnt, comments)
             addModifiersToInstruction(stinkyInst, inst, asmCaps);
 
-            Legalized legalizedInsts
-                = legalizeInstruction(stinkyInst, inst, irBuilder, archId, asmCaps, hasVgprMsb);
+            Legalized legalizedInsts = legalizeInstruction(
+                stinkyInst, inst, irBuilder, archId, asmCaps, archCaps, hasVgprMsb);
 
             auto processStinkyInst = [&](StinkyInstruction* inst) {
                 auto [requiredMsb, hasVgpr] = computeRequiredMsbFromStinkyInst(inst, hasVgprMsb);

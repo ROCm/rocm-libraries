@@ -156,6 +156,9 @@ namespace stinkytofu
                 // Only meaningful when dataType == Type::Register
                 // When true, this register needs offset remapping before use
                 uint32_t isVirtual : 1;
+
+                uint32_t isMinus : 1;
+                uint32_t isAbs : 1;
             } reg;
 
             int32_t literalInt;
@@ -227,7 +230,7 @@ namespace stinkytofu
 
         StinkyRegister(RegType type, uint32_t regIdx, uint16_t regNum, int16_t offset = 0)
             : dataType(Type::Register)
-            , reg{type, regIdx, regNum, offset, false}
+            , reg{type, regIdx, regNum, offset, false, false, false}
         {
         }
 
@@ -237,7 +240,7 @@ namespace stinkytofu
                        uint16_t           regNum,
                        int16_t            offset = 0)
             : dataType(Type::Register)
-            , reg{stringToRegType(typeStr), regIdx, regNum, offset, false}
+            , reg{stringToRegType(typeStr), regIdx, regNum, offset, false, false, false}
         {
         }
 
@@ -261,7 +264,7 @@ namespace stinkytofu
 
         StinkyRegister()
             : dataType(Type::Invalid)
-            , reg{RegType::UNKNOWN, 0, 0, 0, false}
+            , reg{RegType::UNKNOWN, 0, 0, 0, false, false, false}
         {
         }
 

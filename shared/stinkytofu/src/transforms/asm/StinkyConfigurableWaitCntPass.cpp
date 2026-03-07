@@ -19,9 +19,9 @@ namespace
 {
     using namespace stinkytofu;
 
-    constexpr int8_t WAIT_COMPLETE = 0;
-    constexpr int8_t WAIT_IGNORE   = -1;
-    constexpr int    MAX_WAITCNT   = 255;
+    constexpr int WAIT_COMPLETE = 0;
+    constexpr int WAIT_IGNORE   = -1;
+    constexpr int MAX_WAITCNT   = 255;
 
     // Note: BarrierWaitPolicy, DependencyTrackingPolicy, and WaitCntConfig
     // are now defined in StinkyConfigurableWaitCntPass.hpp
@@ -101,7 +101,7 @@ namespace
         void applyWaitCnt(const SWaitCntData& wait)
         {
             auto applyCount
-                = [](int8_t waitValue, int& counter, std::vector<StinkyRegister>& regList) {
+                = [](int waitValue, int& counter, std::vector<StinkyRegister>& regList) {
                       if(waitValue == WAIT_COMPLETE)
                       {
                           counter = 0;
@@ -329,10 +329,10 @@ namespace
      */
     struct WaitCntRequirement
     {
-        int8_t vlcnt = WAIT_IGNORE;
-        int8_t vscnt = WAIT_IGNORE;
-        int8_t dlcnt = WAIT_IGNORE;
-        int8_t dscnt = WAIT_IGNORE;
+        int vlcnt = WAIT_IGNORE;
+        int vscnt = WAIT_IGNORE;
+        int dlcnt = WAIT_IGNORE;
+        int dscnt = WAIT_IGNORE;
 
         bool isValid() const
         {
@@ -342,7 +342,7 @@ namespace
 
         void merge(const WaitCntRequirement& other)
         {
-            auto mergeCount = [](int8_t& target, int8_t value) {
+            auto mergeCount = [](int& target, int value) {
                 if(value != WAIT_IGNORE)
                 {
                     if(target == WAIT_IGNORE)
@@ -1234,9 +1234,9 @@ namespace
             }
 
             if(isGlobalMemLoad(memInst))
-                req.vlcnt = static_cast<int8_t>(std::min(state.globalLoadCount, 127));
+                req.vlcnt = std::min(state.globalLoadCount, 127);
             else if(isDSRead(memInst))
-                req.dlcnt = static_cast<int8_t>(std::min(state.dsLoadCount, 127));
+                req.dlcnt = std::min(state.dsLoadCount, 127);
 
             return req;
         }
@@ -1272,9 +1272,9 @@ namespace
             }
 
             if(isGlobalMemStore(storeInst))
-                req.vscnt = static_cast<int8_t>(std::min(state.globalStoreCount, 127));
+                req.vscnt = std::min(state.globalStoreCount, 127);
             else if(isDSWrite(storeInst))
-                req.dscnt = static_cast<int8_t>(std::min(state.dsStoreCount, 127));
+                req.dscnt = std::min(state.dsStoreCount, 127);
 
             return req;
         }

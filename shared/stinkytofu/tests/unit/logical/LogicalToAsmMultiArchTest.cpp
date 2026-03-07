@@ -595,7 +595,7 @@ LogicalInstruction* createTestInstruction(logical::Opcode opcode)
                       vgpr(4),
                       vgpr(5));
     case logical::SMFMA:
-        return SMFMA("f32", "f32", 16, 16, 4, 1, false, sgpr(0), sgpr(1), sgpr(2), sgpr(3));
+        return SMFMA("bf16", "f32", 16, 16, 32, 1, false, sgpr(0), sgpr(1), sgpr(2), sgpr(3));
     case logical::TensorLoadToLds:
         return TensorLoadToLds(vgpr(0), vgpr(1));
     case logical::Label:
@@ -759,9 +759,33 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
         // TensorLoadToLds: Now works via generic createAsmFromIR (gfx1250 only)
     };
 
-    // Architecture-specific instructions (only test on this arch)
-    std::map<logical::Opcode, std::tuple<int, int, int>> ARCH_SPECIFIC = {
-        {logical::TensorLoadToLds, {12, 5, 0}}, // gfx1250 only
+    // Architecture-specific instructions: only test on the listed architecture(s).
+    // Key = opcode, Value = set of (major, minor, stepping) tuples where the instruction is valid.
+    using ArchTuple = std::tuple<int, int, int>;
+    std::map<logical::Opcode, std::set<ArchTuple>> ARCH_SPECIFIC = {
+        // gfx1250 only
+        {logical::TensorLoadToLds, {{12, 5, 0}}},
+        {logical::MXMFMA, {{12, 5, 0}}},
+        // CDNA only (gfx942 + gfx950) -- not in gfx1250 LogicalToArchMap
+        {logical::SMFMA, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VMadMixF32, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::BufferLoadD16I8, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VDot2CF32F16, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VDot2F32F16, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VDot2F32BF16, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VDot2CF32BF16, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VAccvgprReadB32, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VAccvgprWrite, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VAccvgprWriteB32, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VRsqIFlagF32, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::SMulLOU32, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VCvtScalePkFP8toF16, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VCvtScalePkBF8toF16, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VCvtScaleFP8toF16, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VCvtScalePkF16toFP8, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VCvtScalePkF16toBF8, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VCvtScaleSRF16toFP8, {{9, 4, 2}, {9, 5, 0}}},
+        {logical::VCvtScaleSRF16toBF8, {{9, 4, 2}, {9, 5, 0}}},
     };
 
     std::cout << "Testing " << testedOpcodes.size() << " instructions on " << archs.size()
@@ -778,14 +802,14 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures)
             if(SKIP_LOWERING.find(opcode) != SKIP_LOWERING.end())
                 continue;
 
-            // Skip architecture-specific instructions on wrong architectures
+            // Skip architecture-specific instructions on unsupported architectures
             auto archSpecIt = ARCH_SPECIFIC.find(opcode);
             if(archSpecIt != ARCH_SPECIFIC.end())
             {
-                auto [reqMajor, reqMinor, reqStep] = archSpecIt->second;
-                if(arch.major != reqMajor || arch.minor != reqMinor || arch.stepping != reqStep)
+                ArchTuple current = {arch.major, arch.minor, arch.stepping};
+                if(archSpecIt->second.find(current) == archSpecIt->second.end())
                 {
-                    continue; // Skip this instruction on this architecture
+                    continue;
                 }
             }
 
