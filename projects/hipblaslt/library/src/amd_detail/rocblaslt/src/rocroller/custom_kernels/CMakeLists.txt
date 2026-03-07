@@ -62,6 +62,7 @@ set(CUSTOM_KERNEL_ASM_SOURCES
     # Wave kernels
     ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_64x64x256.s
     ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_128x32x256.s
+    ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_256x192x256.s
     ${CMAKE_CURRENT_SOURCE_DIR}/wave_mxfp4_dynamic_gemm_256x224x256.s
 )
 
