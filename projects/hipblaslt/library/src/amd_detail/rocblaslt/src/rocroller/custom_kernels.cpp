@@ -444,7 +444,7 @@ void preloadCustomKernels(SolutionCache& cache)
             params.workgroupTile = {256, 160, 256};
             cache.addKernel(mxfp4Kernel,
                             params,
-                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x192x256",
+                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_256x160x256",
                                                    mxfp4Kernel,
                                                    params.workgroupTile,
                                                    {64, 4, 1},
