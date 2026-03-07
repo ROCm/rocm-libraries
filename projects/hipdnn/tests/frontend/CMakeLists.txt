@@ -22,6 +22,7 @@ add_executable(
     IntegrationMatmul.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationPointwiseDescriptorLowering.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp

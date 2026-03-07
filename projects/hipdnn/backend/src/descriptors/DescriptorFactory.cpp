@@ -16,6 +16,7 @@
 #include "GraphDescriptor.hpp"
 #include "HipdnnException.hpp"
 #include "KnobSettingDescriptor.hpp"
+#include "PointwiseOperationDescriptor.hpp"
 #include "TensorDescriptor.hpp"
 #include "VariantDescriptor.hpp"
 #include "logging/Logging.hpp"
@@ -67,6 +68,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR:
         privateDesc = std::make_shared<KnobSettingDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR:
+        privateDesc = std::make_shared<PointwiseOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR:
         privateDesc = std::make_shared<ConvolutionBwdOperationDescriptor>();
