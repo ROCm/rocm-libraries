@@ -1050,7 +1050,7 @@ def partial_pass():
                    (32, 32, 128), (32, 32, 64), (64, 32, 128), (160, 72, 72),
                    (72, 72, 72), (160, 80, 72), (160, 80, 80), (96, 96, 96),
                    (108, 108, 80), (72, 72, 52), (80, 80, 80), (84, 84, 72)]:
-        for real in [True,False]:
+        for real in [True, False]:
             for direction in [-1, 1]:
                 for precision in ['single', 'double']:
                     for place in all_inplaces:
@@ -1060,14 +1060,15 @@ def partial_pass():
                         ]:
 
                             yield Problem(length,
-                                        tag=mktag("partial_pass", 3, precision,
-                                                    direction, place, False),
-                                        nbatch=batch,
-                                        direction=direction,
-                                        inplace=place,
-                                        real=real,
-                                        meta={'ivariable': 'batch'},
-                                        precision=precision)
+                                          tag=mktag("partial_pass", 3,
+                                                    precision, direction,
+                                                    place, real),
+                                          nbatch=batch,
+                                          direction=direction,
+                                          inplace=place,
+                                          real=real,
+                                          meta={'ivariable': 'batch'},
+                                          precision=precision)
 
 
 def large_1d_extended():
