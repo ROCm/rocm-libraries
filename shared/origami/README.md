@@ -289,23 +289,22 @@ Run a specific C++ test by name:
 ./build/tests/origami-tests "Origami: select_config_mnk unit test"
 ```
 
-Run only Python tests:
+Run only Python tests (from `shared/origami/python`):
 
 ```bash
-cd python
-python -m pytest tests/ -v
+PYTHONPATH=src:$PYTHONPATH python -m pytest tests/ -v
 ```
 
 Run Python tests excluding slow tests:
 
 ```bash
-python -m pytest tests/ -m "not slow"
+PYTHONPATH=src:$PYTHONPATH python -m pytest tests/ -m "not slow"
 ```
 
 Run selector tests (requires torch):
 
 ```bash
-python -m pytest tests/test_selector.py -v
+PYTHONPATH=src:$PYTHONPATH python -m pytest tests/test_selector.py -v
 ```
 
 ## Contribute
