@@ -1,3 +1,29 @@
+// Composable Kernel Jenkins Pipeline
+//
+// SMART BUILD SYSTEM:
+// This pipeline uses intelligent dependency analysis to speed up PR builds while
+// maintaining full validation on nightly runs.
+//
+// How it works:
+// 1. PR Builds (Selective):
+//    - Configure: cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON (~30s)
+//    - Analyze: Parse compile_commands.json + clang -MM for dependencies (~2min)
+//    - Select: git diff to find affected tests (~1s)
+//    - Build: ninja <affected-tests> only (minutes vs hours)
+//    - Test: ctest -R <affected-pattern>
+//
+// 2. Nightly Builds (Full):
+//    - FORCE_CI=true from cron triggers full build
+//    - All targets built and tested for validation
+//
+// 3. Safety Checks:
+//    - Forces full build if CMake configuration changes
+//    - Forces full build if dependency cache stale (>7 days)
+//    - Manual override: set DISABLE_SMART_BUILD=true
+//
+// Benefits: PR builds 5h → 30min (typical), nightly builds unchanged
+// See: script/dependency-parser/README.md for details
+//
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
@@ -678,7 +704,7 @@ def cmake_build(Map conf=[:]){
         }
         setup_cmd = conf.get(
             "setup_cmd",
-            """${cmake_envs} cmake -G Ninja ${setup_args} -DCMAKE_CXX_FLAGS=" -O3 " .. """
+            """${cmake_envs} cmake -G Ninja ${setup_args} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_FLAGS=" -O3 " .. """
         )
         build_cmd = conf.get(
             "build_cmd",
@@ -756,9 +782,75 @@ def cmake_build(Map conf=[:]){
                 // do not run unit tests when building instances only
                 if(!params.BUILD_INSTANCES_ONLY){
                     if (!runAllUnitTests){
-                        sh "../script/launch_tests.sh"
+                        // Smart Build: Use pre-build dependency analysis for selective testing
+                        echo "🚀 Using Smart Build System"
+
+                        // Determine build mode via CI safety check
+                        def buildMode = "selective"
+                        try {
+                            sh "../script/dependency-parser/ci_safety_check.sh"
+                        } catch (Exception e) {
+                            echo "CI Safety Check indicated full build required: ${e.message}"
+                            buildMode = "full"
+                        }
+
+                        if (buildMode == "selective") {
+                            echo "✓ Selective build enabled - analyzing dependencies..."
+
+                            // Analyze dependencies using pre-build approach
+                            sh """
+                                python3 ../script/dependency-parser/main.py cmake-parse \
+                                    compile_commands.json \
+                                    build.ninja \
+                                    --workspace-root ${env.WORKSPACE} \
+                                    --parallel 32 \
+                                    --output enhanced_dependency_mapping.json
+                            """
+
+                            // Select affected tests
+                            sh """
+                                python3 ../script/dependency-parser/main.py select \
+                                    enhanced_dependency_mapping.json \
+                                    origin/develop \
+                                    HEAD \
+                                    --test-prefix \
+                                    --output tests_to_run.json
+                            """
+
+                            // Check if tests exist
+                            def testsExist = sh(
+                                script: 'test -s tests_to_run.json && jq -e ".tests_to_run | length > 0" tests_to_run.json',
+                                returnStatus: true
+                            ) == 0
+
+                            if (testsExist) {
+                                // Build only affected test executables
+                                def affectedTargets = sh(
+                                    script: 'jq -r ".executables[]" tests_to_run.json | tr "\\n" " "',
+                                    returnStdout: true
+                                ).trim()
+
+                                echo "Building affected targets: ${affectedTargets}"
+                                sh "ninja -j${nt} ${affectedTargets}"
+
+                                // Run affected tests
+                                def testRegex = sh(
+                                    script: 'jq -r ".regex" tests_to_run.json',
+                                    returnStdout: true
+                                ).trim()
+
+                                echo "Running affected tests matching: ${testRegex}"
+                                sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
+                            } else {
+                                echo "✓ No tests affected by changes - skipping test execution"
+                            }
+                        } else {
+                            echo "⚠ Full build mode - building and testing everything"
+                            sh "ninja check"
+                        }
                     }
                     else{
+                        echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja check"
                     }
                     if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
@@ -783,9 +875,75 @@ def cmake_build(Map conf=[:]){
                 // run unit tests unless building library for all targets
                 if (!params.BUILD_INSTANCES_ONLY){
                     if (!runAllUnitTests){
-                        sh "../script/launch_tests.sh"
+                        // Smart Build: Use pre-build dependency analysis for selective testing
+                        echo "🚀 Using Smart Build System"
+
+                        // Determine build mode via CI safety check
+                        def buildMode = "selective"
+                        try {
+                            sh "../script/dependency-parser/ci_safety_check.sh"
+                        } catch (Exception e) {
+                            echo "CI Safety Check indicated full build required: ${e.message}"
+                            buildMode = "full"
+                        }
+
+                        if (buildMode == "selective") {
+                            echo "✓ Selective build enabled - analyzing dependencies..."
+
+                            // Analyze dependencies using pre-build approach
+                            sh """
+                                python3 ../script/dependency-parser/main.py cmake-parse \
+                                    compile_commands.json \
+                                    build.ninja \
+                                    --workspace-root ${env.WORKSPACE} \
+                                    --parallel 32 \
+                                    --output enhanced_dependency_mapping.json
+                            """
+
+                            // Select affected tests
+                            sh """
+                                python3 ../script/dependency-parser/main.py select \
+                                    enhanced_dependency_mapping.json \
+                                    origin/develop \
+                                    HEAD \
+                                    --test-prefix \
+                                    --output tests_to_run.json
+                            """
+
+                            // Check if tests exist
+                            def testsExist = sh(
+                                script: 'test -s tests_to_run.json && jq -e ".tests_to_run | length > 0" tests_to_run.json',
+                                returnStatus: true
+                            ) == 0
+
+                            if (testsExist) {
+                                // Build only affected test executables
+                                def affectedTargets = sh(
+                                    script: 'jq -r ".executables[]" tests_to_run.json | tr "\\n" " "',
+                                    returnStdout: true
+                                ).trim()
+
+                                echo "Building affected targets: ${affectedTargets}"
+                                sh "ninja -j${nt} ${affectedTargets}"
+
+                                // Run affected tests
+                                def testRegex = sh(
+                                    script: 'jq -r ".regex" tests_to_run.json',
+                                    returnStdout: true
+                                ).trim()
+
+                                echo "Running affected tests matching: ${testRegex}"
+                                sh "CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R '${testRegex}'"
+                            } else {
+                                echo "✓ No tests affected by changes - skipping test execution"
+                            }
+                        } else {
+                            echo "⚠ Full build mode - building and testing everything"
+                            sh "ninja check"
+                        }
                     }
                     else{
+                        echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja check"
                     }
                     if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
@@ -1241,6 +1399,10 @@ pipeline {
             name: "USE_SCCACHE",
             defaultValue: true,
             description: "Use the sccache for building CK (default: ON)")
+        booleanParam(
+            name: "DISABLE_SMART_BUILD",
+            defaultValue: false,
+            description: "Disable smart build system and force full build/test (default: OFF). Smart build uses pre-build dependency analysis for selective testing on PRs, full builds on nightly runs.")
         booleanParam(
             name: "RUN_CPPCHECK",
             defaultValue: false,
