@@ -221,4 +221,30 @@ inline Error
     return setDescriptorAttrTensorRef(desc, attrName, tensor->get_uid(), tensorDescs, errorContext);
 }
 
+// Creates tensor descriptors (if needed) for each element in the array and
+// sets them as a tensor array attribute on the given operation descriptor.
+inline Error ensureAndSetTensorArrayRef(
+    hipdnnBackendDescriptor_t desc,
+    hipdnnBackendAttributeName_t attrName,
+    const std::vector<std::shared_ptr<graph::TensorAttributes>>& tensors,
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor>& tensorDescs,
+    const std::string& errorContext)
+{
+    std::vector<hipdnnBackendDescriptor_t> descPtrs;
+    descPtrs.reserve(tensors.size());
+    for(const auto& tensor : tensors)
+    {
+        HIPDNN_CHECK_ERROR(createOrFindTensorDesc(tensorDescs, tensor));
+        descPtrs.push_back(tensorDescs.at(tensor->get_uid()).get());
+    }
+    HIPDNN_RETURN_ON_BACKEND_FAILURE(
+        hipdnnBackend()->backendSetAttribute(desc,
+                                             attrName,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             static_cast<int64_t>(descPtrs.size()),
+                                             descPtrs.data()),
+        "Failed to set " + errorContext);
+    return {};
+}
+
 } // namespace hipdnn_frontend::detail

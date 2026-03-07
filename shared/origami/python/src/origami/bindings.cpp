@@ -135,6 +135,7 @@ NB_MODULE(origami, m) {
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
+      .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
       .def_rw("grid_selection", &origami::config_t::grid_selection)
       .def_rw("prediction_mode", &origami::config_t::prediction_mode)
       .def_rw("grvw_a", &origami::config_t::grvw_a)

@@ -493,9 +493,9 @@ struct config_t {
   bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
            cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
-           workgroup_mapping == o.workgroup_mapping && prediction_mode == o.prediction_mode &&
-           target == o.target && grvw_a == o.grvw_a && grvw_b == o.grvw_b &&
-           gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
+           workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
+           prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
+           grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
            vector_width_b == o.vector_width_b && backend == o.backend;
   }
 
@@ -503,6 +503,7 @@ struct config_t {
     std::size_t seed = math::hash_combine(
         mt.m, mt.n, mt.k, mi.m, mi.n, mi.k,
         hand_optimized_main_loop, cache_hints_a, cache_hints_b, workgroup_mapping,
+        static_cast<std::uint32_t>(reduction_strategy),
         static_cast<std::uint32_t>(prediction_mode), static_cast<std::uint32_t>(target),
         grvw_a, grvw_b, gwvw_d, vector_width_a, vector_width_b);
     // Hash backend-specific parameters if present. The visitor pattern allows

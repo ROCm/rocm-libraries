@@ -134,10 +134,9 @@ MFMAS_PER_TILE_BF16 = 1   # 1 MFMA per tile pair in BF16
 VGPRS_PER_CONVERSION_GROUP = 8   # 8 VGPRs per conversion group in TF32 emulation
 
 
+@dataclass
 class ValidatorInstruction(ABC):
-    """
-    Abstract class with no method just for type hinting purposes.
-    """
+    """Abstract base for all validator instructions."""
     name: str
     issued_at: SchedulePosition
     # The minimum number of quad-cycles that this instruction takes to issue.
@@ -147,26 +146,23 @@ class ValidatorInstruction(ABC):
     def validate(self) -> Optional[str]:
         ...
 
-    @abstractmethod
     def done_idx(self) -> SchedulePosition:
+        """Position after which this instruction is done for scheduling purposes.
+
+        Default: instruction is done at its issue position.
+        Override in subclasses where completion depends on an SWaitCnt (LocalRead, GlobalRead).
         """
-        MFMA Index after which this instruction is done for the purpose of scheduling other instructions
-        which rely on something about it.
-        E.g. The done_idx of a LocalRead/GlobalRead is the index of the SWaitCnt that waits on them.
-        """
-        ...
+        return self.issued_at
 
     def min_issue_quad_cycles(self) -> int:
         return self.min_issue_quad_cycles_base
 
 @dataclass
 class LocalRead(ValidatorInstruction):
-    name: str
-    issued_at: SchedulePosition
     # The index in the list of Local Read instructions provided by a CMS schedule.
     # Needed to properly calculate must_start_after for Packs.
     issue_index: int
-    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(POSITION_INF))
+    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
     guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
 
     def done_idx(self) -> SchedulePosition:
@@ -197,12 +193,7 @@ class LocalRead(ValidatorInstruction):
 
 @dataclass
 class MFMA(ValidatorInstruction):
-    issued_at: SchedulePosition
-    name: str = "MFMA"
     mfma_finish_cycles: ClassVar[int] = QUAD_CYCLES_STANDARD_MFMA_FINISH
-
-    def done_idx(self) -> SchedulePosition:
-        return self.issued_at
 
     def validate(self) -> Optional[str]:
         return None
@@ -210,19 +201,14 @@ class MFMA(ValidatorInstruction):
 @dataclass
 class Pack(ValidatorInstruction):
     """BF16 pack instructions (v_perm). Base class for all pack types."""
-    name: str
-    issued_at: SchedulePosition
     # The index in the list of Pack instructions provided by a CMS schedule.
     # Needed to properly calculate needed_by and must_start_after.
     issue_index: int
     # Which tile/group this pack belongs to, computed at construction time.
     # Only meaningful for TF32 subclasses (CVTPack, MiddlePack, MFMAPack); None for BF16 packs.
     group_index: Optional[int] = None
-    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(POSITION_INF))
+    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
     must_start_after: list[ValidatorInstruction] = field(default_factory=list)
-
-    def done_idx(self) -> SchedulePosition:
-        return self.issued_at
 
     def validate(self) -> Optional[str]:
         issued_at = self.issued_at.vmfma_index
@@ -230,7 +216,7 @@ class Pack(ValidatorInstruction):
         # Collapse must_start_after list to the single latest constraint
         effective_must_start_after = max(
             self.must_start_after, key=lambda c: c.done_idx()
-        ) if self.must_start_after else MFMA(POSITION_NEG_INF)
+        ) if self.must_start_after else MFMA(name="MFMA", issued_at=POSITION_NEG_INF)
 
         if effective_must_start_after.done_idx() < self.issued_at < self.needed_by.done_idx():
             return None
@@ -306,11 +292,6 @@ class MFMAPack(TimedPack, MFMA):
     - isinstance(x, TimedPack) is True — has quad-cycle timing constraints
     - isinstance(x, MFMA) is True — captures "this IS an MFMA" semantics
     """
-    # NOTE: Do NOT re-declare `name: str` here. Although the MRO field merge
-    # correctly resolves Pack's no-default `name` over MFMA's default,
-    # Python's _get_field uses getattr() which picks up MFMA's inherited
-    # `name = 'MFMA'` class attribute and re-introduces the default.
-
     # Override MFMA's finish cycles for 4x4 timing
     mfma_finish_cycles: ClassVar[int] = QUAD_CYCLES_MFMA_4X4_FINISH
 
@@ -324,10 +305,8 @@ class MFMAPack(TimedPack, MFMA):
 
 @dataclass
 class GlobalRead(ValidatorInstruction):
-    name: str
-    issued_at: SchedulePosition
     swap_global_read_order: bool
-    needed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
+    needed_by: ValidatorInstruction = field(default_factory=lambda: MFMA(name="MFMA", issued_at=POSITION_INF))
     guaranteed_by: SchedulePosition = field(default_factory=lambda: POSITION_INF)
     barriered_at: list[SchedulePosition] = field(default_factory=list)
     must_start_after: list[ValidatorInstruction] = field(default_factory=list)
@@ -387,15 +366,15 @@ class GlobalRead(ValidatorInstruction):
     def _validate_needed_by(self) -> Optional[str]:
         """Validate: GR -> SWait -> SBarrier -> LR1"""
         # If needed_by is at inf, the constraint is not active (e.g. no LR1s).
-        if self.needed_by == POSITION_INF:
+        if self.needed_by.issued_at == POSITION_INF:
             return None
 
-        if self.issued_at < self.guaranteed_by < self.needed_by:
-            if any(self.guaranteed_by < barriered_at < self.needed_by for barriered_at in self.barriered_at):
+        if self.issued_at < self.guaranteed_by < self.needed_by.issued_at:
+            if any(self.guaranteed_by < barriered_at < self.needed_by.issued_at for barriered_at in self.barriered_at):
                     return None
 
         issued_at = self.issued_at.vmfma_index
-        needed_by = self.needed_by.vmfma_index
+        needed_by = self.needed_by.issued_at.vmfma_index
 
         name = self._name()
 
@@ -411,12 +390,12 @@ class GlobalRead(ValidatorInstruction):
             return f"{name} @ idx={issued_at} is not valid. There is no SBarrier acting on it."
 
         # 3. Guaranteed after needed
-        if self.guaranteed_by > self.needed_by:
-            return f"{name} @ idx={issued_at} is not valid. It is guaranteed by the SWait @ idx={guaranteed_by} which is after the first corresponding LR1 @ idx={needed_by}. Order must be {name} -> SWait -> SBarrier -> LR1."
+        if self.guaranteed_by > self.needed_by.issued_at:
+            return f"{name} @ idx={issued_at} is not valid. It is guaranteed by the SWait @ idx={guaranteed_by} which is after the first corresponding {self.needed_by.name} @ idx={needed_by}. Order must be {name} -> SWait -> SBarrier -> {self.needed_by.name}."
 
         # 4. No Barrier between SWait and LR1
-        if not any(self.guaranteed_by < barriered_at < self.needed_by for barriered_at in self.barriered_at):
-            return f"{name} @ idx={issued_at} is not valid. No SBarrier between SWait @ idx={guaranteed_by} and LR1 @ idx={needed_by}. Order must be {name} -> SWait -> SBarrier -> LR1."
+        if not any(self.guaranteed_by < barriered_at < self.needed_by.issued_at for barriered_at in self.barriered_at):
+            return f"{name} @ idx={issued_at} is not valid. No SBarrier between SWait @ idx={guaranteed_by} and {self.needed_by.name} @ idx={needed_by}. Order must be {name} -> SWait -> SBarrier -> {self.needed_by.name}."
 
         # TODO: Did we miss a case and will we ever end up here?
         return f"{name} @ idx={issued_at} is not valid. issued @ idx={issued_at}, guaranteed @ idx={guaranteed_by}, barriered @ idx={[b.vmfma_index for b in self.barriered_at]}, needed @ idx={needed_by} is not valid."
@@ -435,15 +414,10 @@ class GlobalRead(ValidatorInstruction):
 
 @dataclass
 class SWait(ValidatorInstruction):
-    issued_at: SchedulePosition
     dscnt: int
     vlcnt: int
     vscnt: int
     comment: str
-    name: str = "SWaitCnt"
-
-    def done_idx(self) -> SchedulePosition:
-        return self.issued_at
 
     def _is_valid(self) -> bool:
         return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at.vmfma_index >= -1
@@ -455,28 +429,18 @@ class SWait(ValidatorInstruction):
 
 @dataclass
 class Barrier(ValidatorInstruction):
-    issued_at: SchedulePosition
     comment: str
-    name: str = "SBarrier"
-
-    def done_idx(self) -> SchedulePosition:
-        return self.issued_at
 
     def validate(self) -> Optional[str]:
         return f"Barrier at index {self.issued_at.vmfma_index} is not valid. Must be >= -1." if self.issued_at.vmfma_index < -1 else None
 
 @dataclass
 class SNop(ValidatorInstruction):
-    issued_at: SchedulePosition
     wait_state: int
-    name: str = "SNop"
 
     def min_issue_quad_cycles(self) -> int:
         # Base instruction quad-cycles plus wait_state additional cycles
         return self.min_issue_quad_cycles_base + self.wait_state
-
-    def done_idx(self) -> SchedulePosition:
-        return self.issued_at
 
     def validate(self) -> Optional[str]:
         return None
@@ -485,11 +449,6 @@ class SNop(ValidatorInstruction):
 class GRInc(ValidatorInstruction):
     """Scalar pointer-increment instructions (GRIncA/GRIncB) that advance the
     global memory address before the next buffer_load."""
-    name: str
-    issued_at: SchedulePosition
-
-    def done_idx(self) -> SchedulePosition:
-        return self.issued_at
 
     def validate(self) -> Optional[str]:
         return None
@@ -608,9 +567,9 @@ class Timeline:
                     assert idx_vmfma >= -1, f"Code path {code_path}: SWaitCnt at index {idx_sync} is not valid. Must be >= -1."
                     
                     if isinstance(sync, SWaitCnt):
-                        sync_instruction = SWait(issued_at=POSITION_NEG_INF, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
+                        sync_instruction = SWait(name="SWaitCnt", issued_at=POSITION_NEG_INF, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
                     elif isinstance(sync, SBarrier):
-                        sync_instruction = Barrier(issued_at=POSITION_NEG_INF, comment=sync.comment)
+                        sync_instruction = Barrier(name="SBarrier", issued_at=POSITION_NEG_INF, comment=sync.comment)
                     else:
                         raise ValueError(f"Unexpected sync instruction type: {type(sync)}")
                     
@@ -620,7 +579,7 @@ class Timeline:
                     assert idx_vmfma >= -1, f"Code path {code_path}: SNop at index {idx_snop} is not valid. Must be >= -1."
                     # The waitState is stored as the first parameter in the rocisa SNop instruction
                     wait_state = snop.getParams()[0]
-                    snop_instruction = SNop(issued_at=POSITION_NEG_INF, wait_state=wait_state)
+                    snop_instruction = SNop(name="SNop", issued_at=POSITION_NEG_INF, wait_state=wait_state)
                     self._insert(idx_vmfma, snop_instruction, kernel)
             elif name.startswith("LRA") or name.startswith("LRB"):
                 for idx_LR, idx_vmfma in enumerate(schedule_get(name, code_path, schedule_info)):
@@ -803,7 +762,7 @@ def apply_barriers(timeline: Timeline) -> None:
             instruction = timeline.combined_timeline[i_inst]
             if not isinstance(instruction, GlobalRead):
                 continue
-            if instruction.barriered_at and barrier.issued_at >= instruction.needed_by:
+            if instruction.barriered_at and barrier.issued_at >= instruction.needed_by.issued_at:
                 # Note: Cannot break since we can't say anything about the relationship 
                 #       of `GR.needed_by` between GRs based on the order they're encountered.
                 continue
@@ -966,7 +925,7 @@ def set_gr_needed_by_from_lrs(timeline: Timeline, swap_global_read_order: bool) 
             
             _, LR_target = target[0]
             for _, gr in grs:
-                gr.needed_by = LR_target.issued_at
+                gr.needed_by = LR_target
 
 @applies_only_once
 def set_gr_must_start_after_from_lr0s(timeline: Timeline, swap_global_read_order: bool, dtl_plus_lds_buf: bool = False) -> None:

@@ -171,11 +171,10 @@ private:
             // for "host" things.
             if(deviceProp.integrated)
             {
-                total_bytes -= deviceProp.totalGlobalMem;
-                if(free_bytes < deviceProp.totalGlobalMem)
-                    free_bytes = 0;
-                else
-                    free_bytes -= deviceProp.totalGlobalMem;
+                const auto dedicated_for_device_allocs
+                    = std::min(deviceProp.totalGlobalMem, std::min(free_bytes, total_bytes) / 2);
+                total_bytes -= dedicated_for_device_allocs;
+                free_bytes -= dedicated_for_device_allocs;
             }
         }
         catch(std::runtime_error&)
