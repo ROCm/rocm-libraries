@@ -41,8 +41,10 @@
  * - 1700-1799: Convolution backward data operation attributes
  * - 1800-1899: Batchnorm inference operation attributes
  * - 1900-1999: Batchnorm inference variance ext operation attributes
- * - 2000-2099: Pointwise operation attributes
- * - 2100-2199: Shared pointwise descriptor attributes
+ * - 2000-2099: Batchnorm backward ext operation attributes
+ * - 2100-2199: Shared batchnorm backward ext attributes
+ * - 2200-2299: Pointwise operation attributes
+ * - 2300-2399: Shared pointwise descriptor attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -471,58 +473,103 @@ typedef enum
     /** @} */
 
     /**
-     * @name Pointwise Operation Attributes (2000-2099)
+     * @name Batchnorm Backward Ext Operation Attributes (2000-2099)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Gradient input tensor (dy) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT = 2000,
+
+    /** @brief Input tensor (x) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT = 2001,
+
+    /** @brief Scale tensor for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_SCALE_EXT = 2002,
+
+    /** @brief Gradient output tensor (dx) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DX_EXT = 2003,
+
+    /** @brief Scale gradient tensor (dscale) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DSCALE_EXT = 2004,
+
+    /** @brief Bias gradient tensor (dbias) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DBIAS_EXT = 2005,
+
+    /** @brief Saved mean tensor from forward pass */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT = 2006,
+
+    /** @brief Saved inverse variance tensor from forward pass */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT = 2007,
+
+    /** @} */
+
+    /**
+     * @name Shared Batchnorm Backward Ext Attributes (2100-2199)
+     * @{
+     */
+
+    /** @brief Compute data type for batchnorm backward */
+    HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT = 2100,
+
+    /** @brief Peer statistics tensor array for multi-GPU batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT = 2101,
+
+    /** @} */
+
+    /**
+     * @name Pointwise Operation Attributes (2200-2299)
      * Attributes for HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR
      * @{
      */
 
     /** @brief Primary input tensor for pointwise operation */
-    HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT = 2000,
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT = 2200,
 
     /** @brief Output tensor for pointwise operation */
-    HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT = 2001,
+    HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT = 2201,
 
     /** @brief Secondary input tensor for pointwise operation (binary/ternary) */
-    HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT = 2002,
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT = 2202,
 
     /** @brief Tertiary input tensor for pointwise operation (ternary) */
-    HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT = 2003,
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT = 2203,
 
     /** @} */
 
     /**
-     * @name Shared Pointwise Descriptor Attributes (2100-2199)
+     * @name Shared Pointwise Descriptor Attributes (2300-2399)
      * Attributes shared across pointwise operation descriptors.
      * These are set directly on the operation descriptor.
      * @{
      */
 
     /** @brief Pointwise operation mode */
-    HIPDNN_ATTR_POINTWISE_MODE = 2100,
+    HIPDNN_ATTR_POINTWISE_MODE = 2300,
 
     /** @brief Lower clip value for ReLU activation */
-    HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP = 2101,
+    HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP = 2301,
 
     /** @brief Upper clip value for ReLU activation */
-    HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP = 2102,
+    HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP = 2302,
 
     /** @brief Lower clip slope for leaky ReLU activation */
-    HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE = 2103,
+    HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE = 2303,
 
     /** @brief Beta parameter for Swish activation */
-    HIPDNN_ATTR_POINTWISE_SWISH_BETA = 2104,
+    HIPDNN_ATTR_POINTWISE_SWISH_BETA = 2304,
 
     /** @brief Alpha parameter for ELU activation */
-    HIPDNN_ATTR_POINTWISE_ELU_ALPHA = 2105,
+    HIPDNN_ATTR_POINTWISE_ELU_ALPHA = 2305,
 
     /** @brief Beta parameter for Softplus activation */
-    HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA = 2106,
+    HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA = 2306,
 
     /** @brief Compute data type for pointwise operation */
-    HIPDNN_ATTR_POINTWISE_MATH_PREC = 2107,
+    HIPDNN_ATTR_POINTWISE_MATH_PREC = 2307,
 
     /** @brief Axis index for pointwise operation */
-    HIPDNN_ATTR_POINTWISE_AXIS = 2108,
+    HIPDNN_ATTR_POINTWISE_AXIS = 2308,
 
     /** @} */
 
