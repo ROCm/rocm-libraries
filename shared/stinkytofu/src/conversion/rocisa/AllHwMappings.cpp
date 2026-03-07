@@ -39,8 +39,8 @@ namespace
 {
     using namespace stinkytofu;
 
-    std::vector<StinkyInstruction*>
-        lowerRocisaMFMA(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
+    std::vector<StinkyInstruction*> lowerRocisaMFMA(rocisa::Instruction& inst,
+                                                    AsmIRBuilder&        irBuilder)
     {
         std::string mnemonic = inst.preStr();
         uint16_t    opcode   = getMnemonicToIsaOpcode(mnemonic, irBuilder.arch);
@@ -50,12 +50,25 @@ namespace
         return {stinkyInst};
     }
 
-    std::vector<StinkyInstruction*>
-        lowerRocisaWaitCnt(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
+    std::vector<StinkyInstruction*> lowerRocisaWaitCnt(rocisa::Instruction& inst,
+                                                       AsmIRBuilder&        irBuilder)
     {
+        auto asmCaps    = rocisa::rocIsa::getInstance().getAsmCaps();
+        auto itLgkm     = asmCaps.find("MaxLgkmcnt");
+        auto itVm       = asmCaps.find("MaxVmcnt");
+        int  maxLgkmcnt = itLgkm != asmCaps.end() ? itLgkm->second : -1;
+        int  maxVmcnt   = itVm != asmCaps.end() ? itVm->second : -1;
+
         SWaitCntData waitCntData;
+        waitCntData.maxLgkmcnt = maxLgkmcnt;
+        waitCntData.maxVmcnt   = maxVmcnt;
         if(rocisa::_SWaitCnt* waitCntInst = dynamic_cast<rocisa::_SWaitCnt*>(&inst))
         {
+            // _SWaitCnt carries pre-computed lgkmcnt (= dscnt + kmcnt) since gfx942
+            // hardware uses a single lgkmcnt counter. Store in dlcnt here; the opt
+            // pass will clear and re-analyze all counts independently.
+            // gfx942:  getLgkmcnt() = dscnt + kmcnt, getVmcnt() = vlcnt + vscnt
+            // gfx1030: getLgkmcnt() = dscnt + kmcnt, getVmcnt() = vlcnt (vscnt separate)
             waitCntData.dlcnt = waitCntInst->getLgkmcnt();
             waitCntData.vlcnt = waitCntInst->getVmcnt();
         }
@@ -91,8 +104,8 @@ namespace
         return {stinkyInst};
     }
 
-    std::vector<StinkyInstruction*>
-        lowerRocisaWaitTensorcnt(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
+    std::vector<StinkyInstruction*> lowerRocisaWaitTensorcnt(rocisa::Instruction& inst,
+                                                             AsmIRBuilder&        irBuilder)
     {
         SWaitTensorCntData waitTensorCntData;
         if(rocisa::SWaitTensorcnt* waitTensorCntInst = dynamic_cast<rocisa::SWaitTensorcnt*>(&inst))
@@ -115,8 +128,8 @@ namespace
         return {stinkyInst};
     }
 
-    std::vector<StinkyInstruction*>
-        lowerRocisaStoreWaitCnt(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
+    std::vector<StinkyInstruction*> lowerRocisaStoreWaitCnt(rocisa::Instruction& inst,
+                                                            AsmIRBuilder&        irBuilder)
     {
         SWaitStoreCntData waitStoreCntData;
         if(rocisa::_SWaitStorecnt* waitStoreCntInst = dynamic_cast<rocisa::_SWaitStorecnt*>(&inst))
@@ -140,8 +153,8 @@ namespace
     }
 
     // implement lowerRocisaWaitAlu
-    std::vector<StinkyInstruction*>
-        lowerRocisaWaitAlu(rocisa::Instruction& inst, AsmIRBuilder& irBuilder)
+    std::vector<StinkyInstruction*> lowerRocisaWaitAlu(rocisa::Instruction& inst,
+                                                       AsmIRBuilder&        irBuilder)
     {
         rocisa::SWaitAlu* waitAluInst = dynamic_cast<rocisa::SWaitAlu*>(&inst);
 

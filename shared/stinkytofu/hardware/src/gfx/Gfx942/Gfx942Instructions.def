@@ -31,6 +31,18 @@ DEF_T(BufferAtomicAddF32Inst, "buffer_atomic_add_f32",
     .logical = "BufferAtomicAddF32"
 )
 
+DEF_T(VCvtF64U32Inst, "v_cvt_f64_u32",
+    .format = VOP1,
+    .flags = {VALU},
+    .logical = "VCvtU32toF64"
+)
+
+DEF_T(VCvtU32F64Inst, "v_cvt_u32_f64",
+    .format = VOP1,
+    .flags = {VALU},
+    .logical = "VCvtF64toU32"
+)
+
 DEF_T(BufferAtomicCmpswapInst, "buffer_atomic_cmpswap",
     .format = MUBUF,
     .flags = {MUBUFAtomic},
@@ -335,36 +347,6 @@ DEF_T(SWaitAluInst, "s_wait_alu",
 )
 
 DEF_T(SWaitAsynccntInst, "s_wait_asynccnt",
-    .format = SOPP,
-    .flags = {WaitCnt}
-)
-
-DEF_T(SWaitDscntInst, "s_wait_dscnt",
-    .format = SOPP,
-    .flags = {WaitCnt}
-)
-
-DEF_T(SWaitKmcntInst, "s_wait_kmcnt",
-    .format = SOPP,
-    .flags = {WaitCnt}
-)
-
-DEF_T(SWaitLoadcntInst, "s_wait_loadcnt",
-    .format = SOPP,
-    .flags = {WaitCnt}
-)
-
-DEF_T(SWaitLoadcntDscntInst, "s_wait_loadcnt_dscnt",
-    .format = SOPP,
-    .flags = {WaitCnt}
-)
-
-DEF_T(SWaitStorecntInst, "s_wait_storecnt",
-    .format = SOPP,
-    .flags = {WaitCnt}
-)
-
-DEF_T(SWaitStorecntDscntInst, "s_wait_storecnt_dscnt",
     .format = SOPP,
     .flags = {WaitCnt}
 )
@@ -852,6 +834,11 @@ DEF_T(DsStoreB192Inst, "ds_store_b192",
     .flags = {DSStore}
 )
 
+DEF_T(DsStoreB256Inst, "ds_store_b256",
+    .format = DS,
+    .flags = {DSStore}
+)
+
 DEF_T(DsStoreB32Inst, "ds_store_b32",
     .format = DS,
     .flags = {DSStore}
@@ -960,6 +947,12 @@ DEF_T(VMfmaF3216x16x16Bf16Inst, "v_mfma_f32_16x16x16_bf16",
     .flags = {MFMA}
 )
 
+DEF_T(VMfmaF3216x16x16Bf16_1kInst, "v_mfma_f32_16x16x16bf16_1k",
+    .format = MFMA,
+    .cost = {4, 16},
+    .flags = {MFMA}
+)
+
 DEF_T(VMfmaF3216x16x16F16Inst, "v_mfma_f32_16x16x16_f16",
     .format = MFMA,
     .cost = {4, 16},
@@ -997,6 +990,12 @@ DEF_T(VMfmaF3216x16x32Fp8Fp8Inst, "v_mfma_f32_16x16x32_fp8_fp8",
 )
 
 DEF_T(VMfmaF3216x16x44bBf16Inst, "v_mfma_f32_16x16x4_4b_bf16",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF3216x16x4Bf16_1kInst, "v_mfma_f32_16x16x4bf16_1k",
     .format = MFMA,
     .cost = {4, 32},
     .flags = {MFMA}
@@ -1062,6 +1061,12 @@ DEF_T(VMfmaF3232x32x42bBf16Inst, "v_mfma_f32_32x32x4_2b_bf16",
     .flags = {MFMA}
 )
 
+DEF_T(VMfmaF3232x32x4Bf16_1kInst, "v_mfma_f32_32x32x4bf16_1k",
+    .format = MFMA,
+    .cost = {4, 64},
+    .flags = {MFMA}
+)
+
 DEF_T(VMfmaF3232x32x42bF16Inst, "v_mfma_f32_32x32x4_2b_f16",
     .format = MFMA,
     .cost = {4, 64},
@@ -1085,6 +1090,12 @@ DEF_T(VMfmaF3232x32x8Bf16Inst, "v_mfma_f32_32x32x8_bf16",
     .flags = {MFMA}
 )
 
+DEF_T(VMfmaF3232x32x8Bf16_1kInst, "v_mfma_f32_32x32x8bf16_1k",
+    .format = MFMA,
+    .cost = {4, 32},
+    .flags = {MFMA}
+)
+
 DEF_T(VMfmaF3232x32x8F16Inst, "v_mfma_f32_32x32x8_f16",
     .format = MFMA,
     .cost = {4, 32},
@@ -1098,6 +1109,12 @@ DEF_T(VMfmaF324x4x116bF32Inst, "v_mfma_f32_4x4x1_16b_f32",
 )
 
 DEF_T(VMfmaF324x4x416bBf16Inst, "v_mfma_f32_4x4x4_16b_bf16",
+    .format = MFMA,
+    .cost = {4, 8},
+    .flags = {MFMA}
+)
+
+DEF_T(VMfmaF324x4x4Bf16_1kInst, "v_mfma_f32_4x4x4bf16_1k",
     .format = MFMA,
     .cost = {4, 8},
     .flags = {MFMA}
@@ -1274,6 +1291,12 @@ DEF_T(SFf1I32B32Inst, "s_ff1_i32_b32",
     .logical = "SFf1B32"
 )
 
+DEF_T(SFlbitI32B32Inst, "s_flbit_i32_b32",
+    .format = SOP2,
+    .flags = {HasSideEffect},
+    .logical = "SFlbitI32B32"
+)
+
 DEF_T(SGetpcB64Inst, "s_getpc_b64",
     .format = SOP2,
     .flags = {HasSideEffect},
@@ -1296,12 +1319,6 @@ DEF_T(SOrSaveexecB64Inst, "s_or_saveexec_b64",
     .format = SOP2,
     .flags = {HasSideEffect},
     .logical = "SOrSaveExecB64"
-)
-
-DEF_T(SSetMaskInst, "s_set_mask",
-    .format = SOP2,
-    .flags = {HasSideEffect},
-    .logical = "SSetMask"
 )
 
 DEF_T(SSetVgprMsbInst, "s_set_vgpr_msb",
@@ -1530,7 +1547,7 @@ DEF_T(SMovB32Inst, "s_mov_b32",
 DEF_T(SMovB64Inst, "s_mov_b64",
     .format = SOP2,
     .flags = {SALU},
-    .logical = "SMovB64"
+    .logical = {"SMovB64", "SSetMask"}
 )
 
 DEF_T(SMovkI32Inst, "s_movk_i32",
@@ -1874,12 +1891,6 @@ DEF_T(VAdd3U32Inst, "v_add3_u32",
     .logical = "VAdd3U32"
 )
 
-DEF_T(VAddCoCiU32Inst, "v_add_co_ci_u32",
-    .format = VOP2,
-    .flags = {VALU, Commutative},
-    .logical = "VAddCCOU32"
-)
-
 DEF_T(VAddCoU32Inst, "v_add_co_u32",
     .format = VOP2,
     .flags = {VALU, Commutative},
@@ -1928,7 +1939,8 @@ DEF_T(VAddNcU32Inst, "v_add_nc_u32",
 
 DEF_T(VAddcCoU32Inst, "v_addc_co_u32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = "VAddCCOU32"
 )
 
 DEF_T(VAndB32Inst, "v_and_b32",
@@ -2077,7 +2089,8 @@ DEF_T(VPkAddF16Inst, "v_pk_add_f16",
 
 DEF_T(VPkAddF32Inst, "v_pk_add_f32",
     .format = VOP2,
-    .flags = {VALU, Commutative}
+    .flags = {VALU, Commutative},
+    .logical = {"VAddPKF32", "_VAddPKF32"}
 )
 
 DEF_T(VPkAddI16Inst, "v_pk_add_i16",
@@ -2130,7 +2143,7 @@ DEF_T(VPkMulF16Inst, "v_pk_mul_f16",
 DEF_T(VPkMulF32Inst, "v_pk_mul_f32",
     .format = VOP2,
     .flags = {VALU, Commutative},
-    .logical = "VMulPKF32S"
+    .logical = {"VMulPKF32S", "VMulPKF32", "_VMulPKF32"}
 )
 
 DEF_T(VPkMulLoU16Inst, "v_pk_mul_lo_u16",
@@ -2155,10 +2168,16 @@ DEF_T(VAccvgprReadB32Inst, "v_accvgpr_read_b32",
     .logical = "VAccvgprReadB32"
 )
 
+DEF_T(VAccvgprWriteInst, "v_accvgpr_write",
+    .format = VOP2,
+    .flags = {VALU},
+    .logical = "VAccvgprWrite"
+)
+
 DEF_T(VAccvgprWriteB32Inst, "v_accvgpr_write_b32",
     .format = VOP2,
     .flags = {VALU},
-    .logical = {"VAccvgprWriteB32", "VAccvgprWrite"}
+    .logical = "VAccvgprWriteB32"
 )
 
 DEF_T(VAddLshlU32Inst, "v_add_lshl_u32",
@@ -2388,6 +2407,18 @@ DEF_T(VReadfirstlaneB32Inst, "v_readfirstlane_b32",
     .format = VOP2,
     .flags = {VALU},
     .logical = "VReadfirstlaneB32"
+)
+
+DEF_T(VReadlaneB32Inst, "v_readlane_b32",
+    .format = VOP2,
+    .flags = {VALU},
+    .logical = "VReadlaneB32"
+)
+
+DEF_T(VWritelaneB32Inst, "v_writelane_b32",
+    .format = VOP2,
+    .flags = {VALU},
+    .logical = "VWritelaneB32"
 )
 
 DEF_T(VRndneF32Inst, "v_rndne_f32",

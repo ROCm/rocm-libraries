@@ -35,6 +35,7 @@ set(TEST_LINK_LIBS
 # Assembly IR Tests
 set(UNIT_ASM_TEST_FILES
     unit/asm/ConfigurableWaitCntPassTest.cpp
+    unit/asm/DAGSchedulerPassTest.cpp
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
@@ -49,6 +50,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/IRParserTest.cpp
     unit/asm/PatternParserTest.cpp
     unit/asm/FuzzTest.cpp
+    unit/asm/HwInstDescTest.cpp
 )
 
 # High-Level IR Tests

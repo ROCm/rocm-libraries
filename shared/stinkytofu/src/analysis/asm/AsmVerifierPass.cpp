@@ -50,6 +50,25 @@ namespace stinkytofu
     // Register width validation (ASM-only; uses HwInstDesc from hardware defs)
     // ===========================================================================
 
+    static RegType fieldTypeToRegType(FieldType ft)
+    {
+        switch(ft)
+        {
+        case FieldType::vgpr:
+        case FieldType::src_vgpr:
+        case FieldType::src_vgpr_or_inline:
+            return RegType::V;
+        case FieldType::sreg:
+        case FieldType::sreg_m0:
+        case FieldType::sgpr:
+        case FieldType::sdst:
+        case FieldType::ssrc:
+            return RegType::S;
+        default:
+            return RegType::UNKNOWN;
+        }
+    }
+
     static std::string checkRegisterWidths(const StinkyInstruction* inst,
                                            const AsmVerifierConfig& config)
     {
@@ -57,45 +76,52 @@ namespace stinkytofu
         if(!hwDesc || !hwDesc->mnemonic)
             return "";
 
-        if(hwDesc->operandWidths.empty())
+        if(hwDesc->operandFields.empty())
             return "";
 
         std::stringstream errors;
 
-        for(const auto& req : hwDesc->operandWidths)
+        unsigned destIdx = 0;
+        unsigned srcIdx  = 0;
+        for(const auto& field : hwDesc->operandFields)
         {
-            const auto& regs = req.isDest ? inst->getDestRegs() : inst->getSrcRegs();
+            bool        isDest       = field.isDest;
+            unsigned    operandIndex = isDest ? destIdx++ : srcIdx++;
+            const auto& regs = isDest ? inst->getDestRegs() : inst->getSrcRegs();
 
-            if(req.operandIndex >= regs.size())
+            if(field.fieldSizeBits == 0)
+                continue;
+
+            unsigned expectedWidth = field.fieldSizeBits / 32;
+            if(expectedWidth <= 1)
+                continue;
+
+            if(operandIndex >= regs.size())
             {
                 errors << "Instruction '" << hwDesc->mnemonic << "' missing operand "
-                       << (req.isDest ? "dest[" : "src[") << (int)req.operandIndex << "]\n";
+                       << (isDest ? "dest[" : "src[") << operandIndex << "]\n";
                 continue;
             }
 
-            const StinkyRegister& reg = regs[req.operandIndex];
+            const StinkyRegister& reg = regs[operandIndex];
             if(reg.dataType != StinkyRegister::Type::Register)
-            {
-                errors << "Instruction '" << hwDesc->mnemonic << "' operand "
-                       << (req.isDest ? "dest[" : "src[") << (int)req.operandIndex << "] "
-                       << "must be a register but got non-register operand (literal/immediate)\n";
                 continue;
-            }
 
-            if(reg.reg.num != req.width)
+            if(reg.reg.num != expectedWidth)
             {
                 errors << "Instruction '" << hwDesc->mnemonic << "' operand "
-                       << (req.isDest ? "dest[" : "src[") << (int)req.operandIndex << "] "
-                       << "has register width " << reg.reg.num << ", expected " << (int)req.width
+                       << (isDest ? "dest[" : "src[") << operandIndex << "] "
+                       << "has register width " << reg.reg.num << ", expected " << expectedWidth
                        << "\n";
             }
 
-            if(req.expectedType != RegType::UNKNOWN && reg.reg.type != req.expectedType)
+            RegType expectedType = fieldTypeToRegType(field.fieldType);
+            if(expectedType != RegType::UNKNOWN && reg.reg.type != expectedType)
             {
                 errors << "Instruction '" << hwDesc->mnemonic << "' operand "
-                       << (req.isDest ? "dest[" : "src[") << (int)req.operandIndex << "] "
+                       << (isDest ? "dest[" : "src[") << operandIndex << "] "
                        << "has register type '" << regTypeToString(reg.reg.type) << "', expected '"
-                       << regTypeToString(req.expectedType) << "'\n";
+                       << regTypeToString(expectedType) << "'\n";
             }
         }
 

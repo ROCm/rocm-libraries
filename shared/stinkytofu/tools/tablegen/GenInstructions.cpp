@@ -92,6 +92,33 @@ namespace stinkytofu
         int         defaultLatency = 4;
     };
 
+    // Operand field description.
+    //
+    // Full entry (in .fields or .operand_fields):
+    //   {Pos, EncodeField, Type, Size [, Options...]}
+    //   e.g. {D0, vdata, vgpr, 32, RW}
+    //
+    //   Pos          D0, D1, ... (dest) or S0, S1, ... (src)
+    //   EncodeField  hardware encoding field (vdata, simm16, ssrc0, ...)
+    //   Type         operand type           (vgpr, sreg, label, wait_alu, ...)
+    //   Size         field size in bits     (16, 32, 64, 128, ...)
+    //   Options      RW (read-write), RSRC (resource descriptor)
+    //
+    // Partial override (in .operand_fields only) — inherits from format .fields
+    // and selectively overrides individual properties by name:
+    //   {S0, .size=64}              — override size only
+    //   {S0, .type=wait_alu}        — override type only
+    //   {D0, .size=64, .type=vgpr}  — override both
+    struct OperandFieldEntry
+    {
+        bool        isDest      = false;
+        bool        isReadWrite = false;
+        std::string encodeField; // "vdata", "vaddr", "rsrc", "soffset", "simm16", ...
+        std::string fieldType; // "vgpr", "sreg", "label", "wait_alu", ...
+        int         sizeBits = 0;
+        std::string positionKey; // "D0", "S0", etc. — non-empty for partial overrides
+    };
+
     // Format definition (provides defaults for instructions)
     // Hardware formats (VOP1, VOP3P, MUBUF, SMRD, etc.) are defined first; opcode-family
     // formats (e.g. MFMA on CDNA) can inherit from a hardware format via .parent.
@@ -99,21 +126,22 @@ namespace stinkytofu
     {
         std::string              name;
         std::string              parent; // e.g. "VOP3P" for MFMA (inherits encoding, etc.)
-        std::vector<std::string> modifiers;
+        std::string              microcode; // microcode format (e.g. "MC_VOP3P", "MC_SMEM")
         std::string              unit;
         std::vector<int>         encoding;
         int                      maxOperands = 0;
-        std::string              pipeline;
+        int                      cycle   = 0; // 0 = not specified (inherit from parent or arch default)
+        int                      latency = 0;
         std::vector<std::string> flags;
-    };
 
-    // Operand width requirement: {operandIndex, width, isDest, regTypeChar ('S','V','A',...)}
-    struct OperandWidthEntry
-    {
-        int  operandIndex = 0;
-        int  width        = 1;
-        bool isDest       = false;
-        char regType      = 'S'; // S=SGPR, V=VGPR, A=AGPR, etc.
+        // Default operand field descriptions for instructions using this format
+        std::vector<OperandFieldEntry> fields;
+
+        // Promoted (wider) encoding format name (e.g., "VOP3" for a VOP2 format)
+        std::string promotedFormat;
+
+        // Operand field descriptions for the promoted encoding
+        std::vector<OperandFieldEntry> altFields;
     };
 
     // Cost override: when modifier matches (e.g. MatrixFmtData(FP4, FP4)), use (cycle, latency)
@@ -134,23 +162,25 @@ namespace stinkytofu
 
         // Optional fields (inherit from format if not specified)
         std::string                    format; // e.g., "VOP3"
-        int                            cycle   = 1; // Default cost
-        int                            latency = 1; // Default latency
+        int                            cycle   = 0; // 0 = not specified (inherit from format, then arch default)
+        int                            latency = 0;
         std::vector<CostOverrideEntry> costOverrides; // modifier-keyed overrides
         std::vector<OperandSpec>       operands; // Operand specifications
-        std::vector<OperandWidthEntry> operandWidths; // Register width/type for verifier
+        std::vector<OperandFieldEntry> operandFields; // Operand field descriptions
+        std::vector<OperandFieldEntry> altOperandFields; // Promoted encoding field overrides
         std::vector<std::string>       flags; // Instruction-specific flags
         std::vector<std::string>
             logical; // Logical IR names mapping to this mnemonic: .logical = {"A", "B"} or .logical = "A"
         std::string              unit; // Override format unit
-        std::string              pipeline; // Override format pipeline
-        std::vector<std::string> modifiers; // Override/restrict format modifiers
 
         // After format inheritance applied
-        std::vector<std::string> finalFlags; // Merged format + instance flags
-        std::string              finalUnit;
-        std::string              finalPipeline;
-        std::vector<std::string> finalModifiers;
+        std::vector<std::string>       finalFlags; // Merged format + instance flags
+        std::string                    finalUnit;
+        std::string                    finalMicrocode; // Microcode format (e.g. "MC_VOP3P")
+        int                            finalEncoding = 0; // Encoding size in bits
+        std::vector<OperandFieldEntry> finalOperandFields; // After format inheritance
+        std::string                    finalPromotedFormat; // Promoted encoding format
+        std::vector<OperandFieldEntry> finalPromotedFields; // Promoted encoding fields
     };
 
     //==========================================================================
@@ -200,8 +230,18 @@ namespace stinkytofu
                                 std::istreambuf_iterator<char>());
 
             lastInstFile_ = instFile;
+            size_t prevSize = instructions_.size();
+            if(!parseBatchContent(content, instFile))
+                return false;
             if(!parseInstructionContent(content, instFile))
                 return false;
+            // Stable-sort newly added instructions by line number so that
+            // DEF_BATCH and DEF_T entries appear in document order.
+            std::stable_sort(instructions_.begin() + prevSize,
+                             instructions_.end(),
+                             [](const InstructionDef& a, const InstructionDef& b) {
+                                 return a.lineNumber < b.lineNumber;
+                             });
             std::cout << std::filesystem::path(instFile).filename().string() << ": parsed "
                       << instructions_.size() << " instructions\n";
             return true;
@@ -221,19 +261,29 @@ namespace stinkytofu
                 return fmt;
             const FormatDef& p = pit->second;
             // Child overrides where non-empty
+            if(fmt.microcode.empty())
+                fmt.microcode = p.microcode;
             if(fmt.unit.empty())
                 fmt.unit = p.unit;
             if(fmt.maxOperands == 0)
                 fmt.maxOperands = p.maxOperands;
-            if(fmt.modifiers.empty())
-                fmt.modifiers = p.modifiers;
             if(fmt.encoding.empty())
                 fmt.encoding = p.encoding;
-            if(fmt.pipeline.empty())
-                fmt.pipeline = p.pipeline;
+            if(fmt.cycle == 0)
+                fmt.cycle = p.cycle;
+            if(fmt.latency == 0)
+                fmt.latency = p.latency;
             // Flags: parent first, then child (child adds MFMA etc.)
             fmt.flags = p.flags;
             fmt.flags.insert(fmt.flags.end(), it->second.flags.begin(), it->second.flags.end());
+            // Fields: child overrides parent if non-empty
+            if(fmt.fields.empty())
+                fmt.fields = p.fields;
+            // Promoted format: child overrides parent if non-empty
+            if(fmt.promotedFormat.empty())
+                fmt.promotedFormat = p.promotedFormat;
+            if(fmt.altFields.empty())
+                fmt.altFields = p.altFields;
             return fmt;
         }
 
@@ -245,10 +295,13 @@ namespace stinkytofu
                 if(inst.format.empty())
                 {
                     // No format: use instruction's own fields so final* are always set
-                    inst.finalFlags     = inst.flags;
-                    inst.finalUnit      = inst.unit;
-                    inst.finalPipeline  = inst.pipeline;
-                    inst.finalModifiers = inst.modifiers;
+                    inst.finalFlags         = inst.flags;
+                    inst.finalUnit          = inst.unit;
+                    inst.finalOperandFields = inst.operandFields;
+                    if(inst.cycle == 0)
+                        inst.cycle = arch_.defaultCycle;
+                    if(inst.latency == 0)
+                        inst.latency = arch_.defaultLatency;
                     continue;
                 }
 
@@ -269,11 +322,123 @@ namespace stinkytofu
                 // Apply unit (instance overrides format)
                 inst.finalUnit = inst.unit.empty() ? fmt.unit : inst.unit;
 
-                // Apply pipeline (instance overrides format)
-                inst.finalPipeline = inst.pipeline.empty() ? fmt.pipeline : inst.pipeline;
+                // Apply microcode format (from format definition)
+                inst.finalMicrocode = fmt.microcode;
 
-                // Apply modifiers (instance overrides format)
-                inst.finalModifiers = inst.modifiers.empty() ? fmt.modifiers : inst.modifiers;
+                // Apply encoding (first element of encoding vector)
+                if(!fmt.encoding.empty())
+                    inst.finalEncoding = fmt.encoding[0];
+
+                // Apply cost: explicit instruction cost > format cost > arch default
+                if(inst.cycle == 0 && fmt.cycle > 0)
+                    inst.cycle = fmt.cycle;
+                if(inst.latency == 0 && fmt.latency > 0)
+                    inst.latency = fmt.latency;
+                if(inst.cycle == 0)
+                    inst.cycle = arch_.defaultCycle;
+                if(inst.latency == 0)
+                    inst.latency = arch_.defaultLatency;
+
+                // Apply operand fields: instruction overrides format
+                if(!inst.operandFields.empty())
+                {
+                    bool isPartial = !inst.operandFields[0].positionKey.empty();
+                    if(isPartial && !fmt.fields.empty())
+                    {
+                        // Merge: start from format defaults, apply named overrides
+                        inst.finalOperandFields = fmt.fields;
+                        int                                        destIdx = 0, srcIdx = 0;
+                        std::unordered_map<std::string, size_t> keyToIdx;
+                        for(size_t fi = 0; fi < inst.finalOperandFields.size(); ++fi)
+                        {
+                            std::string key = inst.finalOperandFields[fi].isDest
+                                                  ? "D" + std::to_string(destIdx++)
+                                                  : "S" + std::to_string(srcIdx++);
+                            keyToIdx[key] = fi;
+                        }
+                        for(const auto& ov : inst.operandFields)
+                        {
+                            auto it = keyToIdx.find(ov.positionKey);
+                            if(it != keyToIdx.end())
+                            {
+                                if(ov.sizeBits != 0)
+                                    inst.finalOperandFields[it->second].sizeBits = ov.sizeBits;
+                                if(!ov.fieldType.empty())
+                                    inst.finalOperandFields[it->second].fieldType = ov.fieldType;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        inst.finalOperandFields = inst.operandFields;
+                    }
+                }
+                else if(!fmt.fields.empty())
+                    inst.finalOperandFields = fmt.fields;
+
+                // Apply promoted format and alt fields
+                inst.finalPromotedFormat = fmt.promotedFormat;
+
+                if(!inst.altOperandFields.empty())
+                {
+                    bool isAltPartial = !inst.altOperandFields[0].positionKey.empty();
+                    if(isAltPartial && !fmt.altFields.empty())
+                    {
+                        inst.finalPromotedFields = fmt.altFields;
+                        int                                    destIdx = 0, srcIdx = 0;
+                        std::unordered_map<std::string, size_t> keyToIdx;
+                        for(size_t fi = 0; fi < inst.finalPromotedFields.size(); ++fi)
+                        {
+                            std::string key = inst.finalPromotedFields[fi].isDest
+                                                  ? "D" + std::to_string(destIdx++)
+                                                  : "S" + std::to_string(srcIdx++);
+                            keyToIdx[key] = fi;
+                        }
+                        for(const auto& ov : inst.altOperandFields)
+                        {
+                            auto it2 = keyToIdx.find(ov.positionKey);
+                            if(it2 != keyToIdx.end())
+                            {
+                                if(ov.sizeBits != 0)
+                                    inst.finalPromotedFields[it2->second].sizeBits = ov.sizeBits;
+                                if(!ov.fieldType.empty())
+                                    inst.finalPromotedFields[it2->second].fieldType = ov.fieldType;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        inst.finalPromotedFields = inst.altOperandFields;
+                    }
+                }
+                else if(!fmt.altFields.empty())
+                {
+                    // Start from format alt_fields, apply same size overrides
+                    // from operandFields (sizes are instruction-level, not encoding-specific)
+                    inst.finalPromotedFields = fmt.altFields;
+                    if(!inst.operandFields.empty()
+                       && !inst.operandFields[0].positionKey.empty())
+                    {
+                        int                                    destIdx = 0, srcIdx = 0;
+                        std::unordered_map<std::string, size_t> keyToIdx;
+                        for(size_t fi = 0; fi < inst.finalPromotedFields.size(); ++fi)
+                        {
+                            std::string key = inst.finalPromotedFields[fi].isDest
+                                                  ? "D" + std::to_string(destIdx++)
+                                                  : "S" + std::to_string(srcIdx++);
+                            keyToIdx[key] = fi;
+                        }
+                        for(const auto& ov : inst.operandFields)
+                        {
+                            auto it2 = keyToIdx.find(ov.positionKey);
+                            if(it2 != keyToIdx.end())
+                            {
+                                if(ov.sizeBits != 0)
+                                    inst.finalPromotedFields[it2->second].sizeBits = ov.sizeBits;
+                            }
+                        }
+                    }
+                }
             }
             return true;
         }
@@ -408,15 +573,324 @@ namespace stinkytofu
 
                 // Parse fields (simple substring matching for proof-of-concept)
                 parseField(block, ".parent", fmt.parent);
+                parseField(block, ".microcode", fmt.microcode);
                 parseField(block, ".unit", fmt.unit);
                 parseFieldInt(block, ".maxOperands", fmt.maxOperands);
+                parseFieldCost(block, ".cost", fmt.cycle, fmt.latency);
                 parseFieldFlags(block, ".flags", fmt.flags);
+                parseFieldOperandFields(block, ".fields", fmt.fields);
+                parseField(block, ".promotedFormat", fmt.promotedFormat);
+                parseFieldOperandFields(block, ".alt_fields", fmt.altFields);
 
                 formats_[formatName] = fmt;
                 pos                  = blockEnd;
             }
 
             return true;
+        }
+
+        // Parse DEF_BATCH(...) blocks.
+        //
+        // Syntax — shared header fields + entries using DEF_T argument syntax:
+        //   DEF_BATCH(.format = FMT, [.flags = {F1, F2},]
+        //       [.microcode = U, .unit = X, .encoding = {N},]
+        //       [.maxOperands = N,]
+        //       ClassName, "mnemonic",
+        //       ClassName, "mnemonic", .logical = "LogicalName",
+        //       ClassName, "mnemonic", .logical = {"L1", "L2"}, .flags = {Extra},
+        //   )
+        //
+        // Each entry uses the same field syntax as DEF_T arguments (without the
+        // DEF_T() wrapper).  Shared header fields are inherited by all entries;
+        // per-entry fields override or extend them (flags are additive).
+        //
+        // The header supports all FormatDef fields. If format-level fields beyond
+        // .format/.flags are given, an anonymous format is created automatically.
+        bool parseBatchContent(const std::string& content,
+                               const std::string& instFile = std::string())
+        {
+            size_t pos = 0;
+            int    batchIdx = 0;
+            while((pos = content.find("DEF_BATCH(", pos)) != std::string::npos)
+            {
+                int    defLine   = getLineNumber(content, pos);
+                size_t argsStart = pos + 10; // After "DEF_BATCH("
+
+                size_t blockEnd = findMatchingParen(content, argsStart);
+                if(blockEnd == std::string::npos)
+                {
+                    if(!instFile.empty())
+                        std::cerr << instFile << ":" << defLine << ": ";
+                    std::cerr << "Error: No matching paren for DEF_BATCH\n";
+                    return false;
+                }
+
+                std::string body = content.substr(argsStart, blockEnd - argsStart);
+
+                // --- Find header portion (before the first entry) ---
+                // Entries start with Identifier, "mnemonic". Header fields start
+                // with '.'. We extract the header text so shared field parsing
+                // doesn't accidentally pick up per-entry fields.
+                std::vector<size_t> tmpStarts;
+                findBatchEntries(body, tmpStarts);
+                std::string header = tmpStarts.empty()
+                                         ? body
+                                         : body.substr(0, tmpStarts[0]);
+
+                // --- Parse shared header fields ---
+                std::string              hdrFormat;
+                std::vector<std::string> hdrFlags;
+                std::string              hdrMicrocode;
+                std::string              hdrUnit;
+                std::string              hdrEncodingStr;
+                int                      hdrMaxOperands = 0;
+
+                parseField(header, ".format", hdrFormat);
+                parseFieldFlags(header, ".flags", hdrFlags);
+                parseField(header, ".microcode", hdrMicrocode);
+                parseField(header, ".unit", hdrUnit);
+                parseField(header, ".encoding", hdrEncodingStr);
+                parseFieldInt(header, ".maxOperands", hdrMaxOperands);
+
+                bool hasFormatFields = !hdrMicrocode.empty()
+                                       || !hdrUnit.empty() || !hdrEncodingStr.empty()
+                                       || hdrMaxOperands != 0;
+
+                std::string effectiveFormat = hdrFormat;
+
+                if(hasFormatFields)
+                {
+                    FormatDef anonFmt;
+                    anonFmt.name = "__batch_" + std::to_string(defLine) + "_"
+                                   + std::to_string(batchIdx++);
+                    anonFmt.parent = hdrFormat;
+                    if(!hdrMicrocode.empty())
+                        anonFmt.microcode = hdrMicrocode;
+                    if(!hdrUnit.empty())
+                        anonFmt.unit = hdrUnit;
+                    if(!hdrEncodingStr.empty())
+                    {
+                        std::string enc = hdrEncodingStr;
+                        enc.erase(std::remove(enc.begin(), enc.end(), '{'), enc.end());
+                        enc.erase(std::remove(enc.begin(), enc.end(), '}'), enc.end());
+                        enc.erase(0, enc.find_first_not_of(" \t"));
+                        enc.erase(enc.find_last_not_of(" \t") + 1);
+                        if(!enc.empty())
+                            anonFmt.encoding.push_back(std::stoi(enc));
+                    }
+                    anonFmt.maxOperands = hdrMaxOperands;
+                    anonFmt.flags = hdrFlags;
+
+                    formats_[anonFmt.name] = anonFmt;
+                    effectiveFormat        = anonFmt.name;
+                    hdrFlags.clear();
+                }
+
+                if(effectiveFormat.empty())
+                {
+                    if(!instFile.empty())
+                        std::cerr << instFile << ":" << defLine << ": ";
+                    std::cerr << "Error: DEF_BATCH needs .format or format-level fields\n";
+                    return false;
+                }
+
+                // Reuse entry positions found during header extraction.
+                std::vector<size_t>& entryStarts = tmpStarts;
+
+                if(entryStarts.empty())
+                {
+                    if(!instFile.empty())
+                        std::cerr << instFile << ":" << defLine << ": ";
+                    std::cerr << "Error: DEF_BATCH contains no entries\n";
+                    return false;
+                }
+
+                // --- Parse each entry ---
+                for(size_t ei = 0; ei < entryStarts.size(); ++ei)
+                {
+                    size_t entryPos = entryStarts[ei];
+                    size_t entryEnd = (ei + 1 < entryStarts.size())
+                                          ? entryStarts[ei + 1]
+                                          : body.size();
+
+                    // Extract ClassName
+                    size_t idEnd = body.find_first_not_of(
+                        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_",
+                        entryPos);
+                    std::string instClass = body.substr(entryPos, idEnd - entryPos);
+
+                    // Expect comma after ClassName
+                    size_t commaPos = body.find_first_not_of(" \t", idEnd);
+                    if(commaPos == std::string::npos || body[commaPos] != ',')
+                    {
+                        int entryLine
+                            = defLine + getLineNumber(body.substr(0, entryPos), 0) - 1;
+                        if(!instFile.empty())
+                            std::cerr << instFile << ":" << entryLine << ": ";
+                        std::cerr << "Error: Expected ',' after class name '"
+                                  << instClass << "' in DEF_BATCH\n";
+                        return false;
+                    }
+
+                    // Expect "mnemonic" after comma
+                    size_t qStart = body.find('"', commaPos + 1);
+                    if(qStart == std::string::npos || qStart >= entryEnd)
+                    {
+                        int entryLine
+                            = defLine + getLineNumber(body.substr(0, entryPos), 0) - 1;
+                        if(!instFile.empty())
+                            std::cerr << instFile << ":" << entryLine << ": ";
+                        std::cerr << "Error: Expected '\"mnemonic\"' after '"
+                                  << instClass << ",' in DEF_BATCH\n";
+                        return false;
+                    }
+                    size_t qEnd = body.find('"', qStart + 1);
+                    if(qEnd == std::string::npos)
+                    {
+                        int entryLine
+                            = defLine + getLineNumber(body.substr(0, entryPos), 0) - 1;
+                        if(!instFile.empty())
+                            std::cerr << instFile << ":" << entryLine << ": ";
+                        std::cerr << "Error: Unterminated mnemonic string for '"
+                                  << instClass << "' in DEF_BATCH\n";
+                        return false;
+                    }
+                    std::string mnem = body.substr(qStart + 1, qEnd - qStart - 1);
+
+                    // Everything between the mnemonic close-quote and the next
+                    // entry (or end of batch) is this entry's optional fields.
+                    std::string entryFields = body.substr(qEnd + 1, entryEnd - qEnd - 1);
+
+                    InstructionDef inst;
+                    inst.instClass  = instClass;
+                    inst.mnemonic   = mnem;
+                    inst.lineNumber = defLine
+                                      + getLineNumber(body.substr(0, entryPos), 0) - 1;
+                    inst.format = effectiveFormat;
+
+                    // Start with shared flags, then append per-entry flags
+                    inst.flags = hdrFlags;
+                    std::vector<std::string> entryFlags;
+                    parseFieldFlags(entryFields, ".flags", entryFlags);
+                    inst.flags.insert(
+                        inst.flags.end(), entryFlags.begin(), entryFlags.end());
+
+                    // Parse per-entry optional fields (same helpers as DEF_T)
+                    parseFieldCost(entryFields, ".cost", inst.cycle, inst.latency);
+                    parseFieldCostOverrides(entryFields, inst.costOverrides);
+                    parseFieldOperandFields(
+                        entryFields, ".operand_fields", inst.operandFields);
+                    parseFieldOperandFields(
+                        entryFields, ".alt_operand_fields", inst.altOperandFields);
+                    parseFieldLogical(entryFields, inst.logical);
+
+                    // Validate: per-entry must NOT redefine .format (use header)
+                    std::string entryFmt;
+                    parseField(entryFields, ".format", entryFmt);
+                    if(!entryFmt.empty())
+                    {
+                        if(!instFile.empty())
+                            std::cerr << instFile << ":" << inst.lineNumber << ": ";
+                        std::cerr << "Error: Entry '" << instClass
+                                  << "' in DEF_BATCH must not specify .format "
+                                  << "(use the batch header instead)\n";
+                        return false;
+                    }
+
+                    instructions_.push_back(inst);
+                }
+
+                pos = blockEnd + 1;
+            }
+            return true;
+        }
+
+        // Find the start positions of all entries inside a DEF_BATCH body.
+        // An entry is: Identifier , "mnemonic" [, .field = ...]
+        // Header fields start with '.' and are skipped.
+        void findBatchEntries(const std::string&  body,
+                              std::vector<size_t>& starts) const
+        {
+            for(size_t i = 0; i < body.size(); ++i)
+            {
+                char c = body[i];
+
+                // Skip whitespace and commas
+                if(c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',')
+                    continue;
+
+                // Skip // comments
+                if(c == '/' && i + 1 < body.size() && body[i + 1] == '/')
+                {
+                    size_t eol = body.find('\n', i);
+                    i = (eol == std::string::npos) ? body.size() : eol;
+                    continue;
+                }
+
+                // Skip .field = value (header or per-entry fields)
+                if(c == '.')
+                {
+                    i = skipDotField(body, i);
+                    continue;
+                }
+
+                // Potential entry: Identifier , "mnemonic"
+                if(std::isalpha(static_cast<unsigned char>(c)) || c == '_')
+                {
+                    size_t idEnd = i + 1;
+                    while(idEnd < body.size()
+                          && (std::isalnum(static_cast<unsigned char>(body[idEnd]))
+                              || body[idEnd] == '_'))
+                        idEnd++;
+
+                    size_t afterId = body.find_first_not_of(" \t", idEnd);
+                    if(afterId != std::string::npos && body[afterId] == ',')
+                    {
+                        size_t afterComma
+                            = body.find_first_not_of(" \t", afterId + 1);
+                        if(afterComma != std::string::npos
+                           && body[afterComma] == '"')
+                        {
+                            starts.push_back(i);
+                            // Advance past the mnemonic to find per-entry fields
+                            size_t qEnd = body.find('"', afterComma + 1);
+                            i = (qEnd != std::string::npos) ? qEnd : idEnd;
+                            continue;
+                        }
+                    }
+                    i = idEnd - 1;
+                }
+            }
+        }
+
+        // Skip a .field = value expression, returning position of its last char.
+        size_t skipDotField(const std::string& body, size_t dotPos) const
+        {
+            size_t i = dotPos + 1;
+            // Skip field name
+            while(i < body.size()
+                  && (std::isalnum(static_cast<unsigned char>(body[i]))
+                      || body[i] == '_'))
+                i++;
+            // Skip whitespace and '='
+            i = body.find_first_not_of(" \t", i);
+            if(i == std::string::npos)
+                return body.size() - 1;
+            if(body[i] == '=')
+            {
+                i = body.find_first_not_of(" \t", i + 1);
+                if(i == std::string::npos)
+                    return body.size() - 1;
+            }
+            // If value starts with '{', skip to matching '}'
+            if(body[i] == '{')
+            {
+                size_t close = findMatchingBrace(body, i);
+                return (close != std::string::npos) ? close : body.size() - 1;
+            }
+            // Otherwise skip to next comma or newline
+            size_t end = body.find_first_of(",\n", i);
+            return (end != std::string::npos) ? end - 1 : body.size() - 1;
         }
 
         bool parseInstructionContent(const std::string& content,
@@ -468,7 +942,8 @@ namespace stinkytofu
                 parseFieldCost(block, ".cost", inst.cycle, inst.latency);
                 parseFieldCostOverrides(block, inst.costOverrides);
                 parseFieldFlags(block, ".flags", inst.flags);
-                parseFieldOperandWidths(block, inst.operandWidths);
+                parseFieldOperandFields(block, ".operand_fields", inst.operandFields);
+                parseFieldOperandFields(block, ".alt_operand_fields", inst.altOperandFields);
                 parseFieldLogical(block, inst.logical);
 
                 instructions_.push_back(inst);
@@ -729,82 +1204,128 @@ namespace stinkytofu
             }
         }
 
-        // Helper: Parse .operand_widths = { {0, 4, false, S}, {1, 8, false, S} }
-        void parseFieldOperandWidths(const std::string& block, std::vector<OperandWidthEntry>& out)
+        // Parse .fields or .operand_fields:
+        //
+        // Full entry (format-level .fields or instruction-level .operand_fields):
+        //   {Pos, EncodeField, Name, Type, Size [, Options...]}
+        //   e.g.  {D0, vdata, vgpr_d, vgpr, 32, RW}
+        //   e.g.  {S0, simm16, label, label, 16}
+        //
+        // Partial override (.operand_fields only — merges with format .fields):
+        //   {S0, .type=wait_alu}          — override type
+        //   {D0, .size=64}                — override size
+        //   {D0, .size=64, .type=vgpr}    — override both
+        size_t findMatchingBrace(const std::string& s, size_t openPos)
         {
-            size_t pos = block.find(".operand_widths");
-            if(pos == std::string::npos)
-                return;
+            int depth = 1;
+            for(size_t i = openPos + 1; i < s.size(); ++i)
+            {
+                if(s[i] == '{')
+                    depth++;
+                else if(s[i] == '}')
+                {
+                    depth--;
+                    if(depth == 0)
+                        return i;
+                }
+            }
+            return std::string::npos;
+        }
 
-            size_t outerStart = block.find("{", pos);
+        void parseFieldOperandFields(const std::string&              block,
+                                     const std::string&              fieldKey,
+                                     std::vector<OperandFieldEntry>& out)
+        {
+            // Search for fieldKey, ensuring it's not a substring of a longer key
+            // (e.g., ".operand_fields" must not match ".alt_operand_fields")
+            size_t pos = 0;
+            while(pos < block.size())
+            {
+                pos = block.find(fieldKey, pos);
+                if(pos == std::string::npos)
+                    return;
+                if(pos > 0 && (std::isalnum(block[pos - 1]) || block[pos - 1] == '_'))
+                {
+                    pos += fieldKey.size();
+                    continue;
+                }
+                break;
+            }
+
+            size_t eqPos = block.find("=", pos);
+            if(eqPos == std::string::npos)
+                return;
+            size_t outerStart = block.find("{", eqPos);
             if(outerStart == std::string::npos)
+                return;
+            size_t outerEnd = findMatchingBrace(block, outerStart);
+            if(outerEnd == std::string::npos)
                 return;
 
             size_t i = outerStart + 1;
-            while(i < block.size())
+            while(i < outerEnd)
             {
-                // Find next inner { for one entry
                 size_t innerStart = block.find("{", i);
-                if(innerStart == std::string::npos)
+                if(innerStart == std::string::npos || innerStart >= outerEnd)
                     break;
                 size_t innerEnd = block.find("}", innerStart);
-                if(innerEnd == std::string::npos)
+                if(innerEnd == std::string::npos || innerEnd >= outerEnd)
                     break;
 
-                std::string       entry = block.substr(innerStart + 1, innerEnd - innerStart - 1);
-                OperandWidthEntry e;
-                // Parse: 0, 4, false, S (operandIndex, width, isDest, regType)
-                size_t p      = 0;
-                auto   skipWs = [&]() {
-                    while(p < entry.size() && (entry[p] == ' ' || entry[p] == '\t'))
-                        p++;
-                };
-                auto nextInt = [&]() {
-                    skipWs();
-                    size_t start = p;
-                    while(p < entry.size() && (std::isdigit(entry[p]) || entry[p] == '-'))
-                        p++;
-                    return std::stoi(entry.substr(start, p - start));
-                };
-                auto nextBool = [&]() {
-                    skipWs();
-                    if(entry.compare(p, 5, "false") == 0)
-                    {
-                        p += 5;
-                        return false;
-                    }
-                    if(entry.compare(p, 4, "true") == 0)
-                    {
-                        p += 4;
-                        return true;
-                    }
-                    return false;
-                };
-                auto nextRegType = [&]() {
-                    skipWs();
-                    if(p < entry.size() && std::isalpha(entry[p]))
-                    {
-                        char c = entry[p++];
-                        return c;
-                    }
-                    return 'S';
-                };
+                std::string entry = block.substr(innerStart + 1, innerEnd - innerStart - 1);
 
-                e.operandIndex = nextInt();
-                skipWs();
-                if(p < entry.size() && entry[p] == ',')
-                    p++;
-                e.width = nextInt();
-                skipWs();
-                if(p < entry.size() && entry[p] == ',')
-                    p++;
-                e.isDest = nextBool();
-                skipWs();
-                if(p < entry.size() && entry[p] == ',')
-                    p++;
-                e.regType = nextRegType();
+                // Tokenize by comma
+                std::vector<std::string> tokens;
+                size_t                   ts = 0;
+                while(ts < entry.size())
+                {
+                    size_t te = entry.find(',', ts);
+                    if(te == std::string::npos)
+                        te = entry.size();
+                    std::string tok = entry.substr(ts, te - ts);
+                    tok.erase(0, tok.find_first_not_of(" \t\n\r"));
+                    tok.erase(tok.find_last_not_of(" \t\n\r") + 1);
+                    if(!tok.empty())
+                        tokens.push_back(tok);
+                    ts = te + 1;
+                }
 
-                out.push_back(e);
+                if(tokens.size() >= 4
+                   && tokens[1].find('.') == std::string::npos)
+                {
+                    // Full entry: {D0, vdata, vgpr, 32 [, RW]}
+                    OperandFieldEntry e;
+                    e.isDest      = (!tokens[0].empty() && tokens[0][0] == 'D');
+                    e.encodeField = tokens[1];
+                    e.fieldType   = tokens[2];
+                    e.sizeBits    = std::stoi(tokens[3]);
+                    for(size_t ti = 4; ti < tokens.size(); ++ti)
+                    {
+                        if(tokens[ti] == "RW")
+                            e.isReadWrite = true;
+                    }
+                    out.push_back(e);
+                }
+                else if(tokens.size() >= 2 && tokens[1].find('.') != std::string::npos)
+                {
+                    // Named-field partial override: {S0, .size=64, .type=wait_alu}
+                    OperandFieldEntry e;
+                    e.positionKey = tokens[0];
+                    for(size_t ti = 1; ti < tokens.size(); ++ti)
+                    {
+                        size_t eq = tokens[ti].find('=');
+                        if(eq == std::string::npos)
+                            continue;
+                        std::string key = tokens[ti].substr(0, eq);
+                        std::string val = tokens[ti].substr(eq + 1);
+                        if(key == ".size")
+                            e.sizeBits = std::stoi(val);
+                        else if(key == ".type")
+                            e.fieldType = val;
+                    }
+                    out.push_back(e);
+                }
+
                 i = innerEnd + 1;
             }
         }
@@ -817,9 +1338,12 @@ namespace stinkytofu
     class InstructionCodeGen
     {
     public:
-        InstructionCodeGen(const std::string& arch, const std::vector<InstructionDef>& instructions)
+        InstructionCodeGen(const std::string&              arch,
+                           const std::vector<InstructionDef>& instructions,
+                           const ArchDef&                  archDef)
             : arch_(arch)
             , instructions_(instructions)
+            , archDef_(archDef)
         {
         }
 
@@ -835,13 +1359,15 @@ namespace stinkytofu
 
             emitHeader(out, "Instruction Cost Table");
             out << "// Cost table: {mnemonic, cycle, latency}\n";
-            out << "// Only non-default costs are listed (default: cycle=1, latency=1)\n\n";
+            out << "// Only non-default costs are listed (default: cycle="
+                << archDef_.defaultCycle << ", latency=" << archDef_.defaultLatency << ")\n\n";
 
             out << "constexpr InstructionCost " << arch_ << "_GENERATED_COSTS[] = {\n";
 
             for(const auto& inst : instructions_)
             {
-                if(inst.cycle != 1 || inst.latency != 1) // Only emit non-default costs
+                if(inst.cycle != archDef_.defaultCycle
+                   || inst.latency != archDef_.defaultLatency)
                 {
                     out << "    {\"" << inst.mnemonic << "\", " << inst.cycle << ", "
                         << inst.latency << "},\n";
@@ -892,22 +1418,124 @@ namespace stinkytofu
             return true;
         }
 
-        // Map reg type char from .def to C++ RegType
-        static std::string regTypeToCpp(char c)
+        static std::string encodeFieldToCpp(const std::string& f)
         {
-            switch(c)
-            {
-            case 'S':
-                return "RegType::S";
-            case 'V':
-                return "RegType::V";
-            case 'A':
-                return "RegType::A";
-            case 'M':
-                return "RegType::M";
-            default:
-                return "RegType::S";
-            }
+            if(f == "vdata")
+                return "EncodeField::vdata";
+            if(f == "vaddr")
+                return "EncodeField::vaddr";
+            if(f == "rsrc")
+                return "EncodeField::rsrc";
+            if(f == "soffset")
+                return "EncodeField::soffset";
+            if(f == "vdst")
+                return "EncodeField::vdst";
+            if(f == "vsrc")
+                return "EncodeField::vsrc";
+            if(f == "saddr")
+                return "EncodeField::saddr";
+            if(f == "addr")
+                return "EncodeField::addr";
+            if(f == "data0")
+                return "EncodeField::data0";
+            if(f == "data1")
+                return "EncodeField::data1";
+            if(f == "src0")
+                return "EncodeField::src0";
+            if(f == "src1")
+                return "EncodeField::src1";
+            if(f == "src2")
+                return "EncodeField::src2";
+            if(f == "scale_src0")
+                return "EncodeField::scale_src0";
+            if(f == "scale_src1")
+                return "EncodeField::scale_src1";
+            if(f == "sdst")
+                return "EncodeField::sdst";
+            if(f == "ssrc1")
+                return "EncodeField::ssrc1";
+            if(f == "literal")
+                return "EncodeField::literal";
+            if(f == "simm16")
+                return "EncodeField::simm16";
+            if(f == "simm32")
+                return "EncodeField::simm32";
+            if(f == "ssrc0")
+                return "EncodeField::ssrc0";
+            if(f == "sdata")
+                return "EncodeField::sdata";
+            if(f == "sbase")
+                return "EncodeField::sbase";
+            if(f == "vsrc1")
+                return "EncodeField::vsrc1";
+            if(f == "vaddr0")
+                return "EncodeField::vaddr0";
+            if(f == "vaddr1")
+                return "EncodeField::vaddr1";
+            if(f == "vaddr2")
+                return "EncodeField::vaddr2";
+            if(f == "vaddr3")
+                return "EncodeField::vaddr3";
+            return "EncodeField::None";
+        }
+
+        static std::string fieldTypeToCpp(const std::string& t)
+        {
+            if(t == "vgpr")
+                return "FieldType::vgpr";
+            if(t == "sreg")
+                return "FieldType::sreg";
+            if(t == "sreg_m0")
+                return "FieldType::sreg_m0";
+            if(t == "label")
+                return "FieldType::label";
+            if(t == "simm16")
+                return "FieldType::simm16";
+            if(t == "simm32")
+                return "FieldType::simm32";
+            if(t == "sdst")
+                return "FieldType::sdst";
+            if(t == "ssrc")
+                return "FieldType::ssrc";
+            if(t == "hwreg")
+                return "FieldType::hwreg";
+            if(t == "delay")
+                return "FieldType::delay";
+            if(t == "set_vgpr_msb")
+                return "FieldType::set_vgpr_msb";
+            if(t == "sleep")
+                return "FieldType::sleep";
+            if(t == "ssrc_barrier_id")
+                return "FieldType::ssrc_barrier_id";
+            if(t == "src_vgpr")
+                return "FieldType::src_vgpr";
+            if(t == "src_vgpr_or_inline")
+                return "FieldType::src_vgpr_or_inline";
+            if(t == "src_simple")
+                return "FieldType::src_simple";
+            if(t == "wait_alu")
+                return "FieldType::wait_alu";
+            if(t == "wait_mem_ds")
+                return "FieldType::wait_mem_ds";
+            if(t == "smem_offset")
+                return "FieldType::smem_offset";
+            if(t == "src")
+                return "FieldType::src";
+            if(t == "vcc")
+                return "FieldType::vcc";
+            if(t == "exec")
+                return "FieldType::exec";
+            if(t == "sgpr")
+                return "FieldType::sgpr";
+            return "FieldType::None";
+        }
+
+        static std::string mnemonicToArraySuffix(const std::string& mnemonic)
+        {
+            std::string s;
+            for(char c : mnemonic)
+                s += (c == '_' ? '_' : (char)std::tolower(c));
+            return s;
         }
 
         // Generate operand requirements file (included by ArchInfo getMCIDTable())
@@ -921,59 +1549,137 @@ namespace stinkytofu
             }
 
             emitHeader(out, "Operand Requirements");
-            out << "// Operand width/type requirements for IR verifier.\n";
-            out << "// Included inside getMCIDTable(); defines instRequirements[].\n\n";
+            out << "// Operand field requirements for IR verifier.\n";
+            out << "// Included inside getMCIDTable(); defines "
+                   "instFieldRequirements[].\n\n";
 
-            std::vector<const InstructionDef*> withWidths;
+            // --- Operand field description arrays ---
+            constexpr int kFieldSizeBitsMax = (1 << 12) - 1; // 4095
+
+            std::vector<const InstructionDef*> withFields;
             for(const auto& inst : instructions_)
             {
-                if(!inst.operandWidths.empty())
-                    withWidths.push_back(&inst);
+                if(!inst.finalOperandFields.empty())
+                    withFields.push_back(&inst);
             }
 
-            if(withWidths.empty())
+            if(withFields.empty())
             {
-                out << "// No instructions with .operand_widths in this arch\n";
+                out << "// No instructions with operand field descriptions in this arch\n";
                 out << "static constexpr struct {\n";
                 out << "    const char* mnemonic;\n";
-                out << "    stinkytofu::span<const stinkytofu::HwInstDesc::OperandWidth> "
-                       "requirements;\n";
-                out << "} instRequirements[] = {};\n";
-                return true;
+                out << "    stinkytofu::span<const stinkytofu::HwInstDesc::OperandFieldDesc> "
+                       "fields;\n";
+                out << "} instFieldRequirements[] = {};\n";
             }
-
-            for(const auto* inst : withWidths)
+            else
             {
-                std::string arrayName = "operand_widths_";
-                for(char c : inst->mnemonic)
-                    arrayName += (c == '_' ? '_' : (char)std::tolower(c));
-
-                out << "static constexpr stinkytofu::HwInstDesc::OperandWidth " << arrayName
-                    << "[] = {\n";
-                for(const auto& e : inst->operandWidths)
+                for(const auto* inst : withFields)
                 {
-                    out << "    {" << (int)e.operandIndex << ", " << (int)e.width << ", "
-                        << (e.isDest ? "true" : "false") << ", " << regTypeToCpp(e.regType)
-                        << "},\n";
+                    std::string arrayName
+                        = "operand_fields_" + mnemonicToArraySuffix(inst->mnemonic);
+                    out << "static constexpr stinkytofu::HwInstDesc::OperandFieldDesc " << arrayName
+                        << "[] = {\n";
+                    for(const auto& e : inst->finalOperandFields)
+                    {
+                        if(e.sizeBits > kFieldSizeBitsMax)
+                        {
+                            std::cerr << "error: " << inst->mnemonic
+                                      << " operand sizeBits=" << e.sizeBits
+                                      << " exceeds 12-bit limit (" << kFieldSizeBitsMax << ")\n";
+                            return false;
+                        }
+                        out << "    {" << encodeFieldToCpp(e.encodeField) << ", "
+                            << fieldTypeToCpp(e.fieldType)
+                            << ", " << e.sizeBits
+                            << ", " << (e.isDest ? 1 : 0)
+                            << ", " << (e.isReadWrite ? 1 : 0) << "},\n";
+                    }
+                    out << "};\n\n";
                 }
-                out << "};\n\n";
+
+                out << "static constexpr struct {\n";
+                out << "    const char* mnemonic;\n";
+                out << "    stinkytofu::span<const stinkytofu::HwInstDesc::OperandFieldDesc> "
+                       "fields;\n";
+                out << "} instFieldRequirements[] = {\n";
+                for(size_t i = 0; i < withFields.size(); ++i)
+                {
+                    const auto* inst = withFields[i];
+                    std::string arrayName
+                        = "operand_fields_" + mnemonicToArraySuffix(inst->mnemonic);
+                    out << "    {\"" << inst->mnemonic << "\", " << arrayName << "}";
+                    out << (i + 1 < withFields.size() ? ",\n" : "\n");
+                }
+                out << "};\n";
             }
 
-            out << "static constexpr struct {\n";
-            out << "    const char* mnemonic;\n";
-            out << "    stinkytofu::span<const stinkytofu::HwInstDesc::OperandWidth> "
-                   "requirements;\n";
-            out << "} instRequirements[] = {\n";
-            for(size_t i = 0; i < withWidths.size(); ++i)
+            // --- Promoted (alt) operand field description arrays ---
+            std::vector<const InstructionDef*> withPromoted;
+            for(const auto& inst : instructions_)
             {
-                const auto* inst      = withWidths[i];
-                std::string arrayName = "operand_widths_";
-                for(char c : inst->mnemonic)
-                    arrayName += (c == '_' ? '_' : (char)std::tolower(c));
-                out << "    {\"" << inst->mnemonic << "\", " << arrayName << "}";
-                out << (i + 1 < withWidths.size() ? ",\n" : "\n");
+                if(!inst.finalPromotedFields.empty())
+                    withPromoted.push_back(&inst);
             }
-            out << "};\n";
+
+            out << "\n";
+            if(withPromoted.empty())
+            {
+                out << "// No instructions with promoted operand field descriptions in this arch\n";
+                out << "static constexpr struct {\n";
+                out << "    const char* mnemonic;\n";
+                out << "    stinkytofu::MicrocodeFormat promotedFormat;\n";
+                out << "    stinkytofu::span<const stinkytofu::HwInstDesc::OperandFieldDesc> "
+                       "fields;\n";
+                out << "} instPromotedFieldRequirements[] = {};\n";
+            }
+            else
+            {
+                for(const auto* inst : withPromoted)
+                {
+                    std::string arrayName
+                        = "promoted_fields_" + mnemonicToArraySuffix(inst->mnemonic);
+                    out << "static constexpr stinkytofu::HwInstDesc::OperandFieldDesc " << arrayName
+                        << "[] = {\n";
+                    for(const auto& e : inst->finalPromotedFields)
+                    {
+                        if(e.sizeBits > kFieldSizeBitsMax)
+                        {
+                            std::cerr << "error: " << inst->mnemonic
+                                      << " promoted operand sizeBits=" << e.sizeBits
+                                      << " exceeds 12-bit limit (" << kFieldSizeBitsMax << ")\n";
+                            return false;
+                        }
+                        out << "    {" << encodeFieldToCpp(e.encodeField) << ", "
+                            << fieldTypeToCpp(e.fieldType)
+                            << ", " << e.sizeBits
+                            << ", " << (e.isDest ? 1 : 0)
+                            << ", " << (e.isReadWrite ? 1 : 0) << "},\n";
+                    }
+                    out << "};\n\n";
+                }
+
+                out << "static constexpr struct {\n";
+                out << "    const char* mnemonic;\n";
+                out << "    stinkytofu::MicrocodeFormat promotedFormat;\n";
+                out << "    stinkytofu::span<const stinkytofu::HwInstDesc::OperandFieldDesc> "
+                       "fields;\n";
+                out << "} instPromotedFieldRequirements[] = {\n";
+                for(size_t i = 0; i < withPromoted.size(); ++i)
+                {
+                    const auto* inst = withPromoted[i];
+                    std::string arrayName
+                        = "promoted_fields_" + mnemonicToArraySuffix(inst->mnemonic);
+                    std::string pfmt = inst->finalPromotedFormat.empty()
+                                          ? "MicrocodeFormat::NONE"
+                                          : "MicrocodeFormat::" + inst->finalPromotedFormat;
+                    out << "    {\"" << inst->mnemonic << "\", "
+                        << "stinkytofu::" << pfmt << ", "
+                        << arrayName << "}";
+                    out << (i + 1 < withPromoted.size() ? ",\n" : "\n");
+                }
+                out << "};\n";
+            }
 
             return true;
         }
@@ -1016,6 +1722,7 @@ namespace stinkytofu
         }
         std::string                        arch_;
         const std::vector<InstructionDef>& instructions_;
+        ArchDef                            archDef_;
 
         void emitHeader(std::ofstream& out, const std::string& description)
         {
@@ -1033,6 +1740,22 @@ namespace stinkytofu
     //==========================================================================
     // ISA .inc EMISSION (from .def only; no gfxisa dependency)
     //==========================================================================
+
+    // Convert microcode string (e.g. "MC_VOP3P") to C++ enum literal "MicrocodeFormat::MC_VOP3P"
+    static std::string microcodeToCpp(const std::string& microcode)
+    {
+        if(microcode.empty())
+            return "MicrocodeFormat::NONE";
+        return "MicrocodeFormat::" + microcode;
+    }
+
+    // Convert unit string (e.g. "VALU") to C++ enum literal "ExecUnit::VALU"
+    static std::string unitToCpp(const std::string& unit)
+    {
+        if(unit.empty())
+            return "ExecUnit::NONE";
+        return "ExecUnit::" + unit;
+    }
 
     // Convert finalFlags to C++ makeFlagSet({ IF_XXX, ... }) content (IF_ prefix per flag)
     static std::string flagsToMakeFlagSetContent(const std::vector<std::string>& flags)
@@ -1081,7 +1804,7 @@ namespace stinkytofu
 
         // MCIDTable
         EMIT_GUARD("GET_ISAINFO_HWINSTDESC_TABLE");
-        out << "// MCIDTable: operandWidths set by ArchInfo getMCIDTable()\n"
+        out << "// MCIDTable: operandFields set by ArchInfo getMCIDTable()\n"
             << "static HwInstDesc MCIDTable[] = {\n";
         for(size_t i = 0; i < instructions.size(); ++i)
         {
@@ -1095,6 +1818,9 @@ namespace stinkytofu
                 << std::setw(3) << inst.cycle << ", " << std::setw(4) << inst.latency << ", "
                 << "\"" << inst.mnemonic << "\", "
                 << "makeFlagSet({" << (flagStr.empty() ? "" : flagStr) << "}), "
+                << microcodeToCpp(inst.finalMicrocode) << ", "
+                << inst.finalEncoding << ", "
+                << unitToCpp(inst.finalUnit) << ", "
                 << "{} },\n";
         }
         out << "};\n\n";
@@ -1228,7 +1954,7 @@ namespace stinkytofu
             << "#include \"hardware/generated/" << arch.name << "_operands.inc\"\n\n"
             << "        static std::once_flag once;\n"
             << "        std::call_once(once, [] {\n"
-            << "            for(const auto& req : instRequirements)\n"
+            << "            for(const auto& req : instFieldRequirements)\n"
             << "            {\n"
             << "                for(size_t i = 0; i < sizeof(MCIDTable) / sizeof(MCIDTable[0]); "
                "++i)\n"
@@ -1236,8 +1962,24 @@ namespace stinkytofu
             << "                    if(MCIDTable[i].mnemonic && std::string(MCIDTable[i].mnemonic) "
                "== req.mnemonic)\n"
             << "                    {\n"
-            << "                        const_cast<HwInstDesc&>(MCIDTable[i]).operandWidths = "
-               "req.requirements;\n"
+            << "                        const_cast<HwInstDesc&>(MCIDTable[i]).operandFields = "
+               "req.fields;\n"
+            << "                        break;\n"
+            << "                    }\n"
+            << "                }\n"
+            << "            }\n"
+            << "            for(const auto& req : instPromotedFieldRequirements)\n"
+            << "            {\n"
+            << "                for(size_t i = 0; i < sizeof(MCIDTable) / sizeof(MCIDTable[0]); "
+               "++i)\n"
+            << "                {\n"
+            << "                    if(MCIDTable[i].mnemonic && std::string(MCIDTable[i].mnemonic) "
+               "== req.mnemonic)\n"
+            << "                    {\n"
+            << "                        const_cast<HwInstDesc&>(MCIDTable[i]).promotedFormat = "
+               "req.promotedFormat;\n"
+            << "                        const_cast<HwInstDesc&>(MCIDTable[i]).promotedFields = "
+               "req.fields;\n"
             << "                        break;\n"
             << "                    }\n"
             << "                }\n"
@@ -1453,7 +2195,7 @@ namespace stinkytofu
             return false;
 
         // Generate output files
-        InstructionCodeGen codegen(normArch, parser.getInstructions());
+        InstructionCodeGen codegen(normArch, parser.getInstructions(), parser.getArch());
 
         bool success = true;
         success &= codegen.generateCostTable(outputBase + "_costs.inc");
@@ -1533,7 +2275,7 @@ namespace stinkytofu
         {
             const std::vector<InstructionDef>& insts = archInstructions[arch];
             const ArchDef&                     ad    = archDefs[arch];
-            InstructionCodeGen                 codegen(arch, insts);
+            InstructionCodeGen                 codegen(arch, insts, ad);
             success &= codegen.generateCostTable((genDir / (arch + "_costs.inc")).string());
             success &= codegen.generateOperandRequirements(
                 (genDir / (arch + "_operands.inc")).string());

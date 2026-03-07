@@ -23,7 +23,9 @@
 #pragma once
 
 #include "stinkytofu/core/PassManager.hpp"
+#include <functional>
 #include <memory>
+#include <sstream>
 #include <string>
 
 namespace stinkytofu
@@ -100,8 +102,7 @@ namespace stinkytofu
         int optimizationIterations = 3; ///< Iterations for optimization passes only
 
         // ========== Debugging ==========
-        bool verbose             = false; ///< Print pass execution progress
-        bool dumpIRBetweenPasses = false; ///< Dump IR after each pass
+        bool verbose = false; ///< Print pass execution progress
 
         // ========== GEMM-Specific Configuration ==========
         std::unique_ptr<GemmTileConfig> gemmTileConfig; ///< GEMM tile configuration (optional)
@@ -187,6 +188,90 @@ namespace stinkytofu
         PipelineConfig& withDebugConfig(std::unique_ptr<PassManagerDebugConfig> cfg)
         {
             debugConfig = std::move(cfg);
+            return *this;
+        }
+
+        /// Apply debug level settings
+        /// @param level 0=silent, 1=verbose to stdout, 2=IR dump to file
+        /// @param groupName Group name used for dump file prefixes (level 2)
+        PipelineConfig& withDebugLevel(int level, const std::string& groupName)
+        {
+            if(level == 1)
+                verbose = true;
+
+            if(level == 2)
+            {
+                if(!debugConfig)
+                    debugConfig = std::make_unique<PassManagerDebugConfig>();
+                debugConfig->setDumpInitialIR(true);
+                debugConfig->setPrintAfterAll(true);
+                debugConfig->setDumpToFileInBefore(groupName + "-before_passes.txt");
+                debugConfig->setDumpToFileInAfter(groupName + "-after_passes.txt");
+            }
+
+            return *this;
+        }
+
+        /// Parse comma-separated pass names and invoke a callback for each trimmed name.
+        /// e.g. "PassA, PassB" -> callback("PassA"), callback("PassB")
+        static void forEachPassName(const std::string&                      commaSeparated,
+                                    std::function<void(const std::string&)> callback)
+        {
+            std::istringstream stream(commaSeparated);
+            std::string        name;
+            while(std::getline(stream, name, ','))
+            {
+                auto start = name.find_first_not_of(" ");
+                auto end   = name.find_last_not_of(" ");
+                if(start != std::string::npos)
+                    callback(name.substr(start, end - start + 1));
+            }
+        }
+
+        /// Selectively print IR before/after specific passes
+        /// @param beforePasses Comma-separated pass names to print IR before (case-sensitive)
+        /// @param afterPasses Comma-separated pass names to print IR after (case-sensitive)
+        /// @param groupName Group name used for dump file prefixes
+        PipelineConfig& withPrintPasses(const std::string& beforePasses,
+                                        const std::string& afterPasses,
+                                        const std::string& groupName)
+        {
+            if(beforePasses.empty() && afterPasses.empty())
+                return *this;
+
+            if(!debugConfig)
+            {
+                debugConfig = std::make_unique<PassManagerDebugConfig>();
+                if(!beforePasses.empty())
+                    debugConfig->setDumpToFileInBefore(groupName + "-before_passes.txt");
+                if(!afterPasses.empty())
+                    debugConfig->setDumpToFileInAfter(groupName + "-after_passes.txt");
+            }
+
+            if(!beforePasses.empty())
+                forEachPassName(beforePasses, [this](const std::string& name) {
+                    debugConfig->addOnlyPrintBefore(name);
+                });
+
+            if(!afterPasses.empty())
+                forEachPassName(afterPasses, [this](const std::string& name) {
+                    debugConfig->addOnlyPrintAfter(name);
+                });
+
+            return *this;
+        }
+
+        /// Enable PASS_DEBUG output for specific passes
+        /// @param passes Comma-separated pass DEBUG_TYPE names (case-sensitive)
+        PipelineConfig& withDebugPass(const std::string& passes)
+        {
+            if(passes.empty())
+                return *this;
+
+            forEachPassName(passes, [](const std::string& name) {
+                PassManagerDebugConfig::addDebugOnly(name);
+            });
+
             return *this;
         }
 

@@ -315,6 +315,25 @@ globalParameters["UseStinkyTofu"] = True  # Enable StinkyTofu IR conversion for 
 # 2: Full optimization
 globalParameters["StinkyTofuOptLevel"] = 0
 
+# StinkyTofu debug level
+# 0: Silent (default)
+# 1: Pipeline phase labels and pass names to stdout
+# 2: Initial IR + IR after each pass to file
+globalParameters["StinkyTofuDebugLevel"] = 0
+
+# StinkyTofu selective pass IR dump
+# Comma-separated pass names to print IR before/after (case-sensitive)
+# e.g. "CFG Builder" or "RedundantMovEliminationPass, StinkyDAGSchedulerPass"
+# Unmatched pass names are silently ignored
+globalParameters["StinkyTofuPrintBeforePass"] = ""
+globalParameters["StinkyTofuPrintAfterPass"] = ""
+
+# StinkyTofu internal pass debug logging
+# Comma-separated pass names to enable PASS_DEBUG output (case-sensitive)
+# e.g. "StinkyDAGSchedulerPass"
+# Unmatched pass names are silently ignored
+globalParameters["StinkyTofuDebugPass"] = ""
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)

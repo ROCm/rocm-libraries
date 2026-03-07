@@ -67,13 +67,15 @@ namespace stinkytofu
             return inst;
         }
 
-        /// Create ds_read_b128 in \p bb: v[destReg:destReg+3] = mem[v[addrReg]].
+        /// Create ds_read_b128 / ds_load_b128 in \p bb: v[destReg:destReg+3] = mem[v[addrReg]].
         /// Defines a 4-DWORD wide vector register.
+        /// Gfx1250 uses ds_load_b128; Gfx942/Gfx950 use ds_read_b128.
         inline StinkyInstruction*
             createDsReadB128InBlock(BasicBlock* bb, GfxArchID arch, int destReg, int addrReg)
         {
-            AsmIRBuilder       builder(*bb, arch);
-            StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::ds_read_b128, arch));
+            AsmIRBuilder builder(*bb, arch);
+            GFX          op = (arch == GfxArchID::Gfx1250) ? GFX::ds_load_b128 : GFX::ds_read_b128;
+            StinkyInstruction* inst = builder.create(getMCIDByUOp(op, arch));
             inst->addDestReg(StinkyRegister("v", destReg, 4));
             inst->addSrcReg(StinkyRegister("v", addrReg, 1));
             return inst;

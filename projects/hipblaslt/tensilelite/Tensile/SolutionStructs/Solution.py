@@ -1864,9 +1864,10 @@ class Solution(collections.abc.Mapping):
       return
 
     if tdmInst > 0:
-      if state["PrefetchGlobalRead"] > 1:
-        reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
-        return
+      # TODO: remove this restriction when PGR=2 is fully supported
+      # if state["PrefetchGlobalRead"] > 1:
+      #   reject(state, printRejectionReason, "Currently TDM only supports PGR=0, 1")
+      #   return
 
       if (state["ProblemType"]["TransposeA"], state["ProblemType"]["TransposeB"]) != (True, False):
         reject(state, printRejectionReason, "Currently TDM only supports TN")

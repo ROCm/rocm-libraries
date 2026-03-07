@@ -32,8 +32,7 @@
 
 namespace stinkytofu
 {
-    Legalized
-        legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
+    Legalized legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
     {
         assert(inst->getUnifiedOpcode() == GFX::v_nop && "Invalid v_nop instruction");
         // Check if this is a v_nop with count > 1
@@ -76,13 +75,13 @@ namespace stinkytofu
     }
 
     Legalized legalizeVCmpX(StinkyInstruction*                inst,
-                            AsmIRBuilder&              irBuilder,
+                            AsmIRBuilder&                     irBuilder,
                             GfxArchID                         archId,
-                            const std::map<std::string, int>& asmCaps)
+                            const std::map<std::string, int>& archCaps)
     {
         // Check if this architecture supports CMPX writes to SGPR
-        auto it = asmCaps.find("CMPXWritesSGPR");
-        if(it != asmCaps.end() && it->second)
+        auto it = archCaps.find("CMPXWritesSGPR");
+        if(it != archCaps.end() && it->second)
         {
             // No lowering needed on this architecture
             return {nullptr, nullptr};
@@ -175,10 +174,12 @@ namespace stinkytofu
         return {cmpInst, movInst};
     }
 
-    Legalized
-        legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
+    Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
     {
         // Only legalize on gfx1250
+        // TODO: Support other SeparateVMcnt + SeparateLGKMcnt archs (e.g. gfx1200,
+        // gfx1201). Need to verify whether they also support combined instructions
+        // (s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt).
         if(archId != GfxArchID::Gfx1250)
             return {nullptr, nullptr};
 
@@ -233,8 +234,8 @@ namespace stinkytofu
         // Helper to create combined wait instruction before inst
         auto createCombinedWait
             = [&](GFX opcode, int8_t count1, int8_t count2) -> StinkyInstruction* {
-            const HwInstDesc*  desc     = getMCIDByUOp(opcode, archId);
-            StinkyInstruction* waitInst = irBuilder.create(desc, inst);
+            const HwInstDesc*  desc          = getMCIDByUOp(opcode, archId);
+            StinkyInstruction* waitInst      = irBuilder.create(desc, inst);
             uint16_t           combinedCount = ((count1 & 0xFF) << 8) | (count2 & 0xFF);
             waitInst->addSrcReg(StinkyRegister(static_cast<int>(combinedCount)));
             if(!comment.empty())
@@ -298,8 +299,7 @@ namespace stinkytofu
         return {firstInst, lastInst};
     }
 
-    Legalized
-        legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
+    Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId)
     {
         // Only legalize on gfx1250
         if(archId != GfxArchID::Gfx1250)
@@ -362,10 +362,10 @@ namespace stinkytofu
         return baseName + "+" + std::to_string(newDigitBase);
     }
 
-    Legalized legalizeDSLoadB192(StinkyInstruction*   inst,
-                                 AsmIRBuilder& irBuilder,
-                                 GfxArchID            archId,
-                                 bool                 hasVgprMsb)
+    Legalized legalizeDSLoadB192(StinkyInstruction* inst,
+                                 AsmIRBuilder&      irBuilder,
+                                 GfxArchID          archId,
+                                 bool               hasVgprMsb)
     {
         // DSLoadB192: ds_load_b192 v[a:a+5], v[b] offset:X
         // →
@@ -461,10 +461,10 @@ namespace stinkytofu
         return {load1, load2};
     }
 
-    Legalized legalizeDSStoreB192(StinkyInstruction*   inst,
-                                  AsmIRBuilder& irBuilder,
-                                  GfxArchID            archId,
-                                  bool                 hasVgprMsb)
+    Legalized legalizeDSStoreB192(StinkyInstruction* inst,
+                                  AsmIRBuilder&      irBuilder,
+                                  GfxArchID          archId,
+                                  bool               hasVgprMsb)
     {
         // DSStoreB192: ds_store_b192 v[addr], v[b:b+5] offset:X
         // →
@@ -557,6 +557,110 @@ namespace stinkytofu
         }
 
         // Remove the original ds_store_b192 instruction
+        inst->erase();
+
+        return {store1, store2};
+    }
+
+    Legalized legalizeDSStoreB256(StinkyInstruction* inst,
+                                  AsmIRBuilder&      irBuilder,
+                                  GfxArchID          archId,
+                                  bool               hasVgprMsb)
+    {
+        // DSStoreB256: ds_store_b256 v[addr], v[b:b+7] offset:X
+        // →
+        // ds_write_b128/ds_store_b128 v[addr], v[b:b+3] offset:X
+        // ds_write_b128/ds_store_b128 v[addr], v[b+4:b+7] offset:X+16
+
+        // Get the original address and source data registers
+        assert(inst->getNumDestRegs() == 0 && inst->getNumSrcRegs() == 2
+               && "invalid ds_store_b256 format.");
+
+        StinkyRegister origDstAddr = inst->getSrcReg(0); // Address (first source)
+        StinkyRegister origSrcData = inst->getSrcReg(1); // Data registers (second source)
+
+        // Get the original DS modifiers (offset, etc.)
+        const DSModifiers* origDSMod  = inst->getModifier<DSModifiers>();
+        int                baseOffset = origDSMod ? origDSMod->offset : 0;
+
+        // Get comment if present
+        const CommentData* commentMod = inst->getModifier<CommentData>();
+        std::string        comment    = commentMod ? commentMod->comment : "";
+
+        // Use ISA-appropriate mnemonic: ds_write_b128 for gfx9, ds_store_b128 for gfx11+
+        const HwInstDesc* dsB128Desc = getMCIDByUOp(GFX::ds_write_b128, archId);
+        if(!dsB128Desc)
+            dsB128Desc = getMCIDByUOp(GFX::ds_store_b128, archId);
+
+        // Create ds_write_b128/ds_store_b128 v[a], v[b:b+3] offset:X
+        StinkyInstruction* store1 = irBuilder.create(dsB128Desc, inst);
+
+        store1->addSrcReg(origDstAddr);
+
+        StinkyRegister srcData1{origSrcData.reg.type,
+                                origSrcData.reg.idx,
+                                4, // 4 registers
+                                origSrcData.reg.offset};
+
+        if(!origSrcData.getSymbolicName().empty())
+        {
+            srcData1.setSymbolicName(origSrcData.getSymbolicName());
+        }
+        store1->addSrcReg(srcData1);
+
+        DSModifiers dsModifiers1;
+        if(origDSMod)
+        {
+            dsModifiers1 = *origDSMod;
+        }
+        dsModifiers1.offset = baseOffset;
+        store1->addModifier<DSModifiers>(dsModifiers1);
+
+        if(!comment.empty())
+        {
+            store1->addModifier<CommentData>(CommentData{comment});
+        }
+
+        // Create ds_write_b128/ds_store_b128 v[a], v[b+4:b+7] offset:X+16
+        StinkyInstruction* store2 = irBuilder.create(dsB128Desc, inst);
+
+        store2->addSrcReg(origDstAddr);
+
+        assert(origSrcData.reg.idx + 4 < std::numeric_limits<uint16_t>::max()
+               && "Invalid source register index");
+
+        uint32_t srcData2Idx = static_cast<uint16_t>(origSrcData.reg.idx + 4);
+        int16_t  srcData2Offs
+            = (hasVgprMsb && origSrcData.reg.type == RegType::V)
+                  ? getVgprMsbOffsetForIdx(origSrcData.reg.type, srcData2Idx, hasVgprMsb)
+                  : origSrcData.reg.offset;
+
+        StinkyRegister srcData2{origSrcData.reg.type, srcData2Idx, 4, srcData2Offs};
+
+        if(!origSrcData.getSymbolicName().empty())
+        {
+            std::string adjustedName = adjustSymbolicRegName(origSrcData.getSymbolicName(), 4);
+            if(!adjustedName.empty())
+            {
+                srcData2.setSymbolicName(adjustedName);
+            }
+        }
+        store2->addSrcReg(srcData2);
+
+        DSModifiers dsModifiers2;
+        if(origDSMod)
+        {
+            dsModifiers2 = *origDSMod;
+        }
+        dsModifiers2.offset = baseOffset + 16;
+        store2->addModifier<DSModifiers>(dsModifiers2);
+
+        if(!comment.empty())
+        {
+            store2->addModifier<CommentData>(CommentData{comment});
+        }
+
+        // Remove the original ds_store_b256 instruction
         inst->erase();
 
         return {store1, store2};

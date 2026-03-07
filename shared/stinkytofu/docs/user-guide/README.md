@@ -31,6 +31,12 @@ Reference documentation for error codes used throughout the library. Includes:
 - Descriptions and usage examples
 - Best practices for error handling
 
+### [Configuration via GlobalParameters](global-parameters.md)
+Control StinkyTofu behavior through Tensile's `GlobalParameters` system. This guide covers:
+- `StinkyTofuOptLevel` -- pipeline optimization level
+- `StinkyTofuDebugLevel` -- diagnostic output (verbose, IR dump)
+- CLI and YAML usage examples
+
 ## Getting Started
 
 If you're new to StinkyTofu:
