@@ -121,8 +121,9 @@ struct FmhaFwdKernel
         ck_tile::index_t nhead_stride_v;
         ck_tile::index_t nhead_stride_o;
 
-        // Optional implicit head-group size for single-launch grouping.
-        ck_tile::index_t head_group_size_q = 0;
+        // Optional global head count and head offset (for grouped launches & RNG correctness)
+        ck_tile::index_t num_head_q_total = 0;
+        ck_tile::index_t head_start       = 0;
     };
 
     struct FmhaFwdLogitsSoftCapKargs
@@ -392,10 +393,11 @@ struct FmhaFwdKernel
                       drop_seed_offset,
                   ck_tile::index_t block_scale_size_q,
                   ck_tile::index_t block_scale_size_kv,
-                  const void* cu_seqlen_q_ptr        = nullptr,
-                  const void* cu_seqlen_k_ptr        = nullptr,
-                  const void* sink_ptr               = nullptr,
-                  ck_tile::index_t head_group_size_q = 0)
+                  const void* cu_seqlen_q_ptr       = nullptr,
+                  const void* cu_seqlen_k_ptr       = nullptr,
+                  const void* sink_ptr              = nullptr,
+                  ck_tile::index_t num_head_q_total = 0,
+                  ck_tile::index_t head_start       = 0)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -431,7 +433,8 @@ struct FmhaFwdKernel
                     batch_stride_k,
                     batch_stride_v,
                     batch_stride_o};
-        kargs.head_group_size_q = head_group_size_q;
+        kargs.num_head_q_total = num_head_q_total;
+        kargs.head_start       = head_start;
 
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
         {
@@ -568,10 +571,11 @@ struct FmhaFwdKernel
               const std::tuple<uint64_t, uint64_t>& drop_seed_offset,
               ck_tile::index_t block_scale_size_q,
               ck_tile::index_t block_scale_size_kv,
-              const void* cu_seqlen_q_ptr        = nullptr,
-              const void* cu_seqlen_k_ptr        = nullptr,
-              const void* sink_ptr               = nullptr,
-              ck_tile::index_t head_group_size_q = 0)
+              const void* cu_seqlen_q_ptr       = nullptr,
+              const void* cu_seqlen_k_ptr       = nullptr,
+              const void* sink_ptr              = nullptr,
+              ck_tile::index_t num_head_q_total = 0,
+              ck_tile::index_t head_start       = 0)
     {
         return MakeKargsImpl(
             q_ptr,
@@ -630,7 +634,8 @@ struct FmhaFwdKernel
             cu_seqlen_q_ptr,
             cu_seqlen_k_ptr,
             sink_ptr,
-            head_group_size_q);
+            num_head_q_total,
+            head_start);
     }
 
     // std::variant<> can't take in a list initializer, overload for backward compatibility
@@ -689,10 +694,11 @@ struct FmhaFwdKernel
               const std::tuple<const void*, const void*>& drop_seed_offset,
               ck_tile::index_t block_scale_size_q,
               ck_tile::index_t block_scale_size_kv,
-              const void* cu_seqlen_q_ptr        = nullptr,
-              const void* cu_seqlen_k_ptr        = nullptr,
-              const void* sink_ptr               = nullptr,
-              ck_tile::index_t head_group_size_q = 0)
+              const void* cu_seqlen_q_ptr       = nullptr,
+              const void* cu_seqlen_k_ptr       = nullptr,
+              const void* sink_ptr              = nullptr,
+              ck_tile::index_t num_head_q_total = 0,
+              ck_tile::index_t head_start       = 0)
     {
         return MakeKargsImpl(
             q_ptr,
@@ -751,7 +757,8 @@ struct FmhaFwdKernel
             cu_seqlen_q_ptr,
             cu_seqlen_k_ptr,
             sink_ptr,
-            head_group_size_q);
+            num_head_q_total,
+            head_start);
     }
 
     template <bool Cond = kIsGroupMode>
@@ -805,10 +812,11 @@ struct FmhaFwdKernel
                       drop_seed_offset,
                   ck_tile::index_t block_scale_size_q,
                   ck_tile::index_t block_scale_size_kv,
-                  const void* cu_seqlen_q_ptr        = nullptr,
-                  const void* cu_seqlen_k_ptr        = nullptr,
-                  const void* sink_ptr               = nullptr,
-                  ck_tile::index_t head_group_size_q = 0)
+                  const void* cu_seqlen_q_ptr       = nullptr,
+                  const void* cu_seqlen_k_ptr       = nullptr,
+                  const void* sink_ptr              = nullptr,
+                  ck_tile::index_t num_head_q_total = 0,
+                  ck_tile::index_t head_start       = 0)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -845,7 +853,8 @@ struct FmhaFwdKernel
                     reinterpret_cast<const int32_t*>(seqstart_k_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_q_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_k_ptr)};
-        kargs.head_group_size_q = head_group_size_q;
+        kargs.num_head_q_total = num_head_q_total;
+        kargs.head_start       = head_start;
 
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
         {
@@ -979,10 +988,11 @@ struct FmhaFwdKernel
               const std::tuple<uint64_t, uint64_t>& drop_seed_offset,
               ck_tile::index_t block_scale_size_q,
               ck_tile::index_t block_scale_size_kv,
-              const void* cu_seqlen_q_ptr        = nullptr,
-              const void* cu_seqlen_k_ptr        = nullptr,
-              const void* sink_ptr               = nullptr,
-              ck_tile::index_t head_group_size_q = 0)
+              const void* cu_seqlen_q_ptr       = nullptr,
+              const void* cu_seqlen_k_ptr       = nullptr,
+              const void* sink_ptr              = nullptr,
+              ck_tile::index_t num_head_q_total = 0,
+              ck_tile::index_t head_start       = 0)
     {
         return MakeKargsImpl(
             q_ptr,
@@ -1036,7 +1046,8 @@ struct FmhaFwdKernel
             cu_seqlen_q_ptr,
             cu_seqlen_k_ptr,
             sink_ptr,
-            head_group_size_q);
+            num_head_q_total,
+            head_start);
     }
 
     // std::variant<> can't take in a list initializer, overload for backward compatibility
@@ -1090,10 +1101,11 @@ struct FmhaFwdKernel
               const std::tuple<const void*, const void*>& drop_seed_offset,
               ck_tile::index_t block_scale_size_q,
               ck_tile::index_t block_scale_size_kv,
-              const void* cu_seqlen_q_ptr        = nullptr,
-              const void* cu_seqlen_k_ptr        = nullptr,
-              const void* sink_ptr               = nullptr,
-              ck_tile::index_t head_group_size_q = 0)
+              const void* cu_seqlen_q_ptr       = nullptr,
+              const void* cu_seqlen_k_ptr       = nullptr,
+              const void* sink_ptr              = nullptr,
+              ck_tile::index_t num_head_q_total = 0,
+              ck_tile::index_t head_start       = 0)
     {
         return MakeKargsImpl(
             q_ptr,
@@ -1147,7 +1159,8 @@ struct FmhaFwdKernel
             cu_seqlen_q_ptr,
             cu_seqlen_k_ptr,
             sink_ptr,
-            head_group_size_q);
+            num_head_q_total,
+            head_start);
     }
 
     CK_TILE_HOST static constexpr auto GridSize(ck_tile::index_t batch_size_,
@@ -1182,78 +1195,11 @@ struct FmhaFwdKernel
         if constexpr(kIsGroupMode)
             has_padded_seqlen_k = (kargs.seqlen_k_ptr != nullptr);
 
+#if CK_TILE_FMHA_FORCE_HEAD_MAJOR
         // bhsd should satisfy stride_q == hdim_q and nhead_stride_q > hdim_q.
         // The extra nhead_stride_q guard prevents bshd false-positive when nhead == 1.
         const bool is_bhsd_layout =
             (kargs.stride_q == kargs.hdim_q) && (kargs.nhead_stride_q > kargs.hdim_q);
-
-        // Single-launch head grouping for bshd only.
-        if((kargs.head_group_size_q > 0) && !is_bhsd_layout)
-        {
-            const index_t num_tile_n1 =
-                ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1);
-            const index_t num_tile_total = has_padded_seqlen_k ? gridDim.z : gridDim.y;
-            const index_t num_head       = gridDim.x;
-            const index_t batch_size     = has_padded_seqlen_k ? gridDim.y : gridDim.z;
-            const index_t linear_id =
-                blockIdx.x + gridDim.x * (blockIdx.y + gridDim.y * blockIdx.z);
-
-            const index_t group_sz = ck_tile::min(kargs.head_group_size_q, num_head);
-            if(group_sz > 0 && group_sz < num_head)
-            {
-                const index_t full_groups      = num_head / group_sz;
-                const index_t tail_heads       = num_head - full_groups * group_sz;
-                const index_t spans_per_group  = batch_size * num_tile_total;
-                const index_t blocks_per_group = spans_per_group * group_sz;
-
-                index_t i_group          = 0;
-                index_t i_batch          = 0;
-                index_t i_block          = 0;
-                index_t i_nhead_in_group = 0;
-
-                if((tail_heads > 0) && (linear_id >= full_groups * blocks_per_group))
-                {
-                    // Tail group decode: [group=tail] -> [batch] -> [block] -> [head_in_group]
-                    const index_t tail_linear      = linear_id - full_groups * blocks_per_group;
-                    const index_t tail_group_heads = tail_heads;
-                    const index_t tail_blocks_per_batch = num_tile_total * tail_group_heads;
-
-                    i_group = full_groups;
-                    i_batch = tail_linear / tail_blocks_per_batch;
-
-                    const index_t rem1 = tail_linear - i_batch * tail_blocks_per_batch;
-                    i_block            = rem1 / tail_group_heads;
-                    i_nhead_in_group   = rem1 - i_block * tail_group_heads;
-                }
-                else
-                {
-                    // Full group decode: [group] -> [batch] -> [block] -> [head_in_group]
-                    i_group = linear_id / blocks_per_group;
-
-                    const index_t rem0             = linear_id - i_group * blocks_per_group;
-                    const index_t blocks_per_batch = num_tile_total * group_sz;
-                    i_batch                        = rem0 / blocks_per_batch;
-
-                    const index_t rem1 = rem0 - i_batch * blocks_per_batch;
-                    i_block            = rem1 / group_sz;
-                    i_nhead_in_group   = rem1 - i_block * group_sz;
-                }
-
-                const index_t i_nhead = i_group * group_sz + i_nhead_in_group;
-
-                index_t i_tile_m = i_block / num_tile_n1;
-                index_t i_tile_n = i_block - i_tile_m * num_tile_n1;
-
-                if constexpr(kHasMask)
-                {
-                    const index_t num_tile_m = num_tile_total / num_tile_n1;
-                    i_tile_m                 = num_tile_m - 1 - i_tile_m;
-                }
-                return ck_tile::make_tuple(i_tile_m, i_tile_n, i_nhead, i_batch);
-            }
-        }
-
-#if CK_TILE_FMHA_FORCE_HEAD_MAJOR
         if(is_bhsd_layout)
         {
             const index_t num_tile_n1 =
@@ -1700,9 +1646,12 @@ struct FmhaFwdKernel
             auto dropout = [&, i_nhead_ = i_nhead, i_batch_ = i_batch]() {
                 if constexpr(kHasDropout)
                 {
+                    const auto num_head_q_total =
+                        (kargs.num_head_q_total > 0 ? kargs.num_head_q_total : kargs.num_head_q);
+                    const auto i_head_global = kargs.head_start + i_nhead_;
                     return BlockDropout{i_batch_,
-                                        i_nhead_,
-                                        kargs.num_head_q,
+                                        i_head_global,
+                                        num_head_q_total,
                                         kargs.is_drop_seed_offset_from_host ? kargs.drop_seed.val
                                                                             : *kargs.drop_seed.ptr,
                                         kargs.is_drop_seed_offset_from_host

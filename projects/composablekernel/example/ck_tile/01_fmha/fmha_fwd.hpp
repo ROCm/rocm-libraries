@@ -10,12 +10,10 @@
 #include "ck_tile/ops/fmha.hpp"
 
 #include "bias.hpp"
-#include "fmha_fwd_head_grouping.hpp"
 #include "mask.hpp"
 #include "quant.hpp"
 #include "rotary.hpp"
 
-#include <iostream>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -244,6 +242,8 @@ struct fmha_fwd_args
     ck_tile::index_t hdim_v;
     ck_tile::index_t nhead_q;
     ck_tile::index_t nhead_k;
+    ck_tile::index_t num_head_q_total = 0;
+    ck_tile::index_t head_start       = 0;
 
     float scale_s;
     float logits_soft_cap;
@@ -289,10 +289,6 @@ struct fmha_fwd_args
 
     ck_tile::index_t block_scale_size_q;
     ck_tile::index_t block_scale_size_kv;
-
-    // Optional override for implicit single-launch head grouping.
-    // 0 means "auto decide in CK using LLC-aware policy".
-    ck_tile::index_t head_group_size_q = 0;
 };
 
 struct fmha_fwd_pagedkv_args
@@ -618,74 +614,10 @@ struct fmha_batch_prefill_args
 };
 
 template <typename FmhaKernel>
-CK_TILE_HOST ck_tile::index_t fmha_fwd_resolve_head_group_size_q(const fmha_fwd_args& args)
-{
-    if(args.nhead_q <= 1)
-        return 0;
-
-    if(args.head_group_size_q > 0)
-    {
-        const ck_tile::index_t explicit_group = std::min(args.head_group_size_q, args.nhead_q);
-        if(explicit_group < args.nhead_q)
-            return explicit_group;
-        return 0;
-    }
-
-#if CK_TILE_FMHA_ENABLE_HEAD_GROUPING
-    // Apply implicit single-launch grouping only for bshd.
-    const bool is_bshd_layout =
-        (args.nhead_stride_q == args.hdim_q) && (args.stride_q > args.hdim_q);
-    if(!is_bshd_layout)
-        return 0;
-
-    if(args.batch <= 0)
-        return 0;
-
-    ck_tile::index_t seqlen_k_for_policy = args.seqlen_k;
-    if(args.seqstart_k_ptr != nullptr && args.seqlen_k_ptr == nullptr)
-    {
-        // group-mode without explicit per-batch seqlen: use per-batch average as policy input.
-        seqlen_k_for_policy = ck_tile::integer_divide_ceil(args.seqlen_k, args.batch);
-    }
-
-    const auto group_size_opt =
-        fmha_fwd_head_grouping::get_head_group_size(args.nhead_q,
-                                                    args.nhead_k,
-                                                    seqlen_k_for_policy,
-                                                    args.hdim_q,
-                                                    args.hdim_v,
-                                                    sizeof(typename FmhaKernel::KDataType),
-                                                    sizeof(typename FmhaKernel::VDataType));
-    if(!group_size_opt.has_value())
-        return 0;
-
-    const ck_tile::index_t group_size = group_size_opt.value();
-
-    if(fmha_fwd_head_grouping::log_enabled())
-    {
-        const std::string arch           = ck_tile::get_device_name();
-        const size_t llc_bytes           = fmha_fwd_head_grouping::get_llc_cache_bytes(arch);
-        const ck_tile::index_t gqa_ratio = (args.nhead_k > 0 ? (args.nhead_q / args.nhead_k) : 1);
-        const ck_tile::index_t n_groups  = ck_tile::integer_divide_ceil(args.nhead_q, group_size);
-        std::cout << "[LLC Head Grouping] enabled (fmha_fwd auto)"
-                  << " arch=" << (arch.empty() ? "unknown" : arch)
-                  << " llc_mb=" << (llc_bytes / (1024ull * 1024ull)) << " nhead_q=" << args.nhead_q
-                  << " nhead_k=" << args.nhead_k << " gqa_ratio=" << gqa_ratio
-                  << " group_size=" << group_size << " groups=" << n_groups << std::endl;
-    }
-
-    return group_size;
-#else
-    return 0;
-#endif
-}
-
-template <typename FmhaKernel>
 auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 {
     assert(args.nhead_q % args.nhead_k == 0);
-    const ck_tile::index_t head_group_size_q = fmha_fwd_resolve_head_group_size_q<FmhaKernel>(args);
-    auto kargs                               = [&] {
+    auto kargs = [&] {
         // create group mode kernel arguments
         if constexpr(FmhaKernel::kIsGroupMode)
         {
@@ -740,7 +672,8 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.cu_seqlen_q_ptr,
                                              args.cu_seqlen_k_ptr,
                                              args.sink_ptr,
-                                             head_group_size_q);
+                                             args.num_head_q_total,
+                                             args.head_start);
         }
         else
         { // create batch mode kernel arguments
@@ -800,7 +733,8 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                              args.cu_seqlen_q_ptr,
                                              args.cu_seqlen_k_ptr,
                                              args.sink_ptr,
-                                             head_group_size_q);
+                                             args.num_head_q_total,
+                                             args.head_start);
         }
     }();
 
