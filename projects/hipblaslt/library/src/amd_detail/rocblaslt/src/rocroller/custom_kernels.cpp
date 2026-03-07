@@ -441,6 +441,15 @@ void preloadCustomKernels(SolutionCache& cache)
                                                    {128, 2, 1},
                                                    getCoPath() / "rr_custom_kernels.co"));
 
+            params.workgroupTile = {224, 160, 256};
+            cache.addKernel(mxfp4Kernel,
+                            params,
+                            createCustomGemmKernel("wave_mxfp4_dynamic_gemm_224x160x256",
+                                                   mxfp4Kernel,
+                                                   params.workgroupTile,
+                                                   {64, 4, 1},
+                                                   getCoPath() / "rr_custom_kernels.co"));
+
             params.workgroupTile = {256, 160, 256};
             cache.addKernel(mxfp4Kernel,
                             params,
