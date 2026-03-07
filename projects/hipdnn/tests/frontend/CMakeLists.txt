@@ -23,6 +23,7 @@ add_executable(
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
     IntegrationConvolutionDgradDescriptorLowering.cpp
+    IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationLayernormForward.cpp

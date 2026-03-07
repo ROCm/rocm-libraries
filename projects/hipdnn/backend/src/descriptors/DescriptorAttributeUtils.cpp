@@ -215,4 +215,73 @@ void getTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSource,
     HipdnnBackendDescriptor::packDescriptor(descSource, arrayOfElements);
 }
 
+void setTensorDescriptorArray(std::vector<std::shared_ptr<TensorDescriptor>>& descTarget,
+                              std::vector<int64_t>& uidTarget,
+                              hipdnnBackendAttributeType_t attributeType,
+                              int64_t elementCount,
+                              const void* arrayOfElements,
+                              const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount < 1");
+
+    auto descs = static_cast<HipdnnBackendDescriptor* const*>(arrayOfElements);
+    std::vector<std::shared_ptr<TensorDescriptor>> tensorDescs;
+    std::vector<int64_t> uids;
+
+    tensorDescs.reserve(static_cast<size_t>(elementCount));
+    uids.reserve(static_cast<size_t>(elementCount));
+
+    for(int64_t i = 0; i < elementCount; ++i)
+    {
+        auto tensorDesc = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+            &descs[i],
+            HIPDNN_STATUS_BAD_PARAM,
+            std::string(errorPrefix) + ": Failed to unpack tensor descriptor");
+        THROW_IF_FALSE(tensorDesc->isFinalized(),
+                       HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED,
+                       std::string(errorPrefix) + ": Tensor descriptor not finalized");
+        tensorDescs.push_back(tensorDesc);
+        uids.push_back(tensorDesc->getData().uid);
+    }
+
+    descTarget = std::move(tensorDescs);
+    uidTarget = std::move(uids);
+}
+
+void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor>>& descSource,
+                              hipdnnBackendAttributeType_t attributeType,
+                              int64_t requestedElementCount,
+                              int64_t* elementCount,
+                              void* arrayOfElements,
+                              const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, errorPrefix);
+
+    auto count = static_cast<int64_t>(descSource.size());
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = count;
+        return;
+    }
+
+    if(elementCount != nullptr)
+    {
+        *elementCount = count;
+    }
+
+    auto outDescs = static_cast<HipdnnBackendDescriptor**>(arrayOfElements);
+    auto copyCount = std::min(requestedElementCount, count);
+    for(int64_t i = 0; i < copyCount; ++i)
+    {
+        outDescs[i] = HipdnnBackendDescriptor::packDescriptor(descSource[static_cast<size_t>(i)]);
+    }
+}
+
 } // namespace hipdnn_backend

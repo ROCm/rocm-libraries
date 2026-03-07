@@ -177,6 +177,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR,
 
     /**
+     * @brief Batchnorm backward operation descriptor (extension)
+     *
+     * Represents a backward batch normalization operation computing gradients
+     * with respect to input (DX), scale (DScale), and bias (DBias).
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT,
+
+    /**
      * @brief Batchnorm inference variance ext operation descriptor
      *
      * Represents a batch normalization inference operation (variance ext variant)

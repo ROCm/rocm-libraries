@@ -17,23 +17,24 @@ set(HIP_DNN_BACKEND_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(
     hipdnn_backend_private
+    descriptors/BatchnormBackwardOperationDescriptor.cpp
+    descriptors/BatchnormInferenceOperationDescriptor.cpp
+    descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
     descriptors/BackendDescriptor.cpp
+    descriptors/ConvolutionBwdOperationDescriptor.cpp
+    descriptors/ConvolutionFwdOperationDescriptor.cpp
+    descriptors/ConvolutionWrwOperationDescriptor.cpp
+    descriptors/DataTypeConversion.cpp
+    descriptors/DescriptorAttributeUtils.cpp
+    descriptors/DescriptorFactory.cpp
     descriptors/EngineConfigDescriptor.cpp
     descriptors/EngineDescriptor.cpp
     descriptors/EngineHeuristicDescriptor.cpp
     descriptors/ExecutionPlanDescriptor.cpp
     descriptors/GraphDescriptor.cpp
-    descriptors/TensorDescriptor.cpp
-    descriptors/ConvolutionFwdOperationDescriptor.cpp
-    descriptors/ConvolutionWrwOperationDescriptor.cpp
-    descriptors/BatchnormInferenceOperationDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
-    descriptors/ConvolutionBwdOperationDescriptor.cpp
-    descriptors/BatchnormInferenceVarianceExtOperationDescriptor.cpp
-    descriptors/DescriptorAttributeUtils.cpp
-    descriptors/DataTypeConversion.cpp
+    descriptors/TensorDescriptor.cpp
     descriptors/VariantDescriptor.cpp
-    descriptors/DescriptorFactory.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp
     logging/Logging.cpp
