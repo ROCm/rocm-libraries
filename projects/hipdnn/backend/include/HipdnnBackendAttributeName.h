@@ -590,7 +590,7 @@ typedef enum
     HIPDNN_ATTR_OPERATION_MATMUL_C_EXT = 2502,
 
     /** @brief Compute data type for matmul */
-    HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT = 2503,
+    HIPDNN_ATTR_MATMUL_MATH_PREC_EXT = 2503,
 
     /** @} */
 

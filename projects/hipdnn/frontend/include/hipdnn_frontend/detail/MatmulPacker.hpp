@@ -42,7 +42,7 @@ inline Error
 
     // Set compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT,
+                                                 HIPDNN_ATTR_MATMUL_MATH_PREC_EXT,
                                                  attributes.compute_data_type,
                                                  "matmul compute data type"));
 

@@ -340,8 +340,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_MATMUL_B_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_MATMUL_C_EXT),
                  "HIPDNN_ATTR_OPERATION_MATMUL_C_EXT");
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT),
-                 "HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_MATMUL_MATH_PREC_EXT),
+                 "HIPDNN_ATTR_MATMUL_MATH_PREC_EXT");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)

@@ -66,7 +66,7 @@ void MatmulOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t attrib
                             arrayOfElements,
                             "MatmulOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_MATMUL_MATH_PREC_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -120,7 +120,7 @@ void MatmulOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t attrib
                             arrayOfElements,
                             "MatmulOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_MATMUL_MATH_PREC_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,

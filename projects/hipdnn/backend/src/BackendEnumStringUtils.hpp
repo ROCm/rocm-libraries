@@ -468,8 +468,8 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_OPERATION_MATMUL_B_EXT";
     case HIPDNN_ATTR_OPERATION_MATMUL_C_EXT:
         return "HIPDNN_ATTR_OPERATION_MATMUL_C_EXT";
-    case HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT:
-        return "HIPDNN_ATTR_MATMUL_COMP_TYPE_EXT";
+    case HIPDNN_ATTR_MATMUL_MATH_PREC_EXT:
+        return "HIPDNN_ATTR_MATMUL_MATH_PREC_EXT";
 
     // Extension API
     case HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT:
