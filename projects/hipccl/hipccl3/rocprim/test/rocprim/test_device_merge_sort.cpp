@@ -60,7 +60,8 @@ template<class KeyType,
          class CompareFunction    = ::rocprim::less<KeyType>,
          bool UseGraphs           = false,
          bool UseIndirectIterator = false,
-         class Config             = ::rocprim::default_config>
+         class Config             = ::rocprim::default_config,
+         bool DisableWithValgrind = false>
 struct DeviceSortParams
 {
     using key_type                              = KeyType;
@@ -69,6 +70,25 @@ struct DeviceSortParams
     static constexpr bool use_graphs            = UseGraphs;
     static constexpr bool use_indirect_iterator = UseIndirectIterator;
     using config                                = Config;
+    static constexpr bool disable_with_valgrind = DisableWithValgrind;
+};
+
+// Convenience struct that sets DisableWithValgrind to true.
+template<class KeyType,
+         class ValueType          = KeyType,
+         class CompareFunction    = ::rocprim::less<KeyType>,
+         bool UseGraphs           = false,
+         bool UseIndirectIterator = false,
+         class Config             = ::rocprim::default_config,
+         bool DisableWithValgrind = true>
+struct DeviceSortDisableWithValgrindParams : DeviceSortParams<KeyType,
+                                                              ValueType,
+                                                              CompareFunction,
+                                                              UseGraphs,
+                                                              UseIndirectIterator,
+                                                              Config,
+                                                              DisableWithValgrind>
+{
 };
 
 // ---------------------------------------------------------
@@ -86,6 +106,7 @@ public:
     static constexpr bool use_graphs            = Params::use_graphs;
     static constexpr bool use_indirect_iterator = Params::use_indirect_iterator;
     using config                                = typename Params::config;
+    static constexpr bool disable_with_valgrind = Params::disable_with_valgrind;
 };
 
 using RocprimDeviceSortTestsParams = ::testing::Types<
@@ -112,8 +133,8 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
     // Test the algorithm with graphs
     DeviceSortParams<int, int, ::rocprim::less<int>, true>,
     // Test the virtual shared memory
-    DeviceSortParams<int, common::custom_huge_type<2048, float>>,
-    DeviceSortParams<common::custom_huge_type<2048, float>>,
+    DeviceSortDisableWithValgrindParams<int, common::custom_huge_type<2048, float>>,
+    DeviceSortDisableWithValgrindParams<common::custom_huge_type<2048, float>>,
     // Test with iterators
     DeviceSortParams<int, int, ::rocprim::less<int>, false, true>,
     // Test with custom config
@@ -126,8 +147,29 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
 
 TYPED_TEST_SUITE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
 
+// When running under Valgrind, we need to disable some larger-sized tests because they
+// either hang or are too slow. This function checks to see if both:
+// 1. Valgrind is running, and
+// 2. The test has been marked as disabled under Valgrind.
+// If both conditions are true then the the test is skipped.
+// There are two ways to mark a test as disabled under Valgrind:
+// 1. At compile time, by setting the template argument to true, and/or
+// 2. At runtime, by passing true as an argument to this function.
+template<bool CompileTimeDisableWithValgrind = false>
+inline bool should_skip(const bool rt_disable_with_valgrind = false)
+{
+#if HAS_VALGRIND_H
+    if (RUNNING_ON_VALGRIND && (CompileTimeDisableWithValgrind || rt_disable_with_valgrind))
+        return true;
+#endif
+    return false;
+}
+
 TYPED_TEST(RocprimDeviceSortTests, SortKey)
 {
+    if (should_skip<TestFixture::disable_with_valgrind>())
+        GTEST_SKIP() << "Skipping large test under Valgrind";
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -252,6 +294,9 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 // This test also ensures that merge_sort is stable
 TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 {
+    if (should_skip<TestFixture::disable_with_valgrind>())
+        GTEST_SKIP() << "Skipping large test under Valgrind";
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -425,8 +470,11 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     }
 }
 
-void testLargeIndices()
+TEST(RocprimDeviceSortTests, LargeIndices)
 {
+    if (should_skip(true))
+        GTEST_SKIP() << "Skipping large test under Valgrind";
+
     using key_type = uint8_t;
 
     const int device_id = test_common_utils::obtain_device_from_ctest();
@@ -536,15 +584,4 @@ void testLargeIndices()
         HIP_CHECK(hipFree(d_output));
         HIP_CHECK(hipFree(d_temp_storage));
     }
-}
-
-TEST(RocprimDeviceSortTests, LargeIndices)
-{
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
-
-    testLargeIndices();
 }
