@@ -1854,7 +1854,7 @@ std::vector<size_t>
 {
     std::vector<size_t> scatter_plan_items; // to be returned;
 
-    const auto out_loc = desc.expected_undistributed_location_for(io_data_label::INPUT);
+    const auto out_loc = desc.expected_undistributed_location_for(io_data_label::OUTPUT);
     if(out_loc && *out_loc == exec_plan_location
        && (exec_plan_metadata.output_buffer.ptr_type() == BufferPtr::PtrType::PTR_USER_OUT
            || (placement == rocfft_placement_inplace
