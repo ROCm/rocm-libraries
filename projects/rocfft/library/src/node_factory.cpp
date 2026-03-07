@@ -1064,6 +1064,28 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
     return false;
 }
 
+// Batch size cut-off for enabling partial-pass 3D kernels may vary
+// by GPU architecture, precision, and length
+static std::size_t cutOffBatch_1 = 5;
+static std::size_t cutOffBatch_2 = 5;
+
+// Partial pass is currently restricted to large enough batch sizes,
+// unite stride, interleaved FFTs.
+auto check_pp_restrictions = [](const NodeMetaData& nodeData, const bool& cutOffBatch) -> bool {
+    size_t checkDist = product(nodeData.length.begin(), nodeData.length.end());
+
+    bool distCondition      = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);
+    bool strideCondition    = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
+                            && (nodeData.outStride.size() && nodeData.outStride[0]) == 1);
+    bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar)
+                              && (nodeData.inArrayType != rocfft_array_type_hermitian_planar)
+                              && (nodeData.outArrayType != rocfft_array_type_complex_planar)
+                              && (nodeData.outArrayType != rocfft_array_type_hermitian_planar);
+    bool batchCondition = (nodeData.batch >= cutOffBatch);
+
+    return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
+};
+
 bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
 {
     if(!pool.has_function(
@@ -1084,9 +1106,8 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
         return length_found;
     };
 
-    // Batch size cut-off for enabling partial-pass 3D kernels may vary
-    // by GPU architecture, precision, and length
-    std::size_t cutOffBatch = 5;
+    auto cutOffBatch = cutOffBatch_1;
+
     if(nodeData.precision == rocfft_precision_single)
     {
         bool lenExceptionFound = false;
@@ -1096,27 +1117,14 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
         std::vector<std::vector<size_t>> gfx1201LenException = {{52, 64, 64}, {128, 64, 64}};
         lenExceptionFound = find_length(gfx1201LenException, nodeData.length);
         if(get_curr_gcn_arch_name() == "gfx1201" && !lenExceptionFound)
-            cutOffBatch = 25;
+            cutOffBatch = cutOffBatch_2;
         std::vector<std::vector<size_t>> gfx950LenException = {{52, 64, 64}};
         lenExceptionFound = find_length(gfx950LenException, nodeData.length);
         if(get_curr_gcn_arch_name() == "gfx950" && !lenExceptionFound)
-            cutOffBatch = 25;
+            cutOffBatch = cutOffBatch_2;
     }
 
-    // Partial pass is currently restricted to large enough batch sizes,
-    // unite stride, interleaved FFTs.
-    bool batchCondition = (nodeData.batch >= cutOffBatch);
-
-    size_t checkDist     = product(nodeData.length.begin(), nodeData.length.end());
-    bool   distCondition = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);
-
-    bool strideCondition = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
-                            && (nodeData.outStride.size() && nodeData.outStride[0]) == 1);
-
-    bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar
-                               && nodeData.outArrayType != rocfft_array_type_complex_planar);
-
-    return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
+    return check_pp_restrictions(nodeData, cutOffBatch);
 }
 
 bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
@@ -1143,6 +1151,7 @@ bool NodeFactory::use_CS_REAL_3D_PP(const function_pool& pool, NodeMetaData& nod
                                   CS_REAL_3D_PP)))
         return false;
 
-    // Fallback to REAL_3D_EVEN.
-    return true;
+    // TODO: Temporarily allow all batch sizes.
+    auto cutOffBatch = 0;
+    return check_pp_restrictions(nodeData, cutOffBatch);
 }
