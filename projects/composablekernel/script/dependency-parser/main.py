@@ -78,6 +78,11 @@ def main():
         action="store_true",
         help="Suppress progress output"
     )
+    parser_cmake.add_argument(
+        "--force",
+        action="store_true",
+        help="Force regeneration even if cache is valid"
+    )
 
     # Ninja post-build dependency parsing (LEGACY)
     parser_parse = subparsers.add_parser(
@@ -132,6 +137,8 @@ def main():
         cmake_args += ["--parallel", str(args.parallel)]
         if args.quiet:
             cmake_args.append("--quiet")
+        if args.force:
+            cmake_args.append("--force")
         run_cmake_dependency_analyzer(cmake_args)
     elif args.command == "parse":
         parse_args = [args.build_ninja, args.ninja]

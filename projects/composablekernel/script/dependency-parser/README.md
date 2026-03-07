@@ -281,6 +281,126 @@ Benchmarks on Composable Kernel (7,892 source files):
 - Affected tests: 47 out of 2,000 tests
 - Build time: 15 min vs 4 hours (16x faster)
 
+## Limitations and Corner Cases
+
+### Known Limitations
+
+#### 1. Build-Time Generated Headers (HIGH RISK)
+
+**Problem:** Files generated during the build process (e.g., via `add_custom_command`) cannot be analyzed before building.
+
+**Example:**
+```cmake
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/generated/config.hpp
+  COMMAND generate_config.sh
+  DEPENDS template.hpp.in
+)
+```
+
+**Impact:** If a source file includes `generated/config.hpp`, the dependency won't be detected until after building.
+
+**Mitigation:**
+- CK analysis shows **no generated headers** currently used
+- If generated headers are added in the future, they must be built first
+- Recommendation: Generate headers in CMake configure phase (not build phase) when possible
+
+**Verification:**
+```bash
+# Check if your project uses generated headers
+grep -r "add_custom_command.*OUTPUT.*\.(hpp|h)" projects/composablekernel/
+# Result for CK: No matches - safe!
+```
+
+#### 2. Macro-Conditional Includes (LOW RISK)
+
+**Problem:** Headers included based on preprocessor macros may not be detected if macro values differ between preprocessing and compilation.
+
+**Example:**
+```cpp
+#if GPU_ARCH >= 908
+#include "mi100_optimizations.hpp"
+#endif
+```
+
+**Impact:** If `GPU_ARCH` is defined differently during `-MM` preprocessing vs actual build, dependencies may be incomplete.
+
+**Mitigation:**
+- Pre-build analysis uses the EXACT same flags from `compile_commands.json`
+- All `-D` defines are preserved during `-MM` preprocessing
+- Only issue would be macros defined DURING build (rare)
+
+**Status:** ✅ Handled correctly by using identical compile flags
+
+#### 3. Environment-Dependent Includes (LOW RISK)
+
+**Problem:** System paths that change between analysis and build environments.
+
+**Example:**
+```cpp
+#include <rocm/hip/hip_runtime.h>  // Depends on ROCM_PATH
+```
+
+**Impact:** If ROCm is installed in different locations, dependencies might differ.
+
+**Mitigation:**
+- Pre-build analysis runs in the SAME environment as the build
+- All `-I` include paths are preserved from `compile_commands.json`
+- Dependency paths are normalized relative to workspace root
+
+**Status:** ✅ Handled correctly by using identical environment
+
+### Cache Invalidation
+
+The analyzer automatically detects when the dependency cache needs regeneration based on:
+
+1. **Input file changes**: `compile_commands.json` or `build.ninja` modified
+2. **Compiler version changes**: Detected via `amdclang++ --version`
+3. **Missing cache**: First run or cache deleted
+
+**Cache validation:**
+```bash
+# Automatic validation (skips if cache valid)
+python3 main.py cmake-parse compile_commands.json build.ninja
+
+# Force regeneration
+python3 main.py cmake-parse compile_commands.json build.ninja --force
+```
+
+**Cache metadata:**
+The output JSON includes an `input_hash` field:
+```json
+{
+  "file_to_executables": {...},
+  "input_hash": "a7f3c891d2e...",  // SHA256 of inputs
+  "statistics": {...}
+}
+```
+
+### When to Force Full Builds
+
+Force a complete re-analysis and full build in these scenarios:
+
+1. **CMake configuration changes**: New targets, changed compiler flags
+2. **Toolchain upgrades**: Major ROCm or compiler version changes
+3. **Dependency cache corruption**: Manual deletion or corrupted JSON
+4. **CI policy**: Weekly/monthly full builds for validation
+
+**Example CI safety check:**
+```groovy
+script {
+    // Force full build on main branch or schedule
+    if (env.BRANCH_NAME == 'main' || env.BUILD_CAUSE == 'SCHEDULE') {
+        sh 'python3 main.py cmake-parse ... --force'
+        sh 'ninja'  // Full build
+    } else {
+        // Selective build for PRs
+        sh 'python3 main.py cmake-parse ...'
+        sh 'ninja $(cat affected_targets.txt)'
+    }
+}
+```
+
 ## Troubleshooting
 
 ### compile_commands.json not generated

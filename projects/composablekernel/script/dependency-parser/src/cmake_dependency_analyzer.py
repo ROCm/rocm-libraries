@@ -16,6 +16,7 @@ Key Features:
 - Outputs dependency_mapping.json compatible with selective_test_filter.py
 """
 
+import hashlib
 import json
 import os
 import re
@@ -485,6 +486,77 @@ class CMakeDependencyAnalyzer:
         self.file_to_executables: Dict[str, Set[str]] = {}
         self.executable_to_files: Dict[str, Set[str]] = {}
 
+    def calculate_input_hash(self) -> str:
+        """Calculate hash of input files to detect when cache should be invalidated.
+
+        Returns:
+            SHA256 hash string representing the current state of input files
+        """
+        hasher = hashlib.sha256()
+
+        # Hash compile_commands.json modification time and size
+        if self.compile_commands_path and os.path.exists(self.compile_commands_path):
+            stat = os.stat(self.compile_commands_path)
+            hasher.update(f"{stat.st_mtime}:{stat.st_size}".encode())
+
+        # Hash build.ninja modification time and size
+        if self.ninja_path and os.path.exists(self.ninja_path):
+            stat = os.stat(self.ninja_path)
+            hasher.update(f"{stat.st_mtime}:{stat.st_size}".encode())
+
+        # Hash compiler version (first compiler found in compile_commands.json)
+        if self.compile_commands_path and os.path.exists(self.compile_commands_path):
+            try:
+                with open(self.compile_commands_path, "r") as f:
+                    commands = json.load(f)
+                    if commands:
+                        # Extract first compiler command
+                        cmd = commands[0].get("command", "")
+                        if cmd:
+                            compiler = shlex.split(cmd)[0] if cmd else ""
+                            if os.path.exists(compiler):
+                                # Get compiler version
+                                result = subprocess.run(
+                                    [compiler, "--version"],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5,
+                                )
+                                hasher.update(result.stdout.encode())
+            except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception):
+                pass
+
+        return hasher.hexdigest()
+
+    def should_regenerate_cache(self, cache_file: str) -> bool:
+        """Check if dependency cache needs to be regenerated.
+
+        Args:
+            cache_file: Path to the cached dependency mapping JSON
+
+        Returns:
+            True if cache should be regenerated, False if cache is valid
+        """
+        if not os.path.exists(cache_file):
+            return True
+
+        try:
+            # Load cached metadata
+            with open(cache_file, "r") as f:
+                data = json.load(f)
+                cached_hash = data.get("input_hash")
+
+            if not cached_hash:
+                return True
+
+            # Calculate current hash and compare
+            current_hash = self.calculate_input_hash()
+            return current_hash != cached_hash
+
+        except (json.JSONDecodeError, KeyError):
+            # Corrupted cache or old format
+            return True
+
     def analyze(self, progress_callback=None):
         """Run the full dependency analysis.
 
@@ -575,6 +647,7 @@ class CMakeDependencyAnalyzer:
                 "type": "cmake_prebuild",
                 "workspace_root": self.workspace_root,
             },
+            "input_hash": self.calculate_input_hash(),
         }
 
         with open(output_path, "w") as f:
@@ -617,6 +690,11 @@ def main():
         action="store_true",
         help="Suppress progress output",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force regeneration even if cache is valid",
+    )
 
     args = parser.parse_args()
 
@@ -632,6 +710,15 @@ def main():
         workspace_root=args.workspace_root,
         parallel_workers=args.parallel,
     )
+
+    # Check if cache needs regeneration
+    if not args.force and not analyzer.should_regenerate_cache(args.output):
+        print(f"Cache is valid, skipping analysis. Use --force to regenerate.")
+        print(f"Using cached results from {args.output}")
+        return
+
+    if not args.force and os.path.exists(args.output):
+        print(f"Cache invalid or outdated, regenerating dependencies...")
 
     print(f"Analyzing dependencies from {args.compile_commands}...")
     analyzer.analyze(progress_callback=progress)
