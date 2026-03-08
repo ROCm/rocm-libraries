@@ -295,4 +295,150 @@ TEST_F(IntegrationRMSNormDescriptorLowering, AutoAssignedUidsPreservedInRoundTri
     EXPECT_EQ(nodeUids.size(), 5u) << "RMSNorm node tensor UIDs are not distinct";
 }
 
+// Roundtrip with optional bias tensor set, verifying it appears in the serialized graph.
+TEST_F(IntegrationRMSNormDescriptorLowering, RMSNormWithBiasRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("BiasRMSNormGraph")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_RMSNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_RMSNORM_TENSOR_X_DIMS)).set_stride(toVec(K_RMSNORM_TENSOR_X_STRIDES));
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_RMSNORM_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_RMSNORM_TENSOR_SCALE_DIMS))
+        .set_stride(toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(K_RMSNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(K_RMSNORM_TENSOR_BIAS_UID).set_name("Bias").set_data_type(DataType::FLOAT);
+    bias->set_dim(toVec(K_RMSNORM_TENSOR_BIAS_DIMS))
+        .set_stride(toVec(K_RMSNORM_TENSOR_BIAS_STRIDES));
+
+    RMSNormAttributes rmsnormAttrs;
+    rmsnormAttrs.set_name("rmsnorm_op");
+    rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_bias(bias);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::TRAINING);
+
+    auto outputs = graph->rmsnorm(x, scale, std::move(rmsnormAttrs));
+    const auto& y = outputs[0];
+    const auto& invRms = outputs[1];
+    y->set_uid(K_RMSNORM_TENSOR_Y_UID).set_output(true).set_name("Y");
+    ASSERT_NE(invRms, nullptr);
+    invRms->set_uid(K_RMSNORM_TENSOR_INV_RMS_UID).set_output(true).set_name("InvRms");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph_via_descriptors(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Retrieve and deserialize
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    size_t serializedSize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    std::vector<uint8_t> serializedData(serializedSize);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
+                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+
+    // X, Scale, Epsilon, Bias, Y, InvRms = 6 tensors
+    ASSERT_EQ(graphT.tensors.size(), 6u);
+
+    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
+    for(const auto& t : graphT.tensors)
+    {
+        tensorMap[t->uid] = t.get();
+    }
+
+    // Bias tensor should be present
+    ASSERT_NE(tensorMap.count(K_RMSNORM_TENSOR_BIAS_UID), 0u);
+    auto* biasT = tensorMap[K_RMSNORM_TENSOR_BIAS_UID];
+    EXPECT_EQ(biasT->name, "Bias");
+    EXPECT_EQ(biasT->data_type, DataTypeSdk::FLOAT);
+
+    // Node should reference bias
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    auto* rmsnorm = graphT.nodes[0]->attributes.AsRMSNormAttributes();
+    ASSERT_NE(rmsnorm, nullptr);
+    ASSERT_TRUE(rmsnorm->bias_tensor_uid.has_value());
+    EXPECT_EQ(*rmsnorm->bias_tensor_uid, K_RMSNORM_TENSOR_BIAS_UID);
+    ASSERT_TRUE(rmsnorm->inv_rms_tensor_uid.has_value());
+    EXPECT_EQ(*rmsnorm->inv_rms_tensor_uid, K_RMSNORM_TENSOR_INV_RMS_UID);
+    EXPECT_EQ(rmsnorm->forward_phase, NormFwdPhaseSdk::TRAINING);
+}
+
+// Inference mode: inv_rms should not appear in the serialized graph.
+TEST_F(IntegrationRMSNormDescriptorLowering, InferenceModeOmitsInvRms)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("InferenceRMSNormGraph")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(K_RMSNORM_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_RMSNORM_TENSOR_X_DIMS)).set_stride(toVec(K_RMSNORM_TENSOR_X_STRIDES));
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_RMSNORM_TENSOR_SCALE_UID).set_name("Scale").set_data_type(DataType::FLOAT);
+    scale->set_dim(toVec(K_RMSNORM_TENSOR_SCALE_DIMS))
+        .set_stride(toVec(K_RMSNORM_TENSOR_SCALE_STRIDES));
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(K_RMSNORM_TENSOR_EPSILON_UID).set_name("Epsilon");
+
+    RMSNormAttributes rmsnormAttrs;
+    rmsnormAttrs.set_name("rmsnorm_op");
+    rmsnormAttrs.set_epsilon(epsilon);
+    rmsnormAttrs.set_forward_phase(NormFwdPhase::INFERENCE);
+
+    auto outputs = graph->rmsnorm(x, scale, std::move(rmsnormAttrs));
+    const auto& y = outputs[0];
+    y->set_uid(K_RMSNORM_TENSOR_Y_UID).set_output(true).set_name("Y");
+    // outputs[1] (inv_rms) should be nullptr in INFERENCE mode
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph_via_descriptors(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Retrieve and deserialize
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    size_t serializedSize = 0;
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    std::vector<uint8_t> serializedData(serializedSize);
+    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
+                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+
+    // X, Scale, Epsilon, Y = 4 tensors (no inv_rms, no bias)
+    ASSERT_EQ(graphT.tensors.size(), 4u);
+
+    // Node should not reference inv_rms or bias
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    auto* rmsnorm = graphT.nodes[0]->attributes.AsRMSNormAttributes();
+    ASSERT_NE(rmsnorm, nullptr);
+    EXPECT_FALSE(rmsnorm->inv_rms_tensor_uid.has_value());
+    EXPECT_FALSE(rmsnorm->bias_tensor_uid.has_value());
+    EXPECT_EQ(rmsnorm->forward_phase, NormFwdPhaseSdk::INFERENCE);
+}
+
 } // namespace
