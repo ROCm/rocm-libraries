@@ -105,6 +105,7 @@ NB_MODULE(origami, m) {
       .def_rw("cache_hints_b", &origami::config_t::cache_hints_b)
       .def_rw("workspace_size", &origami::config_t::workspace_size)
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
+      .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
       .def_rw("grid_selection", &origami::config_t::grid_selection);
 
   nanobind::class_<origami::workgroup_mapping_t>(m, "workgroup_mapping_t")

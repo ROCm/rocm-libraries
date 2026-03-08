@@ -178,7 +178,7 @@ public:
     OperationRng build();
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationRngDescriptor : public BackendDescriptor
+class BackendOperationRngDescriptor : public BackendDescriptor
 {
 private:
     OperationRngBuilder mBuilder;
