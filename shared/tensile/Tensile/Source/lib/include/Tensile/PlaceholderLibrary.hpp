@@ -66,6 +66,12 @@ namespace Tensile
         gfx1153,
         gfx1200,
         gfx1201,
+	gfx9_0_generic,
+	gfx9_4_generic,
+	gfx10_1_generic,
+	gfx10_3_generic,
+	gfx11_generic,
+	gfx12_generic,
         All
     };
 
@@ -130,6 +136,18 @@ namespace Tensile
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:
             return "TensileLibrary_*_gfx1201";
+	case LazyLoadingInit::gfx9_0_generic:
+            return "TensileLibrary_*_gfx9-0-generic";
+	case LazyLoadingInit::gfx9_4_generic:
+            return "TensileLibrary_*_gfx9-4-generic";
+	case LazyLoadingInit::gfx10_1_generic:
+            return "TensileLibrary_*_gfx10-1-generic";
+	case LazyLoadingInit::gfx10_3_generic:
+            return "TensileLibrary_*_gfx10-3-generic";
+    	case LazyLoadingInit::gfx11_generic:
+            return "TensileLibrary_*_gfx11-generic";
+	case LazyLoadingInit::gfx12_generic:
+            return "TensileLibrary_*_gfx12-generic";
         case LazyLoadingInit::None:
             return "";
         }

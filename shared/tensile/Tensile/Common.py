@@ -246,12 +246,12 @@ globalParameters["NumMergedFiles"] = 1            # The number of files that ker
 
 globalParameters["MaxFileName"] = 64              # If a file name would be longer than this, shorten it with a hash.
 globalParameters["SupportedISA"] = [(8,0,3),
-                                    (9,0,0), (9,0,6), (9,0,8), (9,0,10),
-                                    (9,4,2), (9,5,0),
-                                    (10,1,0), (10,1,1), (10,1,2), (10,3,0), (10,3,1), (10,3,2), (10,3,3), (10,3,4), (10,3,5), (10,3,6),
-                                    (11,0,0), (11,0,1), (11,0,2), (11,0,3),
+                                    (9,0,0), (9,0,6), (9,0,8), (9,0,10), (9,0,-1),
+                                    (9,4,2), (9,4,-1), (9,5,0),
+                                    (10,1,0), (10,1,1), (10,1,2), (10,1,-1), (10,3,0), (10,3,1), (10,3,2), (10,3,3), (10,3,4), (10,3,5), (10,3,6), (10,3,-1),
+                                    (11,0,0), (11,0,1), (11,0,2), (11,0,3), (11,0,-1),
                                     (11,5,0), (11,5,1), (11,5,2), (11,5,3),
-                                    (12,0,0), (12,0,1)] # assembly kernels writer supports these architectures
+                                    (12,0,0), (12,0,1), (12,0,-1)] # assembly kernels writer supports these architectures
 
 globalParameters["KeepBuildTmp"] = True                           # Do not remove build artifacts during the build process or build_tmp after build completes
 globalParameters["GenerateManifestAndExit"] = False               # Output manifest file with list of expected library objects and exit
@@ -320,15 +320,15 @@ architectureMap = {
   'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10',
   'gfx906':'vega20', 'gfx906:xnack+':'vega20', 'gfx906:xnack-':'vega20',
   'gfx908':'arcturus','gfx908:xnack+':'arcturus', 'gfx908:xnack-':'arcturus',
-  'gfx90a':'aldebaran', 'gfx90a:xnack+':'aldebaran', 'gfx90a:xnack-':'aldebaran',
-  'gfx942':'aquavanjaram942', 'gfx942:xnack+':'aquavanjaram942', 'gfx942:xnack-':'aquavanjaram942',
+  'gfx90a':'aldebaran', 'gfx90a:xnack+':'aldebaran', 'gfx90a:xnack-':'aldebaran', 'gfx9-generic':'gfx9-generic',
+  'gfx942':'aquavanjaram942', 'gfx942:xnack+':'aquavanjaram942', 'gfx942:xnack-':'aquavanjaram942', 'gfx9-4-generic':'gfx9-4-generic',
   'gfx950':'gfx950', 'gfx950:xnack+':'gfx950', 'gfx950:xnack-':'gfx950',
-  'gfx1010':'navi10', 'gfx1011':'navi12', 'gfx1012':'navi14',
-  'gfx1030':'navi21', 'gfx1031':'navi22', 'gfx1032':'navi23', 'gfx1033':'van gogh', 'gfx1034':'navi24', 'gfx1035':'rembrandt', 'gfx1036':'raphael',
-  'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103',
+  'gfx1010':'navi10', 'gfx1011':'navi12', 'gfx1012':'navi14', 'gfx10-1-generic':'gfx10-1-generic',
+  'gfx1030':'navi21', 'gfx1031':'navi22', 'gfx1032':'navi23', 'gfx1033':'van gogh', 'gfx1034':'navi24', 'gfx1035':'rembrandt', 'gfx1036':'raphael', 'gfx10-3-generic':'gfx10-3-generic',
+  'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103', 'gfx11-generic':'gfx11-generic',
   'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
   'gfx1200':'gfx1200',
-  'gfx1201':'gfx1201'
+  'gfx1201':'gfx1201', 'gfx12-generic':'gfx12-generic',
 }
 
 def getArchitectureName(gfxName: str) -> Optional[str]:
@@ -2201,6 +2201,21 @@ def tryAssembler(isaVersion, asmString, debug=False, *options):
 
 def gfxArch(name: str) -> Optional[IsaVersion]:
     import re
+
+    # Handle special case for generic architectures like 'gfx10-3-generic'
+    generic_match = re.search(r'gfx([0-9]+)-([0-9]+)-generic', name)
+    if generic_match:
+        major = int(generic_match.group(1))
+        minor = int(generic_match.group(2))
+        return (major, minor, -1)  # step=-1 to indicate generic
+
+    # Handle special case for generic architectures like 'gfx11-generic'
+    generic_match = re.search(r'gfx([0-9]+)-generic', name)
+    if generic_match:
+        major = int(generic_match.group(1))
+        return (major, 0, -1)  # step=-1 to indicate generic, minor=0
+
+    # Handle regular architectures like 'gfx900', 'gfx803' etc.
     match = re.search(r'gfx([0-9a-fA-F]{3,})', name)
     if not match: return None
 
@@ -2219,10 +2234,22 @@ def gfxArch(name: str) -> Optional[IsaVersion]:
     return rv
 
 def gfxName(arch):
-    # convert last digit to hex because reasons
-    name = str(arch[0]) + str(arch[1]) + ('%x' % arch[2])
+    # If arch[2] is negative, this is a generic target
+    if arch[2] < 0:
+        if arch[0] == 9:
+            if arch[1] == 4:
+                name = str(arch[0]) + '-' + str(arch[1]) + '-generic'
+            else:
+                name = str(arch[0]) + '-generic'
+        elif arch[0] == 10:
+            name = str(arch[0]) + '-' + str(arch[1]) + '-generic'
+        else:
+            name = str(arch[0]) + '-generic'
+    else:
+        # The normal case
+        # convert last digit to hex because reasons
+        name = str(arch[0]) + str(arch[1]) + ('%x' % arch[2])
     return 'gfx' + ''.join(map(str,name))
-
 
 def detectIsaWindows(output):
     i = 0
@@ -2475,7 +2502,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
     if os.name == "nt":
       globalParameters["CurrentISA"] = (9,0,6)
       printWarning("Failed to detect ISA so forcing (gfx906) on windows")
-  isasWithDisabledHWMonitor = ((9,4,2), (9,5,0), (11,0,0), (11,0,1), (11,0,2), (11,0,3), (11,5,0), (11,5,1), (11,5,2), (11,5,3), (12,0,0), (12,0,1))
+  isasWithDisabledHWMonitor = ((9,0,-1), (9,4,2), (9,4,-1), (9,5,0), (10,1,-1), (10,3,-1), (11,0,0), (11,0,1), (11,0,2), (11,0,3), (11,5,0), (11,5,1), (11,5,2), (11,5,3), (11,0,-1), (12,0,0), (12,0,1), (12,0,-1))
   if globalParameters["CurrentISA"] in isasWithDisabledHWMonitor:
     isaString = ', '.join(map(gfxName, isasWithDisabledHWMonitor))
     printWarning(f"HardwareMonitor currently disabled for {isaString}")
