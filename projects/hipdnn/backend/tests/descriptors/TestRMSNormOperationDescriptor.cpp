@@ -3,6 +3,7 @@
 
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
+#include "HipdnnNormFwdPhase.h"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/IGraphOperation.hpp"
@@ -60,9 +61,11 @@ public:
         if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT)
            == skip.end())
         {
-            auto forwardPhase = static_cast<int64_t>(NormFwdPhase::TRAINING);
-            desc->setAttribute(
-                HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_INT64, 1, &forwardPhase);
+            auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
+                               HIPDNN_TYPE_NORM_FWD_PHASE,
+                               1,
+                               &forwardPhase);
         }
     }
 
@@ -295,10 +298,10 @@ TEST_F(TestRMSNormOperationDescriptor, SetTensorFailsNullPointer)
 TEST_F(TestRMSNormOperationDescriptor, SetForwardPhase)
 {
     auto desc = getDescriptor();
-    auto forwardPhase = static_cast<int64_t>(NormFwdPhase::TRAINING);
+    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_INT64, 1, &forwardPhase));
+        HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &forwardPhase));
 
     ASSERT_EQ(desc->getData().forward_phase, NormFwdPhase::TRAINING);
 }
@@ -307,12 +310,13 @@ TEST_F(TestRMSNormOperationDescriptor, SetForwardPhaseWrongElementCount)
 {
     auto desc = getDescriptor();
     // Value is irrelevant — this test exercises the elementCount != 1 error path.
-    auto forwardPhase = static_cast<int64_t>(NormFwdPhase::TRAINING);
+    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_INT64, 2, &forwardPhase),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
+                                                  HIPDNN_TYPE_NORM_FWD_PHASE,
+                                                  2,
+                                                  &forwardPhase),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 // =============================================================================
@@ -396,15 +400,15 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeForwardPhase)
     makeFinalized();
     auto desc = getDescriptor();
 
-    int64_t forwardPhase = -1;
+    hipdnnNormFwdPhase_t forwardPhase = {};
     int64_t forwardPhaseCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
-                                       HIPDNN_TYPE_INT64,
+                                       HIPDNN_TYPE_NORM_FWD_PHASE,
                                        1,
                                        &forwardPhaseCount,
                                        &forwardPhase));
     ASSERT_EQ(forwardPhaseCount, 1);
-    EXPECT_EQ(forwardPhase, static_cast<int64_t>(NormFwdPhase::TRAINING));
+    EXPECT_EQ(forwardPhase, HIPDNN_NORM_FWD_PHASE_TRAINING);
 }
 
 // =============================================================================
@@ -598,8 +602,11 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeForwardPhaseQueryReturnsOne)
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
+                                       HIPDNN_TYPE_NORM_FWD_PHASE,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -632,10 +639,12 @@ TEST_F(TestRMSNormOperationDescriptor, GetAttributeForwardPhaseQueryFailsNullEle
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->getAttribute(
-            HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_INT64, 0, nullptr, nullptr),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
+                                                  HIPDNN_TYPE_NORM_FWD_PHASE,
+                                                  0,
+                                                  nullptr,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 // =============================================================================

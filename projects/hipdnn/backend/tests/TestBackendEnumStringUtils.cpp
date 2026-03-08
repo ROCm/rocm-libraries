@@ -570,3 +570,14 @@ TEST(TestBackendEnumStringUtils, GetPointwiseModeString)
     EXPECT_STREQ(hipdnnGetPointwiseModeString(static_cast<hipdnnPointwiseMode_t>(-1)),
                  "HIPDNN_POINTWISE_UNKNOWN");
 }
+
+TEST(TestBackendEnumStringUtils, GetNormFwdPhaseString)
+{
+    EXPECT_STREQ(hipdnnGetNormFwdPhaseString(HIPDNN_NORM_FWD_PHASE_INFERENCE),
+                 "HIPDNN_NORM_FWD_PHASE_INFERENCE");
+    EXPECT_STREQ(hipdnnGetNormFwdPhaseString(HIPDNN_NORM_FWD_PHASE_TRAINING),
+                 "HIPDNN_NORM_FWD_PHASE_TRAINING");
+
+    EXPECT_STREQ(hipdnnGetNormFwdPhaseString(static_cast<hipdnnNormFwdPhase_t>(-1)),
+                 "HIPDNN_NORM_FWD_PHASE_UNKNOWN");
+}

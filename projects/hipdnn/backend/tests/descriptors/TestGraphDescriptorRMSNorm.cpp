@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "DescriptorTestUtils.hpp"
+#include "HipdnnNormFwdPhase.h"
 #include "TensorDescriptorTestUtils.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/RMSNormOperationDescriptor.hpp"
@@ -54,9 +55,9 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     desc->setAttribute(
         HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &invRmsDesc);
 
-    auto forwardPhase = static_cast<int64_t>(NormFwdPhase::TRAINING);
+    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_INT64, 1, &forwardPhase);
+        HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT, HIPDNN_TYPE_NORM_FWD_PHASE, 1, &forwardPhase);
     desc->setAttribute(HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
 
     desc->finalize();

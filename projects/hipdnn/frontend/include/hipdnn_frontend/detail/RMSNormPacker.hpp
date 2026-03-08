@@ -65,11 +65,15 @@ inline Error
     }
 
     // Set forward phase
-    auto forwardPhase = static_cast<int64_t>(toSdkType(attributes.get_forward_phase()));
+    auto forwardPhase = toBackendNormFwdPhase(attributes.get_forward_phase());
+    if(!forwardPhase.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported rmsnorm forward phase"};
+    }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT,
-                                               HIPDNN_TYPE_INT64,
-                                               forwardPhase,
+                                               HIPDNN_TYPE_NORM_FWD_PHASE,
+                                               *forwardPhase,
                                                "rmsnorm forward phase"));
 
     // Set compute data type

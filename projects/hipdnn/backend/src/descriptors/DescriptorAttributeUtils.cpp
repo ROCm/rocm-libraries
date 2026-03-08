@@ -219,18 +219,13 @@ void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
                      const void* arrayOfElements,
                      const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_INT64, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(HIPDNN_TYPE_NORM_FWD_PHASE, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
-    int64_t phaseVal = 0;
-    std::memcpy(&phaseVal, arrayOfElements, sizeof(int64_t));
-    auto phase = static_cast<hipdnn_data_sdk::data_objects::NormFwdPhase>(phaseVal);
-    THROW_IF_TRUE(phase < hipdnn_data_sdk::data_objects::NormFwdPhase::MIN
-                      || phase > hipdnn_data_sdk::data_objects::NormFwdPhase::MAX,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  std::string(errorPrefix) + ": invalid NormFwdPhase value");
-    target = phase;
+    hipdnnNormFwdPhase_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkNormFwdPhase(tmp);
 }
 
 void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
@@ -240,7 +235,7 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
                      void* arrayOfElements,
                      const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_NORM_FWD_PHASE, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -259,8 +254,8 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     {
         *elementCount = 1;
     }
-    auto phaseVal = static_cast<int64_t>(source);
-    std::memcpy(arrayOfElements, &phaseVal, sizeof(int64_t));
+    auto tmp = fromSdkNormFwdPhase(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
 }
 
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,

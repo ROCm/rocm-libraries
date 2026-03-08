@@ -10,6 +10,7 @@
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnNormFwdPhase.h"
 #include "HipdnnPointwiseMode.h"
 #include "HipdnnStatus.h"
 
@@ -525,6 +526,19 @@ inline const char* hipdnnGetPluginUnloadingModeString(hipdnnPluginUnloadingMode_
         return "HIPDNN_PLUGIN_UNLOAD_EAGER";
     default:
         return "HIPDNN_PLUGIN_UNLOAD_UNKNOWN";
+    }
+}
+
+inline const char* hipdnnGetNormFwdPhaseString(hipdnnNormFwdPhase_t phase)
+{
+    switch(phase)
+    {
+    case HIPDNN_NORM_FWD_PHASE_INFERENCE:
+        return "HIPDNN_NORM_FWD_PHASE_INFERENCE";
+    case HIPDNN_NORM_FWD_PHASE_TRAINING:
+        return "HIPDNN_NORM_FWD_PHASE_TRAINING";
+    default:
+        return "HIPDNN_NORM_FWD_PHASE_UNKNOWN";
     }
 }
 

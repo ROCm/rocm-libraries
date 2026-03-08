@@ -6,6 +6,7 @@
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnDataType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnNormFwdPhase.h"
 #include "HipdnnPointwiseMode.h"
 #include "TensorDescriptor.hpp"
 #include <cstring>
@@ -126,7 +127,7 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
                       void* arrayOfElements,
                       const char* errorPrefix);
 
-// NormFwdPhase is passed as HIPDNN_TYPE_INT64 (no dedicated C API enum type).
+// NormFwdPhase is passed as HIPDNN_TYPE_NORM_FWD_PHASE (hipdnnNormFwdPhase_t).
 void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
                      hipdnnBackendAttributeType_t attributeType,
                      int64_t elementCount,
