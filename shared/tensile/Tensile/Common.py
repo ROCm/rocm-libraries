@@ -2010,6 +2010,14 @@ def locateExe( defaultPath, exeName ): # /opt/rocm/bin, hip-clang
       return exePath
   return None
 
+def PrintDiff(d1, d2):
+    keys = set(d1.keys() | d2.keys())
+    for key in keys:
+        v1 = d1.get(key)
+        v2 = d2.get(key)
+        if v1 != v2:
+            printWarning(f"{key}: {v1} != {v2}")
+
 def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCaps: Dict[IsaVersion, dict]) -> Dict[IsaVersion, dict]:
   """ Determine assembler capabilities by testing short instructions sequences """
   if globalParameters["AssemblerPath"] is not None:
@@ -2132,6 +2140,7 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
         exitFlag = True
       if exitFlag:
         printWarning("Cached asm caps differ from derived asm caps for {}".format(isaVersion))
+        PrintDiff(derivedAsmCaps, cachedAsmCaps[isaVersion])
     return derivedAsmCaps
   else:
     printWarning("Assembler not present, asm caps loaded from cache are unverified")
