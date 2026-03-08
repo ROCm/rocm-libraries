@@ -255,7 +255,7 @@ class MasterSolutionLibrary:
         """Maps hex characters from gfx name to an index.
 
         Given a gfx name of the form gfx[0-9a-f]*, map the characters following
-        gfx from hex to int and left shift the integer by 18.
+        gfx from hex to int and left shift the integer by 18 (or 29 for generic architectures).
 
         Args:
             architectureName: The gfx name (or fallback).
@@ -273,7 +273,12 @@ class MasterSolutionLibrary:
             archString = re.search('(?<=gfx)[0-9a-f]*', architectureName)
             if archString is not None:
                 archLiteral = archString.group(0)
-                archval = (int(archLiteral, 16) << 18)
+                # Use left shift of 29 for generic architectures, 18 otherwise
+                if architectureName.endswith("-generic"):
+                    shift_bits = 29
+                else:
+                    shift_bits = 18
+                archval = (int(archLiteral, 16) << shift_bits)
         # Check for duplicate architecture values
         if archval >= 0 and not archval in cls.ArchitectureSet:
             cls.ArchitectureSet.add(archval)
