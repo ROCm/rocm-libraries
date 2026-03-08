@@ -200,4 +200,12 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT,
 
+    /**
+     * @brief Matrix multiplication operation descriptor
+     *
+     * Represents a matrix multiplication operation with input (A),
+     * input (B), and output (C) tensors plus a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT,
+
 } hipdnnBackendDescriptorType_t;

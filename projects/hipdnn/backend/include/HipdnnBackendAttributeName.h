@@ -45,6 +45,7 @@
  * - 2100-2199: Shared batchnorm backward ext attributes
  * - 2200-2299: Pointwise operation attributes
  * - 2300-2399: Shared pointwise descriptor attributes
+ * - 2500-2599: Matmul operation attributes
  * - 60000+: Extension attributes
  */
 typedef enum
@@ -570,6 +571,26 @@ typedef enum
 
     /** @brief Axis index for pointwise operation */
     HIPDNN_ATTR_POINTWISE_AXIS = 2308,
+
+    /** @} */
+
+    /**
+     * @name Matmul Operation Attributes (2500-2599)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Left input matrix tensor (A) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_A_EXT = 2500,
+
+    /** @brief Right input matrix tensor (B) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_B_EXT = 2501,
+
+    /** @brief Output matrix tensor (C) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_C_EXT = 2502,
+
+    /** @brief Compute data type for matmul */
+    HIPDNN_ATTR_MATMUL_MATH_PREC_EXT = 2503,
 
     /** @} */
 

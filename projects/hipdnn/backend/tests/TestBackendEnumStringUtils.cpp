@@ -58,6 +58,8 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(
                      HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT),
                  "HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT");
+    EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT),
+                 "HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -331,6 +333,15 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EPSILON_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT),
                  "HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT");
+
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_MATMUL_A_EXT),
+                 "HIPDNN_ATTR_OPERATION_MATMUL_A_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_MATMUL_B_EXT),
+                 "HIPDNN_ATTR_OPERATION_MATMUL_B_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_MATMUL_C_EXT),
+                 "HIPDNN_ATTR_OPERATION_MATMUL_C_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_MATMUL_MATH_PREC_EXT),
+                 "HIPDNN_ATTR_MATMUL_MATH_PREC_EXT");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)
