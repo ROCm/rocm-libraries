@@ -803,6 +803,9 @@ ROCBLAS_INTERNAL_EXPORT bool rocblas_internal_tensile_supports_xdl_math_op(rocbl
 // for internal use
 std::string rocblas_internal_get_arch_name(int device);
 
+// for internal use
+std::string rocblas_internal_get_generic_arch_name(int device);
+
 // for internal use during testing, fetch arch name
 ROCBLAS_INTERNAL_EXPORT std::string rocblas_internal_get_arch_name();
 
