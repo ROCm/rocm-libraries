@@ -962,7 +962,8 @@ def addFallback(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
             value.insert(masterLibraries["fallback"])
 
     for archName in archs:
-        archName = archName.split("-", 1)[0]
+        if not archName.endswith("-generic"):
+            archName = archName.split("-", 1)[0]
         if archName not in masterLibraries:
             tPrint(1, "Using fallback for arch: " + archName)
             masterLibraries[archName] = masterLibraries["fallback"]
