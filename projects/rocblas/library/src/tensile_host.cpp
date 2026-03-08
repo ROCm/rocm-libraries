@@ -792,61 +792,80 @@ namespace
 #endif
 
             // The name of the current GPU platform
-            std::string processor = rocblas_internal_get_arch_name(deviceId);
+            std::string specific_processor = rocblas_internal_get_arch_name(deviceId);
+	    std::string generic_processor = rocblas_internal_get_generic_arch_name(deviceId);
+	    std::string processors[2] = {specific_processor, generic_processor};
+	    std::string processor;
 
             static std::string base_path;
             static int         determined_path = determine_tensile_base_path(base_path);
 
-            path = base_path;
-            if(TestPath(path + "/" + processor))
-                path += "/" + processor;
-
-#ifdef TENSILE_YAML
-            tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".yaml";
-#else
-            tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".dat";
-#endif
-            if(!TestPath(tensileLibraryPath))
+            // Loop over processors to find a valid Tensile library
+            // Only call rocblas_abort on the final processor
+            for(int i = 0; i < 2; ++i)
             {
+	        processor = processors[i];
+                path = base_path;
+                if(TestPath(path + "/" + processor))
+                    path += "/" + processor;
+
+                // Try lazy loading first
+#ifdef TENSILE_YAML
+                tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".yaml";
+#else
+                tensileLibraryPath = path + "/TensileLibrary_lazy_" + processor + ".dat";
+#endif
+                if(TestPath(tensileLibraryPath))
+                {
+                    tensile_lazy_load_enabled = true;
+                    break;
+                }
+
                 tensile_lazy_load_enabled = false;
 
+                // Try regular loading
 #ifdef TENSILE_YAML
                 tensileLibraryPath = path + "/TensileLibrary_" + processor + ".yaml";
 #else
                 tensileLibraryPath = path + "/TensileLibrary_" + processor + ".dat";
 #endif
-                if(!TestPath(tensileLibraryPath))
-                {
+                if(TestPath(tensileLibraryPath))
+                    break;
+
+                // Try generic library
 #ifdef TENSILE_YAML
-                    tensileLibraryPath = path + "/TensileLibrary.yaml";
+                tensileLibraryPath = path + "/TensileLibrary.yaml";
 #else
-                    tensileLibraryPath = path + "/TensileLibrary.dat";
+                tensileLibraryPath = path + "/TensileLibrary.dat";
 #endif
-                    if(!TestPath(tensileLibraryPath))
-                    {
+                if(TestPath(tensileLibraryPath))
+                    break;
+
+                // If this is the last processor, error out
+                if(i == 1)
+                {
 #if ROCBLAS_TENSILE_SEPARATE_ARCH
-                        rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
-                                     << ": " << strerror(errno) << " for GPU arch : " << processor
-                                     << std::endl;
+                    rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
+                                 << ": " << strerror(errno) << " for GPU arch : " << specific_processor
+                                 << std::endl;
 #if ROCBLAS_TENSILE_LAZY_LOAD
-                        std::regex fileMatcher(path + "/TensileLibrary_lazy.*");
+                    std::regex fileMatcher(path + "/TensileLibrary_lazy.*");
 #else
-                        std::regex fileMatcher(path + "/TensileLibrary_gfx\\d+.dat");
+                    std::regex fileMatcher(path + "/TensileLibrary_gfx.\\d+.dat");
 #endif
-                        rocblas_cerr << " List of available TensileLibrary Files : " << std::endl;
-                        for(auto& file_name : fs::directory_iterator(path))
+                    rocblas_cerr << " List of available TensileLibrary Files : " << std::endl;
+                    for(auto& file_name : fs::directory_iterator(path))
+                    {
+                        if(std::regex_match(file_name.path().string(), fileMatcher))
                         {
-                            if(std::regex_match(file_name.path().string(), fileMatcher))
-                            {
-                                rocblas_cerr << file_name << std::endl;
-                            }
+                            rocblas_cerr << file_name << std::endl;
                         }
-#else
-                        rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
-                                     << ": " << strerror(errno) << std::endl;
-#endif
-                        rocblas_abort();
                     }
+#else
+                    rocblas_cerr << "\nrocBLAS error: Cannot read " << tensileLibraryPath
+                                 << ": " << strerror(errno) << std::endl;
+#endif
+                    rocblas_abort();
                 }
             }
 
