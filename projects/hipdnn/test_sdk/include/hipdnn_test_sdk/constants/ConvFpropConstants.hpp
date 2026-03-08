@@ -28,4 +28,17 @@ constexpr std::array<int64_t, 2> K_CONV_PADDING = {1, 1};
 constexpr std::array<int64_t, 2> K_CONV_STRIDE = {1, 1};
 constexpr std::array<int64_t, 2> K_CONV_DILATION = {1, 1};
 
+// Second convolution layer tensors (for multi-operation graph tests)
+constexpr int64_t K_TENSOR_X2_UID = 4;
+constexpr std::array<int64_t, 4> K_TENSOR_X2_DIMS = {1, 64, 32, 32};
+constexpr std::array<int64_t, 4> K_TENSOR_X2_STRIDES = {65536, 1024, 32, 1};
+
+constexpr int64_t K_TENSOR_W2_UID = 5;
+constexpr std::array<int64_t, 4> K_TENSOR_W2_DIMS = {128, 64, 3, 3};
+constexpr std::array<int64_t, 4> K_TENSOR_W2_STRIDES = {576, 9, 3, 1};
+
+constexpr int64_t K_TENSOR_Y2_UID = 6;
+constexpr std::array<int64_t, 4> K_TENSOR_Y2_DIMS = {1, 128, 32, 32};
+constexpr std::array<int64_t, 4> K_TENSOR_Y2_STRIDES = {131072, 1024, 32, 1};
+
 } // namespace hipdnn_tests::constants

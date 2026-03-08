@@ -6,6 +6,7 @@
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnDataType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include "HipdnnPointwiseMode.h"
 #include "TensorDescriptor.hpp"
 #include <cstring>
@@ -13,6 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace hipdnn_backend
@@ -112,6 +114,13 @@ void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
                  void* arrayOfElements,
                  const char* errorPrefix);
 
+void getOperationType(hipdnnOperationType_t source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix);
+
 void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
@@ -150,6 +159,11 @@ void getOptionalInt64(const flatbuffers::Optional<int64_t>& source,
                       int64_t* elementCount,
                       void* arrayOfElements,
                       const char* context);
+
+std::shared_ptr<TensorDescriptor>
+    findTensorInMap(const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap,
+                    int64_t uid,
+                    const char* context);
 
 void setTensorDescriptor(std::shared_ptr<TensorDescriptor>& descTarget,
                          int64_t& uidTarget,

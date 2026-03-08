@@ -27,10 +27,9 @@ add_executable(
     IntegrationConvolutionDgradDescriptorLowering.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
-    IntegrationConvolutionWgradDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
-    IntegrationMatmul.cpp
     IntegrationRMSNormForward.cpp
+    IntegrationGraphLifting.cpp
 )
 
 target_compile_options(public_hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

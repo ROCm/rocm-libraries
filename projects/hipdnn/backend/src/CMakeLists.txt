@@ -36,6 +36,7 @@ add_library(
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
     descriptors/TensorDescriptor.cpp
+    descriptors/NodeFactory.cpp
     descriptors/VariantDescriptor.cpp
     handle/HandleFactory.cpp
     handle/Handle.cpp

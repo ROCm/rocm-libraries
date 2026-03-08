@@ -616,6 +616,15 @@ typedef enum
      */
     HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT = 60100,
 
+    /**
+     * @brief Operation type of an operation descriptor (read-only extension)
+     *
+     * Returns the hipdnnOperationType_t of an operation descriptor, enabling
+     * type-based dispatch without trial-and-error probing.
+     * Type: HIPDNN_TYPE_OPERATION_TYPE_EXT
+     */
+    HIPDNN_ATTR_OPERATION_TYPE_EXT = 60200,
+
     /** @} */
 
 } hipdnnBackendAttributeName_t;

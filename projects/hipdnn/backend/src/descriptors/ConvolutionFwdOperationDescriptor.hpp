@@ -1,5 +1,5 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier:  MIT
 
 #pragma once
 
@@ -7,6 +7,8 @@
 #include "IGraphOperation.hpp"
 #include "TensorDescriptor.hpp"
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <unordered_map>
 
 namespace hipdnn_backend
 {
@@ -58,6 +60,13 @@ public:
     // IGraphOperation interface
     std::vector<std::shared_ptr<TensorDescriptor>> getTensorDescriptors() const override;
     std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT> buildNode() const override;
+
+    // Creates a finalized ConvolutionFwdOperationDescriptor directly from a FlatBuffer NodeT.
+    // Casts nodeT.attributes to ConvolutionFwdAttributesT internally, then directly assigns
+    // the data struct, looks up tensor descriptors from the tensor map, and calls finalize().
+    static std::shared_ptr<ConvolutionFwdOperationDescriptor>
+        fromNode(const hipdnn_data_sdk::data_objects::NodeT& nodeT,
+                 const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap);
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

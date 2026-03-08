@@ -111,7 +111,15 @@ typedef enum
      * Used for passing serialized FlatBuffer data to/from the backend.
      * The value should be a hipdnnBackendFlatbufferData_t struct.
      */
-    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
+    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
+
+    /**
+     * @brief Operation type enumeration (hipdnnOperationType_t, extension)
+     *
+     * Used for querying the operation type of an operation descriptor
+     * via HIPDNN_ATTR_OPERATION_TYPE_EXT.
+     */
+    HIPDNN_TYPE_OPERATION_TYPE_EXT
 
     /** @} */
 

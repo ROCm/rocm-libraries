@@ -1,0 +1,384 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+#include <memory>
+#include <vector>
+
+#include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
+
+#include "test_plugins/TestPluginConstants.hpp"
+
+using namespace hipdnn_frontend;
+using namespace hipdnn_frontend::graph;
+using hipdnn_tests::toVec;
+
+namespace
+{
+
+// Exposes protected Graph methods for testing
+class TestableGraph : public Graph
+{
+public:
+    using Graph::build_operation_graph;
+    using Graph::deserialize_via_backend;
+    using Graph::get_raw_graph_descriptor;
+
+    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
+    {
+        return _sub_nodes;
+    }
+};
+
+// -- Test constants --
+
+constexpr int64_t K_TENSOR_X_UID = 10;
+constexpr int64_t K_TENSOR_W_UID = 20;
+constexpr int64_t K_TENSOR_Y_UID = 30;
+
+constexpr std::array<int64_t, 4> K_TENSOR_X_DIMS = {2, 3, 14, 14};
+constexpr std::array<int64_t, 4> K_TENSOR_X_STRIDES = {588, 196, 14, 1};
+constexpr std::array<int64_t, 4> K_TENSOR_W_DIMS = {8, 3, 3, 3};
+constexpr std::array<int64_t, 4> K_TENSOR_W_STRIDES = {27, 9, 3, 1};
+
+constexpr std::array<int64_t, 2> K_CONV_PRE_PADDING = {1, 1};
+constexpr std::array<int64_t, 2> K_CONV_POST_PADDING = {1, 1};
+constexpr std::array<int64_t, 2> K_CONV_STRIDE = {2, 2};
+constexpr std::array<int64_t, 2> K_CONV_DILATION = {1, 1};
+
+// Builds a conv fprop graph via the frontend, lowers it through the backend C-API
+// via build_operation_graph(), then lifts it back with fromBackendDescriptor()
+// and verifies the reconstructed graph matches the original.
+class IntegrationGraphLifting : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+
+        ASSERT_EQ(hipInit(0), hipSuccess);
+
+        const std::array<const char*, 1> paths
+            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
+
+        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+    }
+
+    void TearDown() override
+    {
+        if(_handle != nullptr)
+        {
+            hipdnnDestroy(_handle);
+        }
+    }
+
+    // Builds a standard conv fprop graph for round-trip testing
+    static std::shared_ptr<TestableGraph>
+        buildConvFpropGraph(DataType computeType = DataType::FLOAT,
+                            DataType intermediateType = DataType::FLOAT,
+                            DataType ioType = DataType::FLOAT)
+    {
+        auto graph = std::make_shared<TestableGraph>();
+        graph->set_name("LiftingTestGraph")
+            .set_compute_data_type(computeType)
+            .set_intermediate_data_type(intermediateType)
+            .set_io_data_type(ioType);
+
+        auto x = std::make_shared<TensorAttributes>();
+        x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+        x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+
+        auto w = std::make_shared<TensorAttributes>();
+        w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
+        w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+
+        ConvFpropAttributes convAttrs;
+        convAttrs.set_name("conv_fprop_op");
+        convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
+        convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
+        convAttrs.set_stride(toVec(K_CONV_STRIDE));
+        convAttrs.set_dilation(toVec(K_CONV_DILATION));
+        convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
+
+        auto y = graph->conv_fprop(x, w, convAttrs);
+        y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
+
+        return graph;
+    }
+
+    hipdnnHandle_t _handle = nullptr;
+};
+
+// Builds a conv fprop graph, lowers via build_operation_graph(handle), extracts the
+// raw descriptor, creates a new graph with fromBackendDescriptor(), and verifies
+// tensor dimensions, data types, convolution parameters, and graph-level data types.
+TEST_F(IntegrationGraphLifting, ConvFpropRoundTripViaCApi)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    // Lift back into a new graph
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (X, W, Y) in lifted graph";
+
+    // Verify X tensor
+    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
+    auto liftedX = tensorMap[K_TENSOR_X_UID];
+    EXPECT_EQ(liftedX->get_dim(), toVec(K_TENSOR_X_DIMS));
+    EXPECT_EQ(liftedX->get_stride(), toVec(K_TENSOR_X_STRIDES));
+    EXPECT_EQ(liftedX->get_data_type(), DataType::FLOAT);
+
+    // Verify W tensor
+    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
+    auto liftedW = tensorMap[K_TENSOR_W_UID];
+    EXPECT_EQ(liftedW->get_dim(), toVec(K_TENSOR_W_DIMS));
+    EXPECT_EQ(liftedW->get_stride(), toVec(K_TENSOR_W_STRIDES));
+    EXPECT_EQ(liftedW->get_data_type(), DataType::FLOAT);
+
+    // Verify Y tensor
+    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
+    auto liftedY = tensorMap[K_TENSOR_Y_UID];
+    EXPECT_EQ(liftedY->get_data_type(), DataType::FLOAT);
+    // Y dimensions are inferred during validate(), so just check they are non-empty
+    EXPECT_FALSE(liftedY->get_dim().empty());
+
+    // Verify the lifted graph has the correct number of sub-nodes
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    // Access the conv fprop node and verify convolution parameters
+    auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
+    ASSERT_NE(convNode, nullptr) << "Expected a ConvolutionFpropNode";
+
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+    EXPECT_EQ(convNode->attributes.get_convolution_mode(), ConvolutionMode::CROSS_CORRELATION);
+}
+
+// Verifies that tensors are accessible by UID on the reconstructed graph,
+// confirming tensor identity is preserved through the round-trip.
+TEST_F(IntegrationGraphLifting, ConvFpropTensorSharingPreserved)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // All tensors should be accessible by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u) << "X tensor not found by UID";
+    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u) << "W tensor not found by UID";
+    EXPECT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u) << "Y tensor not found by UID";
+
+    // Verify the node references the same tensor objects via UID
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
+    ASSERT_NE(convNode, nullptr);
+
+    EXPECT_EQ(convNode->attributes.get_x()->get_uid(), K_TENSOR_X_UID);
+    EXPECT_EQ(convNode->attributes.get_w()->get_uid(), K_TENSOR_W_UID);
+    EXPECT_EQ(convNode->attributes.get_y()->get_uid(), K_TENSOR_Y_UID);
+}
+
+// Builds a graph with set_preferred_engine_id_ext(42), lowers, lifts, and verifies
+// that get_preferred_engine_id_ext() returns 42 on the reconstructed graph.
+TEST_F(IntegrationGraphLifting, PreferredEngineIdPreservedThroughCApi)
+{
+    auto originalGraph = buildConvFpropGraph();
+    constexpr int64_t K_PREFERRED_ENGINE_ID = 42;
+    originalGraph->set_preferred_engine_id_ext(K_PREFERRED_ENGINE_ID);
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto liftedEngineId = liftedGraph->get_preferred_engine_id_ext();
+    ASSERT_TRUE(liftedEngineId.has_value()) << "Preferred engine ID should be set after lifting";
+    EXPECT_EQ(liftedEngineId.value(), K_PREFERRED_ENGINE_ID);
+}
+
+// Verifies that fromBackendDescriptor(nullptr) returns an error.
+TEST_F(IntegrationGraphLifting, NullDescriptorReturnsError)
+{
+    auto graph = std::make_shared<Graph>();
+    auto result = graph->fromBackendDescriptor(nullptr);
+    EXPECT_NE(result.code, ErrorCode::OK) << "fromBackendDescriptor(nullptr) should return error";
+}
+
+// Builds a graph with FLOAT compute, HALF intermediate, and BFLOAT16 io data types,
+// lowers through the C-API, lifts, and verifies all three are preserved.
+TEST_F(IntegrationGraphLifting, DataTypesPreservedThroughCApi)
+{
+    auto originalGraph = buildConvFpropGraph(DataType::FLOAT, DataType::HALF, DataType::BFLOAT16);
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::HALF);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::BFLOAT16);
+}
+
+// Builds a conv fprop graph, serializes to binary, creates a backend descriptor
+// from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
+// the reconstructed graph matches the original.
+TEST_F(IntegrationGraphLifting, ConvFpropLiftWithoutFinalization)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to binary via the frontend
+    auto data = originalGraph->toBinary();
+    ASSERT_FALSE(data.empty());
+
+    // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
+    detail::ScopedHipdnnBackendDescriptor graphDesc(data.data(), data.size());
+    ASSERT_TRUE(graphDesc.valid()) << "Failed to create backend graph descriptor";
+
+    // Lift into a new graph via fromBackendDescriptor
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(graphDesc.get());
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify the lifted graph has 1 operation node
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
+    ASSERT_NE(convNode, nullptr);
+
+    // Verify convolution parameters
+    EXPECT_EQ(convNode->attributes.get_pre_padding(), toVec(K_CONV_PRE_PADDING));
+    EXPECT_EQ(convNode->attributes.get_post_padding(), toVec(K_CONV_POST_PADDING));
+    EXPECT_EQ(convNode->attributes.get_stride(), toVec(K_CONV_STRIDE));
+    EXPECT_EQ(convNode->attributes.get_dilation(), toVec(K_CONV_DILATION));
+}
+
+// Exercises the deserialize_via_backend() path with a handle (full finalization).
+// Builds a conv fprop graph, serializes to binary, then uses deserialize_via_backend()
+// with a handle and verifies the reconstructed graph.
+TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithHandle)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto data = originalGraph->toBinary();
+    ASSERT_FALSE(data.empty());
+
+    // Create a new graph and use deserialize_via_backend with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize_via_backend(_handle, data);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify the lifted graph has 1 operation node
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* convNode = dynamic_cast<ConvolutionFpropNode*>(subNodes[0].get());
+    ASSERT_NE(convNode, nullptr);
+}
+
+// Exercises the deserialize_via_backend() path without a handle (no finalization).
+// Verifies that the graph can be reconstructed from binary data without
+// requiring a hipdnnHandle_t.
+TEST_F(IntegrationGraphLifting, DeserializeViaBackendWithoutHandle)
+{
+    auto originalGraph = buildConvFpropGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto data = originalGraph->toBinary();
+    ASSERT_FALSE(data.empty());
+
+    // Create a new graph and use deserialize_via_backend without handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize_via_backend(nullptr, data);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level data types
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors are present
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u);
+    EXPECT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
+    EXPECT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
+    EXPECT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
+}
+
+} // namespace
