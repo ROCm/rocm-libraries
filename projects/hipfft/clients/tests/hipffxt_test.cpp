@@ -38,7 +38,51 @@ DISABLE_WARNING_RETURN_TYPE
 DISABLE_WARNING_POP
 #endif
 
-std::string formatname(const int format)
+std::string transform_type_name(const fft_transform_type transform_type)
+{
+    switch(transform_type)
+    {
+    case fft_transform_type_complex_forward:
+        return "fft_transform_type_complex_forward";
+    case fft_transform_type_complex_inverse:
+        return "fft_transform_type_complex_inverse";
+    case fft_transform_type_real_forward:
+        return "fft_transform_type_real_forward";
+    case fft_transform_type_real_inverse:
+        return "fft_transform_type_real_inverse";
+    default:
+        return "Invalid transform value";
+    }
+}
+
+std::string fft_io_name(const fft_io io)
+{
+    switch(io)
+    {
+    case fft_io_in:
+        return "fft_io_in";
+    case fft_io_out:
+        return "fft_io_out";
+    default:
+        return "Invalid fft_io value";
+    }
+}
+
+std::string fft_result_placement_name(const fft_result_placement placement)
+{
+    switch(placement)
+    {
+    case fft_placement_inplace:
+        return "fft_placement_inplace";
+    case fft_placement_notinplace:
+        return "fft_placement_notinplace";
+    default:
+        return "Invalid fft_result_placement value";
+    }
+}
+
+
+std::string format_name(const int format)
 {
     switch(format)
     {
@@ -193,25 +237,10 @@ static std::vector<std::tuple<bool, int, int, hipfftXtSubFormat>> goodlist =
 
 TEST_P(hipfftxtunitdesc, desccreation)
 {
-    // Test whether we can just make plans.
-    
-    size_t    ngpus = 2;
-
-    // Just batch=1 for now.
-
-    // FIXME: handle 3D as well.
-    
-    const int Nx    = 32;
-    const int Ny    = 32;
 
     const int direction = std::get<0>(GetParam());
     const bool realcomplex = std::get<1>(GetParam());
     const hipfftXtSubFormat format = std::get<2>(GetParam());
-
-    const bool forward = (direction == HIPFFT_FORWARD);
-    
-    const hipfftType transform_type  = realcomplex
-        ? (forward ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
 
     if(verbose > 0)
     {
@@ -220,14 +249,80 @@ TEST_P(hipfftxtunitdesc, desccreation)
                   << "\n";
     }
 
-    auto hipfft_rt = HIPFFT_SUCCESS;
+    // FIXME: handle variable number of GPUs
+    size_t    ngpus = 2;
+    std::vector<int> gpus(ngpus);
+    std::iota(gpus.begin(), gpus.end(), 0);
+    
+    // FIXME: handle 3D as well.
+    const int Nx    = 32;
+    const int Ny    = 36;
+    // Just batch=1 for now.
+
+    // TODO: 3D, other sizes, batch, etc.
+    std::vector<size_t> batches = {1};
+    std::vector<size_t> lengths = {Nx, Ny};
+    std::vector<size_t> batchlengths = batches;
+    batchlengths.insert(batchlengths.end(), lengths.begin(), lengths.end());
+
+    // Some facts about the test case:
+    const bool forward = (direction == HIPFFT_FORWARD);
+    const bool isreal = realcomplex ? ( format == HIPFFT_XT_FORMAT_INPLACE  ) : false;
+    const bool isherm = realcomplex ? ( format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED  ) : false;
+    const size_t lastdim = batchlengths.size() - 1;
+    const bool isinput = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
+
+    // FIXME: check for 3D and output formats
+    const size_t splitdim = isinput ? lastdim - 1 : lastdim; 
+
+    if(verbose)
+    {
+        std::cout << "lastdim: " << lastdim << "\n";
+        std::cout << "splitdim: " << splitdim << "\n";
+    }
         
+    // fft_enums configuration
+    const fft_transform_type dft_type = realcomplex
+        ? (forward ? fft_transform_type_real_forward : fft_transform_type_real_inverse)
+        : (forward ? fft_transform_type_complex_forward : fft_transform_type_complex_inverse);
+    const fft_result_placement placement
+        = (format == HIPFFT_XT_FORMAT_INPLACE
+           || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+        ? fft_placement_inplace : fft_placement_notinplace;
+    const fft_io io = (forward
+                       != (format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE))
+        ? fft_io_out : fft_io_in;
+
+    // hipfftxt configuratin:
+    const hipfftType transform_type  = realcomplex
+        ? (forward ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
+
+    // Host data configuration:
+    const auto host_distances = default_distances(dft_type, placement, io, lengths, batches);
+    auto hostdiststrides = host_distances;
+    const auto host_strides = default_strides(dft_type, placement, io, lengths);
+    hostdiststrides.insert(hostdiststrides.end(), host_strides.begin(), host_strides.end());
+    if(verbose > 1)
+    {
+        std::cout << "dft_type: " << transform_type_name(dft_type) << "\n";
+        std::cout << "placement: " << fft_result_placement_name(placement) << "\n";
+        std::cout << "io: " << fft_io_name(io) << "\n";
+        std::cout << "host batch/length:";
+        for(auto val : batchlengths)
+            std::cout << " " << val;
+        std::cout << "\n";
+        std::cout << "host dist/strides:";
+        for(auto val : hostdiststrides)
+            std::cout << " " << val;
+        std::cout << "\n";
+    }    
+
+    // Create the xt plan and descriptor:
+    auto hipfft_rt = HIPFFT_SUCCESS;
+
     hipfftHandle plan;
     hipfft_rt =   hipfftCreate(&plan);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    std::vector<int> gpus(ngpus);
-    std::iota(gpus.begin(), gpus.end(), 0);
     
     hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
@@ -244,16 +339,167 @@ TEST_P(hipfftxtunitdesc, desccreation)
     EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code "
                                          << hipfft_rt
                                          << " (" << hipfftResult_string(hipfft_rt) << ")";
+    std::cout << "plan allocated\n";
+    
+    auto printhostbuf = [](const char* hostbuf,
+                           const bool isreal,
+                           std::vector<size_t> batchlengths,
+                           const std::vector<size_t> &hostdiststrides) -> void  {
+        // FIXME: handle 3D as well.
+        for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
+        {
+            for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
+            {
+                for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
+                {
+                    const std::vector<size_t> idx = {ibatch, xidx, yidx};
+                    
+                    const size_t pos = std::inner_product(std::begin(idx),
+                                                          std::end(idx),
+                                                          std::begin(hostdiststrides), 0);
+                    if(isreal) {
+                        const auto hostdat = reinterpret_cast<const double*>(hostbuf);
+                        if(yidx > 0)
+                            std::cout << " ";
+                        std::cout << hostdat[pos];
+                    }
+                    else
+                    {
+                        const auto hostdat
+                            = reinterpret_cast<const std::complex<double>*>(hostbuf);
+                        if(yidx > 0)
+                            std::cout << " ";
+                        std::cout << hostdat[pos];
+                    }
+                }
+                std::cout << "\n";
+            }
+        }
+    };
+        
+    // Initialize desc buffers to zero:
+    for(const auto igpu : gpus)
+    {
+        //const auto device = mydesc->descriptor->GPUs[igpu];
+        const auto bufsize = mydesc->descriptor->size[igpu];
+        auto devbuf = mydesc->descriptor->data[igpu];
+        auto hipret = hipMemset(devbuf, bufsize, 0);
+        EXPECT_EQ(hipret, hipSuccess) << "hipMemset failed";
+        std::vector<char> hostbufpart(bufsize);
+        hipret = hipMemcpy(hostbufpart.data(), devbuf, bufsize, hipMemcpyDeviceToHost);
+        EXPECT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
+    }
 
+    // FIXME: document
+    auto hostdatabatchlengths = [](const bool isherm,
+                                   const std::vector<size_t> &batchlengths) -> std::vector<size_t>
+    {
+        std::vector<size_t> newbatchlengths = batchlengths;
+        const size_t lastdim = batchlengths.size() - 1;
+        if(isherm)
+            newbatchlengths[lastdim] = newbatchlengths[lastdim] / 2 + 1;
+        return newbatchlengths;
+    };
+
+    // FIXME: comment
+    auto fillhostbuf = [](std::vector<char> &hostbuf,
+                          const bool isreal,
+                          std::vector<size_t> batchlengths,
+                          const std::vector<size_t> &hostdiststrides) -> void  {
+        using lint = decltype(batchlengths)::value_type;
+        const size_t nelem = std::accumulate(batchlengths.begin(),
+                                             batchlengths.end(),
+                                             static_cast<lint>(1),
+                                             std::multiplies<lint>());
+        // FIXME: just have the 2D case right now.
+        for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
+        {
+            for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
+            {
+                for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
+                {
+                    const std::vector<size_t> idx = {ibatch, xidx, yidx};
+                    
+                    const size_t pos = std::inner_product(std::begin(idx),
+                                                          std::end(idx),
+                                                          std::begin(hostdiststrides), 0);
+                    if(isreal) {
+                        auto hostdat = reinterpret_cast<double*>(hostbuf.data());
+                        hostdat[pos] = xidx + 0.01 * yidx;
+                    }
+                    else
+                    {
+                        auto hostdat
+                            = reinterpret_cast<std::complex<double>*>(hostbuf.data());
+                        hostdat[pos] = std::complex<double>(xidx, yidx);
+                    }
+                }
+            }
+        }
+    };
+
+    // FIXME: document.  This is the per-gpu-buffer lengths.
+    auto devbatchlength = [splitdim](const size_t ngpus,
+                                     const std::vector<size_t> &hostbatchlengths,
+                                     const hipfftXtSubFormat format,
+                                     const size_t igpu) -> std::vector<size_t>
+        
+        {
+            std::vector<size_t> batchlengths = hostbatchlengths;
+            const auto l = batchlengths[splitdim];
+            batchlengths[splitdim] = l / ngpus + ((igpu < l % ngpus) ? 1 : 0);
+            return batchlengths;
+        };
+    
+    // Return a vector containing {gpu index, batch index, transform indices...}.
+    // Batch and transform indices are buffer-local multi-index (ie relative to an index starting at
+    // {0, ... , 0} on each brick).
+    auto devidx = [splitdim](const size_t ngpus,
+                             const std::vector<size_t> &hostidx,
+                             const std::vector<size_t> &batchlengths,
+                             const hipfftXtSubFormat format) -> std::vector<size_t> {
+        std::vector<size_t> ret(batchlengths.size() + 1, 0);
+        for(size_t idx = 0; idx < hostidx.size(); ++idx)
+        {
+            if(idx != splitdim)
+                ret[idx + 1] = hostidx[idx];
+        }
+        const auto l = batchlengths[splitdim];
+        const auto b = l / ngpus; // Elements per gpu in splitdim (if no remainder).
+        const auto r = l - b * ngpus; // Remainder
+
+        const auto a = hostidx[splitdim];
+        if(a < r * (b + 1))
+        {
+            ret[0] = a / (b + 1);
+            ret[splitdim + 1] = a - ret[0] * (b + 1);
+        }
+        else
+        {
+            ret[0] = r +  (a - r * (b + 1)) / b;
+            ret[splitdim + 1] = a - r * (b + 1) - (ret[0] - r) * b;
+        }
+        
+        return ret;
+    };
+    
     // Fine, let's do a copy test and see what happens.
 
-    // host-to-device copies:
     for(const bool h2d : {true /*, false*/}) // FIXME: enable d2h
     {
         const auto copydir = h2d ? HIPFFT_COPY_HOST_TO_DEVICE : HIPFFT_COPY_DEVICE_TO_HOST;
         
-        // Transforms are double-precision, something. FIXME: actually figure this out.
-        std::vector<std::complex<double>> hostbuf(2*Nx * Ny, 0.0);
+        const auto hostbatchlength = hostdatabatchlengths(isherm, batchlengths);
+        const size_t nelem = hostdiststrides[0] * hostbatchlength[0];
+        const size_t valsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
+        std::vector<char> hostbuf(valsize * nelem);
+        fillhostbuf(hostbuf, isreal, hostbatchlength, hostdiststrides);
+
+        if(verbose > 1)
+        {
+            printhostbuf(hostbuf.data(), isreal, hostbatchlength, hostdiststrides);
+        }
+        
         if(h2d)
         {
             hipfft_rt = hipfftXtMemcpy(plan,
@@ -273,7 +519,7 @@ TEST_P(hipfftxtunitdesc, desccreation)
         vstrings << std::get<0>(v) << ":" <<(std::get<0>(v) ? "rc": "cc")
                  << " " << std::get<1>(v) << ":" << (std::get<1>(v) ? "forward" : "backward")
                  << " " << std::get<2>(v) << ":" << (std::get<2>(v) ? "h2d" : "d2h")
-                 << " " << formatname(format);
+                 << " " << format_name(format);
         if(verbose > 2)
         {
             std::cout << vstrings.str() << "\n";
@@ -302,21 +548,115 @@ TEST_P(hipfftxtunitdesc, desccreation)
                                                  << vstrings.str();
         }
 
+        std::cout << "finished hipfftXtMemcpy\n";
+
+        // A host copy of the individual distributed GPU buffers:
+        std::vector<std::vector<char>> hostbufparts(gpus.size());
+
+        // Copy the individual buffers to the host:
         for(const auto igpu : gpus)
         {
-            std::cout << igpu << std::endl;
-            
+            std::cout << "buffer " << igpu << " after xtmemcp\n";
             const auto device = mydesc->descriptor->GPUs[igpu];
             const auto bufsize = mydesc->descriptor->size[igpu];
             std::cout << "device: " << device << "\n";
             std::cout << "buffer size: " << bufsize << "\n";
-            std::vector<char> hostbufpart(bufsize);
+            hostbufparts[igpu].resize(bufsize);
             auto devbuf = mydesc->descriptor->data[igpu];
-            auto hipret = hipMemcpy(hostbufpart.data(), devbuf, bufsize, hipMemcpyDeviceToHost);
+            auto hipret = hipMemcpy(hostbufparts[igpu].data(), devbuf, bufsize,
+                                    hipMemcpyDeviceToHost);
             EXPECT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
+        }
 
+        // Each brick gets it own special set of strides.
+        std::vector<std::vector<size_t>> brick_batchlengths(gpus.size());
+        std::vector<std::vector<size_t>> brick_diststrides(gpus.size());
+
+        for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
+        {
+            brick_batchlengths[igpu] = devbatchlength(ngpus, batchlengths, format, igpu);
+            std::vector<size_t> brick_batches;
+            brick_batches.insert(brick_batches.end(),
+                                 brick_batchlengths[igpu].begin(),
+                                 brick_batchlengths[igpu].begin() +1);
+            std::vector<size_t> brick_lengths;
+            brick_lengths.insert(brick_lengths.end(),
+                                 brick_batchlengths[igpu].begin() + 1,
+                                 brick_batchlengths[igpu].end());
+
+            // FIXME: real data is padded, Hermitian-complex data is split.
             
-            
+            const auto brick_distances = default_distances(dft_type, placement, io,
+                                                           brick_lengths, brick_batches);
+            std::cout << brick_distances[0] << std::endl;
+            brick_diststrides[igpu] = brick_distances;
+            const auto brick_strides = default_strides(dft_type, placement, io, brick_lengths);
+            brick_diststrides[igpu].insert(brick_diststrides[igpu].end(), brick_strides.begin(),
+                                           brick_strides.end());
+        }
+
+        std::cout << "gpu buffer length and dist/strides:\n";
+        for(size_t igpu=0; igpu < gpus.size(); ++igpu)
+        {
+            std::cout << igpu << "\n";
+            std::cout << "batch/length:";
+            for(const auto val : brick_batchlengths[igpu])
+                std::cout << " " << val;
+            std::cout << "\n";
+            std::cout << "dist/stride:";
+            for(const auto val : brick_diststrides[igpu])
+                std::cout << " " << val;
+            std::cout << "\n";
+
+            // FIXME: allow printing of subsection
+            // printhostbuf(hostbufparts[igpu].data(), isreal, brick_batchlengths[igpu],
+            //              brick_diststrides[igpu]);
+        }
+        
+        // TODO: lambda this?
+        // Check all of the host buf values and make sure that they're where we expect them to be:
+        for(size_t xidx = 0; xidx < Nx; ++xidx)
+        {
+            for(size_t yidx = 0; yidx < Ny; ++yidx)
+            {
+                const std::vector<size_t> hostidx = {0, xidx, yidx};
+                const auto bufidx = devidx(ngpus, hostidx, batchlengths, format);
+
+                // Just look at the first value for each buffer.
+                if(std::all_of(bufidx.begin() + 1, bufidx.end(),
+                               [](const size_t idx ) { return idx == 0; })) 
+                {
+                    std::cout << hostidx[0]
+                              << " " << hostidx[1]
+                              << " " << hostidx[2]
+                              << " -> "
+                              << bufidx[0]
+                              << " " << bufidx[1]
+                              << " " << bufidx[2]
+                              << " " << bufidx[3]
+                              << "\t";
+
+                    const size_t hostoffset = std::inner_product(std::begin(hostidx),
+                                                                 std::end(hostidx),
+                                                                 std::begin(hostdiststrides), 0);
+                    const auto igpu = bufidx[0];
+                    const size_t gpuoffset = std::inner_product(std::begin(bufidx) + 1,
+                                                                std::end(bufidx),
+                                                                std::begin(brick_diststrides[igpu]),
+                                                                0);
+                    if(isreal)
+                    {
+                        const double* hostbufr = (double*) hostbuf.data();
+                        const auto hostval = hostbufr[hostoffset];
+                        std::cout << hostoffset << " -> " << hostval << "\t";
+                        const double* gpubufr = (double*) hostbufparts[igpu].data();
+                        const auto gpuval = gpubufr[gpuoffset];
+                        std::cout << gpuoffset << " -> " << gpuval << "\n";
+                    }
+
+                }
+                
+            }
         }
         
     }
@@ -346,7 +686,7 @@ INSTANTIATE_TEST_SUITE_P(
         const hipfftXtSubFormat format = std::get<2>(info.param);
         std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
         name += realcomplex ? "rc" : "cc";
-        name += formatname(format);
+        name += format_name(format);
         return name;
     }
     );
@@ -379,8 +719,8 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
     if(verbose > 0)
     {
         std::cout << "complex-to-complex direction: " << directionname(direction)
-                  << " input format: " << formatname(informat)
-                  << " output format: " << formatname(outformat)
+                  << " input format: " << format_name(informat)
+                  << " output format: " << format_name(outformat)
                   << "\n";
     }
     
@@ -432,9 +772,9 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
 
     EXPECT_EQ(inoutdesc->subFormat, outformat) << "descriptor subformat is "
                                                << inoutdesc->subFormat
-                                               << " (" << formatname(inoutdesc->subFormat) << ")"
+                                               << " (" << format_name(inoutdesc->subFormat) << ")"
                                                << " but we expected " << outformat
-                                               << " (" << formatname(outformat) << ")";
+                                               << " (" << format_name(outformat) << ")";
     
     std::vector<std::complex<double>> output(Nx * Ny);
 
@@ -477,7 +817,7 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     int ngpus = 2;
 
     int count = 0;
-    ASSERT_EQ(hipGetDeviceCount(&count), HIPFFT_SUCCESS) << "hipGetDeviceCount failed";
+    ASSERT_EQ(hipGetDeviceCount(&count), hipSuccess) << "hipGetDeviceCount failed";
     if(count < ngpus)
     {
         // We actually use separate GPUs, so skip if we don't have enough GPUs.
@@ -550,8 +890,8 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
         std::cout << "\ttransform_type: " << transform_type << " : "
                   << hipffttype_to_name(transform_type) << "\n";
         std::cout << "\tdirection: " << direction << " : " << directionname(direction)
-                  << "\n\tinput subformat: " << informat << " : " << formatname(informat)
-                  << "\n\toutput subformat: " << outformat << " : " << formatname(outformat)
+                  << "\n\tinput subformat: " << informat << " : " << format_name(informat)
+                  << "\n\toutput subformat: " << outformat << " : " << format_name(outformat)
                   << "\n";
     }
     
@@ -562,7 +902,7 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     if(verbose > 1)
     {
         std::cout << "direction: " << directionname(direction)
-                  << " informat: " << formatname(informat)
+                  << " informat: " << format_name(informat)
                   << " batch: " << batch << "\n";
     }
 
@@ -659,8 +999,8 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     
     EXPECT_EQ(inoutdesc->subFormat, informat)
         << "informat not what expected:"
-        << " got " << formatname((hipfftXtSubFormat)inoutdesc->subFormat)
-        << " expected " << formatname((hipfftXtSubFormat)informat);
+        << " got " << format_name((hipfftXtSubFormat)inoutdesc->subFormat)
+        << " expected " << format_name((hipfftXtSubFormat)informat);
 
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtExecDescriptor failed with code "
@@ -670,9 +1010,9 @@ TEST_P(hipfftxtdirectionformat, r2cinplace)
     EXPECT_EQ(inoutdesc->subFormat, outformat)
         << "outformat not what expected:"
         << " got " << inoutdesc->subFormat << " "
-        << formatname((hipfftXtSubFormat)inoutdesc->subFormat)
+        << format_name((hipfftXtSubFormat)inoutdesc->subFormat)
         << " expected "  << outformat << " "
-        << formatname((hipfftXtSubFormat)outformat);
+        << format_name((hipfftXtSubFormat)outformat);
     
     hipfft_rt = hipfftXtMemcpy(plan,
                                direction == HIPFFT_FORWARD
