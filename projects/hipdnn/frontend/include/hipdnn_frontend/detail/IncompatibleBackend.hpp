@@ -87,9 +87,14 @@ public:
         return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
-    hipdnnStatus_t versionExt(const char** /*version*/) override
+    hipdnn_data_sdk::utilities::Version version() override
     {
-        return hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED;
+        return hipdnn_data_sdk::utilities::Version{-1, 0, 0};
+    }
+
+    const char* versionString() override
+    {
+        return "";
     }
 
     void loggingCallbackExt(hipdnnSeverity_t /*severity*/, const char* /*msg*/) override {}

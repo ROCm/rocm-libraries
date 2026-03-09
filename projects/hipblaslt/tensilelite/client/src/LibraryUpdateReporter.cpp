@@ -28,6 +28,7 @@
 #include "TimingInstrumentation.hpp"
 
 #include <cstddef>
+#include <sstream>
 
 namespace TensileLite
 {
@@ -71,7 +72,9 @@ namespace TensileLite
         template <typename T>
         void LibraryUpdateReporter::reportValue(std::string const& key, T const& value)
         {
-            std::string valueStr = boost::lexical_cast<std::string>(value);
+            std::ostringstream oss;
+            oss << value;
+            std::string valueStr = oss.str();
             //m_stream << key << " = " << valueStr << std::endl;
 
             if(key == ResultKey::Validation)
