@@ -1717,16 +1717,16 @@ public:
      * nextRunningVar  = (1 - momentum) * prevRunningVar  + momentum * var
      * @endcode
      *
-     * @param x Input tensor [N, C, H, W]
-     * @param scale Per-channel scale (gamma) [1, C, 1, 1]
-     * @param bias Per-channel bias (beta) [1, C, 1, 1]
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
      * @param attributes Configuration including epsilon; optionally
      *        prev_running_mean, prev_running_variance, and momentum for
      *        exponential moving average of running statistics
      * @return Array of 5 output tensors:
-     *         - [0] y: Normalized output [N, C, H, W]
-     *         - [1] mean: Batch mean [1, C, 1, 1]
-     *         - [2] invVariance: Batch inverse variance [1, C, 1, 1]
+     *         - [0] y: Normalized output (same shape as x)
+     *         - [1] mean: Per-channel batch mean
+     *         - [2] invVariance: Per-channel batch inverse variance
      *         - [3] nextRunningMean: Updated running mean (nullptr if not tracking)
      *         - [4] nextRunningVariance: Updated running variance (nullptr if not tracking)
      *
@@ -1778,15 +1778,24 @@ public:
      *
      * Computes gradients with respect to input, scale, and bias.
      *
-     * @param dy Upstream gradient (loss gradient w.r.t. output) [N, C, H, W]
-     * @param x Original input from forward pass [N, C, H, W]
-     * @param scale Per-channel scale (gamma) [1, C, 1, 1]
+     * Formula (using per-channel indexing for illustration):
+     * @code
+     * x_hat[c]  = (x[c] - mean[c]) * invVariance[c]
+     * dbias[c]  = sum(dy[c])                           // sum over batch and spatial dims
+     * dscale[c] = sum(dy[c] * x_hat[c])                // sum over batch and spatial dims
+     * dx[c]     = scale[c] * invVariance[c] * (dy[c] - (dbias[c] + x_hat[c] * dscale[c]) / m)
+     * @endcode
+     * where m = number of elements per channel (batch size * spatial dims).
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. output, same shape as x)
+     * @param x Original input from forward pass
+     * @param scale Per-channel scale (gamma)
      * @param attributes Configuration; optionally set saved mean and inverse
      *        variance from the forward pass via set_saved_mean_and_inv_variance()
      * @return Array of 3 output tensors:
-     *         - [0] dx: Gradient w.r.t. input [N, C, H, W]
-     *         - [1] dscale: Gradient w.r.t. scale [1, C, 1, 1]
-     *         - [2] dbias: Gradient w.r.t. bias [1, C, 1, 1]
+     *         - [0] dx: Gradient w.r.t. input (same shape as x)
+     *         - [1] dscale: Per-channel gradient w.r.t. scale
+     *         - [2] dbias: Per-channel gradient w.r.t. bias
      *
      * @see BatchnormBackwardAttributes
      */
@@ -1827,13 +1836,13 @@ public:
      * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) * invVariance[c] + bias[c]
      * @endcode
      *
-     * @param x Input tensor [N, C, H, W]
-     * @param mean Pre-computed mean [1, C, 1, 1]
-     * @param invVariance Pre-computed inverse variance (1/sqrt(var+epsilon)) [1, C, 1, 1]
-     * @param scale Per-channel scale (gamma) [1, C, 1, 1]
-     * @param bias Per-channel bias (beta) [1, C, 1, 1]
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param mean Pre-computed per-channel mean
+     * @param invVariance Pre-computed per-channel inverse variance (1/sqrt(var+epsilon))
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
      * @param attributes Additional configuration
-     * @return y: Normalized output tensor [N, C, H, W]
+     * @return y: Normalized output tensor (same shape as x)
      *
      * @see BatchnormInferenceAttributes
      */
@@ -1875,14 +1884,14 @@ public:
      * y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean[c]) / sqrt(variance[c] + epsilon) + bias[c]
      * @endcode
      *
-     * @param x Input tensor [N, C, H, W]
-     * @param mean Pre-computed mean [1, C, 1, 1]
-     * @param variance Pre-computed variance [1, C, 1, 1]
-     * @param scale Per-channel scale (gamma) [1, C, 1, 1]
-     * @param bias Per-channel bias (beta) [1, C, 1, 1]
+     * @param x Input tensor with batch, channel, and spatial dimensions
+     * @param mean Pre-computed per-channel mean
+     * @param variance Pre-computed per-channel variance
+     * @param scale Per-channel scale (gamma)
+     * @param bias Per-channel bias (beta)
      * @param epsilon Epsilon tensor for numerical stability (pass-by-value scalar)
      * @param attributes Additional configuration
-     * @return y: Normalized output tensor [N, C, H, W]
+     * @return y: Normalized output tensor (same shape as x)
      *
      * @see BatchnormInferenceAttributesVarianceExt
      */
@@ -2011,8 +2020,8 @@ public:
      * In training phase, the inverse RMS is also returned as an output for use
      * in the backward pass.
      *
-     * @param x Input tensor [N, D1, D2, ..., Dk]
-     * @param scale Per-channel scale (gamma) tensor [1, C, 1, 1, ...]
+     * @param x Input tensor with batch and feature dimensions
+     * @param scale Per-channel scale (gamma) tensor, broadcast over batch and spatial dims
      * @param attributes Configuration including epsilon and forward phase
      * @return Array of 2 output tensors:
      *         - [0] y: Normalized output (same shape as x)
@@ -2362,7 +2371,7 @@ public:
      *
      * Computes a cross-correlation (or convolution) of the input with filters.
      *
-     * For 2D with NCHW layout:
+     * Example for 2D (using NCHW notation for illustration):
      * @code
      * y[n,k,oh,ow] = sum_c,r,s  x[n, c, oh*stride_h + r*dilation_h - pad_h,
      *                                     ow*stride_w + s*dilation_w - pad_w]
@@ -2372,11 +2381,11 @@ public:
      *              - dilation * (kernel - 1) - 1) / stride) + 1
      * @endcode
      *
-     * @param x Input activation tensor [N, C, H, W] or [N, H, W, C]
-     * @param w Filter/weight tensor [K, C, R, S] or [K, R, S, C]
+     * @param x Input activation tensor (batch, channels, spatial dimensions)
+     * @param w Filter/weight tensor (output channels, input channels, filter spatial dims)
      * @param attributes Convolution parameters: padding, stride, dilation,
      *        convolution mode
-     * @return y: Output activation tensor [N, K, OH, OW]
+     * @return y: Output activation tensor
      *
      * @see ConvFpropAttributes
      */
@@ -2417,11 +2426,18 @@ public:
      * given the output gradient and the filter weights. Used during
      * backpropagation.
      *
-     * @param dy Upstream gradient (loss gradient w.r.t. conv output) [N, K, OH, OW]
-     * @param w Filter/weight tensor [K, C, R, S]
+     * Example for 2D (using NCHW notation for illustration):
+     * @code
+     * dx[n,c,h,w] = sum_k,r,s  dy[n, k, p, q] * w[k, c, r, s]
+     *   where p = (h + pad_h - r*dilation_h) / stride_h  (integer, in [0, H_out))
+     *         q = (w + pad_w - s*dilation_w) / stride_w  (integer, in [0, W_out))
+     * @endcode
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. conv output)
+     * @param w Filter/weight tensor
      * @param attributes Convolution parameters: padding, stride, dilation
      *        (must match forward pass)
-     * @return dx: Gradient w.r.t. input [N, C, H, W]
+     * @return dx: Gradient w.r.t. input (same shape as forward input)
      *
      * @see ConvDgradAttributes
      */
@@ -2462,11 +2478,18 @@ public:
      * given the output gradient and the original input. Used during
      * backpropagation.
      *
-     * @param dy Upstream gradient (loss gradient w.r.t. conv output) [N, K, OH, OW]
-     * @param x Original input activation tensor [N, C, H, W]
+     * Example for 2D (using NCHW notation for illustration):
+     * @code
+     * dw[k,c,r,s] = sum_n,p,q  dy[n, k, p, q] * x[n, c, h, w]
+     *   where h = p*stride_h - pad_h + r*dilation_h
+     *         w = q*stride_w - pad_w + s*dilation_w
+     * @endcode
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. conv output)
+     * @param x Original input activation tensor
      * @param attributes Convolution parameters: padding, stride, dilation
      *        (must match forward pass)
-     * @return dw: Gradient w.r.t. filter weights [K, C, R, S]
+     * @return dw: Gradient w.r.t. filter weights (same shape as forward weights)
      *
      * @see ConvWgradAttributes
      */
