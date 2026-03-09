@@ -1446,7 +1446,7 @@ namespace TensileLite
                         if(t1 == t2)
                             return true;
                         return std::any_of(arr.begin(), arr.end(), [&](const auto& p){
-                                return (p == std::make_pair(t1, t2)) or (p == std::make_pair(t2, t1));
+                                return (p == std::make_pair(t1, t2));
                         });
                     };
 
