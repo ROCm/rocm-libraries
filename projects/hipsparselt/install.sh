@@ -728,7 +728,9 @@ pushd .
         elevate_if_not_root dpkg -i hipsparselt[-\_]*.deb
       ;;
       centos|rhel)
-        elevate_if_not_root yum -y localinstall hipsparselt-*.rpm
+        # hipblaslt-style: upgrade the locally-built RPMs without dependency solving.
+        # This avoids conflicts with pinned ROCm meta-packages (e.g. rocm-hip) in CI images.
+        elevate_if_not_root rpm --nodeps -U hipsparselt-*.rpm
       ;;
       fedora)
         elevate_if_not_root dnf install hipsparselt-*.rpm
