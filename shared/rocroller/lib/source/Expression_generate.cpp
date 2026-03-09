@@ -122,12 +122,12 @@ namespace rocRoller
                     regType = MapSPRTypeToGPRType(regType);
                 }
 
-                // Calculate the register count of this result
+                // Calculate the register count of this result, starting with the value count of the result type
                 size_t count = resType.valueCount;
                 // If given a specific packing/unpacking ratio, multiply the value count by this ratio
                 if(packingRatio.has_value())
                 {
-                    count *= packingRatio.has_value();
+                    count *= packingRatio.value();
                 }
                 // Otherwise, simply divide the value count by its packing
                 else
@@ -142,6 +142,26 @@ namespace rocRoller
                                                     regType,
                                                     resType.varType,
                                                     count,
+                                                    Register::AllocationOptions::FullyContiguous());
+            }
+
+            // A special case of resultPlaceholder, for use when the value count in resType should be ignored
+            // and the placeholder should be created with a count of one
+            Register::ValuePtr resultPlaceholderCountOne(ResultType const& resType,
+                                                         bool              allowSpecial = true)
+            {
+                auto regType = resType.regType;
+                if(IsWriteableSpecial(regType))
+                {
+                    if(allowSpecial)
+                        return m_context->getSpecial(regType);
+                    regType = MapSPRTypeToGPRType(regType);
+                }
+
+                return Register::Value::Placeholder(m_context,
+                                                    regType,
+                                                    resType.varType,
+                                                    1,
                                                     Register::AllocationOptions::FullyContiguous());
             }
 
@@ -418,7 +438,7 @@ namespace rocRoller
                     int packingRatio = std::max(lhsInfo.packing, rhsInfo.packing)
                                        / std::min(lhsInfo.packing, rhsInfo.packing);
 
-                    auto conversion = resultPlaceholder(resType, true);
+                    auto conversion = resultPlaceholder(resType, true, packingRatio);
 
                     for(size_t i = 0; i < resType.valueCount; i += packingRatio)
                     {
@@ -461,7 +481,7 @@ namespace rocRoller
                                     || rhs->variableType() == resType.varType,
                                 "Only one floating point argument can be converted");
 
-                    auto conversion = resultPlaceholder(resType, true);
+                    auto conversion = resultPlaceholderCountOne(resType, true);
 
                     for(size_t k = 0; k < resType.valueCount; ++k)
                     {

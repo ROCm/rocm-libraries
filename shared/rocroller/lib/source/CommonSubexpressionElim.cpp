@@ -720,12 +720,12 @@ namespace rocRoller
                                                  std::optional<float> packingRatio
                                                  = std::nullopt) const
             {
-                // Calculate the register count of this result
+                // Calculate the register count of this result, starting with the value count of the result type
                 size_t count = resType.valueCount;
                 // If given a specific packing/unpacking ratio, multiply the value count by this ratio
                 if(packingRatio.has_value())
                 {
-                    count *= packingRatio.has_value();
+                    count *= packingRatio.value();
                 }
                 // Otherwise, simply divide the value count by its packing
                 else
