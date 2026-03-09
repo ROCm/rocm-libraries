@@ -308,14 +308,14 @@ struct tensor
         };
 
         [[noreturn]] void operator()(any = {},
-                                      any = {},
-                                      any = {},
-                                      any = {},
-                                      any = {},
-                                      any = {},
-                                      any = {},
-                                      any = {},
-                                      any = {}) const
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {},
+                                     any = {}) const
         {
             throw std::runtime_error(
                 "Arguments to for_each do not match tensor size or the function " +
