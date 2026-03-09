@@ -122,7 +122,7 @@ inline uint8_t float_to_fp8_e5m2_bits(float f, bool saturate = true) noexcept
     std::memcpy(&bits, &f, sizeof(float));
 
     uint32_t sign = (bits >> 24) & 0x80; // Extract sign to bit 7
-    int32_t exp = ((bits >> 23) & 0xFF) - 127 + 15; // Rebias from float (127) to E5M2 (15)
+    int32_t exp = static_cast<int32_t>((bits >> 23) & 0xFF) - 127 + 15; // Rebias from float (127) to E5M2 (15)
     uint32_t mant = bits & 0x007FFFFF;
 
     // Handle overflow
