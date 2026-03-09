@@ -342,8 +342,8 @@ public:
                                         + std::to_string(strides().size()) + ")");
         }
 
-        return throwIfOutOfBounds(
-            std::inner_product(indices.begin(), indices.end(), strides().begin(), int64_t{0}));
+        return throwIfOutOfBounds(std::inner_product( // NOLINT(bugprone-fold-init-type)
+            indices.begin(), indices.end(), strides().begin(), int64_t{0}));
     }
 
     virtual ITensorIterator<false> begin() = 0;
