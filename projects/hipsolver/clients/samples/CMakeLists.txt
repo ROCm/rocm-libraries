@@ -42,7 +42,7 @@ foreach(exe example-c-basic;example-cpp-basic;)
 
   target_link_libraries(${exe} PRIVATE roc::hipsolver)
 
-if(NOT HIP_PLATFORM STREQUAL nvidia)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
     target_link_libraries(${exe} PRIVATE hip::host)
 
     if(CUSTOM_TARGET)

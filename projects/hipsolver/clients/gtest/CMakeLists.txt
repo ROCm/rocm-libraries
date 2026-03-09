@@ -132,7 +132,7 @@ if(BUILD_FORTRAN_BINDINGS)
   target_sources(hipsolver-test PRIVATE ${hipsolver_f90_source})
 endif()
 
-if(NOT HIP_PLATFORM STREQUAL nvidia)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   target_link_libraries(hipsolver-test PRIVATE hip::host)
 
   if(CUSTOM_TARGET)

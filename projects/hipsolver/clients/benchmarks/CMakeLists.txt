@@ -65,7 +65,7 @@ endif()
 
 add_armor_flags(hipsolver-bench "${ARMOR_LEVEL}")
 
-if(NOT HIP_PLATFORM STREQUAL nvidia)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   target_link_libraries(hipsolver-bench PRIVATE hip::host)
 
   if(CUSTOM_TARGET)

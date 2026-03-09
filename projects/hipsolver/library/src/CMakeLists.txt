@@ -40,7 +40,7 @@ endfunction()
 # ########################################################################
 prepend_path(".." hipsolver_headers_public relative_hipsolver_headers_public)
 
-if(NOT HIP_PLATFORM STREQUAL nvidia)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(hipsolver_source
     "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipsolver_conversions.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipsolver.cpp"
@@ -118,7 +118,7 @@ if(NOT BUILD_WITH_SPARSE)
 endif()
 
 # Build hipsolver from source on AMD platform
-if(NOT HIP_PLATFORM STREQUAL nvidia)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   # Find rocBLAS
   if(NOT TARGET rocblas)
     if(CUSTOM_ROCBLAS)
@@ -233,7 +233,7 @@ rocm_install_targets(
     ${CMAKE_BINARY_DIR}/include
 )
 
-if(NOT HIP_PLATFORM STREQUAL nvidia)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   rocm_export_targets(
     TARGETS roc::hipsolver
     DEPENDS PACKAGE hip

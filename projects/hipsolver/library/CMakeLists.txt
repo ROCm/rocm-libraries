@@ -46,7 +46,7 @@ if(BUILD_VERBOSE)
   message(STATUS "\t==>CMAKE_EXE_LINKER link flags: " ${CMAKE_EXE_LINKER_FLAGS})
 endif()
 
-if(NOT HIP_PLATFORM STREQUAL nvidia)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   find_package(hip REQUIRED PATHS ${ROCM_PATH} /opt/rocm ${HIP_PATH})
 else()
   find_package(HIP REQUIRED)

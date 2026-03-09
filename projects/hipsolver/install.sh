@@ -174,7 +174,7 @@ install_packages( )
   local library_dependencies_fedora=( "make" "cmake" "gcc-c++" "libcxx-devel" "rpm-build" )
   local library_dependencies_sles=( "make" "cmake" "gcc-c++" "libcxxtools9" "rpm-build" )
 
-  if [[ $HIP_PLATFORM == "nvidia" ]]; then
+  if [[ "${build_cuda}" == true || $HIP_PLATFORM == "nvidia" ]]; then
     # Ideally, this could be cuda-cublas-dev, but the package name has a version number in it
     library_dependencies_ubuntu+=( "cuda" )
     library_dependencies_centos+=( "" ) # how to install cuda on centos?
