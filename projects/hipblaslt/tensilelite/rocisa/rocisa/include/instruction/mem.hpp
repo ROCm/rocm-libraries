@@ -1630,6 +1630,46 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> tmp;
     };
 
+    struct FlatAtomicDecU32 : public FLATStoreInstruction
+    {
+        FlatAtomicDecU32(const std::shared_ptr<RegisterContainer>& vdst,
+                         const std::shared_ptr<RegisterContainer>& vaddr,
+                         const std::shared_ptr<RegisterContainer>& vsrc,
+                         std::optional<FLATModifiers>              flat    = std::nullopt,
+                         const std::string&                        comment = "")
+            : FLATStoreInstruction(InstType::INST_B32, vaddr, vsrc, flat, comment)
+            , vdst(vdst)
+        {
+            setInst("flat_atomic_dec_u32");
+        }
+
+        std::string typeConvert() const override
+        {
+            return "";
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<FlatAtomicDecU32>(*this);
+        }
+
+        std::string getArgStr() const override
+        {
+            return vdst->toString() + ", " + vaddr->toString() + ", " + srcData->toString();
+        } 
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr + " " + getArgStr();
+            if(flat)
+                kStr += flat->toString();
+            return formatWithComment(kStr);
+        }
+
+    private:
+        std::shared_ptr<RegisterContainer> vdst;
+    };
+
     struct DSLoadU8 : public DSLoadInstruction
     {
         DSLoadU8(const std::shared_ptr<RegisterContainer>& dst,

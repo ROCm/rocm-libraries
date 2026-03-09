@@ -279,14 +279,15 @@ void init_containers(nb::module_ m)
                 std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t), std::get<4>(t));
         });
     nb::class_<rocisa::FLATModifiers, rocisa::Container>(m_con, "FLATModifiers")
-        .def(nb::init<int, bool, bool, bool, rocisa::CacheScope, bool, bool>(),
+        .def(nb::init<int, bool, bool, bool, rocisa::CacheScope, bool, bool, bool>(),
              nb::arg("offset12") = 0,
              nb::arg("glc")      = false,
              nb::arg("slc")      = false,
              nb::arg("dlc")      = false,
              nb::arg("scope")    = 0,
              nb::arg("lds")      = false,
-             nb::arg("isStore")  = false)
+             nb::arg("isStore")  = false,
+             nb::arg("thAtomicRt") = false)
         .def_rw("isStore", &rocisa::FLATModifiers::isStore)
         .def("__str__", &rocisa::FLATModifiers::toString)
         .def("__deepcopy__",
@@ -301,18 +302,20 @@ void init_containers(nb::module_ m)
                                         self.dlc,
                                         self.scope,
                                         self.lds,
-                                        self.isStore);
+                                        self.isStore,
+                                        self.thAtomicRt);
              })
         .def("__setstate__",
              [](rocisa::FLATModifiers&                                            self,
-                std::tuple<int, bool, bool, bool, rocisa::CacheScope, bool, bool> t) {
+                std::tuple<int, bool, bool, bool, rocisa::CacheScope, bool, bool, bool> t) {
                  new(&self) rocisa::FLATModifiers(std::get<0>(t),
                                                   std::get<1>(t),
                                                   std::get<2>(t),
                                                   std::get<3>(t),
                                                   std::get<4>(t),
                                                   std::get<5>(t),
-                                                  std::get<6>(t));
+                                                  std::get<6>(t),
+                                                  std::get<7>(t));
              });
 
     nb::class_<rocisa::GLOBALModifiers, rocisa::Container>(m_con, "GLOBALModifiers")

@@ -22,12 +22,13 @@
 
 from rocisa import countInstruction
 from rocisa.code import Module, Label, RegSet
-from rocisa.container import ContinuousRegister, SMEMModifiers, vgpr, sgpr, replaceHolder
+from rocisa.container import ContinuousRegister, SMEMModifiers, vgpr, sgpr, FLATModifiers, EXEC
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, SBranch, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SBarrier, \
-    SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec
+    SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
+    FlatAtomicDecU32, VAndB32, VCmpXEqU32
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2
@@ -1382,6 +1383,8 @@ class GSUOn(GSU):
         tmpS05 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False)
         tmpS06 = writer.sgprPool.checkOutAligned(4,4, preventOverflow=False)
         tmpS06Res = ContinuousRegister(idx=tmpS06, size=4)
+        tmpV01 = writer.vgprPool.checkOut(1, preventOverflow=False)
+        tmpV02 = writer.vgprPool.checkOutAligned(2, 2, preventOverflow=False)
 
         bufferOOB = tmpVgpr.idx + tmpVgpr.size - 1
         storeOffsetSgpr = tmpSgpr.idx
@@ -1400,7 +1403,28 @@ class GSUOn(GSU):
             module.add(SWaitCnt(waitAll=True, comment="wait store done before synchronizer start load and add"))
             module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
             module.add(SSubU32(dst=sgpr(tmpS02), src0=sgpr(tmpS02), src1=1, comment=""))
-            module.add(SAtomicDec(dst=sgpr(tmpS02), base=sgpr("SrdSync", 2), smem=SMEMModifiers(glc=True)))
+            # Since gfx12 has no s_atomic_dec, here use flat_atomic_dec_u32 instead.
+            # flat_atomic_dec is not a scalar instruction, so we need one dec per wavefront.
+            # Mask exec so that only lane 0 performs the atomic_dec, then restore exec.
+            if kernel["ISA"][0] == 12:
+                # flat_atomic_dec_u32 behavior is:
+                #   tmp = Mem[vaddr]
+                #   Mem[vaddr] = ((tmp == 0) | (tmp > vsrc)) ? vsrc : tmp - 1
+                #   vsrc = tmp
+                waveSize = kernel["WavefrontSize"]
+                module.add(VAndB32(dst=vgpr(tmpV01), src0=vgpr("Serial"), src1=waveSize - 1, comment="lane id in the wavefront"))
+                module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr(tmpV01), src1=0, comment="only lane 0 does flat_atomic_dec"))
+                module.add(VMovB32(dst=vgpr(tmpV01), src=sgpr(tmpS02), comment="copy GSU to vgpr"))
+                module.add(VMovB32(dst=vgpr(tmpV02), src=sgpr("SrdSync+0"), comment="copy value of SrdSync to vgpr"))
+                module.add(VMovB32(dst=vgpr(tmpV02+1), src=sgpr("SrdSync+1"), comment="copy value of SrdSync to vgpr"))
+                module.add(FlatAtomicDecU32(vdst=vgpr(tmpV01), vaddr=vgpr(tmpV02, 2), vsrc=vgpr(tmpV01), flat=FLATModifiers(glc=True, thAtomicRt=True), comment=""))
+                # restore full exec mask
+                if waveSize == 32:
+                    module.add(SMovB32(dst=EXEC(), src=-1, comment="restore full exec"))
+                else:
+                    module.add(SMovB64(dst=EXEC(), src=-1, comment="restore full exec"))
+            else:
+                module.add(SAtomicDec(dst=sgpr(tmpS02), base=sgpr("SrdSync", 2), smem=SMEMModifiers(glc=True)))
             if kernel["MbskPrefetchMethod"] == 0:
                 module.add(SAndB32(dst=sgpr(tmpS01), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))
                 module.add(SCmpGtI32(src0=sgpr(tmpS01), src1=self.gsuThreshold, comment="GSU > %u ?" % self.gsuThreshold))
@@ -1409,7 +1433,11 @@ class GSUOn(GSU):
 
             # wait for synchronizer and check whether to branch or not
             module.addComment("check synchronizer done")
-            module.add(SWaitCnt(kmcnt=0, comment="Wait for synchronizer"))
+            if kernel["ISA"][0] == 12:
+                module.add(SWaitCnt(vlcnt=0, comment="Wait for synchronizer"))
+                module.add(VReadfirstlaneB32(dst=sgpr(tmpS02), src=vgpr(tmpV01), comment=""))
+            else:
+                module.add(SWaitCnt(kmcnt=0, comment="Wait for synchronizer"))
             module.add(SCmpEQU32(src0=sgpr(tmpS02), src1=hex(1), comment=""))
             module.add(SCBranchSCC1(labelName=reductionBodyLabel.getLabelName(), comment="branch if true"))
             if kernel["MbskPrefetchMethod"] == 0:
@@ -1824,6 +1852,8 @@ class GSUOn(GSU):
         writer.sgprPool.checkIn(tmpS05)
         writer.sgprPool.checkIn(tmpS02)
         writer.sgprPool.checkIn(tmpS01)
+        writer.vgprPool.checkIn(tmpV01)
+        writer.vgprPool.checkIn(tmpV02)
 
         return module
 

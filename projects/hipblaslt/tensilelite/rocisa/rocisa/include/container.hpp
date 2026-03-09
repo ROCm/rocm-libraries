@@ -108,7 +108,8 @@ namespace rocisa
                       bool       dlc      = false,
                       CacheScope scope    = CacheScope::SCOPE_NONE,
                       bool       lds      = false,
-                      bool       isStore  = false)
+                      bool       isStore  = false,
+                      bool       thAtomicRt = false)
             : Container()
             , offset12(offset12)
             , glc(glc)
@@ -117,6 +118,7 @@ namespace rocisa
             , scope(scope)
             , lds(lds)
             , isStore(isStore)
+            , thAtomicRt(thAtomicRt)
         {
         }
 
@@ -129,6 +131,7 @@ namespace rocisa
             , scope(other.scope)
             , lds(other.lds)
             , isStore(other.isStore)
+            , thAtomicRt(other.thAtomicRt)
         {
         }
 
@@ -166,6 +169,10 @@ namespace rocisa
             {
                 kStr += " lds";
             }
+            if(thAtomicRt)
+            {
+                kStr += " th:TH_ATOMIC_RT_RETURN";
+            }
             return kStr;
         }
 
@@ -176,6 +183,7 @@ namespace rocisa
         CacheScope scope;
         bool       lds;
         bool       isStore;
+        bool       thAtomicRt;
     };
 
     struct GLOBALModifiers : public Container
