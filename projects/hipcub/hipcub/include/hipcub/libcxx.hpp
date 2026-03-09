@@ -20,6 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#ifndef HIPCUB_LIBCXX_HPP_
+#define HIPCUB_LIBCXX_HPP_
+
 #pragma once
 
 // This is a utility file that helps managing which
@@ -31,11 +34,14 @@
 //     #include _HIPCUB_STD_INCLUDE(optional)
 //     using optional_int = _HIPCUB_STD::optional<int>;
 
-// Version that we depend on. We can ignore patch for now
-// since we're only interested in breaking (major) and
-// features (minor).
-#define _HIPCUB_REQUIRED_LIBCXX_VERSION_MAJOR 2
-#define _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR 8
+// Minimum version that we depend on.
+#define _HIPCUB_REQUIRED_LIBCXX_VERSION_MAJOR 3
+#define _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR 0
+#define _HIPCUB_REQUIRED_LIBCXX_VERSION_PATCH 0
+
+#define _HIPCUB_REQUIRED_LIBCXX_VERSION                                                            \
+    _HIPCUB_REQUIRED_LIBCXX_VERSION_MAJOR * 1000000 + _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR * 1000 \
+        + _HIPCUB_REQUIRED_LIBCXX_VERSION_PATCH
 
 #ifdef __has_include
     #define HIPCUB_HAS_INCLUDE(_X) __has_include(_X)
@@ -52,9 +58,7 @@
 #if HIPCUB_HAS_INCLUDE(<cuda/std/version>)
     #include <cuda/std/version>
     // If version matches and '_CUDA_VSTD' is available.
-    #if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _HIPCUB_REQUIRED_LIBCXX_VERSION_MAJOR    \
-        && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR \
-        && defined(_CUDA_VSTD)
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) && defined(_CUDA_VSTD)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/LIB)
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(cuda/std/LIB)
         #define _HIPCUB_LIBCXX ::cuda
@@ -63,14 +67,12 @@
         #define _HIPCUB_STD_NAMESPACE_BEGIN _LIBCUDACXX_BEGIN_NAMESPACE_STD
         #define _HIPCUB_STD_NAMESPACE_END _LIBCUDACXX_END_NAMESPACE_STD
     #endif
-
+#endif
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
-#elif HIPCUB_HAS_INCLUDE(<hip/std/version>)
+#if !defined(_HIPCUB_HAS_DEVICE_SYSTEM_STD) && HIPCUB_HAS_INCLUDE(<hip/std/version>)
     #include <hip/std/version>
     // If version matches and '_CUDA_VSTD' is available.
-    #if _LIBCUDACXX_CUDA_API_VERSION_MAJOR == _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR    \
-        && _LIBCUDACXX_CUDA_API_VERSION_MINOR >= _HIPCUB_REQUIRED_LIBCXX_VERSION_MINOR \
-        && defined(_CUDA_VSTD)
+    #if defined(_LIBCUDACXX_CUDA_API_VERSION) && (_LIBCUDACXX_CUDA_API_VERSION >= _HIPCUB_REQUIRED_LIBCXX_VERSION) && defined(_CUDA_VSTD)
         #define _HIPCUB_LIBCXX_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/LIB)
         #define _HIPCUB_STD_INCLUDE(LIB) _HIPCUB_STRINGIFY(hip/std/LIB)
         // In 'libhipcxx' the '::hip' namespace is synonymous with '::cuda'.
@@ -97,3 +99,5 @@
 #endif
 
 // clang-format on
+
+#endif // HIPCUB_LIBCXX_HPP_
