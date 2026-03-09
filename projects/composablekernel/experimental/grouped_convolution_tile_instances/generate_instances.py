@@ -108,23 +108,32 @@ def check_vectors(a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector)
         return False
     return True
 
-# replace , by ; in each sequence
-def merge_seqs(input):
-    input_list = list(input)
-    seq_started = False
-    for idx in range(len(input)):
-        c = input_list[idx]
-        if c == '(':
-            # Sequence started
-            seq_started = True
-        elif c == ')':
-            # Sequence ended
-            seq_started = False
-        elif c == ',':
-            # Found , in Sequence - replace
-            if seq_started:
-                input_list[idx] = ';'
-    return "".join(input_list)
+def parse_instance_string(instance_string):
+    """Parse instance string, treating Seq(...) as a single parameter."""
+    params = []
+    current_param = ""
+    paren_depth = 0
+    
+    for char in instance_string:
+        if char == '(':
+            paren_depth += 1
+            current_param += char
+        elif char == ')':
+            paren_depth -= 1
+            current_param += char
+        elif char == ',' and paren_depth == 0:
+            # Only split on comma if we're not inside parentheses
+            params.append(current_param.strip())
+            current_param = ""
+        else:
+            current_param += char
+    
+    # Add the last parameter
+    if current_param.strip():
+        params.append(current_param.strip())
+    
+    return params
+
 
 def generate_calls_inc(instances, problem_name, direction, filter_pattern):
     generate_dir = Path(__file__).resolve().parent
@@ -186,9 +195,10 @@ def parse_fwd_instances(instances, problem_name):
     for instance_id, instance in enumerate(instances):
         if instance.find("#") != -1 or instance.find(";") != -1:
             continue
-        instance_args_list = instance[instance.find("<") + 1 : instance.find(">")]
-        instance_args_list = merge_seqs(instance_args_list)
-        args = instance_args_list.split(",")
+        start = instance.index('<') + 1
+        end = instance.rindex('>')
+        params_str = instance[start:end]
+        args = parse_instance_string(params_str)
 
         is_v3_instance = instance.find("Xdl_CShuffle_V3") != -1
         split_image = instance.find("Large_Tensor") != -1
@@ -277,32 +287,6 @@ def parse_fwd_instances(instances, problem_name):
         )
         convs.append(conv)
     return convs
-
-def parse_instance_string(instance_string):
-    """Parse instance string, treating Seq(...) as a single parameter."""
-    params = []
-    current_param = ""
-    paren_depth = 0
-    
-    for char in instance_string:
-        if char == '(':
-            paren_depth += 1
-            current_param += char
-        elif char == ')':
-            paren_depth -= 1
-            current_param += char
-        elif char == ',' and paren_depth == 0:
-            # Only split on comma if we're not inside parentheses
-            params.append(current_param.strip())
-            current_param = ""
-        else:
-            current_param += char
-    
-    # Add the last parameter
-    if current_param.strip():
-        params.append(current_param.strip())
-    
-    return params
 
 def parse_bwd_weight_instances(instances, problem_name):
     convs = []
