@@ -171,7 +171,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_NE(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x != y)                                       \
+        if((x) != (y))                                   \
         {                                                \
             return {error_status, message};              \
         }                                                \
@@ -180,7 +180,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_EQ(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x == y)                                       \
+        if((x) == (y))                                   \
         {                                                \
             return {error_status, message};              \
         }                                                \
@@ -207,7 +207,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_NULL(x, error_status, message) \
     do                                                  \
     {                                                   \
-        if(x == nullptr)                                \
+        if((x) == nullptr)                              \
         {                                               \
             return {error_status, message};             \
         }                                               \
@@ -216,7 +216,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_LT(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x < y)                                        \
+        if((x) < (y))                                    \
         {                                                \
             return {error_status, message};              \
         }                                                \
@@ -225,7 +225,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_GE(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x >= y)                                       \
+        if((x) >= (y))                                   \
         {                                                \
             return {error_status, message};              \
         }                                                \
@@ -234,7 +234,7 @@ typedef Error error_t; ///< @brief Type alias for Error
 #define HIPDNN_RETURN_IF_LE(x, y, error_status, message) \
     do                                                   \
     {                                                    \
-        if(x <= y)                                       \
+        if((x) <= (y))                                   \
         {                                                \
             return {error_status, message};              \
         }                                                \

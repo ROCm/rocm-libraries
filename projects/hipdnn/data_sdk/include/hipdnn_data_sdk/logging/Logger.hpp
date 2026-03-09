@@ -139,7 +139,7 @@ inline constexpr const char* K_COMPONENT_NAME = "hipdnn_sdk";
     {                                                                                         \
         if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO))                    \
         {                                                                                     \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_INFO, component) << msg; \
+            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_INFO, component) << msg; /* NOLINT(bugprone-macro-parentheses) msg is a stream expression */ \
         }                                                                                     \
     } while(0)
 
@@ -148,7 +148,7 @@ inline constexpr const char* K_COMPONENT_NAME = "hipdnn_sdk";
     {                                                                                         \
         if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN))                    \
         {                                                                                     \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_WARN, component) << msg; \
+            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_WARN, component) << msg; /* NOLINT(bugprone-macro-parentheses) msg is a stream expression */ \
         }                                                                                     \
     } while(0)
 
@@ -157,7 +157,7 @@ inline constexpr const char* K_COMPONENT_NAME = "hipdnn_sdk";
     {                                                                                          \
         if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_ERROR))                    \
         {                                                                                      \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_ERROR, component) << msg; \
+            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_ERROR, component) << msg; /* NOLINT(bugprone-macro-parentheses) msg is a stream expression */ \
         }                                                                                      \
     } while(0)
 
@@ -166,7 +166,7 @@ inline constexpr const char* K_COMPONENT_NAME = "hipdnn_sdk";
     {                                                                                          \
         if(::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_FATAL))                    \
         {                                                                                      \
-            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_FATAL, component) << msg; \
+            ::hipdnn_data_sdk::logging::detail::LogStream(HIPDNN_SEV_FATAL, component) << msg; /* NOLINT(bugprone-macro-parentheses) msg is a stream expression */ \
         }                                                                                      \
     } while(0)
 
