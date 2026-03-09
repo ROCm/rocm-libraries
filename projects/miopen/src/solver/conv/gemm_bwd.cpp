@@ -701,7 +701,8 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
 
             float time_gemm = 0;
 
-            // tensors.dx = transpose(tensors.w) * tensors.dy
+            // Specialized 3D path for non-grouped convolutions:
+            // launch one strided-batched GEMM over N, then one batched Col2Im.
             if(group_count == 1 && spatial_dims == 3)
             {
                 auto batched_gemm_desc   = gemm_desc;
@@ -764,59 +765,58 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                 return;
             }
 
-            else
+            for(std::size_t i = 0; i < in_n; i++)
             {
-                for(std::size_t i = 0; i < in_n; i++)
+                std::size_t out_offset = i * wei_k * out_spatial_size;
+                std::size_t in_offset  = i * in_c * in_spatial_size;
+
+                miopenStatus_t gemm_status;
+
+                // tensors.dx = transpose(tensors.w) * tensors.dy
+                if(group_count > 1)
                 {
-                    std::size_t out_offset = i * wei_k * out_spatial_size;
-                    std::size_t in_offset  = i * in_c * in_spatial_size;
-
-                    if(group_count > 1)
-                    {
-                        const auto gemm_status = CallGemmStridedBatched(handle,
-                                                                        gemm_desc,
-                                                                        w,
-                                                                        0,
-                                                                        dy,
-                                                                        out_offset,
-                                                                        workspace,
-                                                                        0,
-                                                                        GemmBackend_t::rocblas);
-                        if(gemm_status != miopenStatusSuccess)
-                            MIOPEN_THROW("GemmBwdRest execution failure.");
-
-                        if(handle.IsProfilingEnabled())
-                            time_gemm += handle.GetKernelTime();
-                    }
-                    else
-                    {
-                        const auto gemm_status =
-                            CallGemm(handle, gemm_desc, w, 0, dy, out_offset, workspace, 0);
-                        if(gemm_status != miopenStatusSuccess)
-                            MIOPEN_THROW("GemmBwdRest execution failure.");
-
-                        if(handle.IsProfilingEnabled())
-                            time_gemm += handle.GetKernelTime();
-                    }
-
-                    time_gemm += Col2ImGPU(handle,
-                                           spatial_dims,
-                                           static_cast<const uint8_t*>(workspace) +
-                                               (group_count == 1 && spatial_dims == 3
-                                                    ? i * in_c * wei_spatial_size * out_spatial_size *
-                                                          GetTypeSize(dyDesc_.GetType())
-                                                    : 0),
-                                           out_spatial,
-                                           wei_spatial,
-                                           pads,
-                                           strides,
-                                           dilations,
-                                           in_c,
-                                           in_spatial,
-                                           dx,
-                                           in_offset,
-                                           dyDesc_.GetType());
+                    gemm_status = CallGemmStridedBatched(handle,
+                                                         gemm_desc,
+                                                         w,
+                                                         0,
+                                                         dy,
+                                                         out_offset,
+                                                         workspace,
+                                                         0,
+                                                         GemmBackend_t::rocblas);
                 }
+                else
+                {
+                    gemm_status = CallGemm(handle,
+                                           gemm_desc,
+                                           w,
+                                           0,
+                                           dy,
+                                           out_offset,
+                                           workspace,
+                                           0,
+                                           GemmBackend_t::rocblas);
+                }
+
+                if(gemm_status != miopenStatusSuccess)
+                    MIOPEN_THROW("GemmBwdRest execution failure.");
+
+                if(handle.IsProfilingEnabled())
+                    time_gemm += handle.GetKernelTime();
+
+                time_gemm += Col2ImGPU(handle,
+                                       spatial_dims,
+                                       workspace,
+                                       out_spatial,
+                                       wei_spatial,
+                                       pads,
+                                       strides,
+                                       dilations,
+                                       in_c,
+                                       in_spatial,
+                                       dx,
+                                       in_offset,
+                                       dyDesc_.GetType());
             }
 
             if(handle.IsProfilingEnabled())
