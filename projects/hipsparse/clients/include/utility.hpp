@@ -589,21 +589,42 @@ void hipsparseInit(std::vector<T>& A, int M, int N)
 /* ============================================================================================ */
 /*! \brief  vector initialization: */
 // initialize sparse index vector with nnz entries ranging from start to end
+// Uses Fisher-Yates shuffle for efficiency
 template <typename I>
 void hipsparseInitIndex(I* x, int nnz, int start, int end)
 {
-    std::vector<bool> check(end - start, false);
-    int               num = 0;
-    while(num < nnz)
+    int range = end - start;
+
+    if(nnz >= range)
     {
-        int val = start + rand() % (end - start);
-        if(!check[val - start])
+        for(int i = 0; i < nnz; ++i)
         {
-            x[num]             = val;
-            check[val - start] = true;
-            ++num;
+            x[i] = start + i;
         }
+
+        return;
     }
+
+    // Create sequential array and shuffle first nnz elements
+    std::vector<int> indices(range);
+    for(int i = 0; i < range; ++i)
+    {
+        indices[i] = start + i;
+    }
+
+    // Partial Fisher-Yates shuffle - only need first nnz elements
+    for(int i = 0; i < nnz; ++i)
+    {
+        int j = i + rand() % (range - i);
+        std::swap(indices[i], indices[j]);
+    }
+
+    // Copy first nnz elements
+    for(int i = 0; i < nnz; ++i)
+    {
+        x[i] = indices[i];
+    }
+
     std::sort(x, x + nnz);
 };
 
@@ -1703,8 +1724,7 @@ inline void host_csr_to_csr_compress(int                     M,
 
         for(int j = start; j < end; j++)
         {
-            if(testing_abs(csr_val_A[j]) > testing_real(tol)
-               && testing_abs(csr_val_A[j]) > (std::numeric_limits<float>::min)())
+            if(testing_abs(csr_val_A[j]) > testing_real(tol))
             {
                 count++;
             }
@@ -1745,8 +1765,7 @@ inline void host_csr_to_csr_compress(int                     M,
 
         for(int j = start; j < end; j++)
         {
-            if(testing_abs(csr_val_A[j]) > testing_real(tol)
-               && testing_abs(csr_val_A[j]) > (std::numeric_limits<float>::min)())
+            if(testing_abs(csr_val_A[j]) > testing_real(tol))
             {
                 csr_col_ind_C[index] = csr_col_ind_A[j];
                 csr_val_C[index]     = csr_val_A[j];

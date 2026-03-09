@@ -49,8 +49,11 @@ add_hipdnn_sample(conv_fprop convolution/ConvFprop.cpp)
 add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
 add_hipdnn_sample(fused_conv_fprop_bias_activ convolution/FusedConvFpropBiasActiv.cpp)
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
+add_hipdnn_sample(conv_fprop_deterministic convolution/ConvFpropDeterministic.cpp)
 
 add_hipdnn_sample(serialization_roundtrip serialization/SerializationRoundTrip.cpp)
+
+add_hipdnn_sample(knobs_usage knobs/KnobsUsage.cpp)
 
 # Enable testing and add sample tests
 enable_testing()
@@ -89,6 +92,7 @@ if(NOT WIN32)
     # Some fused conv samples are not supported on windows due to lack of CK support
     add_hipdnn_sample_test(fused_conv_fprop_activ)
     add_hipdnn_sample_test(fused_conv_fprop_bias_activ)
+    add_hipdnn_sample_test(conv_fprop_deterministic)
 endif()
 
 # Register batchnorm samples as tests
@@ -103,6 +107,10 @@ add_hipdnn_sample_test(fused_bn_inference_variance_activ)
 
 # Register serialization samples as tests
 add_hipdnn_sample_test(serialization_roundtrip)
+
+# Register knobs sample
+# Note: knobs_usage is informational/educational, not validation
+install(TARGETS knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}

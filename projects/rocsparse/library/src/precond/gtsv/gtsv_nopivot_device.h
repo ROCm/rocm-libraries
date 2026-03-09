@@ -79,6 +79,17 @@ namespace rocsparse
         srhs[tid]             = B[tid + ldb * hipBlockIdx_x];
         srhs[tid + BLOCKSIZE] = B[tid + BLOCKSIZE + ldb * hipBlockIdx_x];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = 0;
+        }
+        if(tid == (BLOCKSIZE - 1))
+        {
+            sc[tid + BLOCKSIZE] = 0;
+        }
+
         __syncthreads();
 
         // Forward reduction using cyclic reduction
@@ -184,6 +195,17 @@ namespace rocsparse
         sb[tid]   = d[tid];
         sc[tid]   = du[tid];
         srhs[tid] = B[tid + ldb * hipBlockIdx_x];
+
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = static_cast<T>(0);
+        }
+        if(tid == (BLOCKSIZE - 1))
+        {
+            sc[tid] = static_cast<T>(0);
+        }
 
         __syncthreads();
 
@@ -2014,7 +2036,7 @@ namespace rocsparse
     }
 
     // Combined Parallel cyclic reduction and cyclic reduction algorithm using shared memory
-    template <uint32_t BLOCKSIZE, uint32_t PCR_SIZE, typename T>
+    template <uint32_t BLOCKSIZE, uint32_t PCR_SIZE, uint32_t NUM_RHS, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_crpcr_pow2_shared_kernel2(rocsparse_int m,
                                                 rocsparse_int n,
@@ -2029,6 +2051,7 @@ namespace rocsparse
                                                 T* __restrict__ temp_d)
     {
         const int tid = hipThreadIdx_x;
+        const int bid = hipBlockIdx_x;
 
         const int tot_iter = static_cast<rocsparse_int>(rocsparse::log2((2 * BLOCKSIZE) / 2));
         const int pcr_iter = static_cast<rocsparse_int>(rocsparse::log2(PCR_SIZE / 2));
@@ -2041,26 +2064,20 @@ namespace rocsparse
         __shared__ T sa[2 * BLOCKSIZE];
         __shared__ T sb[2 * BLOCKSIZE];
         __shared__ T sc[2 * BLOCKSIZE];
-        __shared__ T srhs[2 * BLOCKSIZE];
-        __shared__ T sx[2 * BLOCKSIZE];
+        __shared__ T srhs[2 * BLOCKSIZE * NUM_RHS];
 
         // Fill cyclic reduction shared memory
-        // sa[tid]               = (tid < m) ? dl[tid] : static_cast<T>(0);
-        // sa[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? dl[tid + BLOCKSIZE] : static_cast<T>(0);
-        // sb[tid]               = (tid < m) ? d[tid]: static_cast<T>(1);
-        // sb[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? d[tid + BLOCKSIZE] : static_cast<T>(1);
-        // sc[tid]               = (tid < m) ? du[tid] : static_cast<T>(0);
-        // sc[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? du[tid + BLOCKSIZE] : static_cast<T>(0);
-        // srhs[tid]             = (tid < m) ? B[tid + ldb * hipBlockIdx_x] : static_cast<T>(0);
-        // srhs[tid + BLOCKSIZE] = (tid + BLOCKSIZE < m) ? B[tid + BLOCKSIZE + ldb * hipBlockIdx_x] : static_cast<T>(0);
-        sa[tid]               = dl[tid];
-        sa[tid + BLOCKSIZE]   = dl[tid + BLOCKSIZE];
-        sb[tid]               = d[tid];
-        sb[tid + BLOCKSIZE]   = d[tid + BLOCKSIZE];
-        sc[tid]               = du[tid];
-        sc[tid + BLOCKSIZE]   = du[tid + BLOCKSIZE];
-        srhs[tid]             = B[tid + ldb * hipBlockIdx_x];
-        srhs[tid + BLOCKSIZE] = B[tid + BLOCKSIZE + ldb * hipBlockIdx_x];
+        sa[tid]               = (tid < m) ? dl[tid] : static_cast<T>(0);
+        sa[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? dl[tid + BLOCKSIZE] : static_cast<T>(0);
+        sb[tid]               = (tid < m) ? d[tid] : static_cast<T>(1);
+        sb[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? d[tid + BLOCKSIZE] : static_cast<T>(1);
+        sc[tid]               = (tid < m) ? du[tid] : static_cast<T>(0);
+        sc[tid + BLOCKSIZE]   = (tid + BLOCKSIZE < m) ? du[tid + BLOCKSIZE] : static_cast<T>(0);
+        for(int p = 0; p < NUM_RHS; p++)
+        {
+            srhs[2 * BLOCKSIZE * p + tid]             = (tid < m && (NUM_RHS * bid + p) < n) ? B[ldb * (NUM_RHS * bid + p) + tid] : static_cast<T>(0);
+            srhs[2 * BLOCKSIZE * p + tid + BLOCKSIZE] = (tid + BLOCKSIZE < m && (NUM_RHS * bid + p) < n) ? B[ldb * (NUM_RHS * bid + p) + tid + BLOCKSIZE] : static_cast<T>(0);
+        }
 
         __syncthreads();
 
@@ -2084,29 +2101,19 @@ namespace rocsparse
                 T k2 = sc[index] / sb[right];
 
                 sb[index]   = sb[index] - sc[left] * k1 - sa[right] * k2;
-                srhs[index] = srhs[index] - srhs[left] * k1 - srhs[right] * k2;
                 sa[index]   = -sa[left] * k1;
                 sc[index]   = -sc[right] * k2;
+
+                for(int p = 0; p < NUM_RHS; p++)
+                {
+                    srhs[2 * BLOCKSIZE * p + index] = srhs[2 * BLOCKSIZE * p + index] - srhs[2 * BLOCKSIZE * p + left] * k1 - srhs[2 * BLOCKSIZE * p + right] * k2;
+                }
             }
 
             active_threads /= 2;
 
             __syncthreads();
         }
-        // temp_a[0] = tot_iter;
-        // temp_a[1] = pcr_iter;
-        // temp_a[2] = cr_iter;
-        // temp_a[3] = stride;
-
-        // temp_a[tid]             = sa[tid];
-        // temp_a[tid + BLOCKSIZE] = sa[tid + BLOCKSIZE];
-        // temp_b[tid]             = sb[tid];
-        // temp_b[tid + BLOCKSIZE] = sb[tid + BLOCKSIZE];
-        // temp_c[tid]             = sc[tid];
-        // temp_c[tid + BLOCKSIZE] = sc[tid + BLOCKSIZE];
-        // temp_d[tid]             = srhs[tid];
-        // temp_d[tid + BLOCKSIZE] = srhs[tid + BLOCKSIZE];
-        // __syncthreads();
 
         // Parallel cyclic reduction
         const int index = stride * tid + stride - 1;
@@ -2117,7 +2124,7 @@ namespace rocsparse
             T ta;
             T tb;
             T tc;
-            T trhs;
+            T trhs[NUM_RHS];
 
             if(tid < PCR_SIZE)
             {
@@ -2133,18 +2140,25 @@ namespace rocsparse
                 T k2 = sc[index] / sb[right];
 
                 tb   = sb[index] - sc[left] * k1 - sa[right] * k2;
-                trhs = srhs[index] - srhs[left] * k1 - srhs[right] * k2;
                 ta   = -sa[left] * k1;
                 tc   = -sc[right] * k2;
+
+                for(int p = 0; p < NUM_RHS; p++)
+                {
+                    trhs[p] = srhs[2 * BLOCKSIZE * p + index] - srhs[2 * BLOCKSIZE * p + left] * k1 - srhs[2 * BLOCKSIZE * p + right] * k2;
+                }
             }
 
             __syncthreads();
             if(tid < PCR_SIZE)
             {
                 sb[index]   = tb;
-                srhs[index] = trhs;
                 sa[index]   = ta;
                 sc[index]   = tc;
+                for(int p = 0; p < NUM_RHS; p++)
+                {
+                    srhs[2 * BLOCKSIZE * p + index] = trhs[p];
+                }
             }
             pcr_stride *= 2;
             __syncthreads();
@@ -2181,11 +2195,12 @@ namespace rocsparse
             //     a_left = (left >= 0) ? sa[left] : static_cast<T>(0);
             //     b_left = (left >= 0) ? sb[left] : static_cast<T>(0);
             //     c_left = (left >= 0) ? sc[left] : static_cast<T>(0);
-            //     rhs_left = (left >= 0) ? srhs[left] : static_cast<T>(0);
 
             //     a_right = (right <= 2 * BLOCKSIZE - 1) ? sa[right] : static_cast<T>(0);
             //     b_right = (right <= 2 * BLOCKSIZE - 1) ? sb[right] : static_cast<T>(0);
             //     c_right = (right <= 2 * BLOCKSIZE - 1) ? sc[right] : static_cast<T>(0);
+
+            //     rhs_left = (left >= 0) ? srhs[left] : static_cast<T>(0);
             //     rhs_right = (right <= 2 * BLOCKSIZE - 1) ? srhs[right] : static_cast<T>(0);    
 
             //     k1 = (left >= 0) ? a / b_left : static_cast<T>(0);
@@ -2205,16 +2220,6 @@ namespace rocsparse
             // pcr_stride *= 2;
         }
 
-        // temp_a[tid]             = sa[tid];
-        // temp_a[tid + BLOCKSIZE] = sa[tid + BLOCKSIZE];
-        // temp_b[tid]             = sb[tid];
-        // temp_b[tid + BLOCKSIZE] = sb[tid + BLOCKSIZE];
-        // temp_c[tid]             = sc[tid];
-        // temp_c[tid + BLOCKSIZE] = sc[tid + BLOCKSIZE];
-        // temp_d[tid]             = srhs[tid];
-        // temp_d[tid + BLOCKSIZE] = srhs[tid + BLOCKSIZE];
-        // __syncthreads();
-
         if(tid < PCR_SIZE / 2)
         {
             const int index = stride * tid + stride - 1;
@@ -2224,11 +2229,15 @@ namespace rocsparse
             const int j = index + pcr_stride;
             const T det = static_cast<T>(1) / (sb[j] * sb[i] - sc[i] * sa[j]);
 
-            sx[i] = (sb[j] * srhs[i] - sc[i] * srhs[j]) * det;
-            sx[j] = (srhs[j] * sb[i] - srhs[i] * sa[j]) * det;
-        }
+            for(int p = 0; p < NUM_RHS; p++)
+            {
+                const T rhs_i = srhs[2 * BLOCKSIZE * p + i];
+                const T rhs_j = srhs[2 * BLOCKSIZE * p + j];
 
-        __syncthreads();
+                srhs[2 * BLOCKSIZE * p + i] = (sb[j] * rhs_i - sc[i] * rhs_j) * det;
+                srhs[2 * BLOCKSIZE * p + j] = (rhs_j * sb[i] - rhs_i * sa[j]) * det;
+            }
+        }
 
         // Backward substitution using cyclic reduction
         active_threads = PCR_SIZE;
@@ -2242,10 +2251,13 @@ namespace rocsparse
                 const int left  = index - stride / 2;
                 const int right = index + stride / 2;
 
-                const T x_left  = (left >= 0) ? sx[left] : static_cast<T>(0);
-                const T x_right = (right < m) ? sx[right] : static_cast<T>(0);
+                for(int p = 0; p < NUM_RHS; p++)
+                {
+                    const T rhs_left  = (left >= 0) ? srhs[2 * BLOCKSIZE * p + left] : static_cast<T>(0);
+                    const T rhs_right = (right < m) ? srhs[2 * BLOCKSIZE * p + right] : static_cast<T>(0);
 
-                sx[index] = (srhs[index] - sa[index] * x_left - sc[index] * x_right) / sb[index];
+                    srhs[2 * BLOCKSIZE * p + index] = (srhs[2 * BLOCKSIZE * p + index] - sa[index] * rhs_left - sc[index] * rhs_right) / sb[index];
+                }
             }
 
             stride /= 2;
@@ -2254,16 +2266,26 @@ namespace rocsparse
 
         __syncthreads();
 
-        // if(tid < m)
-        // {
-        //     B[tid + ldb * hipBlockIdx_x]             = sx[tid];
-        // }
-        // if(tid + BLOCKSIZE < m)
-        // {
-        //     B[tid + BLOCKSIZE + ldb * hipBlockIdx_x] = sx[tid + BLOCKSIZE];
-        // }
-        B[tid + ldb * hipBlockIdx_x]             = sx[tid];
-        B[tid + BLOCKSIZE + ldb * hipBlockIdx_x] = sx[tid + BLOCKSIZE];
+        if(tid < m)
+        {
+            for(int p = 0; p < NUM_RHS; p++)
+            {
+                if((NUM_RHS * bid + p) < n)
+                {
+                    B[ldb * (NUM_RHS * bid + p) + tid] = srhs[2 * BLOCKSIZE * p + tid];
+                }
+            }
+        }
+        if(tid + BLOCKSIZE < m)
+        {
+            for(int p = 0; p < NUM_RHS; p++)
+            {
+                if((NUM_RHS * bid + p) < n)
+                {
+                    B[ldb * (NUM_RHS * bid + p) + tid + BLOCKSIZE] = srhs[2 * BLOCKSIZE * p + tid + BLOCKSIZE];
+                }
+            }
+        }
     }
 
 
@@ -2298,6 +2320,16 @@ namespace rocsparse
         sc[tid]   = (tid < m) ? du[tid] : static_cast<T>(0);
         srhs[tid] = (tid < m) ? B[tid + ldb * hipBlockIdx_x] : static_cast<T>(0);
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = static_cast<T>(0);
+        }
+        if(tid == (m - 1))
+        {
+            sc[tid] = static_cast<T>(0);
+        }
         __syncthreads();
 
         for(rocsparse_int j = 0; j < iter; j++)
@@ -2397,6 +2429,25 @@ namespace rocsparse
         T k3 = -a0[left];
         T k4 = -c0[right];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(gid == 0)
+        {
+            k1 = static_cast<T>(0);
+        }
+        if(left == 0)
+        {
+            k3 = static_cast<T>(0);
+        }
+        if(gid == (m - 1))
+        {
+            k2 = static_cast<T>(0);
+        }
+        if(right == (m - 1))
+        {
+            k4 = static_cast<T>(0);
+        }
+
         b1[gid] = b0[gid] - c0[left] * k1 - a0[right] * k2;
         a1[gid] = k3 * k1;
         c1[gid] = k4 * k2;
@@ -2441,6 +2492,25 @@ namespace rocsparse
         T k2 = c0[gid] / b0[right];
         T k3 = -a0[left];
         T k4 = -c0[right];
+
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(gid == 0)
+        {
+            k1 = static_cast<T>(0);
+        }
+        if(left == 0)
+        {
+            k3 = static_cast<T>(0);
+        }
+        if(gid == (m - 1))
+        {
+            k2 = static_cast<T>(0);
+        }
+        if(right == (m - 1))
+        {
+            k4 = static_cast<T>(0);
+        }
 
         b1[gid] = b0[gid] - c0[left] * k1 - a0[right] * k2;
         a1[gid] = k3 * k1;
@@ -2699,6 +2769,25 @@ namespace rocsparse
         T k3 = -a0[left];
         T k4 = -c0[right];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(gid == 0)
+        {
+            k1 = static_cast<T>(0);
+        }
+        if(left == 0)
+        {
+            k3 = static_cast<T>(0);
+        }
+        if(gid == (m - 1))
+        {
+            k2 = static_cast<T>(0);
+        }
+        if(right == (m - 1))
+        {
+            k4 = static_cast<T>(0);
+        }
+
         b1[gid] = b0[gid] - c0[left] * k1 - a0[right] * k2;
         a1[gid] = k3 * k1;
         c1[gid] = k4 * k2;
@@ -2751,6 +2840,25 @@ namespace rocsparse
         T k2 = c0[gid] / b0[right];
         T k3 = -a0[left];
         T k4 = -c0[right];
+
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(gid == 0)
+        {
+            k1 = static_cast<T>(0);
+        }
+        if(left == 0)
+        {
+            k3 = static_cast<T>(0);
+        }
+        if(gid == (m - 1))
+        {
+            k2 = static_cast<T>(0);
+        }
+        if(right == (m - 1))
+        {
+            k4 = static_cast<T>(0);
+        }
 
         b1[gid] = b0[gid] - c0[left] * k1 - a0[right] * k2;
         a1[gid] = k3 * k1;

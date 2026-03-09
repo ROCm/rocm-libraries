@@ -416,6 +416,17 @@ namespace rocsparse
         srhs[tid]             = x[gid];
         srhs[tid + BLOCKSIZE] = x[gid + BLOCKSIZE];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = 0;
+        }
+        if(tid == (BLOCKSIZE - 1))
+        {
+            sc[tid + BLOCKSIZE] = 0;
+        }
+
         __syncthreads();
 
         // Forward reduction using cyclic reduction
@@ -524,6 +535,17 @@ namespace rocsparse
         sc[tid]   = du[gid];
         srhs[tid] = x[gid];
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = static_cast<T>(0);
+        }
+        if(tid == (BLOCKSIZE - 1))
+        {
+            sc[tid] = static_cast<T>(0);
+        }
+
         __syncthreads();
 
         for(rocsparse_int j = 0; j < iter; j++)
@@ -617,6 +639,17 @@ namespace rocsparse
         sc[tid + BLOCKSIZE]   = du[gid + BLOCKSIZE];
         srhs[tid]             = x[gid];
         srhs[tid + BLOCKSIZE] = x[gid + BLOCKSIZE];
+
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = static_cast<T>(0);
+        }
+        if(tid == (BLOCKSIZE - 1))
+        {
+            sc[tid + BLOCKSIZE] = static_cast<T>(0);
+        }
 
         __syncthreads();
 
@@ -786,6 +819,17 @@ namespace rocsparse
         sc[tid]   = (tid < m) ? du[gid] : static_cast<T>(0);
         srhs[tid] = (tid < m) ? x[gid] : static_cast<T>(0);
 
+        // The first entry of the lower diagonal and the last entry of the upper
+        // diagonal should be treated as zero
+        if(tid == 0)
+        {
+            sa[tid] = static_cast<T>(0);
+        }
+        if(tid == (m - 1))
+        {
+            sc[tid] = static_cast<T>(0);
+        }
+
         __syncthreads();
 
         for(rocsparse_int j = 0; j < iter; j++)
@@ -906,15 +950,15 @@ namespace rocsparse
         if(left < 0)
             left = 0;
 
-        T k1 = a0_col[gid] / b0_col[left];
-        T k2 = c0_col[gid] / b0_col[right];
+        T k1 = (gid > 0) ? a0_col[gid] / b0_col[left] : static_cast<T>(0);
+        T k2 = (gid < (m - 1)) ? c0_col[gid] / b0_col[right] : static_cast<T>(0);
         T k3 = rhs0_col[right];
         T k4 = rhs0_col[left];
 
         b1_col[gid]   = b0_col[gid] - c0_col[left] * k1 - a0_col[right] * k2;
         rhs1_col[gid] = rhs0_col[gid] - k4 * k1 - k3 * k2;
-        k3            = -a0_col[left];
-        k4            = -c0_col[right];
+        k3            = (left > 0) ? -a0_col[left] : static_cast<T>(0);
+        k4            = (right < (m - 1)) ? -c0_col[right] : static_cast<T>(0);
 
         a1_col[gid] = k3 * k1;
         c1_col[gid] = k4 * k2;
@@ -1096,15 +1140,15 @@ namespace rocsparse
         if(left < 0)
             left = 0;
 
-        T k1 = a0_col[gid] / b0_col[left];
-        T k2 = c0_col[gid] / b0_col[right];
+        T k1 = (gid > 0) ? a0_col[gid] / b0_col[left] : static_cast<T>(0);
+        T k2 = (gid < (m - 1)) ? c0_col[gid] / b0_col[right] : static_cast<T>(0);
         T k3 = rhs0_col[right];
         T k4 = rhs0_col[left];
 
         b1_col[gid]   = b0_col[gid] - c0_col[left] * k1 - a0_col[right] * k2;
         rhs1_col[gid] = rhs0_col[gid] - k4 * k1 - k3 * k2;
-        k3            = -a0_col[left];
-        k4            = -c0_col[right];
+        k3            = (left > 0) ? -a0_col[left] : static_cast<T>(0);
+        k4            = (right < (m - 1)) ? -c0_col[right] : static_cast<T>(0);
 
         a1_col[gid] = k3 * k1;
         c1_col[gid] = k4 * k2;

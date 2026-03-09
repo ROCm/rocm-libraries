@@ -107,22 +107,22 @@ void testing_gtsv_no_pivot(const Arguments& arg)
     host_vector<T> hd(m);
     host_vector<T> hdu(m);
 
-    // initialize tri-diagonal matrix
-    for(rocsparse_int i = 0; i < m; ++i)
-    {
-        hdl[i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
-        hd[i]  = static_cast<T>(4);//random_cached_generator<T>(17, 32);
-        hdu[i] = static_cast<T>(2);//random_cached_generator<T>(1, 8);
-    }
+    // // initialize tri-diagonal matrix
     // for(rocsparse_int i = 0; i < m; ++i)
     // {
-    //     hdl[i] = static_cast<T>(i);
-    //     hd[i]  = static_cast<T>(i + m);
-    //     hdu[i] = static_cast<T>(i + 2 * m);
+    //    hdl[i] = -1;//random_cached_generator<T>(1, 8);
+    //    hd[i]  = 4;//random_cached_generator<T>(17, 32);
+    //    hdu[i] = -1;//random_cached_generator<T>(1, 8);
     // }
+    for(rocsparse_int i = 0; i < m; ++i)
+    {
+        hdl[i] = static_cast<T>(i);
+        hd[i]  = static_cast<T>(i + m);
+        hdu[i] = static_cast<T>(i + 2 * m);
+    }
 
-    hdl[0]     = 0.0f;
-    hdu[m - 1] = 0.0f;
+    hdl[0]     = static_cast<T>(0);//std::numeric_limits<T>::infinity();
+    hdu[m - 1] = static_cast<T>(0);//std::numeric_limits<T>::infinity();
 
     // Host dense rhs
     host_vector<T> hB(ldb * n, static_cast<T>(7));
@@ -134,6 +134,31 @@ void testing_gtsv_no_pivot(const Arguments& arg)
             hB[j * ldb + i] = static_cast<T>(1);//j * ldb + i;//random_cached_generator<T>(-10, 10);
         }
     }
+
+    std::cout << "hdl" << std::endl;
+    for(size_t i = 0; i < hdl.size(); i++)
+    {
+        std::cout << hdl[i] << " ";
+    }
+    std::cout << "" << std::endl;
+    std::cout << "hd" << std::endl;
+    for(size_t i = 0; i < hd.size(); i++)
+    {
+        std::cout << hd[i] << " ";
+    }
+    std::cout << "" << std::endl;
+    std::cout << "hdu" << std::endl;
+    for(size_t i = 0; i < hdu.size(); i++)
+    {
+        std::cout << hdu[i] << " ";
+    }
+    std::cout << "" << std::endl;
+    std::cout << "hB" << std::endl;
+    for(size_t i = 0; i < hB.size(); i++)
+    {
+        std::cout << hB[i] << " ";
+    }
+    std::cout << "" << std::endl;
 
     host_vector<T> hB_original = hB;
 

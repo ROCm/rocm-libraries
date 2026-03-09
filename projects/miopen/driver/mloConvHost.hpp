@@ -737,8 +737,8 @@ int mloDirectSPConvHost5x5(int MLO_GRP_SZ1,
                             } // for (int k_j = 0; k_j < MLO_KERNEL_SZ1; ++k_j, bot_off1 +=
                               // MLO_BOT_STRIDE, wei_off += MLO_FILTER_SIZE1 * MLO_N_OUTPUTS *
                               // MLO_N_INPUTS)
-                        }     // for (int c = 0; c < MLO_N_INPUTS; ++c, bot_off +=
-                              // MLO_BOT_CHANNEL_STRIDE)
+                        } // for (int c = 0; c < MLO_N_INPUTS; ++c, bot_off +=
+                          // MLO_BOT_CHANNEL_STRIDE)
 
                         // output
                         int out_off = b * MLO_TOP_BATCH_STRIDE + o_base * MLO_TOP_CHANNEL_STRIDE +
@@ -1174,8 +1174,7 @@ bool mloVerify_mt(const miopenTensorDescriptor_t& cpu_,
                         {
                             match = false;
                             std::cout << "ULPs: " << ulps << " is too large (> " << ulps_tolerance
-                                      << ")"
-                                      << " at {" << b << ',' << c << ',';
+                                      << ")" << " at {" << b << ',' << c << ',';
                             if(spatial_dim == 3)
                                 std::cout << k << ',';
                             std::cout << j << ',' << i << "}, cpu_val = " << c_val

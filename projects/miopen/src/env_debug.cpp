@@ -84,8 +84,8 @@ template <class T>
 constexpr bool is_type_int = (std::is_integral_v<T> && !is_type_bool<T>);
 
 template <class T>
-constexpr bool is_type_str = (std::is_same_v<T, std::string> ||
-                              std::is_same_v<T, std::string_view>);
+constexpr bool is_type_str =
+    (std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>);
 
 struct LibEnvVar
 {

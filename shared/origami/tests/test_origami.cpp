@@ -545,32 +545,143 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
   }
 }
 
+TEST_CASE("Origami: select_staggerU unit test", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    if (gpu_arch != 950) continue;  // StaggerU tuned for gfx950
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - select_staggerU") {
+      auto hardware = make_hardware(gpu_arch);
+
+      // Helper to compute skGrid (no stream-K, just numMTs)
+      auto compute_skGrid = [](size_t M, size_t N, size_t MT_M, size_t MT_N) {
+        return ((M + MT_M - 1) / MT_M) * ((N + MT_N - 1) / MT_N);
+      };
+
+      // Test 1: Non-temporal access uses max_staggerU
+      {
+        auto problem = make_problem(4096, 4096, 2048);
+        auto config  = make_config(128, 128, 64, 16, 16, 32, false, 1, 1, 4, 0);  // nta=4
+        auto skGrid  = compute_skGrid(4096, 4096, 128, 128);
+        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        REQUIRE(result.staggerU == 32);
+      }
+
+      // Test 2: Batch > 1 should disable stagger
+      {
+        auto problem = make_problem(4096, 4096, 2048, origami::transpose_t::T, origami::transpose_t::N, 2);
+        auto config  = make_config(128, 128, 64, 16, 16, 32);
+        auto skGrid  = compute_skGrid(4096, 4096, 128, 128);
+        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        REQUIRE(result.staggerU == 0);
+      }
+
+      // Test 3: Split-K should disable stagger
+      {
+        auto problem = make_problem(1024, 1024, 1024);
+        auto config  = make_config(128, 128, 64, 16, 16, 32);
+        size_t numMTs = ((1024 + 127) / 128) * ((1024 + 127) / 128);  // 64
+        size_t skGrid = numMTs * 2;  // split_factor = 2
+        auto result   = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        REQUIRE(result.staggerU == 0);
+      }
+
+      // Test 4: Basic TN case — stagger should be enabled
+      {
+        auto problem = make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
+        auto config  = make_config(128, 128, 64, 16, 16, 32);
+        auto skGrid  = compute_skGrid(2048, 2048, 128, 128);
+        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        REQUIRE(result.staggerU > 0);
+        // StaggerU should be power of 2
+        REQUIRE((result.staggerU & (result.staggerU - 1)) == 0);
+      }
+
+      // Test 5: StaggerU mapping should be SUM1 for positive WGM when A contention dominates
+      // [1320, 256, 2048] MT=64x32x256 WGM=8: L2Tile_N=8 > L2Tile_M=4, row-mates share A
+      {
+        auto problem = make_problem(1320, 256, 2048, origami::transpose_t::T, origami::transpose_t::N);
+        problem.a_dtype = origami::data_type_t::BFloat16;
+        problem.b_dtype = origami::data_type_t::BFloat16;
+        auto config  = make_config(64, 32, 256, 16, 16, 32);
+        auto skGrid  = compute_skGrid(1320, 256, 64, 32);
+        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 8);
+        REQUIRE(result.staggerU > 0);
+        REQUIRE(result.staggerUMapping == 1);  // SUM1: distribute A reads
+      }
+
+      // Test 6: StaggerU mapping should be SUM0 when B contention dominates
+      // [128, 1024, 144] MT=32x64x16 WGM=1 FP32: L2Tile_M > L2Tile_N, B is the bottleneck
+      {
+        auto problem = make_problem(128, 1024, 144, origami::transpose_t::T, origami::transpose_t::N);
+        problem.a_dtype = origami::data_type_t::Float;
+        problem.b_dtype = origami::data_type_t::Float;
+        auto config  = make_config(32, 64, 16, 16, 16, 4);
+        auto skGrid  = compute_skGrid(128, 1024, 32, 64);
+        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 1);
+        REQUIRE(result.staggerU > 0);
+        REQUIRE(result.staggerUMapping == 0);  // SUM0: distribute B reads
+      }
+
+      // Test 7: StaggerU value should be power of 2 and <= 32
+      {
+        auto problem = make_problem(4096, 4096, 4096, origami::transpose_t::T, origami::transpose_t::N);
+        auto config  = make_config(128, 128, 64, 16, 16, 32);
+        auto skGrid  = compute_skGrid(4096, 4096, 128, 128);
+        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        if (result.staggerU > 0) {
+          REQUIRE(result.staggerU <= 32);
+          REQUIRE((result.staggerU & (result.staggerU - 1)) == 0);
+          REQUIRE(result.staggerUMapping <= 1);
+        }
+      }
+
+      // Test 8: Stride shift ensures each stagger step crosses a cache line
+      {
+        auto problem = make_problem(2048, 2048, 2048, origami::transpose_t::T, origami::transpose_t::N);
+        auto config  = make_config(64, 64, 16, 16, 16, 16);  // Small MT_K=16
+        auto skGrid  = compute_skGrid(2048, 2048, 64, 64);
+        auto result  = origami::select_staggerU(problem, hardware, config, skGrid, 4);
+        if (result.staggerU > 0) {
+          // With MT_K=16, bpe=2: bytes_per_k_iter=32 < 128, so shift should be > 0
+          size_t bytes_per_k = 16 * 2;  // MT_K * bpe
+          REQUIRE((bytes_per_k << result.staggerUStrideShift) >= 128);
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - select_workgroup_mapping unit test") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(4096, 4096, 8192);
-      auto config   = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 4, 5);
+      auto config   = make_config(256, 256, 32, 32, 32, 8, false, 1, 6, 0, 0);
       auto skGrid   = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
+      size_t numMT_M = (problem.size.m + config.mt.m - 1) / config.mt.m;
+      size_t numMT_N = (problem.size.n + config.mt.n - 1) / config.mt.n;
 
       // Default values
       size_t default_wgmxccchunk = 0;
-      size_t default_wgmxcc = hardware.NUM_XCD;
+      size_t default_wgmxcc      = hardware.NUM_XCD;
+      size_t chunk_size          = std::min((numMT_M * numMT_N + hardware.NUM_XCD - 1) / hardware.NUM_XCD, 
+                                            (hardware.N_CU + hardware.NUM_XCD - 1) / hardware.NUM_XCD);
 
       // Test 1: Test non-temporal cache hints (nta > 3, ntb < 4; nta < 4, ntb > 3; both > 3)
+      config.cache_hints_a = 4;
+      config.cache_hints_b = 3;
       auto out_wgm_1 =
-          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
-      REQUIRE(out_wgm_1.wgmxccchunk == default_wgmxccchunk);
+          origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta > 3, ntb < 4
+      REQUIRE(out_wgm_1.wgmxccchunk == chunk_size);
       REQUIRE(out_wgm_1.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_1.wgm == 1);
+      REQUIRE(out_wgm_1.wgm == numMT_N);
 
       config.cache_hints_a = 3;
       config.cache_hints_b = 4;
       auto out_wgm_2 =
           origami::select_workgroup_mapping(problem, hardware, config, skGrid);  // nta < 4, ntb > 3
-      REQUIRE(out_wgm_2.wgmxccchunk == default_wgmxccchunk);
+      REQUIRE(out_wgm_2.wgmxccchunk == chunk_size);
       REQUIRE(out_wgm_2.wgmxcc == default_wgmxcc);
-      REQUIRE(out_wgm_2.wgm == -1);
+      REQUIRE(out_wgm_2.wgm == -numMT_M);
 
       config.cache_hints_a = 4;
       config.cache_hints_b = 4;

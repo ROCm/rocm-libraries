@@ -119,6 +119,25 @@ rocsolver_<type>lange()
    :outline:
 .. doxygenfunction:: rocsolver_slange
 
+.. _gecon:
+
+rocsolver_<type>gecon()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_cgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_dgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_sgecon_64
+   :outline:
+.. doxygenfunction:: rocsolver_zgecon
+   :outline:
+.. doxygenfunction:: rocsolver_cgecon
+   :outline:
+.. doxygenfunction:: rocsolver_dgecon
+   :outline:
+.. doxygenfunction:: rocsolver_sgecon
 
 
 
