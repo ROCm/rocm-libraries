@@ -50,11 +50,14 @@ private:
     bool _finalized = false;
     hipdnnBackendDescriptorType_t _type = HIPDNN_INVALID_TYPE;
 
-public:
+    friend T;
+
     HipdnnBackendDescriptorImpl()
         : _type(getStaticType())
     {
     }
+
+public:
 
     void finalize() override
     {
