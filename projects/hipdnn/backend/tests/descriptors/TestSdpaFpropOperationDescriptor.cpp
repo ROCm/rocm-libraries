@@ -184,6 +184,16 @@ TEST_F(TestSdpaFpropOperationDescriptor, FinalizeWithRequiredAttributes)
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
+TEST_F(TestSdpaFpropOperationDescriptor, DoubleFinalizeThrows)
+{
+    // SdpaFpropOperationDescriptor::finalize() has no guard for already-finalized state.
+    // All required fields remain set after the first finalize, so the second call
+    // succeeds without throwing. This documents the current behavior.
+    makeFinalized();
+    auto desc = getDescriptor();
+    ASSERT_NO_THROW(desc->finalize());
+}
+
 class TestSdpaFpropOperationDescriptorFinalizeFailsWithout
     : public TestSdpaFpropOperationDescriptor,
       public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>
@@ -569,6 +579,26 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorFailsNullPointer)
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
+TEST_F(TestSdpaFpropOperationDescriptor, SetOptionalTensorDescriptorWrongTypeThrows)
+{
+    auto desc = getDescriptor();
+    int64_t dummy = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT, HIPDNN_TYPE_INT64, 1, &dummy),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, SetOptionalTensorDescriptorWrongElementCountThrows)
+{
+    auto desc = getDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT,
+                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                  2,
+                                                  &_attnMaskDesc),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
 // =============================================================================
 // SetAttribute Tests - Data Fields
 // =============================================================================
@@ -667,6 +697,26 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetComputeDataTypeWrongElementCount)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestSdpaFpropOperationDescriptor, SetOptionalScalarWrongTypeThrows)
+{
+    auto desc = getDescriptor();
+    int64_t val = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(
+            HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT, HIPDNN_TYPE_INT64, 1, &val),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, SetOptionalScalarWrongElementCountThrows)
+{
+    auto desc = getDescriptor();
+    float val = 0.5f;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(
+            HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT, HIPDNN_TYPE_FLOAT, 2, &val),
+        HIPDNN_STATUS_BAD_PARAM);
+}
+
 // =============================================================================
 // SetAttribute Error Cases
 // =============================================================================
@@ -689,6 +739,24 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetAttributeUnsupported)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_INT64, 1, &dummy),
+        HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, SetAttributeAfterFinalizeThrows)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_qDesc),
+        HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, SetAttributeUnsupportedNameThrows)
+{
+    auto desc = getDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->setAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_INT64, 1, &_qDesc),
         HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
@@ -831,6 +899,18 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeUnsupported)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_INT64, 1, nullptr, &dummy),
+        HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeUnsupportedNameThrows)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+    int64_t dummy = 0;
+    int64_t elementCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(
+            HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_INT64, 1, &elementCount, &dummy),
         HIPDNN_STATUS_NOT_SUPPORTED);
 }
 
