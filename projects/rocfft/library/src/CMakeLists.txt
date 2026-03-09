@@ -525,14 +525,6 @@ endif()
 # enable a configure-time option to skip kernel cache building
 option( ROCFFT_KERNEL_CACHE_ENABLE "Enable building rocFFT kernel cache" ON)
 
-# cache file should go next to the shared object - on Windows this
-# would be the DLL, not the import library.
-if( WIN32 )
-  set( ROCFFT_KERNEL_CACHE_PATH ${CMAKE_BINARY_DIR}/staging/rocfft_kernel_cache.db )
-else()
-  set( ROCFFT_KERNEL_CACHE_PATH ${CMAKE_BINARY_DIR}/library/src/rocfft_kernel_cache.db )
-endif()
-
 # ROCFFT_BUILD_KERNEL_CACHE_PATH may be specified as a temporary file
 # to collect compiled kernels before writing them out as part of the
 # build.  any kernels that already exist in this file will be reused
@@ -559,16 +551,41 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
-  add_custom_command(
-    OUTPUT rocfft_kernel_cache.db
-    COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${GPU_TARGETS_AOT}
-    DEPENDS rocfft_aot_helper rocfft_rtc_helper
-    COMMENT "Compile kernels into shipped cache file"
-  )
-  add_custom_target( rocfft_kernel_cache_target ALL
-    DEPENDS rocfft_kernel_cache.db
-    VERBATIM
-  )
+
+  # build separate kernel cache for each target
+  foreach( arch IN ITEMS ${GPU_TARGETS_AOT} )
+    # cache file should go next to the shared object - on Windows this
+    # would be the DLL, not the import library.
+    if( WIN32 )
+      set( arch_kernel_cache_path ${CMAKE_BINARY_DIR}/staging/rocfft_kernel_cache_${arch}.db )
+    else()
+      set( arch_kernel_cache_path ${CMAKE_BINARY_DIR}/library/src/rocfft_kernel_cache_${arch}.db )
+    endif()
+
+    add_custom_command(
+      OUTPUT rocfft_kernel_cache_${arch}.db
+      COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${arch_kernel_cache_path} $<TARGET_FILE:rocfft_rtc_helper> ${arch}
+      DEPENDS rocfft_aot_helper rocfft_rtc_helper
+      COMMENT "Compile ${arch} kernels into shipped cache file"
+    )
+    add_custom_target( rocfft_kernel_cache_${arch}_target ALL
+      DEPENDS rocfft_kernel_cache_${arch}.db
+      VERBATIM
+    )
+
+    # make each AOT build depend on the previous one, so that only one is
+    # running at a time.  The AOT build will itself spawn a bunch of
+    # processes to take advantage of multiple CPUs.
+    if( previous_arch )
+      add_dependencies( rocfft_kernel_cache_${arch}_target rocfft_kernel_cache_${previous_arch}_target )
+    endif()
+    set( previous_arch ${arch} )
+
+    # maintain a list of all cache files we produce for install
+    list( APPEND ROCFFT_KERNEL_CACHE_PATHS ${arch_kernel_cache_path} )
+
+  endforeach()
+
 endif()
 
 rocm_set_soversion( rocfft ${rocfft_SOVERSION} )
@@ -602,7 +619,7 @@ else()
 endif()
 
 if( NOT ENABLE_ASAN_PACKAGING AND ROCFFT_KERNEL_CACHE_ENABLE)
-  rocm_install(FILES ${ROCFFT_KERNEL_CACHE_PATH}
+  rocm_install(FILES ${ROCFFT_KERNEL_CACHE_PATHS}
     DESTINATION "${ROCFFT_KERNEL_CACHE_INSTALL_DIR}"
     COMPONENT runtime
   )

@@ -304,6 +304,8 @@ globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the
 
 globalParameters["DisableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
 
+globalParameters["RocProfCounter"] = None # No rocprof counter
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)

@@ -65,13 +65,13 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         Validates that when multiple MFMA instructions are issued back-to-back,
         the estimated quad-cycles account for the execution latency and stalling.
         """
-        target_mfma = MFMA(issued_at=_pos(3, 0))
+        target_mfma = MFMA(name="MFMA", issued_at=_pos(3, 0))
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=_pos(-1, 0), needed_by=target_mfma)
         all_instructions = [
             pack0,
-            MFMA(issued_at=_pos(0, 0)),
-            MFMA(issued_at=_pos(1, 0)),
-            MFMA(issued_at=_pos(2, 0)),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
+            MFMA(name="MFMA", issued_at=_pos(1, 0)),
+            MFMA(name="MFMA", issued_at=_pos(2, 0)),
             target_mfma,
         ]
         # +4x3 for the 3 MFMAs to issue + finish
@@ -82,12 +82,12 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         """
         Test that consecutive non-MFMA instructions are estimated correctly.
         """
-        target_snop = SNop(issued_at=_pos(-1, 3), wait_state=0)
+        target_snop = SNop(name="SNop", issued_at=_pos(-1, 3), wait_state=0)
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=_pos(-1, 0), needed_by=target_snop)
         all_instructions = [
             pack0,
-            SNop(issued_at=_pos(-1, 1), wait_state=0),
-            SNop(issued_at=_pos(-1, 2), wait_state=0),
+            SNop(name="SNop", issued_at=_pos(-1, 1), wait_state=0),
+            SNop(name="SNop", issued_at=_pos(-1, 2), wait_state=0),
             target_snop,
         ]
         # +1 for 1st SNop
@@ -102,14 +102,14 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         the cycle estimation reflects parallel execution on different execution units,
         with no unnecessary stalls between these independent instruction types.
         """
-        target_mfma = MFMA(issued_at=_pos(1, 0))
+        target_mfma = MFMA(name="MFMA", issued_at=_pos(1, 0))
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=_pos(-1, 0), needed_by=target_mfma)
         all_instructions = [
             pack0,
-            MFMA(issued_at=_pos(0, 0)),
-            SNop(issued_at=_pos(0, 1), wait_state=0),
-            SNop(issued_at=_pos(0, 2), wait_state=0),
-            SNop(issued_at=_pos(0, 3), wait_state=0),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
+            SNop(name="SNop", issued_at=_pos(0, 1), wait_state=0),
+            SNop(name="SNop", issued_at=_pos(0, 2), wait_state=0),
+            SNop(name="SNop", issued_at=_pos(0, 3), wait_state=0),
             target_mfma
         ]
         # +1 for MFMA to issue
@@ -124,15 +124,15 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         an MFMA immediately before the window boundary does not cause stalls for the
         first instruction, as they execute on different hardware units.
         """
-        target_mfma = MFMA(issued_at=_pos(1, 0))
+        target_mfma = MFMA(name="MFMA", issued_at=_pos(1, 0))
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=_pos(0, 1), needed_by=target_mfma)
         all_instructions = [
-            MFMA(issued_at=_pos(0, 0)),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
             # Window starts with Pack
             pack0,
-            SNop(issued_at=_pos(0, 2), wait_state=0),
-            SNop(issued_at=_pos(0, 3), wait_state=0),
-            SNop(issued_at=_pos(0, 4), wait_state=0),
+            SNop(name="SNop", issued_at=_pos(0, 2), wait_state=0),
+            SNop(name="SNop", issued_at=_pos(0, 3), wait_state=0),
+            SNop(name="SNop", issued_at=_pos(0, 4), wait_state=0),
             target_mfma
         ]
         self.validate(pack0, 3, all_instructions)
@@ -147,14 +147,14 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         MFMA instruction. This tests the propagation of stall effects across instruction
         types.
         """
-        target_snop = SNop(issued_at=_pos(1, 2), wait_state=0)
+        target_snop = SNop(name="SNop", issued_at=_pos(1, 2), wait_state=0)
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=_pos(0, 1), needed_by=target_snop)
         all_instructions = [
-            MFMA(issued_at=_pos(0, 0)),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
             # Window starts with Pack
             pack0,
-            MFMA(issued_at=_pos(1, 0)),  # +2 qs of stall
-            SNop(issued_at=_pos(1, 1), wait_state=0),
+            MFMA(name="MFMA", issued_at=_pos(1, 0)),  # +2 qs of stall
+            SNop(name="SNop", issued_at=_pos(1, 1), wait_state=0),
             target_snop
         ]
         # +3 quad-cycles for MFMA before window to finish.
@@ -169,16 +169,16 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         The effect of this is that the issuing of the MFMA is stalled,
         but the number of quad-cycles in the window is smaller than in the tests above.
         """
-        target_snop = SNop(issued_at=_pos(2, 2), wait_state=0)
+        target_snop = SNop(name="SNop", issued_at=_pos(2, 2), wait_state=0)
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=_pos(0, 1), needed_by=target_snop)
         all_instructions = [
-            MFMA(issued_at=_pos(0, 0)),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
             # Window starts with Pack
             pack0,
-            MFMA(issued_at=_pos(1, 0)),
-            SNop(issued_at=_pos(1, 1), wait_state=0),
-            MFMA(issued_at=_pos(2, 0)),  # +2 qs of stall
-            SNop(issued_at=_pos(2, 1), wait_state=0),
+            MFMA(name="MFMA", issued_at=_pos(1, 0)),
+            SNop(name="SNop", issued_at=_pos(1, 1), wait_state=0),
+            MFMA(name="MFMA", issued_at=_pos(2, 0)),  # +2 qs of stall
+            SNop(name="SNop", issued_at=_pos(2, 1), wait_state=0),
             target_snop
         ]
         # +1 for Pack to issue
@@ -192,11 +192,11 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         The 5th and 6th Pack for 4x4MFMA are MFMAs which take 1 cycle to finish.
         Ensure that we can issue things in parallel with them.
         """
-        target_snop = SNop(issued_at=_pos(-1, 2), wait_state=0)
+        target_snop = SNop(name="SNop", issued_at=_pos(-1, 2), wait_state=0)
         pack0 = MFMAPack(name="PackA0", issue_index=5, issued_at=_pos(-1, 0), needed_by=target_snop)
         all_instructions = [
             pack0,
-            SNop(issued_at=_pos(-1, 1), wait_state=1),
+            SNop(name="SNop", issued_at=_pos(-1, 1), wait_state=1),
             target_snop,
         ]
         # +1 for Pack to finish (SNop issues in parallel)
@@ -207,11 +207,11 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         """
         Extra 4 quad-cycle latency associated with switching MFMA type.
         """
-        target_snop = SNop(issued_at=_pos(0, 1), wait_state=0)
+        target_snop = SNop(name="SNop", issued_at=_pos(0, 1), wait_state=0)
         pack0 = MFMAPack(name="PackA0", issue_index=5, issued_at=_pos(-1, 0), needed_by=target_snop)
         all_instructions = [
             pack0,
-            MFMA(issued_at=_pos(0, 0)),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
             target_snop,
         ]
         # +1 for Pack to finish (MFMA stalls)
@@ -223,12 +223,12 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         """
         4x4 -> 16x16 has extra 4 quad-cycle latency only when issuing in the first 3 quad-cycles after the MFMA.
         """
-        target_snop = SNop(issued_at=_pos(0, 1), wait_state=0)
+        target_snop = SNop(name="SNop", issued_at=_pos(0, 1), wait_state=0)
         pack0 = MFMAPack(name="PackA0", issue_index=5, issued_at=_pos(-1, 0), needed_by=target_snop)
         all_instructions = [
             pack0,
-            SNop(issued_at=_pos(-1, 1), wait_state=1),
-            MFMA(issued_at=_pos(0, 0)),
+            SNop(name="SNop", issued_at=_pos(-1, 1), wait_state=1),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
             target_snop,
         ]
         # +1 for Pack to finish (Snop issue hidden)
@@ -240,11 +240,11 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         """
         Extra 4 quad-cycle latency associated with switching MFMA type.
         """
-        target_snop = SNop(issued_at=_pos(0, 2), wait_state=0)
+        target_snop = SNop(name="SNop", issued_at=_pos(0, 2), wait_state=0)
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=_pos(-1, 0), needed_by=target_snop)
         all_instructions = [
             pack0,
-            MFMA(issued_at=_pos(0, 0)),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
             MFMAPack(name="PackA0", issue_index=5, issued_at=_pos(0, 1)),
             target_snop,
         ]
@@ -258,12 +258,12 @@ class TestEstimateQuadCyclesValidator(unittest.TestCase):
         """
         16x16 -> 4x4 has extra 4 quad-cycle latency only when issuing in the first 4 quad-cycles after the MFMA.
         """
-        target_snop = SNop(issued_at=_pos(0, 3), wait_state=0)
+        target_snop = SNop(name="SNop", issued_at=_pos(0, 3), wait_state=0)
         pack0 = Pack(name="Pack0", issue_index=0, issued_at=_pos(-1, 0), needed_by=target_snop)
         all_instructions = [
             pack0,
-            MFMA(issued_at=_pos(0, 0)),
-            SNop(issued_at=_pos(0, 1), wait_state=3),
+            MFMA(name="MFMA", issued_at=_pos(0, 0)),
+            SNop(name="SNop", issued_at=_pos(0, 1), wait_state=3),
             MFMAPack(name="PackA0", issue_index=5, issued_at=_pos(0, 2)),
             target_snop,
         ]
