@@ -255,18 +255,10 @@ switch branches or merge changes in Git to ensure any large binaries are kept in
 Installing the dependencies manually
 ===============================================================
 
-If you're using Ubuntu v16, you can install the ``Boost`` packages using:
+If you're using Ubuntu, you can install the ``BZip2`` packages using:
 
 .. code:: shell
 
-   sudo apt-get install libboost-dev
-   sudo apt-get install libboost-system-dev
-   sudo apt-get install libboost-filesystem-dev
-
-.. note::
-
-   By default, MIOpen attempts to build with Boost statically linked libraries. To build
-   with dynamically linked Boost libraries, use the ``-DBoost_USE_STATIC_LIBS=Off`` flag during the
-   configuration stage. However, this is not recommended.
+   sudo apt-get install libbz2-dev
 
 You must install the ``half`` header from the `half website <http://half.sourceforge.net/>`_.

@@ -8,7 +8,11 @@ import shutil
 import stat
 import subprocess
 import sys
+from io import StringIO
 from pathlib import Path
+
+import pylint.lint
+import pylint.reporters.text
 
 try:
     from tqdm.auto import tqdm
@@ -78,12 +82,12 @@ def run_isort(path: Path):
     format_and_patch(f"isort --profile black --quiet --check --diff {path}", path)
 
 
-def get_cpp_files(dir: Path):
+def get_cpp_files(dir: Path) -> list[Path]:
     cpp_suffixes = {".h", ".hpp", ".cpp", ".h.in", ".hpp.in", ".cpp.in"}
     return [p for x in git.ls_tree(dir) if (p := Path(x)).suffix in cpp_suffixes]
 
 
-def get_py_files(dir: Path):
+def get_py_files(dir: Path) -> list[Path]:
     paths = []
     for x in git.ls_tree(dir):
         p = Path(x)
@@ -111,11 +115,26 @@ def fix_cpp(dir: Path):
     write("Done.")
 
 
+def lint_python(dir: Path):
+    pylint_output = StringIO()
+    reporter = pylint.reporters.text.TextReporter(pylint_output)
+    pylint.lint.Run(
+        [str(x) for x in get_py_files(dir)] + ["--disable=C"],
+        reporter=reporter,
+        exit=False,
+    )
+
+    # For now, just print out results
+    print(pylint_output.getvalue())
+
+
 def check_python(dir: Path):
     command = ["flake8"]
     write(" ".join(command))
 
     subprocess.run(command, cwd=dir, check=False)
+
+    lint_python(dir)
 
 
 def fix_python(dir: Path):
