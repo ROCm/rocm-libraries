@@ -61,6 +61,7 @@ table PointwiseAttributes {
     relu_lower_clip: float = null;
     relu_upper_clip: float = null;
     relu_lower_clip_slope: float = null;
+    // Plain axis index (not a tensor UID). Used by GEN_INDEX mode.
     axis_tensor_uid: long = null;
     in_0_tensor_uid: long;
     in_1_tensor_uid: long = null;
