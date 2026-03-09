@@ -111,10 +111,7 @@ inline float fp8_e8m0_bits_to_float(uint8_t bits) noexcept
         // 2^-127 cannot be represented exactly as a normal float.
         // The closest is 2^-126 * 0.5 = 2^-127, which requires mantissa = 0.5.
         // Float bit pattern: sign=0, exp=0, mantissa=0x400000 (2^22 = 0.5 in denorm)
-        uint32_t floatBits = 0x00400000; // denorm representing 2^-127
-        float f;
-        std::memcpy(&f, &floatBits, sizeof(float));
-        return f;
+        return 0x1p-127f;
     }
 
     uint32_t floatBits = static_cast<uint32_t>(bits) << 23;
