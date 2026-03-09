@@ -52,6 +52,7 @@ add_executable(
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
     TestNode.cpp
+    TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp
     TestSdpaFpropNode.cpp
     TestPointwiseAttributes.cpp

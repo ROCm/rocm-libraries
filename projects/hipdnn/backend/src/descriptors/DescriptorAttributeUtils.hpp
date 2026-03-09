@@ -9,6 +9,7 @@
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
 #include "HipdnnNormFwdPhase.h"
+#include "HipdnnOperationType.h"
 #include "HipdnnPointwiseMode.h"
 #include "TensorDescriptor.hpp"
 #include <cstring>
@@ -120,6 +121,13 @@ void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
                  int64_t* elementCount,
                  void* arrayOfElements,
                  const char* errorPrefix);
+
+void getOperationType(hipdnnOperationType_t source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix);
 
 void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
                       hipdnnBackendAttributeType_t attributeType,
