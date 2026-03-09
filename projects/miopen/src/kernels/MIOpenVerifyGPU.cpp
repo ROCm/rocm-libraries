@@ -291,7 +291,7 @@ __launch_bounds__(BLOCK_SZ) void VerifyGPUKernel(const FLOAT_UUT* __restrict__ u
                                                  FLOAT_ACCUM* error,
                                                  [[maybe_unused]] FLOAT_ACCUM* max)
 {
-    if constexpr(DO_VALIDATE == 1)
+    if constexpr(CHECK_NUMERIC_PROPERTIES == 1)
     {
         size_t tid  = threadIdx.x;
         size_t gid  = blockIdx.x * blockDim.x + tid;

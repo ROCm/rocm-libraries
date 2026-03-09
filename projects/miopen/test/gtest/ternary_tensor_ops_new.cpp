@@ -90,9 +90,11 @@ template <typename T,
           test::adaptive::UnitUnderTest UUT    = test::adaptive::UnitUnderTest::naiveGPU,
           test::adaptive::TestReference REF    = test::adaptive::TestReference::naiveCPU,
           test::adaptive::AfterTestFailure ATF = test::adaptive::AfterTestFailure::none,
-          test::adaptive::VerifyOption VER     = test::adaptive::VerifyOption::noValidateAndRMS>
-struct TensorOpsCommonNew : public test::adaptive::AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>,
-                            public testing::TestWithParam<TestCase>
+          test::adaptive::VerifyOption VER     = test::adaptive::VerifyOption::rms,
+          bool CheckNumericProperties          = false>
+struct TensorOpsCommonNew
+    : public test::adaptive::AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>,
+      public testing::TestWithParam<TestCase>
 {
 private:
     tensor<T> tensorA;
@@ -105,7 +107,7 @@ private:
     size_t input_sz;
 
     // std::vector<T> naiveGPUData;
-    std::vector<T> naiveCPUData;
+    std::vector<T> naiveCPUData{};
 
     constexpr const void* GetUUTDataDev()
     {
@@ -138,12 +140,14 @@ protected:
         {
             GTEST_SKIP() << "Test configuration is incorrect";
         }
-        test::adaptive::SetUpSharedVerifyData<T, TVerify, UUT, REF, ATF, VER>();
+        test::adaptive::
+            SetUpSharedVerifyData<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>();
     }
 
     static void TearDownTestSuite()
     {
-        test::adaptive::TearDownSharedVerifyData<T, TVerify, UUT, REF, ATF, VER>();
+        test::adaptive::
+            TearDownSharedVerifyData<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>();
     }
 
     void SetUp() override
@@ -186,8 +190,6 @@ protected:
             return tensor<T>{lens}.generate(tensor_elem_gen_integer{max_value});
         }
     }
-
-    miopenStatus_t RunOptimizedGPU() override { return miopenStatusNotImplemented; }
     miopenStatus_t RunNaiveGPU() override
     {
         const TestCase& testCase = GetParam();
@@ -216,7 +218,7 @@ protected:
 
         return miopenStatusSuccess;
     }
-    miopenStatus_t RunOptimizedCPU() override { return miopenStatusNotImplemented; }
+
     miopenStatus_t RunNaiveCPU() override
     {
         const TestCase& testCase = GetParam();

@@ -121,7 +121,7 @@ template <typename XDataType,
           test::adaptive::UnitUnderTest UUT    = test::adaptive::UnitUnderTest::naiveGPU,
           test::adaptive::TestReference REF    = test::adaptive::TestReference::naiveCPU,
           test::adaptive::AfterTestFailure ATF = test::adaptive::AfterTestFailure::none,
-          test::adaptive::VerifyOption VER     = test::adaptive::VerifyOption::validateAndRMS>
+          test::adaptive::VerifyOption VER     = test::adaptive::VerifyOption::rms>
 struct BNFwdTrainTestNew
     : public test::adaptive::AdaptiveTest<XDataType, TVerify, UUT, REF, ATF, VER>,
       public ::testing::TestWithParam<std::tuple<TestCase,
@@ -249,8 +249,6 @@ protected:
                   bn_fwd_train_test_data.saveVariance_ref.end(),
                   std::numeric_limits<YDataType>::quiet_NaN());
     }
-
-    miopenStatus_t RunOptimizedGPU() override { return miopenStatusNotImplemented; }
 
     miopenStatus_t RunNaiveGPU() override
     {
@@ -389,8 +387,6 @@ protected:
         // }
         return res;
     }
-
-    miopenStatus_t RunOptimizedCPU() override { return miopenStatusNotImplemented; }
 
     miopenStatus_t RunNaiveCPU() override
     {

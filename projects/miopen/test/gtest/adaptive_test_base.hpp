@@ -83,12 +83,9 @@ enum class AfterTestFailure
 
 enum class VerifyOption
 {
-    noValidateAndRMS      = 0,
-    noValidateAndMAE      = 1,
-    noValidateAndMismatch = 2,
-    validateAndRMS        = 3,
-    validateAndMAE        = 4,
-    validateAndMismatch   = 5,
+    rms      = 0,
+    mae      = 1,
+    mismatch = 2,
 };
 
 constexpr bool IsValidUUT(UnitUnderTest uut)
@@ -170,7 +167,8 @@ template <typename T,
           UnitUnderTest UUT,
           TestReference REF,
           AfterTestFailure ATF,
-          VerifyOption VER>
+          VerifyOption VER,
+          bool CheckNumericProperties>
 class AdaptiveTest;
 
 template <typename T,
@@ -178,7 +176,8 @@ template <typename T,
           UnitUnderTest UUT,
           TestReference REF,
           AfterTestFailure ATF,
-          VerifyOption VER>
+          VerifyOption VER,
+          bool CheckNumericProperties>
 static void SetUpSharedVerifyData();
 
 template <typename T,
@@ -186,7 +185,8 @@ template <typename T,
           UnitUnderTest UUT,
           TestReference REF,
           AfterTestFailure ATF,
-          VerifyOption VER>
+          VerifyOption VER,
+          bool CheckNumericProperties>
 static void TearDownSharedVerifyData();
 
 /**
@@ -202,7 +202,8 @@ template <typename T,
           UnitUnderTest UUT,
           TestReference REF,
           AfterTestFailure ATF,
-          VerifyOption VER>
+          VerifyOption VER,
+          bool CheckNumericProperties = true>
 class AdaptiveTest
 {
 private:
@@ -380,20 +381,22 @@ private:
     inline static TVerify* mismatch_dev = nullptr;
 
 public:
-    template <typename T_f,
-              typename TVerify_f,
-              UnitUnderTest UUT_f,
-              TestReference REF_f,
-              AfterTestFailure ATF_f,
-              VerifyOption VER_f>
+    template <typename T_,
+              typename TVerify_,
+              UnitUnderTest UUT_,
+              TestReference REF_,
+              AfterTestFailure ATF_,
+              VerifyOption VER_,
+              bool CheckNumericProperties_>
     friend void SetUpSharedVerifyData();
 
-    template <typename T_f,
-              typename TVerify_f,
-              UnitUnderTest UUT_f,
-              TestReference REF_f,
-              AfterTestFailure ATF_f,
-              VerifyOption VER_f>
+    template <typename T_,
+              typename TVerify_,
+              UnitUnderTest UUT_,
+              TestReference REF_,
+              AfterTestFailure ATF_,
+              VerifyOption VER_,
+              bool CheckNumericProperties_>
     friend void TearDownSharedVerifyData();
 
 protected:
@@ -414,10 +417,12 @@ protected:
      * miopenStatusNotImplemented - if corresponding implementation does not exists.
      * miopenStatusSuccess        - if correspongin implementation exists.
      */
-    virtual miopenStatus_t RunOptimizedGPU() = 0;
-    virtual miopenStatus_t RunNaiveGPU()     = 0;
-    virtual miopenStatus_t RunOptimizedCPU() = 0;
-    virtual miopenStatus_t RunNaiveCPU()     = 0;
+    virtual miopenStatus_t RunOptimizedGPU() { return miopenStatusNotImplemented; }
+    virtual miopenStatus_t RunNaiveGPU() { return miopenStatusNotImplemented; }
+    virtual miopenStatus_t RunOptimizedCPU() { return miopenStatusNotImplemented; }
+    virtual miopenStatus_t RunNaiveCPU() { return miopenStatusNotImplemented; }
+    virtual miopenStatus_t RunRobustGPU() { return miopenStatusNotImplemented; }
+    virtual miopenStatus_t RunRobustCPU() { return miopenStatusNotImplemented; }
 
     /**
      * Use EXPECT_* instead of ASSERT_* in verifying function so that on failure execution can
@@ -441,9 +446,7 @@ protected:
     {
         bool all_zeros_uut = true, all_zeros_ref = true, all_finite_and_not_nan_uut = true,
              all_finite_and_not_nan_ref = true;
-        if constexpr(VER == VerifyOption::validateAndMAE ||
-                     VER == VerifyOption::validateAndMismatch ||
-                     VER == VerifyOption::validateAndRMS)
+        if constexpr(CheckNumericProperties)
         {
             all_zeros_uut = miopen::range_zero(uut);
             all_zeros_ref = miopen::range_zero(ref);
@@ -455,12 +458,11 @@ protected:
 
         TVerify error = static_cast<TVerify>(0);
 
-        if constexpr(VER == VerifyOption::noValidateAndMAE || VER == VerifyOption::validateAndMAE)
+        if constexpr(VER == VerifyOption::mae)
         {
             error = miopen::max_diff_v2(uut, ref);
         }
-        else if constexpr(VER == VerifyOption::noValidateAndRMS ||
-                          VER == VerifyOption::validateAndRMS)
+        else if constexpr(VER == VerifyOption::rms)
         {
             error = miopen::rms_range(uut, ref);
         }
@@ -516,15 +518,13 @@ protected:
         std::string file     = "MIOpenVerifyGPU.cpp";
         std::string kernel_name = "VerifyGPUKernel";
 
-        if constexpr(VER == VerifyOption::noValidateAndMAE ||
-                     VER == VerifyOption::noValidateAndMismatch ||
-                     VER == VerifyOption::noValidateAndRMS)
+        if constexpr(CheckNumericProperties)
         {
-            param += " -DDO_VALIDATE=0";
+            param += " -DCHECK_NUMERIC_PROPERTIES=1";
         }
         else
         {
-            param += " -DDO_VALIDATE=1";
+            param += " -DCHECK_NUMERIC_PROPERTIES=0";
         }
 
         if constexpr(std::is_same_v<UUT_Type, double>)
@@ -562,7 +562,7 @@ protected:
         }
         // add support to other missing types
 
-        if constexpr(VER == VerifyOption::noValidateAndRMS || VER == VerifyOption::validateAndRMS)
+        if constexpr(VER == VerifyOption::rms)
         {
             algo += "_RMS";
             net_conf = algo + "_" + std::to_string(vld[0]) + "_" +
@@ -594,8 +594,7 @@ protected:
             TVerify max = std::max({*max_dev, std::numeric_limits<TVerify>::min()});
             error       = std::sqrt(*rms_dev) / (std::sqrt(sz) * max);
         }
-        else if constexpr(VER == VerifyOption::noValidateAndMAE ||
-                          VER == VerifyOption::validateAndMAE)
+        else if constexpr(VER == VerifyOption::mae)
         {
             algo += "_MAE";
             net_conf = algo + "_" + std::to_string(vld[0]) + "_" + std::to_string(miopen_type<T>{});
@@ -690,27 +689,33 @@ template <typename T,
           UnitUnderTest UUT,
           TestReference REF,
           AfterTestFailure ATF,
-          VerifyOption VER>
+          VerifyOption VER,
+          bool CheckNumericProperties = true>
 static void SetUpSharedVerifyData()
 {
-    HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev,
-                               sizeof(*AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev)));
-    if constexpr(VER == VerifyOption::noValidateAndRMS || VER == VerifyOption::validateAndRMS)
+    HIP_CHECK(hipMallocManaged(
+        &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::res_dev,
+        sizeof(*AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::res_dev)));
+    if constexpr(VER == VerifyOption::rms)
     {
-        HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::rms_dev,
-                                   sizeof(TVerify)));
-        HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::max_dev,
-                                   sizeof(TVerify)));
+        HIP_CHECK(hipMallocManaged(
+            &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::rms_dev,
+            sizeof(TVerify)));
+        HIP_CHECK(hipMallocManaged(
+            &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::max_dev,
+            sizeof(TVerify)));
     }
-    else if constexpr(VER == VerifyOption::noValidateAndMAE || VER == VerifyOption::validateAndMAE)
+    else if constexpr(VER == VerifyOption::mae)
     {
-        HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mae_dev,
-                                   sizeof(TVerify)));
+        HIP_CHECK(hipMallocManaged(
+            &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::mae_dev,
+            sizeof(TVerify)));
     }
     else
     {
-        HIP_CHECK(hipMallocManaged(&AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mismatch_dev,
-                                   sizeof(TVerify)));
+        HIP_CHECK(hipMallocManaged(
+            &AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::mismatch_dev,
+            sizeof(TVerify)));
     }
 }
 
@@ -719,22 +724,28 @@ template <typename T,
           UnitUnderTest UUT,
           TestReference REF,
           AfterTestFailure ATF,
-          VerifyOption VER>
+          VerifyOption VER,
+          bool CheckNumericProperties = true>
 static void TearDownSharedVerifyData()
 {
-    HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::res_dev));
-    if constexpr(VER == VerifyOption::noValidateAndRMS || VER == VerifyOption::validateAndRMS)
+    HIP_CHECK(
+        hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::res_dev));
+    if constexpr(VER == VerifyOption::rms)
     {
-        HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::rms_dev));
-        HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::max_dev));
+        HIP_CHECK(
+            hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::rms_dev));
+        HIP_CHECK(
+            hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::max_dev));
     }
-    else if constexpr(VER == VerifyOption::noValidateAndMAE || VER == VerifyOption::validateAndMAE)
+    else if constexpr(VER == VerifyOption::mae)
     {
-        HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mae_dev));
+        HIP_CHECK(
+            hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::mae_dev));
     }
     else
     {
-        HIP_CHECK(hipFree(AdaptiveTest<T, TVerify, UUT, REF, ATF, VER>::mismatch_dev));
+        HIP_CHECK(hipFree(
+            AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>::mismatch_dev));
     }
 }
 
