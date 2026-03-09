@@ -264,6 +264,67 @@ stage('Selective Test') {
     ctest -R "$(jq -r '.regex' tests_to_run.json)"
 ```
 
+### Jenkins Integration with Safety Checks
+
+The smart build system integrates with Jenkins CI using the `ci_safety_check.sh` script that determines when to use selective vs full builds:
+
+**Script:** [ci_safety_check.sh](ci_safety_check.sh)
+
+**Usage in Jenkinsfile:**
+```groovy
+stage('Safety Check') {
+    steps {
+        script {
+            def buildMode = sh(
+                script: 'bash script/dependency-parser/ci_safety_check.sh',
+                returnStatus: true
+            )
+            env.USE_SMART_BUILD = (buildMode == 0) ? 'true' : 'false'
+        }
+    }
+}
+
+stage('Build and Test') {
+    steps {
+        script {
+            if (env.USE_SMART_BUILD == 'true') {
+                // Selective build path
+                sh '''
+                    python3 script/dependency-parser/main.py cmake-parse \
+                        compile_commands.json build.ninja --parallel 32
+                    python3 script/dependency-parser/main.py select \
+                        cmake_dependency_mapping.json origin/${CHANGE_TARGET} HEAD
+                    ninja $(jq -r '.executables[]' tests_to_run.json)
+                    ctest -R "$(jq -r '.regex' tests_to_run.json)"
+                '''
+            } else {
+                // Full build path
+                sh 'ninja && ctest'
+            }
+        }
+    }
+}
+```
+
+**Automatic Full Build Triggers:**
+1. **Nightly/Scheduled Builds** - Triggered when `FORCE_CI=true` (set by Jenkins cron)
+2. **Build System Changes** - When CMakeLists.txt or cmake/*.cmake files are modified
+3. **Stale Cache** - When dependency cache is older than 7 days
+4. **Manual Override** - When `DISABLE_SMART_BUILD=true` is set
+
+**Environment Variables:**
+- `FORCE_CI` - Set by Jenkins for nightly builds
+- `CHANGE_TARGET` - Base branch for PR builds (e.g., "develop")
+- `CHANGE_ID` - PR identifier (indicates PR build vs branch build)
+- `BASE_BRANCH` - Override base branch (default: "develop")
+- `DISABLE_SMART_BUILD` - Manual override to force full build
+
+**PR Build Behavior:** For pull requests, the entire PR is compared against the base branch (not just incremental commits), ensuring all affected tests are identified.
+
+**Exit Codes:**
+- `0` = Selective build OK (use smart build)
+- `1` = Full build required
+
 ## Performance
 
 Benchmarks on Composable Kernel (7,892 source files):
