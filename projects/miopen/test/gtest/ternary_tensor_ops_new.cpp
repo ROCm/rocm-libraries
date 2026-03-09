@@ -104,7 +104,7 @@ private:
 
     size_t input_sz;
 
-    std::vector<T> naiveGPUData;
+    // std::vector<T> naiveGPUData;
     std::vector<T> naiveCPUData;
 
     constexpr const void* GetUUTDataDev()

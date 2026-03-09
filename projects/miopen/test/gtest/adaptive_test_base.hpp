@@ -367,9 +367,9 @@ private:
         }
     };
 
-    bool test_passed;
-    std::unordered_map<std::string, TVerify> failure_errors;
-    ErrorAnalysisInfo info;
+    bool test_passed = true;
+    std::unordered_map<std::string, TVerify> failure_errors{};
+    ErrorAnalysisInfo info{};
 
     static constexpr int verify_block_size = 1024;
 
@@ -397,14 +397,14 @@ public:
     friend void TearDownSharedVerifyData();
 
 protected:
-    TestReference current_REF;
+    TestReference current_REF = REF;
 
-    AdaptiveTest() : test_passed(true)
-    {
-        failure_errors = std::unordered_map<std::string, TVerify>{};
-        info           = ErrorAnalysisInfo{};
-        current_REF    = REF;
-    }
+    // AdaptiveTest() : test_passed(true)
+    // {
+    //     failure_errors = std::unordered_map<std::string, TVerify>{};
+    //     info           = ErrorAnalysisInfo{};
+    //     current_REF    = REF;
+    // }
 
     /**
      * Invoking corresponding implementation. These should be able to be called several times
