@@ -156,6 +156,12 @@ cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
 cmake -GNinja -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/another/path ..
 ```
 
+### rocm-libraries Superbuild
+
+The superbuild allows you to build hipdnn + dnn-providers in the same build making it easier to do cross project changes.
+
+See [Superbuild](./Superbuild.md) documentation for usage.
+
 ### Clang Tools
 
 Different versions of Clang tools are required. For example, clang-format version 18 and clang-tidy version 20. The hipDNN project tool discovery provides two mechanism to assist with finding the needed version of each tool.
