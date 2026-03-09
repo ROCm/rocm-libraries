@@ -21,7 +21,20 @@
 *
 * ************************************************************************ */
 
-#include "testing.hpp"
+
+#include "auto_testing_bad_arg.hpp"
+#include "display.hpp"
+#include "flops.hpp"
+#include "gbyte.hpp"
+#include "rocsparse.hpp"
+#include "rocsparse_check.hpp"
+#include "rocsparse_graph.hpp"
+#include "rocsparse_matrix_factory.hpp"
+#include "rocsparse_reproducibility.hpp"
+#include "rocsparse_reproducibility_test_save.hpp"
+#include "rocsparse_traits.hpp"
+#include "rocsparse_vector_utils.hpp"
+#include "utility.hpp"
 
 namespace rocsparse_clients
 {
@@ -49,7 +62,7 @@ namespace rocsparse_clients
             host_dense_vector<T>* that = new host_dense_vector<T>(size);
             T*                    d    = that->data();
             for(int64_t i = 0; i < size; ++i)
-                d[i] = 1;
+	      d[i] = 1;
             return that;
         }
         ~dense_vector_t()

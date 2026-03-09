@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,15 +23,15 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef ROCSPARSE_MATRIX_ELL_HPP
-#define ROCSPARSE_MATRIX_ELL_HPP
+#ifndef ROCSPARSE_MATRIX_BELL_HPP
+#define ROCSPARSE_MATRIX_BELL_HPP
 
 #include "rocsparse_vector.hpp"
 
 #include "rocsparse_clients_routine_trace.hpp"
 
 template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
-struct ell_matrix
+struct bell_matrix
 {
     template <typename S>
     using array_t = typename memory_traits<MODE>::template array_t<S>;
@@ -39,26 +39,29 @@ struct ell_matrix
     I                      m{};
     I                      n{};
     I                      width{};
-    int64_t                nnz{};
+    rocsparse_direction    bdir{};
+    I                      bdim{1};
     rocsparse_index_base   base{};
     rocsparse_storage_mode storage_mode{rocsparse_storage_mode_sorted};
     array_t<I>             ind{};
     array_t<T>             val{};
 
-    ell_matrix(){};
-    ~ell_matrix(){};
+    bell_matrix(){};
+    ~bell_matrix(){};
 
-    ell_matrix(I m_, I n_, I width_, rocsparse_index_base base_)
+    bell_matrix(
+        I m_, I n_, I width_, rocsparse_direction bdir_, I bdim_, rocsparse_index_base base_)
         : m(m_)
         , n(n_)
         , width(width_)
-        , nnz((int64_t)m_ * width_)
+        , bdir(bdir_)
+        , bdim(bdim_)
         , base(base_)
-        , ind(nnz)
-        , val(nnz){};
+        , ind(width_ * m_)
+        , val(width_ * m_ * bdim_ * bdim_){};
 
-    explicit ell_matrix(const ell_matrix<MODE, T, I>& that_, bool transfer = true)
-        : ell_matrix<MODE, T, I>(that_.m, that_.n, that_.width, that_.base)
+    explicit bell_matrix(const bell_matrix<MODE, T, I>& that_, bool transfer = true)
+        : bell_matrix<MODE, T, I>(that_.m, that_.n, that_.width, that_.bdir, that_.bdim, that_.base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -69,8 +72,8 @@ struct ell_matrix
     }
 
     template <memory_mode::value_t THAT_MODE>
-    explicit ell_matrix(const ell_matrix<THAT_MODE, T, I>& that_, bool transfer = true)
-        : ell_matrix<MODE, T, I>(that_.m, that_.n, that_.width, that_.base)
+    explicit bell_matrix(const bell_matrix<THAT_MODE, T, I>& that_, bool transfer = true)
+        : bell_matrix<MODE, T, I>(that_.m, that_.n, that_.width, that_.bdir, that_.bdim, that_.base)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -81,10 +84,10 @@ struct ell_matrix
     }
 
     template <memory_mode::value_t THAT_MODE>
-    ell_matrix& operator()(const ell_matrix<THAT_MODE, T, I>& that_, bool transfer = true)
+    bell_matrix& operator()(const bell_matrix<THAT_MODE, T, I>& that_, bool transfer = true)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-        this->define(that_.m, that_.n, that_.width, that_.base);
+        this->define(that_.m, that_.n, that_.width, that_.bdir, that_.bdim, that_.base);
         if(transfer)
         {
             this->transfer_from(that_);
@@ -93,12 +96,12 @@ struct ell_matrix
     }
 
     template <memory_mode::value_t THAT_MODE>
-    void transfer_from(const ell_matrix<THAT_MODE, T, I>& that)
+    void transfer_from(const bell_matrix<THAT_MODE, T, I>& that)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        CHECK_HIP_THROW_ERROR((this->m == that.m && this->n == that.n && this->nnz == that.nnz
-                               && this->base == that.base)
+        CHECK_HIP_THROW_ERROR((this->m == that.m && this->n == that.n && this->bdim == that.bdim
+                               && this->width == that.width && this->base == that.base)
                                   ? hipSuccess
                                   : hipErrorInvalidValue);
 
@@ -106,41 +109,27 @@ struct ell_matrix
         this->val.transfer_from(that.val);
     };
 
-    void define(I m_, I n_, I width_, rocsparse_index_base base_)
+    void
+        define(I m_, I n_, I width_, rocsparse_direction bdir_, I bdim_, rocsparse_index_base base_)
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
-
-        if(m_ != this->m)
+        if((this->m != m_) || (this->width != width_) || (this->bdim != bdim_))
         {
-            this->m = m_;
+            this->ind.resize(int64_t(m_) * width_);
+            this->val.resize(int64_t(m_) * width_ * bdim_ * bdim_);
         }
 
-        if(n_ != this->n)
-        {
-            this->n = n_;
-        }
-
-        if(width_ != this->width)
-        {
-            this->width = width_;
-        }
-
-        if(base_ != this->base)
-        {
-            this->base = base_;
-        }
-
-        if((int64_t)this->m * this->width != this->nnz)
-        {
-            this->nnz = (int64_t)this->m * this->width;
-            this->ind.resize(this->nnz);
-            this->val.resize(this->nnz);
-        }
+        this->m     = m_;
+        this->n     = n_;
+        this->width = width_;
+        this->bdim  = bdim_;
+        this->bdir  = bdir_;
+        this->base  = base_;
     }
 
     template <memory_mode::value_t THAT_MODE>
-    void near_check(const ell_matrix<THAT_MODE, T, I>& that_,
-                    floating_data_t<T>                 tol = default_tolerance<T>::value) const
+    void near_check(const bell_matrix<THAT_MODE, T, I>& that_,
+                    floating_data_t<T>                  tol = default_tolerance<T>::value) const
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
@@ -148,7 +137,7 @@ struct ell_matrix
         {
         case memory_mode::device:
         {
-            ell_matrix<memory_mode::host, T, I> on_host(*this);
+            bell_matrix<memory_mode::host, T, I> on_host(*this);
             on_host.near_check(that_, tol);
             break;
         }
@@ -165,8 +154,9 @@ struct ell_matrix
                 unit_check_scalar(this->m, that_.m);
                 unit_check_scalar(this->n, that_.n);
                 unit_check_scalar(this->width, that_.width);
-                unit_check_scalar(this->nnz, that_.nnz);
                 unit_check_enum(this->base, that_.base);
+                unit_check_enum(this->bdir, that_.bdir);
+                unit_check_scalar(this->bdim, that_.bdim);
 
                 this->ind.unit_check(that_.ind);
                 this->val.near_check(that_.val, tol);
@@ -175,7 +165,7 @@ struct ell_matrix
             }
             case memory_mode::device:
             {
-                ell_matrix<memory_mode::host, T, I> that(that_);
+                bell_matrix<memory_mode::host, T, I> that(that_);
                 this->near_check(that, tol);
                 break;
             }
@@ -189,20 +179,21 @@ struct ell_matrix
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        std::cout << "INFO ELL" << std::endl;
+        std::cout << "INFO BELL" << std::endl;
         std::cout << " m     : " << this->m << std::endl;
         std::cout << " n     : " << this->n << std::endl;
-        std::cout << " nnz   : " << this->nnz << std::endl;
         std::cout << " width : " << this->width << std::endl;
+        std::cout << " bdir  : " << this->bdir << std::endl;
+        std::cout << " bdim  : " << this->bdim << std::endl;
         std::cout << " base  : " << this->base << std::endl;
     }
 };
 
 template <typename T, typename I = rocsparse_int>
-using host_ell_matrix = ell_matrix<memory_mode::host, T, I>;
+using host_bell_matrix = bell_matrix<memory_mode::host, T, I>;
 template <typename T, typename I = rocsparse_int>
-using device_ell_matrix = ell_matrix<memory_mode::device, T, I>;
+using device_bell_matrix = bell_matrix<memory_mode::device, T, I>;
 template <typename T, typename I = rocsparse_int>
-using managed_ell_matrix = ell_matrix<memory_mode::managed, T, I>;
+using managed_bell_matrix = bell_matrix<memory_mode::managed, T, I>;
 
-#endif // ROCSPARSE_MATRIX_ELL_HPP
+#endif // ROCSPARSE_MATRIX_BELL_HPP

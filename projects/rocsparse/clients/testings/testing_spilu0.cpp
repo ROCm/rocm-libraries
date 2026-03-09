@@ -902,22 +902,24 @@ void rocsparse_clients_spilu0_host(rocsparse_clients::spilu0_descr&         spil
                                    const T*                  boost_value)
 {
 
-    auto& cpu_symbolic_pivot      = spilu0_descr.m_cpu_symbolic_singularity_position;
-    auto& cpu_numeric_near_pivot  = spilu0_descr.m_cpu_numeric_near_singularity_position;
-    auto& cpu_numeric_exact_pivot = spilu0_descr.m_cpu_numeric_exact_singularity_position;
-
-    switch(A.m_format)
+    auto& cpu_symbolic_pivot           = spilu0_descr.m_cpu_symbolic_singularity_position;
+    auto& cpu_numeric_near_pivot       = spilu0_descr.m_cpu_numeric_near_singularity_position;
+    auto& cpu_numeric_exact_pivot      = spilu0_descr.m_cpu_numeric_exact_singularity_position;
+    const rocsparse_format format      = A.get_format();
+    const int64_t          batch_count = A.get_batch_count();
+    switch(format)
     {
     case rocsparse_format_csr:
     {
-        for(int64_t i = 0; i < A.m_batch_count; ++i)
+        auto& host = A.template as<rocsparse_format_csr>().host();
+        for(int64_t i = 0; i < batch_count; ++i)
         {
-            T* p = A.get_batched_host_val(i);
-            host_csrilu0<T, I, J>(A.m_host_csr.m,
-                                  A.m_host_csr.ptr,
-                                  A.m_host_csr.ind,
+            T* p = host.val.data() + i * A.get_stride();
+            host_csrilu0<T, I, J>(host.m,
+                                  host.ptr,
+                                  host.ind,
                                   p,
-                                  A.m_host_csr.base,
+                                  host.base,
                                   cpu_symbolic_pivot + i,
                                   cpu_numeric_exact_pivot + i,
                                   cpu_numeric_near_pivot + i,
@@ -927,7 +929,7 @@ void rocsparse_clients_spilu0_host(rocsparse_clients::spilu0_descr&         spil
                                   boost_value);
         }
 
-        for(int64_t j = 0; j < A.m_batch_count; ++j)
+        for(int64_t j = 0; j < batch_count; ++j)
         {
             if(cpu_numeric_near_pivot[j] == -1)
             {
@@ -947,22 +949,24 @@ void rocsparse_clients_spilu0_host(rocsparse_clients::spilu0_descr&         spil
 
     case rocsparse_format_bsr:
     {
-        for(int64_t i = 0; i < A.m_batch_count; ++i)
+        auto& host = A.template as<rocsparse_format_bsr>().host();
+        for(int64_t i = 0; i < batch_count; ++i)
         {
-            T* p = A.get_batched_host_val(i);
-            host_bsrilu0<T, I, J>(A.m_host_gebsr.block_direction,
-                                  A.m_host_gebsr.mb,
-                                  A.m_host_gebsr.ptr,
-                                  A.m_host_gebsr.ind,
+            T* p = host.val.data() + i * A.get_stride();
+
+            host_bsrilu0<T, I, J>(host.block_direction,
+                                  host.mb,
+                                  host.ptr,
+                                  host.ind,
                                   p,
-                                  A.m_host_gebsr.row_block_dim,
-                                  A.m_host_gebsr.base,
+                                  host.row_block_dim,
+                                  host.base,
                                   cpu_symbolic_pivot + i,
                                   cpu_numeric_exact_pivot + i,
                                   boost_enable,
                                   boost_tolerance,
                                   boost_value);
-            for(int64_t j = 0; j < A.m_batch_count; ++j)
+            for(int64_t j = 0; j < batch_count; ++j)
             {
                 cpu_numeric_near_pivot[j] = cpu_numeric_exact_pivot[j];
             }
@@ -1235,29 +1239,7 @@ void testing_spilu0(const Arguments& arg_)
 
         for(int32_t iter = 0; iter < n_cold_calls; ++iter)
         {
-            switch(A.m_format)
-            {
-            case rocsparse_format_csc:
-            case rocsparse_format_ell:
-            case rocsparse_format_bell:
-            case rocsparse_format_sell:
-            case rocsparse_format_coo_aos:
-            case rocsparse_format_coo:
-            {
-                break;
-            }
-            case rocsparse_format_csr:
-            {
-                A.m_device_csr.val.transfer_from(A.m_host_csr.val);
-                break;
-            }
-            case rocsparse_format_bsr:
-            {
-                A.m_device_gebsr.val.transfer_from(A.m_host_gebsr.val);
-                break;
-            }
-            }
-
+            A.reinit_values();
             CHECK_ROCSPARSE_ERROR(rocsparse_spilu0(handle,
                                                    spilu0_descr,
                                                    A,
@@ -1276,14 +1258,7 @@ void testing_spilu0(const Arguments& arg_)
             gpu_time[iter] = 0;
             for(int32_t sub_iter = 0; sub_iter < n_sub_calls; ++sub_iter)
             {
-                if(A.m_format == rocsparse_format_csr)
-                {
-                    A.m_device_csr.val.transfer_from(A.m_host_csr.val);
-                }
-                else if(A.m_format == rocsparse_format_bsr)
-                {
-                    A.m_device_gebsr.val.transfer_from(A.m_host_gebsr.val);
-                }
+                A.reinit_values();
                 t.start();
 
                 CHECK_ROCSPARSE_ERROR(rocsparse_spilu0(handle,
@@ -1306,8 +1281,9 @@ void testing_spilu0(const Arguments& arg_)
         const int32_t mid = n_calls / 2;
         const double  gpu_time_used
             = (n_calls % 2 == 0) ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];
+        const rocsparse_format format = A.get_format();
 
-        switch(A.m_format)
+        switch(format)
         {
         case rocsparse_format_csc:
         case rocsparse_format_ell:
@@ -1320,12 +1296,14 @@ void testing_spilu0(const Arguments& arg_)
         }
         case rocsparse_format_csr:
         {
-            double       gbyte_count = csrilu0_gbyte_count<T>(A.m_device_csr.m, A.m_device_csr.nnz);
+            auto& device = A.template as<rocsparse_format_csr>().device();
+
+            double       gbyte_count = csrilu0_gbyte_count<T>(device.m, device.nnz);
             const double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
             display_timing_info(display_key_t::M,
-                                A.m_device_csr.m,
+                                device.m,
                                 display_key_t::nnz_A,
-                                A.m_device_csr.nnz,
+                                device.nnz,
                                 display_key_t::bandwidth,
                                 gpu_gbyte,
                                 display_key_t::time_ms,
@@ -1334,15 +1312,16 @@ void testing_spilu0(const Arguments& arg_)
         }
         case rocsparse_format_bsr:
         {
-            double gbyte_count = bsrilu0_gbyte_count<T>(
-                A.m_device_gebsr.mb, A.m_device_gebsr.row_block_dim, A.m_device_gebsr.nnzb);
+            auto&  device = A.template as<rocsparse_format_bsr>().device();
+            double gbyte_count
+                = bsrilu0_gbyte_count<T>(device.mb, device.row_block_dim, device.nnzb);
             const double gpu_gbyte = get_gpu_gbyte(gpu_time_used, gbyte_count);
             display_timing_info(display_key_t::M,
-                                A.m_device_gebsr.mb,
+                                device.mb,
                                 display_key_t::nnzb,
-                                A.m_device_gebsr.nnzb,
+                                device.nnzb,
                                 display_key_t::bdim,
-                                A.m_device_gebsr.row_block_dim,
+                                device.row_block_dim,
                                 display_key_t::bandwidth,
                                 gpu_gbyte,
                                 display_key_t::time_ms,

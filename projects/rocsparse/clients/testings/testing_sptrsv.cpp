@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -20,11 +20,11 @@
 * THE SOFTWARE.
 *
 * ************************************************************************ */
-
 #include "rocsparse_clients_dnvec_descr.hpp"
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "rocsparse_clients_sptrsv.hpp"
+#include "testing.hpp"
 
 template <typename I, typename J, typename T>
 static void host_csr_lsolve(J                    M,
@@ -542,28 +542,31 @@ namespace rocsparse_clients
                      int64_t*                                 symbolic,
                      int64_t*                                 exact)
     {
-        switch(A.m_format)
+        const rocsparse_format format = A.get_format();
+        switch(format)
         {
         case rocsparse_format_coo:
         {
+            auto& host = A.template as<rocsparse_format_coo>().host();
+
             for(int64_t i = 0; i < batch_count; ++i)
             {
-                const T* p    = A.get_batched_host_val(i);
-                const T* p_hx = x.m_host.data() + i * x.m_stride;
-                T*       p_hy = y.m_host.data() + i * y.m_stride;
+                const T* p    = host.val.data() + i * A.get_stride();
+                const T* p_hx = x.host().data() + i * x.get_stride();
+                T*       p_hy = y.host().data() + i * y.get_stride();
 
                 cpu_coosv<I, T>(operation,
-                                A.m_host_coo.m,
-                                A.m_host_coo.nnz,
+                                host.m,
+                                host.nnz,
                                 *halpha,
-                                A.m_host_coo.row_ind,
-                                A.m_host_coo.col_ind,
+                                host.row_ind,
+                                host.col_ind,
                                 p,
                                 p_hx,
                                 p_hy,
                                 diag,
                                 uplo,
-                                A.m_host_coo.base,
+                                host.base,
                                 symbolic + i,
                                 exact + i);
             }
@@ -571,24 +574,25 @@ namespace rocsparse_clients
         }
         case rocsparse_format_csr:
         {
+            auto& host = A.template as<rocsparse_format_csr>().host();
             for(int64_t i = 0; i < batch_count; ++i)
             {
-                const T* p    = A.get_batched_host_val(i);
-                const T* p_hx = x.m_host.data() + i * x.m_stride;
-                T*       p_hy = y.m_host.data() + i * y.m_stride;
+                const T* p    = host.val.data() + i * A.get_stride();
+                const T* p_hx = x.host().data() + i * x.get_stride();
+                T*       p_hy = y.host().data() + i * y.get_stride();
                 cpu_csrsv<I, J, T>(operation,
-                                   A.m_host_csr.m,
-                                   A.m_host_csr.nnz,
+                                   host.m,
+                                   host.nnz,
                                    *halpha,
-                                   A.m_host_csr.ptr,
-                                   A.m_host_csr.ind,
+                                   host.ptr,
+                                   host.ind,
                                    p,
                                    p_hx,
                                    (int64_t)1,
                                    p_hy,
                                    diag,
                                    uplo,
-                                   A.m_host_csr.base,
+                                   host.base,
                                    symbolic + i,
                                    exact + i);
             }
@@ -598,12 +602,13 @@ namespace rocsparse_clients
 
         case rocsparse_format_bsr:
         {
-            for(int64_t i = 0; i < A.m_batch_count; ++i)
+            for(int64_t i = 0; i < batch_count; ++i)
             {
 #if 0
+      auto& host = A.template as<rocsparse_format_bsr>().host();
 	    const T* p = A.get_batched_host_val(i);
-	    const T* p_hx = x.m_host.data() + i*x.m_stride;
-	    T* p_hy = y.m_host.data() + i*y.m_stride;
+	    const T* p_hx = x.host().data() + i*x.get_stride();
+	    T* p_hy = y.host().data() + i*y.get_stride();
 	    host_bsrsv<T>(operation,
 			  A.m_host_gebsr.block_direction,
 			  A.m_host_gebsr.mb,
@@ -793,11 +798,11 @@ void testing_sptrsv(const Arguments& arg)
             {
                 if(rocsparse_pointer_mode_host == mode)
                 {
-                    rocsparse_reproducibility::save("Y pointer mode host", y.m_device);
+                    rocsparse_reproducibility::save("Y pointer mode host", y.device());
                 }
                 else
                 {
-                    rocsparse_reproducibility::save("Y pointer mode device", y.m_device);
+                    rocsparse_reproducibility::save("Y pointer mode device", y.device());
                 }
             }
 
@@ -839,11 +844,12 @@ void testing_sptrsv(const Arguments& arg)
 
         CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
 
-        int64_t A_m         = A.get_nrows();
-        int64_t A_nnz       = 0;
-        int64_t A_bdim      = 1;
-        double  gbyte_count = 0;
-        switch(A.m_format)
+        int64_t                A_m         = A.get_nrows();
+        int64_t                A_nnz       = 0;
+        int64_t                A_bdim      = 1;
+        double                 gbyte_count = 0;
+        const rocsparse_format format      = A.get_format();
+        switch(format)
         {
 
         case rocsparse_format_csc:
@@ -857,27 +863,28 @@ void testing_sptrsv(const Arguments& arg)
 
         case rocsparse_format_coo:
         {
-            gbyte_count = coosv_gbyte_count<T>(A.m_device_coo.m, A.m_device_coo.nnz);
-            A_nnz       = A.m_device_coo.nnz;
+            auto& device = A.template as<rocsparse_format_coo>().device();
+            gbyte_count  = coosv_gbyte_count<T>(device.m, device.nnz);
+            A_nnz        = device.nnz;
             break;
         }
 
         case rocsparse_format_csr:
         {
-            gbyte_count = csrsv_gbyte_count<T>(A.m_device_csr.m, A.m_device_csr.nnz);
-            A_nnz       = A.m_device_csr.nnz;
+            auto& device = A.template as<rocsparse_format_csr>().device();
+            gbyte_count  = csrsv_gbyte_count<T>(device.m, device.nnz);
+            A_nnz        = device.nnz;
             break;
         }
 
         case rocsparse_format_bsr:
         {
+            auto& device = A.template as<rocsparse_format_bsr>().device();
             gbyte_count
-                = csrsv_gbyte_count<T>(A.m_device_gebsr.mb * A.m_device_gebsr.row_block_dim,
-                                       A.m_device_gebsr.nnzb * A.m_device_gebsr.row_block_dim
-                                           * A.m_device_gebsr.col_block_dim);
-            A_nnz = A.m_device_gebsr.nnzb * A.m_device_gebsr.row_block_dim
-                    * A.m_device_gebsr.col_block_dim;
-            A_bdim = A.m_device_gebsr.row_block_dim;
+                = csrsv_gbyte_count<T>(device.mb * device.row_block_dim,
+                                       device.nnzb * device.row_block_dim * device.col_block_dim);
+            A_nnz  = device.nnzb * device.row_block_dim * device.col_block_dim;
+            A_bdim = device.row_block_dim;
             break;
         }
         }

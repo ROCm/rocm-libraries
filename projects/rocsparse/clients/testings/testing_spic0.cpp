@@ -870,29 +870,31 @@ void rocsparse_clients_spic0_host(rocsparse_clients::spic0_descr&          spic0
                                   rocsparse_clients::spmat_descr<T, I, J>& A,
                                   const double*                            singular_pivot_tolerance)
 {
-    auto& cpu_symbolic_pivot      = spic0_descr.m_cpu_symbolic_singularity_position;
-    auto& cpu_numeric_near_pivot  = spic0_descr.m_cpu_numeric_near_singularity_position;
-    auto& cpu_numeric_exact_pivot = spic0_descr.m_cpu_numeric_exact_singularity_position;
-
-    switch(A.m_format)
+    auto&         cpu_symbolic_pivot      = spic0_descr.m_cpu_symbolic_singularity_position;
+    auto&         cpu_numeric_near_pivot  = spic0_descr.m_cpu_numeric_near_singularity_position;
+    auto&         cpu_numeric_exact_pivot = spic0_descr.m_cpu_numeric_exact_singularity_position;
+    const int64_t batch_count             = A.get_batch_count();
+    const rocsparse_format format         = A.get_format();
+    switch(format)
     {
     case rocsparse_format_csr:
     {
-        for(int64_t i = 0; i < A.m_batch_count; ++i)
+        auto& host = A.template as<rocsparse_format_csr>().host();
+        for(int64_t i = 0; i < batch_count; ++i)
         {
-            T* p = A.get_batched_host_val(i);
-            host_csric0<T, I, J>(A.m_host_csr.m,
-                                 A.m_host_csr.ptr,
-                                 A.m_host_csr.ind,
+            T* p = host.val.data() + i * A.get_stride();
+            host_csric0<T, I, J>(host.m,
+                                 host.ptr,
+                                 host.ind,
                                  p,
-                                 A.m_host_csr.base,
+                                 host.base,
                                  cpu_symbolic_pivot + i,
                                  cpu_numeric_exact_pivot + i,
                                  cpu_numeric_near_pivot + i,
                                  singular_pivot_tolerance[0]);
         }
 
-        for(int64_t j = 0; j < A.m_batch_count; ++j)
+        for(int64_t j = 0; j < batch_count; ++j)
         {
             if(cpu_numeric_near_pivot[j] == -1)
             {
@@ -913,21 +915,22 @@ void rocsparse_clients_spic0_host(rocsparse_clients::spic0_descr&          spic0
 
     case rocsparse_format_bsr:
     {
-        for(int64_t i = 0; i < A.m_batch_count; ++i)
+        auto& host = A.template as<rocsparse_format_bsr>().host();
+        for(int64_t i = 0; i < batch_count; ++i)
         {
-            T* p = A.get_batched_host_val(i);
-            host_bsric0<T, I, J>(A.m_host_gebsr.block_direction,
-                                 A.m_host_gebsr.mb,
-                                 A.m_host_gebsr.row_block_dim,
-                                 A.m_host_gebsr.ptr,
-                                 A.m_host_gebsr.ind,
+            T* p = host.val.data() + i * A.get_stride();
+            host_bsric0<T, I, J>(host.block_direction,
+                                 host.mb,
+                                 host.row_block_dim,
+                                 host.ptr,
+                                 host.ind,
                                  p,
-                                 A.m_host_gebsr.base,
+                                 host.base,
                                  cpu_symbolic_pivot + i,
                                  cpu_numeric_exact_pivot + i);
         }
 
-        for(int64_t j = 0; j < A.m_batch_count; ++j)
+        for(int64_t j = 0; j < batch_count; ++j)
         {
             cpu_numeric_near_pivot[j] = cpu_numeric_exact_pivot[j];
         }
@@ -964,6 +967,7 @@ void testing_spic0(const Arguments& arg)
     int64_t batch_count = arg.batch_count;
     if(batch_count == -1)
         batch_count = 1;
+    batch_count                                       = 2;
     static constexpr const bool             full_rank = true;
     rocsparse_clients::spmat_descr<T, I, J> A(arg, batch_count, full_rank);
 
@@ -1166,29 +1170,7 @@ void testing_spic0(const Arguments& arg)
 
         for(int32_t iter = 0; iter < n_cold_calls; ++iter)
         {
-            switch(A.m_format)
-            {
-            case rocsparse_format_csc:
-            case rocsparse_format_ell:
-            case rocsparse_format_bell:
-            case rocsparse_format_sell:
-            case rocsparse_format_coo_aos:
-            case rocsparse_format_coo:
-            {
-                break;
-            }
-            case rocsparse_format_csr:
-            {
-                A.m_device_csr.val.transfer_from(A.m_host_csr.val);
-                break;
-            }
-            case rocsparse_format_bsr:
-            {
-                A.m_device_gebsr.val.transfer_from(A.m_host_gebsr.val);
-                break;
-            }
-            }
-
+            A.reinit_values();
             CHECK_ROCSPARSE_ERROR(rocsparse_spic0(handle,
                                                   spic0_descr,
                                                   A,
@@ -1207,14 +1189,7 @@ void testing_spic0(const Arguments& arg)
             gpu_time[iter] = 0;
             for(int32_t sub_iter = 0; sub_iter < n_sub_calls; ++sub_iter)
             {
-                if(A.m_format == rocsparse_format_csr)
-                {
-                    A.m_device_csr.val.transfer_from(A.m_host_csr.val);
-                }
-                else if(A.m_format == rocsparse_format_bsr)
-                {
-                    A.m_device_gebsr.val.transfer_from(A.m_host_gebsr.val);
-                }
+                A.reinit_values();
                 t.start();
                 CHECK_ROCSPARSE_ERROR(rocsparse_spic0(handle,
                                                       spic0_descr,
@@ -1235,8 +1210,9 @@ void testing_spic0(const Arguments& arg)
         const int32_t mid = n_calls / 2;
         const double  gpu_time_used
             = (n_calls % 2 == 0) ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];
+        const rocsparse_format format = A.get_format();
 
-        switch(A.m_format)
+        switch(format)
         {
         case rocsparse_format_csc:
         case rocsparse_format_ell:
@@ -1249,12 +1225,13 @@ void testing_spic0(const Arguments& arg)
         }
         case rocsparse_format_csr:
         {
-            double       gbyte_count = csric0_gbyte_count<T>(A.m_device_csr.m, A.m_device_csr.nnz);
+            auto&        device      = A.template as<rocsparse_format_csr>().device();
+            double       gbyte_count = csric0_gbyte_count<T>(device.m, device.nnz);
             const double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
             display_timing_info(display_key_t::M,
-                                A.m_device_csr.m,
+                                device.m,
                                 display_key_t::nnz_A,
-                                A.m_device_csr.nnz,
+                                device.nnz,
                                 display_key_t::bandwidth,
                                 gpu_gbyte,
                                 display_key_t::time_ms,
@@ -1263,16 +1240,16 @@ void testing_spic0(const Arguments& arg)
         }
         case rocsparse_format_bsr:
         {
-
-            double gbyte_count = bsric0_gbyte_count<T>(
-                A.m_device_gebsr.mb, A.m_device_gebsr.row_block_dim, A.m_device_gebsr.nnzb);
+            auto&  device = A.template as<rocsparse_format_bsr>().device();
+            double gbyte_count
+                = bsric0_gbyte_count<T>(device.mb, device.row_block_dim, device.nnzb);
             const double gpu_gbyte = get_gpu_gbyte(gpu_time_used, gbyte_count);
             display_timing_info(display_key_t::M,
-                                A.m_device_gebsr.mb,
+                                device.mb,
                                 display_key_t::nnzb,
-                                A.m_device_gebsr.nnzb,
+                                device.nnzb,
                                 display_key_t::bdim,
-                                A.m_device_gebsr.row_block_dim,
+                                device.row_block_dim,
                                 display_key_t::bandwidth,
                                 gpu_gbyte,
                                 display_key_t::time_ms,

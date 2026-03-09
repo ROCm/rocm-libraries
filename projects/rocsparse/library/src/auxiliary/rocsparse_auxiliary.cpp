@@ -2247,7 +2247,6 @@ try
     *descr = new _rocsparse_spmat_descr;
 
     (*descr)->init = true;
-
     (*descr)->rows = rows;
     (*descr)->cols = cols;
     (*descr)->nnz  = nnz;
