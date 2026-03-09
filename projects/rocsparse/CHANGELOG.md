@@ -3,7 +3,7 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## rocSPARSE 4.5.0 for ROCm 4.5.0
+## rocSPARSE 4.5.0 for ROCm 7.12.0
 
 ### Added
 * Added `--show-skipped` and `--hide-skipped` command-line options to `rocsparse-test` to control whether skipped test output is displayed.
