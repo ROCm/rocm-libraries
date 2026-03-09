@@ -215,6 +215,6 @@ typedef enum
      * query (Q), key (K), value (V), and output (O) tensors plus
      * attention parameters.
      */
-    HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT = 10000,
+    HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT = 23,
 
 } hipdnnBackendDescriptorType_t;
