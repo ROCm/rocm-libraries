@@ -27,7 +27,6 @@
 #pragma once
 #include <miopen/env.hpp>
 #include <miopen/config.h>
-#include <chrono>
 #include <limits>
 #include <thread>
 
@@ -41,6 +40,10 @@ const size_t MIOPEN_DEFAULT_TUNING_PATIENCE = std::numeric_limits<std::size_t>::
 MIOPEN_DECLARE_ENV_VAR_UINT64(
     MIOPEN_TUNING_PATIENCE,
     MIOPEN_DEFAULT_TUNING_PATIENCE) // End tuning if no improvement in X iterations
+
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_TUNING_FOLLOWUP_TOLERANCE_PCT, 10)
+
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_TUNING_ITERATIONS, 10)
 
 #if MIOPEN_USE_COMGR
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_COMPILE_PARALLEL_LEVEL, 1) // COMGR is not parallelizable
