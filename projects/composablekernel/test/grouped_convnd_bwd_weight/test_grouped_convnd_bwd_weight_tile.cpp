@@ -53,7 +53,7 @@ class TestGroupedConvndBwdWeightTile : public ::testing::Test
     template <ck::index_t NDimSpatial>
     void Run()
     {
-        EXPECT_FALSE(conv_args.empty());
+        ASSERT_FALSE(conv_args.empty());
         bool pass = true;
         for(size_t i = 0; i < conv_args.size(); i++)
         {
