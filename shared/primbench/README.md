@@ -143,15 +143,23 @@ It outputs this `results.json`:
         "general": {
             "algorithm": "copy",
             "specialization_count": 2,
-            "gpu_name": "AMD Instinct MI210",
-            "gpu_arch": "gfx90a",
-            "gpu_pci_bus_id": "0000:83:00.0",
             "library_build_type": "debug",
+            "gpu": {
+                "name": "AMD Radeon RX 9070 XT",
+                "arch": "gfx1201",
+                "pci_bus_id": "0000:83:00.0"
+            },
+            "backend": {
+                "name": "hip",
+                "hip_version": "6.4.43482-0f2d60242",
+                "runtime_version": "6.4.43482",
+                "driver_version": "6.4.43482",
+                "amdsmi_version": "25.3.0",
+                "clang_version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
+            },
             "temperature_type": "edge",
             "host_name": "host",
-            "date": "2025-11-24T15:01:50+00:00",
-            "hip_version": "6.4.43482-0f2d60242",
-            "clang_version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
+            "date": "2025-11-24T15:01:50+00:00"
         },
         "settings": {
             "size": 134217728,
