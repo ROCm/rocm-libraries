@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "HipdnnAttentionImplementation.h"
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnDataType.h"
+#include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
 #include "HipdnnPointwiseMode.h"
 #include "TensorDescriptor.hpp"
@@ -12,6 +14,7 @@
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
 #include <vector>
 
@@ -192,5 +195,31 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
                               int64_t* elementCount,
                               void* arrayOfElements,
                               const char* errorPrefix);
+
+void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& target,
+                          hipdnnBackendAttributeType_t attributeType,
+                          int64_t elementCount,
+                          const void* arrayOfElements,
+                          const char* errorPrefix);
+
+void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment source,
+                          hipdnnBackendAttributeType_t attributeType,
+                          int64_t requestedElementCount,
+                          int64_t* elementCount,
+                          void* arrayOfElements,
+                          const char* errorPrefix);
+
+void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation& target,
+                                hipdnnBackendAttributeType_t attributeType,
+                                int64_t elementCount,
+                                const void* arrayOfElements,
+                                const char* errorPrefix);
+
+void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation source,
+                                hipdnnBackendAttributeType_t attributeType,
+                                int64_t requestedElementCount,
+                                int64_t* elementCount,
+                                void* arrayOfElements,
+                                const char* errorPrefix);
 
 } // namespace hipdnn_backend

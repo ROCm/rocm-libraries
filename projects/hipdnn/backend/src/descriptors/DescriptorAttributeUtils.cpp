@@ -481,4 +481,93 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
     }
 }
 
+void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& target,
+                          hipdnnBackendAttributeType_t attributeType,
+                          int64_t elementCount,
+                          const void* arrayOfElements,
+                          const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnDiagonalAlignment_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkDiagonalAlignment(tmp);
+}
+
+void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment source,
+                          hipdnnBackendAttributeType_t attributeType,
+                          int64_t requestedElementCount,
+                          int64_t* elementCount,
+                          void* arrayOfElements,
+                          const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkDiagonalAlignment(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
+void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation& target,
+                                hipdnnBackendAttributeType_t attributeType,
+                                int64_t elementCount,
+                                const void* arrayOfElements,
+                                const char* errorPrefix)
+{
+    checkSetArgs(
+        HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnAttentionImplementation_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkAttentionImplementation(tmp);
+}
+
+void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation source,
+                                hipdnnBackendAttributeType_t attributeType,
+                                int64_t requestedElementCount,
+                                int64_t* elementCount,
+                                void* arrayOfElements,
+                                const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkAttentionImplementation(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
 } // namespace hipdnn_backend

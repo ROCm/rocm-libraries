@@ -79,293 +79,197 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                             "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_attnMaskDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.attn_mask_tensor_uid = uid;
+        setOptionalTensorDescriptor(_attnMaskDesc,
+                                    _data.attn_mask_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_scaleDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.scale_tensor_uid = uid;
+        setOptionalTensorDescriptor(_scaleDesc,
+                                    _data.scale_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_seqLenQDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.seq_len_q_tensor_uid = uid;
+        setOptionalTensorDescriptor(_seqLenQDesc,
+                                    _data.seq_len_q_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_seqLenKvDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.seq_len_kv_tensor_uid = uid;
+        setOptionalTensorDescriptor(_seqLenKvDesc,
+                                    _data.seq_len_kv_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_seedDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.seed_tensor_uid = uid;
+        setOptionalTensorDescriptor(_seedDesc,
+                                    _data.seed_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_offsetDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.offset_tensor_uid = uid;
+        setOptionalTensorDescriptor(_offsetDesc,
+                                    _data.offset_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_dropoutMaskDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.dropout_mask_tensor_uid = uid;
+        setOptionalTensorDescriptor(_dropoutMaskDesc,
+                                    _data.dropout_mask_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_dropoutScaleDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.dropout_scale_tensor_uid = uid;
+        setOptionalTensorDescriptor(_dropoutScaleDesc,
+                                    _data.dropout_scale_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_pageTableKDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.page_table_k_tensor_uid = uid;
+        setOptionalTensorDescriptor(_pageTableKDesc,
+                                    _data.page_table_k_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_pageTableVDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.page_table_v_tensor_uid = uid;
+        setOptionalTensorDescriptor(_pageTableVDesc,
+                                    _data.page_table_v_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_blockMaskDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.block_mask_tensor_uid = uid;
+        setOptionalTensorDescriptor(_blockMaskDesc,
+                                    _data.block_mask_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_sinkTokenDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.sink_token_tensor_uid = uid;
+        setOptionalTensorDescriptor(_sinkTokenDesc,
+                                    _data.sink_token_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_descaleQDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.descale_q_tensor_uid = uid;
+        setOptionalTensorDescriptor(_descaleQDesc,
+                                    _data.descale_q_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_descaleKDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.descale_k_tensor_uid = uid;
+        setOptionalTensorDescriptor(_descaleKDesc,
+                                    _data.descale_k_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_descaleVDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.descale_v_tensor_uid = uid;
+        setOptionalTensorDescriptor(_descaleVDesc,
+                                    _data.descale_v_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_descaleSDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.descale_s_tensor_uid = uid;
+        setOptionalTensorDescriptor(_descaleSDesc,
+                                    _data.descale_s_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_scaleSDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.scale_s_tensor_uid = uid;
+        setOptionalTensorDescriptor(_scaleSDesc,
+                                    _data.scale_s_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_scaleODesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.scale_o_tensor_uid = uid;
+        setOptionalTensorDescriptor(_scaleODesc,
+                                    _data.scale_o_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_statsDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.stats_tensor_uid = uid;
+        setOptionalTensorDescriptor(_statsDesc,
+                                    _data.stats_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_maxDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.max_tensor_uid = uid;
+        setOptionalTensorDescriptor(_maxDesc,
+                                    _data.max_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_sumExpDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.sum_exp_tensor_uid = uid;
+        setOptionalTensorDescriptor(_sumExpDesc,
+                                    _data.sum_exp_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_rngDumpDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.rng_dump_tensor_uid = uid;
+        setOptionalTensorDescriptor(_rngDumpDesc,
+                                    _data.rng_dump_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_amaxSDesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.amax_s_tensor_uid = uid;
+        setOptionalTensorDescriptor(_amaxSDesc,
+                                    _data.amax_s_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT:
-    {
-        int64_t uid = 0;
-        setTensorDescriptor(_amaxODesc,
-                            uid,
-                            attributeType,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.amax_o_tensor_uid = uid;
+        setOptionalTensorDescriptor(_amaxODesc,
+                                    _data.amax_o_tensor_uid,
+                                    attributeType,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT:
     {
         bool val = false;
@@ -411,53 +315,33 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                   "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT:
-    {
-        float val = 0.0f;
-        setScalar(val,
-                  HIPDNN_TYPE_FLOAT,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.dropout_probability = val;
+        setOptionalFloat(_data.dropout_probability,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT:
-    {
-        float val = 0.0f;
-        setScalar(val,
-                  HIPDNN_TYPE_FLOAT,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.attn_scale_value = val;
+        setOptionalFloat(_data.attn_scale_value,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT:
-    {
-        int64_t val = 0;
-        setScalar(val,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.left_bound = val;
+        setOptionalInt64(_data.left_bound,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT:
-    {
-        int64_t val = 0;
-        setScalar(val,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.right_bound = val;
+        setOptionalInt64(_data.right_bound,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT:
     {
         int64_t val = 0;
@@ -472,13 +356,21 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
         break;
     }
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
-        setDiagonalAlignment(attributeType, elementCount, arrayOfElements);
+        hipdnn_backend::setDiagonalAlignment(_data.diagonal_alignment,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT:
         setMmaCoreMode(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT:
-        setImplementation(attributeType, elementCount, arrayOfElements);
+        hipdnn_backend::setAttentionImplementation(_data.implementation,
+                                                   attributeType,
+                                                   elementCount,
+                                                   arrayOfElements,
+                                                   "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT:
         setDataType(_computeDataType,
@@ -492,26 +384,6 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                               "SdpaFpropOperationDescriptor::setAttribute: attributeName not "
                               "supported");
     }
-}
-
-void SdpaFpropOperationDescriptor::setDiagonalAlignment(hipdnnBackendAttributeType_t attributeType,
-                                                        int64_t elementCount,
-                                                        const void* arrayOfElements)
-{
-    checkSetArgs(HIPDNN_TYPE_INT64,
-                 attributeType,
-                 arrayOfElements,
-                 "SdpaFpropOperationDescriptor::setAttribute()");
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "SdpaFpropOperationDescriptor::setAttribute(): elementCount is not 1");
-    auto mode = static_cast<hipdnn_data_sdk::data_objects::DiagonalAlignment>(
-        *static_cast<const int64_t*>(arrayOfElements));
-    THROW_IF_TRUE(mode < hipdnn_data_sdk::data_objects::DiagonalAlignment::MIN
-                      || mode > hipdnn_data_sdk::data_objects::DiagonalAlignment::MAX,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "SdpaFpropOperationDescriptor::setAttribute(): invalid DiagonalAlignment value");
-    _data.diagonal_alignment = mode;
 }
 
 void SdpaFpropOperationDescriptor::setMmaCoreMode(hipdnnBackendAttributeType_t attributeType,
@@ -533,27 +405,6 @@ void SdpaFpropOperationDescriptor::setMmaCoreMode(hipdnnBackendAttributeType_t a
         HIPDNN_STATUS_BAD_PARAM,
         "SdpaFpropOperationDescriptor::setAttribute(): invalid MMA core mode (DataType) value");
     _data.mma_core_mode = mode;
-}
-
-void SdpaFpropOperationDescriptor::setImplementation(hipdnnBackendAttributeType_t attributeType,
-                                                     int64_t elementCount,
-                                                     const void* arrayOfElements)
-{
-    checkSetArgs(HIPDNN_TYPE_INT64,
-                 attributeType,
-                 arrayOfElements,
-                 "SdpaFpropOperationDescriptor::setAttribute()");
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "SdpaFpropOperationDescriptor::setAttribute(): elementCount is not 1");
-    auto mode = static_cast<hipdnn_data_sdk::data_objects::AttentionImplementation>(
-        *static_cast<const int64_t*>(arrayOfElements));
-    THROW_IF_TRUE(
-        mode < hipdnn_data_sdk::data_objects::AttentionImplementation::MIN
-            || mode > hipdnn_data_sdk::data_objects::AttentionImplementation::MAX,
-        HIPDNN_STATUS_BAD_PARAM,
-        "SdpaFpropOperationDescriptor::setAttribute(): invalid AttentionImplementation value");
-    _data.implementation = mode;
 }
 
 // ============================================================================
@@ -605,196 +456,196 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                             "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT:
-        getTensorDescriptor(_attnMaskDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_attnMaskDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT:
-        getTensorDescriptor(_scaleDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_scaleDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT:
-        getTensorDescriptor(_seqLenQDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_seqLenQDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT:
-        getTensorDescriptor(_seqLenKvDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_seqLenKvDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT:
-        getTensorDescriptor(_seedDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_seedDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT:
-        getTensorDescriptor(_offsetDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_offsetDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT:
-        getTensorDescriptor(_dropoutMaskDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_dropoutMaskDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT:
-        getTensorDescriptor(_dropoutScaleDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_dropoutScaleDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT:
-        getTensorDescriptor(_pageTableKDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_pageTableKDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT:
-        getTensorDescriptor(_pageTableVDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_pageTableVDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT:
-        getTensorDescriptor(_blockMaskDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_blockMaskDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT:
-        getTensorDescriptor(_sinkTokenDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_sinkTokenDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT:
-        getTensorDescriptor(_descaleQDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_descaleQDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT:
-        getTensorDescriptor(_descaleKDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_descaleKDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT:
-        getTensorDescriptor(_descaleVDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_descaleVDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT:
-        getTensorDescriptor(_descaleSDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_descaleSDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT:
-        getTensorDescriptor(_scaleSDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_scaleSDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT:
-        getTensorDescriptor(_scaleODesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_scaleODesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT:
-        getTensorDescriptor(_statsDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_statsDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT:
-        getTensorDescriptor(_maxDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_maxDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT:
-        getTensorDescriptor(_sumExpDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_sumExpDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT:
-        getTensorDescriptor(_rngDumpDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_rngDumpDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT:
-        getTensorDescriptor(_amaxSDesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_amaxSDesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT:
-        getTensorDescriptor(_amaxODesc,
-                            attributeType,
-                            requestedElementCount,
-                            elementCount,
-                            arrayOfElements,
-                            "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalTensorDescriptor(_amaxODesc,
+                                    attributeType,
+                                    requestedElementCount,
+                                    elementCount,
+                                    arrayOfElements,
+                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT:
     {
@@ -845,53 +696,37 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT:
-    {
-        float val = _data.dropout_probability.value_or(0.0f);
-        getScalar(val,
-                  HIPDNN_TYPE_FLOAT,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalFloat(_data.dropout_probability,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT:
-    {
-        float val = _data.attn_scale_value.value_or(0.0f);
-        getScalar(val,
-                  HIPDNN_TYPE_FLOAT,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalFloat(_data.attn_scale_value,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT:
-    {
-        int64_t val = _data.left_bound.value_or(0);
-        getScalar(val,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalInt64(_data.left_bound,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT:
-    {
-        int64_t val = _data.right_bound.value_or(0);
-        getScalar(val,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalInt64(_data.right_bound,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT:
     {
         int64_t val = static_cast<int64_t>(_data.max_seq_len_kv.value_or(0));
@@ -905,13 +740,23 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
         break;
     }
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
-        getDiagonalAlignment(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        hipdnn_backend::getDiagonalAlignment(_data.diagonal_alignment,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT:
         getMmaCoreMode(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT:
-        getImplementation(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        hipdnn_backend::getAttentionImplementation(_data.implementation,
+                                                   attributeType,
+                                                   requestedElementCount,
+                                                   elementCount,
+                                                   arrayOfElements,
+                                                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT:
         getDataType(_computeDataType,
@@ -926,33 +771,6 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                               "SdpaFpropOperationDescriptor::getAttribute: attributeName not "
                               "supported");
     }
-}
-
-void SdpaFpropOperationDescriptor::getDiagonalAlignment(hipdnnBackendAttributeType_t attributeType,
-                                                        int64_t requestedElementCount,
-                                                        int64_t* elementCount,
-                                                        void* arrayOfElements) const
-{
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, "SdpaFpropOperationDescriptor::getAttribute()");
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "SdpaFpropOperationDescriptor::getAttribute(): elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedElementCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "SdpaFpropOperationDescriptor::getAttribute(): requestedElementCount < 1");
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
-    }
-    *static_cast<int64_t*>(arrayOfElements) = static_cast<int64_t>(_data.diagonal_alignment);
 }
 
 void SdpaFpropOperationDescriptor::getMmaCoreMode(hipdnnBackendAttributeType_t attributeType,
@@ -980,33 +798,6 @@ void SdpaFpropOperationDescriptor::getMmaCoreMode(hipdnnBackendAttributeType_t a
         *elementCount = 1;
     }
     *static_cast<int64_t*>(arrayOfElements) = static_cast<int64_t>(_data.mma_core_mode);
-}
-
-void SdpaFpropOperationDescriptor::getImplementation(hipdnnBackendAttributeType_t attributeType,
-                                                     int64_t requestedElementCount,
-                                                     int64_t* elementCount,
-                                                     void* arrayOfElements) const
-{
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, "SdpaFpropOperationDescriptor::getAttribute()");
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "SdpaFpropOperationDescriptor::getAttribute(): elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedElementCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "SdpaFpropOperationDescriptor::getAttribute(): requestedElementCount < 1");
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
-    }
-    *static_cast<int64_t*>(arrayOfElements) = static_cast<int64_t>(_data.implementation);
 }
 
 // ============================================================================

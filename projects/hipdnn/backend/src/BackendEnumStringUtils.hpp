@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "HipdnnAttentionImplementation.h"
 #include "HipdnnBackendAttributeName.h"
 #include "HipdnnBackendAttributeType.h"
 #include "HipdnnBackendDescriptorType.h"
@@ -10,6 +11,7 @@
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnDiagonalAlignment.h"
 #include "HipdnnPointwiseMode.h"
 #include "HipdnnStatus.h"
 
@@ -140,6 +142,10 @@ inline const char* hipdnnGetAttributeTypeString(hipdnnBackendAttributeType_t typ
     // Extension API
     case HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT:
         return "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT";
+    case HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT:
+        return "HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT";
+    case HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT:
+        return "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT";
 
     default:
         return "HIPDNN_ATTRIBUTE_UNKNOWN";

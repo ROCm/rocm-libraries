@@ -3,13 +3,16 @@
 
 #pragma once
 
+#include "HipdnnAttentionImplementation.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
 #include "HipdnnPointwiseMode.h"
 #include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 
 namespace hipdnn_backend
 {
@@ -28,5 +31,18 @@ hipdnnConvolutionMode_t fromSdkConvMode(hipdnn_data_sdk::data_objects::ConvMode 
 // Converts between C-API hipdnnPointwiseMode_t and SDK PointwiseMode enum values.
 hipdnn_data_sdk::data_objects::PointwiseMode toSdkPointwiseMode(hipdnnPointwiseMode_t mode);
 hipdnnPointwiseMode_t fromSdkPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode mode);
+
+// Converts between C-API hipdnnDiagonalAlignment_t and SDK DiagonalAlignment enum values.
+hipdnn_data_sdk::data_objects::DiagonalAlignment
+    toSdkDiagonalAlignment(hipdnnDiagonalAlignment_t mode);
+hipdnnDiagonalAlignment_t
+    fromSdkDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment mode);
+
+// Converts between C-API hipdnnAttentionImplementation_t and SDK AttentionImplementation enum
+// values.
+hipdnn_data_sdk::data_objects::AttentionImplementation
+    toSdkAttentionImplementation(hipdnnAttentionImplementation_t mode);
+hipdnnAttentionImplementation_t
+    fromSdkAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation mode);
 
 } // namespace hipdnn_backend

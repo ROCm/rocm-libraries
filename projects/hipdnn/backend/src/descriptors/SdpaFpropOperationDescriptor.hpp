@@ -201,29 +201,15 @@ private:
         = hipdnn_data_sdk::data_objects::DataType::UNSET;
 
     // Private setAttribute helpers
-    void setDiagonalAlignment(hipdnnBackendAttributeType_t attributeType,
-                              int64_t elementCount,
-                              const void* arrayOfElements);
     void setMmaCoreMode(hipdnnBackendAttributeType_t attributeType,
                         int64_t elementCount,
                         const void* arrayOfElements);
-    void setImplementation(hipdnnBackendAttributeType_t attributeType,
-                           int64_t elementCount,
-                           const void* arrayOfElements);
 
     // Private getAttribute helpers
-    void getDiagonalAlignment(hipdnnBackendAttributeType_t attributeType,
-                              int64_t requestedElementCount,
-                              int64_t* elementCount,
-                              void* arrayOfElements) const;
     void getMmaCoreMode(hipdnnBackendAttributeType_t attributeType,
                         int64_t requestedElementCount,
                         int64_t* elementCount,
                         void* arrayOfElements) const;
-    void getImplementation(hipdnnBackendAttributeType_t attributeType,
-                           int64_t requestedElementCount,
-                           int64_t* elementCount,
-                           void* arrayOfElements) const;
 };
 
 } // namespace hipdnn_backend

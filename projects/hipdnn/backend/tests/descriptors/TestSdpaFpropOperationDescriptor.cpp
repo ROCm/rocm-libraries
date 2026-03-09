@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "DescriptorTestUtils.hpp"
+#include "HipdnnAttentionImplementation.h"
+#include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
@@ -606,10 +608,12 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorFailsNullPointer)
 TEST_F(TestSdpaFpropOperationDescriptor, SetDiagonalAlignment)
 {
     auto desc = getDescriptor();
-    auto diagonalAlignment = static_cast<int64_t>(DiagonalAlignment::TOP_LEFT);
+    auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_INT64, 1, &diagonalAlignment));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
+                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                       1,
+                                       &diagonalAlignment));
 
     ASSERT_EQ(desc->getData().diagonal_alignment, DiagonalAlignment::TOP_LEFT);
 }
@@ -617,10 +621,10 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetDiagonalAlignment)
 TEST_F(TestSdpaFpropOperationDescriptor, SetDiagonalAlignmentWrongElementCount)
 {
     auto desc = getDescriptor();
-    int64_t diagonalAlignment = 0;
+    auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                                  HIPDNN_TYPE_INT64,
+                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                                   2,
                                                   &diagonalAlignment),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -651,10 +655,12 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetDataTypeWrongElementCount)
 TEST_F(TestSdpaFpropOperationDescriptor, SetAttentionImplementation)
 {
     auto desc = getDescriptor();
-    auto implementation = static_cast<int64_t>(AttentionImplementation::AUTO);
+    auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT, HIPDNN_TYPE_INT64, 1, &implementation));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
+                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                       1,
+                                       &implementation));
 
     ASSERT_EQ(desc->getData().implementation, AttentionImplementation::AUTO);
 }
@@ -662,12 +668,13 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetAttentionImplementation)
 TEST_F(TestSdpaFpropOperationDescriptor, SetAttentionImplementationWrongElementCount)
 {
     auto desc = getDescriptor();
-    int64_t implementation = 0;
+    auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(
-            HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT, HIPDNN_TYPE_INT64, 2, &implementation),
-        HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
+                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                                  2,
+                                                  &implementation),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestSdpaFpropOperationDescriptor, SetComputeDataType)
@@ -748,15 +755,15 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeSdpafpropParams)
     auto desc = getDescriptor();
 
     // diagonal alignment
-    int64_t diagonalAlignment = -1;
+    auto diagonalAlignment = static_cast<hipdnnDiagonalAlignment_t>(-1);
     int64_t diagonalAlignmentCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                       HIPDNN_TYPE_INT64,
+                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                        1,
                                        &diagonalAlignmentCount,
                                        &diagonalAlignment));
     ASSERT_EQ(diagonalAlignmentCount, 1);
-    EXPECT_EQ(diagonalAlignment, static_cast<int64_t>(DiagonalAlignment::TOP_LEFT));
+    EXPECT_EQ(diagonalAlignment, HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT);
 
     // mma core mode
     int64_t mmaCoreMode = -1;
@@ -770,15 +777,15 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeSdpafpropParams)
     EXPECT_EQ(mmaCoreMode, static_cast<int64_t>(DataType::UNSET));
 
     // implementation
-    int64_t implementation = -1;
+    auto implementation = static_cast<hipdnnAttentionImplementation_t>(-1);
     int64_t implementationCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                       HIPDNN_TYPE_INT64,
+                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                        1,
                                        &implementationCount,
                                        &implementation));
     ASSERT_EQ(implementationCount, 1);
-    EXPECT_EQ(implementation, static_cast<int64_t>(AttentionImplementation::AUTO));
+    EXPECT_EQ(implementation, HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT);
 }
 
 TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeComputeType)
@@ -1244,7 +1251,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDiagonalAlignmentQueryRetur
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                       HIPDNN_TYPE_INT64,
+                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                        0,
                                        &elementCount,
                                        nullptr));
@@ -1268,8 +1275,11 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeAttentionImplementationQuer
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
+                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -1302,10 +1312,12 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDiagonalAlignmentQueryFails
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->getAttribute(
-            HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_INT64, 0, nullptr, nullptr),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
+                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                                  0,
+                                                  nullptr,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDataTypeQueryFailsNullElementCount)
@@ -1325,10 +1337,12 @@ TEST_F(TestSdpaFpropOperationDescriptor,
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->getAttribute(
-            HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT, HIPDNN_TYPE_INT64, 0, nullptr, nullptr),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
+                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                                  0,
+                                                  nullptr,
+                                                  nullptr),
+                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
 // =============================================================================
