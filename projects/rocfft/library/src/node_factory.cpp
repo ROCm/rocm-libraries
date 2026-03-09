@@ -1072,8 +1072,17 @@ static std::size_t cutOffBatch_2 = 5;
 // Partial pass is currently restricted to large enough batch sizes,
 // unite stride, interleaved FFTs.
 auto check_pp_restrictions = [](const NodeMetaData& nodeData, const bool& cutOffBatch) -> bool {
-    size_t checkiDist = product(nodeData.length.begin(), nodeData.length.end());
-    size_t checkoDist = product(nodeData.outputLength.begin(), nodeData.outputLength.end());
+    size_t checkiDist = 0, checkoDist = 0;
+
+    auto inputLength = nodeData.length;
+
+    // real-to-complex iDist check is in real units,
+    // which is outputLength[0] * 2 * product of other lengths
+    if(nodeData.placement == rocfft_placement_inplace
+       && nodeData.inArrayType == rocfft_array_type_real)
+        inputLength[0] = nodeData.outputLength[0] * 2;
+    checkiDist = product(inputLength.begin(), inputLength.end());
+    checkoDist = product(nodeData.outputLength.begin(), nodeData.outputLength.end());
 
     bool distCondition      = (nodeData.iDist == checkiDist && nodeData.oDist == checkoDist);
     bool strideCondition    = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
