@@ -721,10 +721,6 @@ class Solution(collections.abc.Mapping):
               % (tc, totalElementsPerp, state["NumLoadsPerpendicular%s"%tc]))
         return False
 
-    if (tc == "A" or tc == "B") and state["ProblemType"].get("SwizzleTensor%s"%tc, False) and state["NumLoadsCoalesced%s"%tc] > 1:
-      reject(state, printRejectionReason, "%s: SwizzleTensor with NumLoadsCoalesced > 1 not supported (incorrect tile offset stride for edge cases)"%tc)
-      return False
-
     if (tc == "A" or tc == "B") and state["enableGLTr%s"%tc]:
       state["NumLoadsCoalesced%s"%tc], state["NumLoadsPerpendicular%s"%tc] = state["NumLoadsPerpendicular%s"%tc], state["NumLoadsCoalesced%s"%tc]
 
