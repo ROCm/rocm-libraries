@@ -601,35 +601,6 @@ namespace rocsparse_clients
         }
 
         case rocsparse_format_bsr:
-        {
-            for(int64_t i = 0; i < batch_count; ++i)
-            {
-#if 0
-      auto& host = A.template as<rocsparse_format_bsr>().host();
-	    const T* p = A.get_batched_host_val(i);
-	    const T* p_hx = x.host().data() + i*x.get_stride();
-	    T* p_hy = y.host().data() + i*y.get_stride();
-	    host_bsrsv<T>(operation,
-			  A.m_host_gebsr.block_direction,
-			  A.m_host_gebsr.mb,
-			  A.m_host_gebsr.nnzb,
-			  *halpha,
-			  A.m_host_gebsr.ptr,
-			  A.m_host_gebsr.ind,
-			  p,
-			  A.m_host_gebsr.row_block_dim,
-			  p_hx,
-			  p_hy,
-			  diag,
-			  uplo,
-			  A.m_host_gebsr.base,
-			  symbolic + i,
-			  exact + i);
-#endif
-            }
-            break;
-        }
-
         case rocsparse_format_ell:
         case rocsparse_format_sell:
         case rocsparse_format_bell:
@@ -841,8 +812,6 @@ void testing_sptrsv(const Arguments& arg)
                                                buffer_size,
                                                buffer,
                                                p_error);
-
-        CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
 
         int64_t                A_m         = A.get_nrows();
         int64_t                A_nnz       = 0;

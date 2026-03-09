@@ -376,8 +376,8 @@ if(BUILD_CODE_COVERAGE)
     LLVM_PROFDATA
     llvm-profdata
     REQUIRED
-    HINTS /opt/amdgpu/lib/x86_64-linux-gnu/llvm-20.1/bin/ #${ROCM_PATH}/llvm/bin
-    PATHS /opt/amdgpu/lib/x86_64-linux-gnu/llvm-20.1/bin/
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
   )
 
   find_program(

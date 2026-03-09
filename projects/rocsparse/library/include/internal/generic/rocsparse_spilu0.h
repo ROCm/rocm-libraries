@@ -34,7 +34,7 @@ extern "C" {
  *  \brief Get buffer size for Incomplete LU factorization with 0 fill-ins and no pivoting.
 *  \details
 *  \p rocsparse_spilu0_buffer_size returns the size of the non-persistent buffer
-*  that is required by \p rocsparse_spilu0, and must be allocated  by the user.
+*  that is required by \ref rocsparse_spilu0, and must be allocated  by the user.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -100,7 +100,7 @@ rocsparse_status rocsparse_spilu0_buffer_size(rocsparse_handle            handle
 *  \p rocsparse_spilu0 supports the following
 *  data types for \p A: \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
 *
-*  \note The descriptor \p rocsparse_spilu0_descr needs to be configured with \ref rocsparse_spilu0_set_input.
+*  \note The descriptor \p spilu0_descr needs to be configured with \ref rocsparse_spilu0_set_input.
 *  \note The sparse matrix formats currently supported are: \ref rocsparse_format_csr and \ref rocsparse_format_bsr.
 *
 *  \note

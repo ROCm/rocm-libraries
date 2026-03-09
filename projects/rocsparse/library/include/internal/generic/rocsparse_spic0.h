@@ -83,7 +83,7 @@ rocsparse_status rocsparse_spic0_buffer_size(rocsparse_handle            handle,
    *  \brief Incomplete Cholesky factorization with 0 fill-ins and no pivoting.
    *
    *  \details
-   *  \p rocsparse_csric0 computes the incomplete Cholesky factorization with 0 fill-ins
+   *  \p rocsparse_spic0 computes the incomplete Cholesky factorization with 0 fill-ins
    *  and no pivoting of a sparse \f$m \times m\f$ matrix \f$A\f$, such that
    *  \f[
    *    A \approx LL^T
@@ -105,7 +105,7 @@ rocsparse_status rocsparse_spic0_buffer_size(rocsparse_handle            handle,
    *  \p rocsparse_spic0 supports the following
    *  data types for \p A: \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c.
    *
-   *  \note The descriptor \p rocsparse_spic0_descr needs to be configured with \ref rocsparse_spic0_set_input.
+   *  \note The descriptor \p spic0_descr needs to be configured with \ref rocsparse_spic0_set_input.
    *  \note
    *  The sparse matrix formats currently supported are: \ref rocsparse_format_csr and \ref rocsparse_format_bsr.
    *

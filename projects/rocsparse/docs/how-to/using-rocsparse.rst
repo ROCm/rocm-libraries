@@ -358,7 +358,7 @@ Function name                                        yes no
 For :cpp:func:`rocsparse_spmv()`, :cpp:func:`rocsparse_spmm()`, :cpp:func:`rocsparse_spsv()`, and :cpp:func:`rocsparse_spsm()`,
 ``hipGraph`` is supported when passing the buffer size or compute stages but is not supported when passing the preprocess stage.
 
-For :cpp:func:`rocsparse_v2_spmv()`, :cpp:func:`rocsparse_sptrsv()`, and :cpp:func:`rocsparse_sptrsm()`, :cpp:func:`rocsparse_spic0()`, and :cpp:func:`rocsparse_spilu0()`, ``hipGraph`` is supported when passing the compute stage but is not supported when passing the analysis stage.
+For :cpp:func:`rocsparse_v2_spmv()`, :cpp:func:`rocsparse_sptrsv()`, :cpp:func:`rocsparse_sptrsm()`, :cpp:func:`rocsparse_spic0()`, and :cpp:func:`rocsparse_spilu0()`, ``hipGraph`` is supported when passing the compute stage but is not supported when passing the analysis stage.
 
 For :cpp:func:`rocsparse_sddmm()`, ``hipGraph`` is supported only when using the default algorithm.
 
