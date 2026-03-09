@@ -2445,6 +2445,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.addComment1("global read addresses: shift mxsb")
           module.add(self.graShift(kernel, tensorParametersB["MX"]))
 
+    # addresses
+    if not forceNoTileCode:
+      module.addComment1("global read addresses: addresses a")
+      module.add(self.graAddresses(kernel, tensorParametersA))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.addComment1("global read addresses: addresses mxsa")
+        module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
+      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+        module.addComment1("global read addresses: addresses metadata")
+        module.add(self.graAddresses(kernel, tPM))
+      module.addComment1("global read addresses: addresses b")
+      module.add(self.graAddresses(kernel, tensorParametersB))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.addComment1("global read addresses: addresses mxsb")
+        module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
+
     # workgoup SGPRs no longer needed
     module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
 
@@ -2467,22 +2483,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.graFinalOffsets(kernel, tensorParametersB["MX"]))
     self.dontAppendCode = False
     self.dontAppendCode = self.dontAppendCode or forceNoTileCode
-
-    # addresses
-    if not forceNoTileCode:
-      module.addComment1("global read addresses: addresses a")
-      module.add(self.graAddresses(kernel, tensorParametersA))
-      if kernel["ProblemType"]["MXBlockA"]:
-        module.addComment1("global read addresses: addresses mxsa")
-        module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
-      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-        module.addComment1("global read addresses: addresses metadata")
-        module.add(self.graAddresses(kernel, tPM))
-      module.addComment1("global read addresses: addresses b")
-      module.add(self.graAddresses(kernel, tensorParametersB))
-      if kernel["ProblemType"]["MXBlockB"]:
-        module.addComment1("global read addresses: addresses mxsb")
-        module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
 
     # Add increment code
     gsuComponent = Component.GSU.find(self)
