@@ -161,8 +161,8 @@ struct BlockGemmARegBRegCRegEightWavesV1
                                        tuple<sequence<2, NIterPerWarp, NWarp / 2>, KIterSeq>,
                                        tuple<sequence<2, 1, 0, 1>>,
                                        tuple<sequence<0, 0, 0, 2>>,
-                                       sequence</*1, 2*/>,
-                                       sequence</*0, 1*/>>{};
+                                       sequence<>,
+                                       sequence<>>{};
 
         constexpr auto b_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             b_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
@@ -190,9 +190,9 @@ struct BlockGemmARegBRegCRegEightWavesV1
             make_static_tile_distribution(MakeCBlockDistributionEncode()));
     }
 
-    using ALdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(
+    using ALdsTile  = decltype(make_static_distributed_tensor<ComputeDataType>(
         make_static_tile_distribution(MakeABlockDistributionEncode())));
-    using BLdsTile = statically_indexed_array<
+    using BLdsTiles = statically_indexed_array<
         statically_indexed_array<decltype(make_static_distributed_tensor<ComputeDataType>(
                                      make_static_tile_distribution(
                                          MakeBBlockDistributionEncode()))),
@@ -203,7 +203,7 @@ struct BlockGemmARegBRegCRegEightWavesV1
     template <typename CBlockTensor>
     CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                    const ALdsTile& a_warp_tile_,
-                                   const BLdsTile& b_warp_tile_) const
+                                   const BLdsTiles& b_warp_tiles_) const
     {
         // checks
         static_assert(std::is_same_v<CDataType, remove_cv_t<typename CBlockTensor::DataType>>,
@@ -226,7 +226,7 @@ struct BlockGemmARegBRegCRegEightWavesV1
 
                 // read B warp tensor from B block tensor
                 BWarpTensor b_warp_tensor;
-                b_warp_tensor.get_thread_buffer() = b_warp_tile_[nIter][kIter].get_thread_buffer();
+                b_warp_tensor.get_thread_buffer() = b_warp_tiles_[nIter][kIter].get_thread_buffer();
 
                 // read C warp tensor from C block tensor
                 using c_iter_idx = sequence<mIter, nIter>;
@@ -250,11 +250,11 @@ struct BlockGemmARegBRegCRegEightWavesV1
     template <typename CBlockTensor>
     CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                    const ALdsTile& a_warp_tile_,
-                                   const BLdsTile& b_warp_tile_,
+                                   const BLdsTiles& b_warp_tiles_,
                                    const null_tensor&,
                                    const null_tensor&) const
     {
-        operator()(c_block_tensor, a_warp_tile_, b_warp_tile_);
+        operator()(c_block_tensor, a_warp_tile_, b_warp_tiles_);
     }
 };
 

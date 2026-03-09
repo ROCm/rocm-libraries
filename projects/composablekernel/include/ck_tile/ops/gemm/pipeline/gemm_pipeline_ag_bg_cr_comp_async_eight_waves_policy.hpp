@@ -100,23 +100,6 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static_assert(K0 * K1 * K2 == KPerWarp, "Wrong!");
     static_assert(K0 == 1, "Wrong!");
 
-    struct swap_warp_t
-    {
-        template <typename T>
-        CK_TILE_HOST_DEVICE constexpr auto operator()(T&& v) const
-        {
-            return v ^ 1;
-        }
-    };
-
-    template <bool swap_warp_group>
-    static constexpr inline auto warp_groups_transform = []() {
-        if constexpr(swap_warp_group)
-            return make_functor_transform(swap_warp_t{}, number<KWarps>{});
-        else
-            return make_pass_through_transform(number<KWarps>{});
-    }();
-
     CK_TILE_DEVICE static constexpr bool IsPreshuffle() { return Preshuffle; }
 
     CK_TILE_DEVICE static constexpr auto MakeADramTileDistribution()
@@ -355,7 +338,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
 
     CK_TILE_DEVICE static constexpr index_t GetSmemSize()
     {
-        return max(2 * (GetSmemSizeA() + GetSmemSizeB()));
+        return 2 * (GetSmemSizeA() + GetSmemSizeB());
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeA() { return K2; }

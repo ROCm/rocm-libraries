@@ -207,8 +207,8 @@ struct ABQuantBlockUniversalGemmAsBsCrAsync : public BlockGemmQuantBase
             make_static_tile_distribution(MakeCBlockDistributionEncode()));
     }
 
-    using ALdsTile = typename BlockGemmBase::ALdsTile;
-    using BLdsTile = typename BlockGemmBase::BLdsTile;
+    using ALdsTile  = typename BlockGemmBase::ALdsTile;
+    using BLdsTiles = typename BlockGemmBase::BLdsTiles;
 
     private:
     template <GemmPipelineScheduler Scheduler, typename GemmTraits>
@@ -236,7 +236,7 @@ struct ABQuantBlockUniversalGemmAsBsCrAsync : public BlockGemmQuantBase
         template <typename CBlockTensor, typename AQBlockTensor, typename BQBlockTensor>
         CK_TILE_DEVICE void operator()(CBlockTensor& c_block_tensor,
                                        const ALdsTile& a_warp_tile_,
-                                       const BLdsTile& b_warp_tile_,
+                                       const BLdsTiles& b_warp_tiles_,
                                        AQBlockTensor& aq_block_tensor,
                                        BQBlockTensor& bq_block_tensor)
         {
@@ -273,7 +273,7 @@ struct ABQuantBlockUniversalGemmAsBsCrAsync : public BlockGemmQuantBase
                             merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
                         BWarpTensor b_warp_tensor;
                         b_warp_tensor.get_thread_buffer() =
-                            b_warp_tile_[nIter][kIter].get_thread_buffer();
+                            b_warp_tiles_[nIter][kIter].get_thread_buffer();
                         if constexpr(kIterInQScale == 0)
                         {
                             c_warp_tensor = WarpGemm{}(a_warp_tensor, b_warp_tensor);

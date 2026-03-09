@@ -42,10 +42,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
 
     static_assert(!std::is_same_v<BDataType, pk_int4_t>, "Not implemented");
 
-    static constexpr index_t APackedSize =
-        ck_tile::numeric_traits<remove_cvref_t<ADataType>>::PackedSize;
-    static constexpr index_t BPackedSize =
-        ck_tile::numeric_traits<remove_cvref_t<BDataType>>::PackedSize;
+    static constexpr index_t APackedSize = ck_tile::numeric_traits<ADataType>::PackedSize;
+    static constexpr index_t BPackedSize = ck_tile::numeric_traits<BDataType>::PackedSize;
 
     using BlockGemm = remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem>())>;
     using WarpGemm  = typename BlockGemm::WarpGemm;
@@ -100,7 +98,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
     [[nodiscard]] CK_TILE_HOST static const std::string GetPipelineName()
     {
         // clang-format off
-        return "COMPUTE_ASYNC";
+        return "COMPUTE_ASYNC_EIGHT_WAVES";
         // clang-format on
     }
 
@@ -158,8 +156,6 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
             // ------
             // Checks
             // ------
-            static_assert(!is_detected<is_tuple, AsDramBlockWindowTmp>::value);
-            static_assert(!is_detected<is_tuple, BsDramBlockWindowTmp>::value);
             static_assert(
                 std::is_same_v<ADataType,
                                remove_cvref_t<typename AsDramBlockWindowTmp::DataType>> &&
@@ -223,6 +219,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
     {
         // TODO: A/B windows are tuple of windows, but the implementation doesn't take that into
         // account yet and just the first element is passed
+        static_assert(AsDramBlockWindowTmp::size() == 1);
+        static_assert(BsDramBlockWindowTmp::size() == 1);
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
         const auto RunPipeline  = [&](auto hot_loop_, auto tail_num_) {

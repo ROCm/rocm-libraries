@@ -299,7 +299,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
         auto c_block_tile = block_gemm.MakeCBlockTile();
 
         typename BlockGemm::ALdsTile a_block_tile;
-        typename BlockGemm::BLdsTile b_block_tile;
+        typename BlockGemm::BLdsTiles b_block_tiles;
 
         decltype(load_tile(aq_copy_dram_window)) aq_block_tile[2];
         decltype(load_tile(bq_copy_dram_window)) bq_block_tile[2];
@@ -340,14 +340,14 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
             LocalPrefetchA(smem_a, a_block_tile, a_lds_gemm_window);
 
             BDataType* smem_b = reinterpret_cast<BDataType*>(smem01[i] + lds_offset_b);
-            LocalPrefetchB(smem_b, b_block_tile, b_lds_gemm_window);
+            LocalPrefetchB(smem_b, b_block_tiles, b_lds_gemm_window);
         };
 
         auto calc_gemm = [&](index_t i) {
             __builtin_amdgcn_sched_barrier(0);
             s_nop();
             block_gemm(
-                c_block_tile, a_block_tile, b_block_tile, aq_block_tile[i], bq_block_tile[i]);
+                c_block_tile, a_block_tile, b_block_tiles, aq_block_tile[i], bq_block_tile[i]);
             scheduler_func();
         };
 
@@ -380,7 +380,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
             GlobalPrefetchAsync(smem_b_tic, b_copy_lds_window, b_copy_dram_window);
 
             BDataType* smem_b_toc = reinterpret_cast<BDataType*>(smem01[toc] + lds_offset_b);
-            LocalPrefetchB(smem_b_toc, b_block_tile, b_lds_gemm_window);
+            LocalPrefetchB(smem_b_toc, b_block_tiles, b_lds_gemm_window);
 
             __builtin_amdgcn_sched_barrier(0);
             block_sync_lds_direct_load<AQ_LOAD_INST + BQ_LOAD_INST + B_LOAD_INST>();
