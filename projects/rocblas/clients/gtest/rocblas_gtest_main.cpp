@@ -313,6 +313,7 @@ int main(int argc, char** argv)
     }
 
     print_rocblas_version_string();
+    print_asan_kernel_warning("rocblas-test");
 
     // Set test device
     rocblas_set_test_device();

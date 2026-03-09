@@ -164,7 +164,7 @@ void logHipDeviceInfo(hipStream_t stream)
 
 void initialize()
 {
-    if(sLoggingShutdown.load(std::memory_order_relaxed))
+    if(sLoggingShutdown.load(std::memory_order_acquire))
     {
         // Program is shutting down; do not initialize the logger.
         return;
@@ -512,7 +512,7 @@ void backendLoggingCallback(hipdnnSeverity_t severity, const char* msg)
 {
     // Check the shutdown flag before accessing BackendLogState. The atexit handler sets this
     // flag to prevent any thread from accessing logging infrastructure during static destruction.
-    if(sLoggingShutdown.load(std::memory_order_relaxed))
+    if(sLoggingShutdown.load(std::memory_order_acquire))
     {
         return;
     }
