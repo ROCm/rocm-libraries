@@ -120,7 +120,7 @@ def sendFailureNotifications() {
     // Get the build log.
     def buildLog = currentBuild.rawBuild.getLog(Integer.MAX_VALUE).join('\n')
     echo "Checking for failure patterns..."
-    Check for patterns in the log.
+    // Check for patterns in the log.
     def foundPatterns = []
     for (patternMap in failurePatterns) {
         def result = checkForPattern(patternMap.pattern, buildLog)
