@@ -24,7 +24,7 @@
 
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister
-from rocisa.instruction import SMovB32, SMovB64, SNop, VAddU32, VAndB32, VMovB32, VLShiftLeftB32, VLShiftRightB32
+from rocisa.instruction import SMovB32, SMovB64, SNop, VAddU32, VAndB32, VMovB32, VLShiftLeftB32, VLShiftRightB32, _VLShiftLeftAddU32, VBfeU32
 from rocisa.functions import vectorStaticRemainder, \
     vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply, \
     vectorStaticMultiplyAdd
@@ -206,34 +206,47 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         strideWave   = numTileInInst * matrixInstT * vectorWidth
 
         with writer.allocTmpSgpr(1) as tmpSgprInfo:
-            # tile offset = (wtId%16)//8*8
-            module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
-                "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
-            #FIXME: calculate this
-            module.add(vectorStaticRemainder(dummy, tReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpVgprRes, tmpSgprInfo, "tileOffset=wtId%16"))
-            module.add(vectorStaticDivide(tReg, tReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, f"tileOffset//={self.NUM_CONT_READ_ELEMENTS}"))
-            module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
-                "tileOffset*=strideTile(%u)" % strideTile))
-            # block offset
-            # removed, wmma has only single block
-
-            #FIXME: should apply along k-dir?
-            module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
-                "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
-
-            # unroll offset
-            module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
-            module.add(vectorStaticDivide(kReg, kReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset=wtId//{self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
-            if isSparseDenseMatrix:
-                # Dense matrix of SPARSE are interleaved format, so we need to multiply by 2
-                module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_CONT_READ_ELEMENTS * 2, tmpSgprInfo, f"kOffset*=2x{self.NUM_CONT_READ_ELEMENTS}"))
+            if writer.states.asmCaps["HasWMMA_V4"]:
+                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
+                module.add(vectorStaticRemainder(dummy, tReg, dividendReg, 2, tmpVgprRes, tmpSgprInfo, "tid%2"))
+                module.add(vectorStaticDivide(kReg, kReg, 8, tmpSgprInfo, "wtid/8"))
+                module.add(_VLShiftLeftAddU32(dst=vgpr(kReg), shiftHex=0x1, src0=vgpr(kReg), src1=vgpr(tReg), comment="kOffset = tid%2 + wtid/8*2"))
+                module.add(VBfeU32(dst=vgpr(dummy), src0=vgpr(dividendReg), src1=1, src2=1, comment="tid[bit1]"))
+                module.add(_VLShiftLeftAddU32(dst=vgpr(dummy), shiftHex=0x3, src0=vgpr(dummy), src1=vgpr(kReg), comment="kOffset= tid%2 + wtid/8*2 + tid[bit1]*8"))
+                module.add(VBfeU32(dst=vgpr(tmpVgpr), src0=vgpr(dividendReg), src1=2, src2=1, comment="tid[bit2]"))
+                module.add(vectorStaticMultiply(vgpr(tmpVgpr), vgpr(tmpVgpr), 8, tmpSgprInfo, "tileOffset=wtId[bit2]*8"))
+                #module.add(_VLShiftLeftAddU32(dst=vgpr(tReg), shiftHex=0x4, src0=vgpr(dummy), src1=vgpr(tmpVgpr), comment="8"))
+                module.add(vectorStaticMultiply(vgpr(dummy), vgpr(dummy), strideUnroll, tmpSgprInfo, "kOffset*=stride"))
+                module.add(VAddU32(vgpr(tReg), vgpr(dummy), vgpr(tmpVgpr), "lrOffset = kOffset + tileOffset"))
             else:
-                module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_CONT_READ_ELEMENTS, tmpSgprInfo, f"kOffset*={self.NUM_CONT_READ_ELEMENTS}"))
-            module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
-            module.add(vectorStaticRemainder(dummy, kReg, kReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, f"ktOffset=wtid%{self.NUM_CONT_READ_ELEMENTS}"))
-            module.add(VAddU32(vgpr(mReg), vgpr(mReg), vgpr(kReg), "kOffset+=ktOffset"))
-            module.add(vectorStaticMultiply(vgpr(mReg), vgpr(mReg), strideUnroll, tmpSgprInfo, "kOffset*=stride"))
-            module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(mReg), "lrOffset = kOffset + tileOffset"))
+                # tile offset = (wtId%16)//8*8
+                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
+                    "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
+                #FIXME: calculate this
+                module.add(vectorStaticRemainder(dummy, tReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpVgprRes, tmpSgprInfo, "tileOffset=wtId%16"))
+                module.add(vectorStaticDivide(tReg, tReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, f"tileOffset//={self.NUM_CONT_READ_ELEMENTS}"))
+                module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
+                    "tileOffset*=strideTile(%u)" % strideTile))
+                # block offset
+                # removed, wmma has only single block
+
+                #FIXME: should apply along k-dir?
+                module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
+                    "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
+
+                # unroll offset
+                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
+                module.add(vectorStaticDivide(kReg, kReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset=wtId//{self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
+                if isSparseDenseMatrix:
+                    # Dense matrix of SPARSE are interleaved format, so we need to multiply by 2
+                    module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_CONT_READ_ELEMENTS * 2, tmpSgprInfo, f"kOffset*=2x{self.NUM_CONT_READ_ELEMENTS}"))
+                else:
+                    module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_CONT_READ_ELEMENTS, tmpSgprInfo, f"kOffset*={self.NUM_CONT_READ_ELEMENTS}"))
+                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
+                module.add(vectorStaticRemainder(dummy, kReg, kReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, f"ktOffset=wtid%{self.NUM_CONT_READ_ELEMENTS}"))
+                module.add(VAddU32(vgpr(mReg), vgpr(mReg), vgpr(kReg), "kOffset+=ktOffset"))
+                module.add(vectorStaticMultiply(vgpr(mReg), vgpr(mReg), strideUnroll, tmpSgprInfo, "kOffset*=stride"))
+                module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(mReg), "lrOffset = kOffset + tileOffset"))
 
             # wave offset
             if num1DWaves > 1:
@@ -352,53 +365,82 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         strideWave   = numTileInInst * matrixInstT * vectorWidth
 
         with writer.allocTmpSgpr(1) as tmpSgprInfo:
-            # tile offset = (wtId%8)//4*8
-            module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
-                "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
-            #FIXME: calculate this
-            module.add(vectorStaticRemainder(dummy, tReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpVgprRes, tmpSgprInfo, "tileOffset=wtId%8"))
-            module.add(vectorStaticDivide(tReg, tReg, self.NUM_CONT_READ_ELEMENTS, tmpSgprInfo, f"tileOffset//={self.NUM_CONT_READ_ELEMENTS}"))
-            module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
-                "tileOffset*=strideTile(%u)" % strideTile))
-            # block offset
-            # removed, wmma has only single block
-
-            #FIXME: should apply along k-dir?
-            module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
-                "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
-
-            if tP["isM"]:
-                # multiplyBy:
-                # 2 : t8-t15 will read the same block as the t0-t7. t0-t7 reads 0-63
-                # 1 : t8-t15 will read the next block. t0-t7 reads 0-63 and t8-t15 read 64-127
-                # TODO Should have wider local read to let t8-t15 read the next iter's data and remove the muliplyBy=1 case.
-                multiplyBy = 1 if kernel["MIInputPerThread%s"%tc] * tP["bpeDS"] // writer.states.bpr == 2 else 2
-                strideK = self.NUM_UNROLLED_STRIDE_ELEMENTS // self.NUM_READ_ELEMENT_PER_THREAD * self.NUM_CONT_READ_ELEMENTS * multiplyBy
-                module.add(vectorStaticRemainder(dummy, sReg, kReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, f"5.1 kOffset = wtId % {self.NUM_CONT_READ_ELEMENTS}"))
-                module.add(vectorStaticDivide(mReg, kReg, strideK , tmpSgprInfo, f"5. blockOffset = wtId / strideK({strideK})"))
-
-                module.add(vectorStaticMultiplyAdd(vgpr(kReg), vgpr(mReg), self.NUM_CONT_READ_ELEMENTS, vgpr(sReg), tmpSgprInfo,f"5.3 kOffset = kOffset + blockOffset * {self.NUM_CONT_READ_ELEMENTS}"))
-                module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), strideUnroll, tmpSgprInfo, f"6.1 lrOffset = kOffset * strideUnroll({strideUnroll})"))
-                module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(kReg), "6.2 lrOffset = lrOffset + tileOffset"))
+            if writer.states.asmCaps["HasWMMA_V4"]:
+                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
+                module.add(vectorStaticRemainder(dummy, tReg, dividendReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, "tid%4"))
+                module.add(vectorStaticDivide(kReg, kReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, "wtid/16"))
+                module.add(_VLShiftLeftAddU32(dst=vgpr(kReg), shiftHex=0x2, src0=vgpr(kReg), src1=vgpr(tReg), comment="kOffset = wtid/16*4 + tid%4"))
+                module.add(VBfeU32(dst=vgpr(dummy), src0=vgpr(dividendReg), src1=2, src2=1, comment="tid[bit2]"))
+                module.add(_VLShiftLeftAddU32(dst=vgpr(tReg), shiftHex=0x3, src0=vgpr(dummy), src1=vgpr(kReg), comment="kOffset = wtid/16*4 + tid%4 +tid[bit2]*8"))
+                module.add(VBfeU32(dst=vgpr(tmpVgpr), src0=vgpr(dividendReg), src1=3, src2=1, comment="tid[bit3]"))
+                module.add(vectorStaticMultiply(vgpr(tmpVgpr), vgpr(tmpVgpr), 8, tmpSgprInfo, "tileOffset = tid[bit3]*8"))
+                #module.add(_VLShiftLeftAddU32(dst=vgpr(tReg), shiftHex=0x4, src0=vgpr(tReg), src1=vgpr(tmpVgpr), comment="8"))
+                module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideUnroll, tmpSgprInfo, "kOffset*=stride"))
+                module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(tmpVgpr), "lrOffset = kOffset + tileOffset"))
             else:
-                # unroll offset
-                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
-                module.add(vectorStaticDivide(kReg, kReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset=wtId//{self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
-                if isSparseDenseMatrix:
-                    # Dense matrix of SPARSE are interleaved format, so we need to multiply by 2
-                    module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_UNROLLED_STRIDE_ELEMENTS*2, tmpSgprInfo, f"kOffset*={self.NUM_UNROLLED_STRIDE_ELEMENTS}x2"))
+                # tile offset = (wtId%8)//4*8
+                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
+                    "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
+                #FIXME: calculate this
+                module.add(vectorStaticRemainder(dummy, tReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpVgprRes, tmpSgprInfo, "tileOffset=wtId%8"))
+                module.add(vectorStaticDivide(tReg, tReg, self.NUM_CONT_READ_ELEMENTS, tmpSgprInfo, f"tileOffset//={self.NUM_CONT_READ_ELEMENTS}"))
+                module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
+                    "tileOffset*=strideTile(%u)" % strideTile))
+                # block offset
+                # removed, wmma has only single block
+
+                #FIXME: should apply along k-dir?
+                module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
+                    "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
+
+                if tP["isM"]:
+                    multiplyBy = 1 if kernel["MIInputPerThread%s"%tc] * tP["bpeDS"] // writer.states.bpr == 2 else 2
+                    strideK = self.NUM_UNROLLED_STRIDE_ELEMENTS // self.NUM_READ_ELEMENT_PER_THREAD * self.NUM_CONT_READ_ELEMENTS * multiplyBy
+                    module.add(vectorStaticRemainder(dummy, sReg, kReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, f"5.1 kOffset = wtId % {self.NUM_CONT_READ_ELEMENTS}"))
+                    module.add(vectorStaticDivide(mReg, kReg, strideK , tmpSgprInfo, f"5. blockOffset = wtId / strideK({strideK})"))
+
+                    if kernel["widerLDSTrMetadata"] == 0:
+                        # multiplyBy:
+                        # 2 : t8-t15 will read the same block as the t0-t7. t0-t7 reads 0-63
+                        # 1 : t8-t15 will read the next block. t0-t7 reads 0-63 and t8-t15 read 64-127
+                        # TODO Should have wider local read to let t8-t15 read the next iter's data and remove the muliplyBy=1 case.
+                        module.add(vectorStaticMultiplyAdd(vgpr(kReg), vgpr(mReg), self.NUM_CONT_READ_ELEMENTS, vgpr(sReg), tmpSgprInfo,f"5.3 kOffset = kOffset + blockOffset * {self.NUM_CONT_READ_ELEMENTS}"))
+                        module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), strideUnroll, tmpSgprInfo, f"6.1 lrOffset = kOffset * strideUnroll({strideUnroll})"))
+                        module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(kReg), "6.2 lrOffset = lrOffset + tileOffset"))
+                    else:
+                        # multiplyBy:
+                        # 2 : t8-t15 will read the next iter block. t0-t7 reads 0-63, t8-t15 reads 128-191, t16-t23 reads 64-127, t24-t31 reads 192-255                    
+                        # 1 : t8-t15 will read the next block. t0-t7 reads 0-63 and t8-t15 read 64-127            
+                        module.add(vectorStaticMultiplyAdd(vgpr(tmpVgpr), vgpr(mReg), self.NUM_CONT_READ_ELEMENTS, vgpr(sReg), tmpSgprInfo,f"5.3 kOffset = kOffset + blockOffset * {self.NUM_CONT_READ_ELEMENTS}"))
+                        module.add(vectorStaticMultiply(vgpr(tmpVgpr), vgpr(tmpVgpr), strideUnroll, tmpSgprInfo, f"6.1 lrOffset = kOffset * strideUnroll({strideUnroll})"))
+                        module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(tmpVgpr), "6.2 lrOffset = lrOffset + tileOffset"))
+
+                        if multiplyBy == 2:
+                            blockStride = self.NUM_UNROLLED_STRIDE_ELEMENTS // self.NUM_READ_ELEMENT_PER_THREAD * self.NUM_CONT_READ_ELEMENTS
+                            module.add(vectorStaticDivide(mReg, kReg, blockStride , tmpSgprInfo, f"6.3 blockIdx = wtid / blockStride({blockStride})"))
+                            module.add(VAndB32(dst=vgpr(mReg), src0=hex(1), src1=vgpr(mReg), comment="6.4 isOddIter = blockIdx % 2"))  #data at block 1 and 3 will be used at odd iter.
+                            miWaveTile = kernel["MIWaveTileB"] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTileA"]
+                            iterOffset = (self.NUM_READ_ELEMENT_PER_THREAD * waveWidth // multiplyBy)  * num1DWaves * miWaveTile  # (8*32/2) x waveGroup x waveTile.
+                            module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(mReg), iterOffset, vgpr(tReg), tmpSgprInfo, f"6.4 lrOffset = lrOffset + iterOffset({iterOffset}) * isOddIter"))
                 else:
-                    module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset*={self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
-                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
-                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpVgprRes, tmpSgprInfo, "ktOffset=wtId%16"))
-                module.add(vectorStaticDivide(kReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpSgprInfo, f"kOffset=ktOffset//{self.NUM_READ_ELEMENT_PER_THREAD}"))
-                module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), self.NUM_CONT_READ_ELEMENTS, tmpSgprInfo, f"ktOffset*={self.NUM_CONT_READ_ELEMENTS}"))
-                module.add(VAddU32(vgpr(mReg), vgpr(mReg), vgpr(kReg), "kOffset+=ktOffset"))
-                module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
-                module.add(vectorStaticRemainder(dummy, kReg, kReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, f"ktOffset=wtid%{self.NUM_CONT_READ_ELEMENTS}"))
-                module.add(VAddU32(vgpr(mReg), vgpr(mReg), vgpr(kReg), "kOffset+=ktOffset"))
-                module.add(vectorStaticMultiply(vgpr(mReg), vgpr(mReg), strideUnroll, tmpSgprInfo, "kOffset*=stride"))
-                module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(mReg), "lrOffset = kOffset + tileOffset"))
+                    # unroll offset
+                    module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
+                    module.add(vectorStaticDivide(kReg, kReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset=wtId//{self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
+                    if isSparseDenseMatrix:
+                        # Dense matrix of SPARSE are interleaved format, so we need to multiply by 2
+                        module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_UNROLLED_STRIDE_ELEMENTS*2, tmpSgprInfo, f"kOffset*={self.NUM_UNROLLED_STRIDE_ELEMENTS}x2"))
+                    else:
+                        module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset*={self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
+                    module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
+                    module.add(vectorStaticRemainder(dummy, kReg, dividendReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpVgprRes, tmpSgprInfo, "ktOffset=wtId%16"))
+                    module.add(vectorStaticDivide(kReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpSgprInfo, f"kOffset=ktOffset//{self.NUM_READ_ELEMENT_PER_THREAD}"))
+                    module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), self.NUM_CONT_READ_ELEMENTS, tmpSgprInfo, f"ktOffset*={self.NUM_CONT_READ_ELEMENTS}"))
+                    module.add(VAddU32(vgpr(mReg), vgpr(mReg), vgpr(kReg), "kOffset+=ktOffset"))
+                    module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
+                    module.add(vectorStaticRemainder(dummy, kReg, kReg, self.NUM_CONT_READ_ELEMENTS, tmpVgprRes, tmpSgprInfo, f"ktOffset=wtid%{self.NUM_CONT_READ_ELEMENTS}"))
+                    module.add(VAddU32(vgpr(mReg), vgpr(mReg), vgpr(kReg), "kOffset+=ktOffset"))
+                    module.add(vectorStaticMultiply(vgpr(mReg), vgpr(mReg), strideUnroll, tmpSgprInfo, "kOffset*=stride"))
+                    module.add(VAddU32(vgpr(tReg), vgpr(tReg), vgpr(mReg), "lrOffset = kOffset + tileOffset"))
 
             # wave offset
             if num1DWaves > 1:

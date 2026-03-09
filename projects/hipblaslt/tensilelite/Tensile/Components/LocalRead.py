@@ -700,7 +700,7 @@ class LocalReadMFMA(LocalRead):
         valufIdx = 0
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
-            if writer.states.asmCaps["HasWMMA_V3"]:
+            if writer.states.asmCaps["HasWMMA_V3"] or writer.states.asmCaps["HasWMMA_V4"]:
                 if tP["bpeDS"] == 0.5:
                     LocalReadX = instruction.getInst(0)
                     wtRegStride = int(MIInputPerThUnroll * tP["bpeDS"] // bpr)
@@ -747,6 +747,8 @@ class LocalReadMFMA(LocalRead):
                     LocalReadX = instruction.getInst(0)
                     wtRegStride = MIInputPerThUnroll * tP["bpeDS"] // bpr
                     numUnrolledIncrements = 32
+                    if writer.states.asmCaps["HasWMMA_V4"]:
+                        numUnrolledIncrements = 16
                     vwTrLoad = 8
                     numberLRVWPerMIInput = MIInputPerThUnroll // kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
                     for tIdx in range(numberMTilesPerWave):
@@ -786,6 +788,8 @@ class LocalReadMFMA(LocalRead):
                                         paddedOffset += int((paddedOffset // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
                                     ds = DSModifiers(na=1, offset=paddedOffset)
                                     destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc, bufferIdx, iui, wtRegStride*tIdx, 2*v+4*i), blockWidth)
+                                    if writer.states.asmCaps["HasWMMA_V4"]:
+                                        destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc, bufferIdx, iui, wtRegStride*tIdx, 2*v+2*i), blockWidth)
                                     localReadCode: Module = imod.add(Module("LocalRead%s Valu%u"%(tc, int(valufIdx))))
                                     localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment="LDS Transpose"))
                 elif tP["bpeDS"] == 2:
@@ -803,33 +807,34 @@ class LocalReadMFMA(LocalRead):
                         valuiIdx = int(valufIdx)
                         localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
                         localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
-                        destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth), blockWidth)
-                        incrementBytes = int(numberLRVWPerMIInput*UnrollStride*kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]*tP["bpeDS"])
+                        if not(writer.states.asmCaps["HasWMMA_V4"]):
+                            destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth), blockWidth)
+                            incrementBytes = int(numberLRVWPerMIInput*UnrollStride*kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]*tP["bpeDS"])
 
-                        sparseDenseOffset = 0
-                        if numberLRVWPerMIInput == 4:
-                            # generally numberLRVWPerMIInput should be 2, for the dense matrix of sparse cases, it will be 4
-                            incrementBytes = incrementBytes // 2
-                            sparseDenseOffset = incrementBytes // 2  # for sparse dense matrix, we read the 2nd half of the data seperately.
-                        offset_val = unpaddedOffset + incrementBytes - sparseDenseOffset
-                        if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
-                            offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
-                        ds = DSModifiers(na=1, offset=offset_val)
-                        localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
-                        if numberLRVWPerMIInput == 4:
-                            # for the dense case when sparse.
-                            destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth * 2), blockWidth)
-                            offset_val = unpaddedOffset + incrementBytes * 2
+                            sparseDenseOffset = 0
+                            if numberLRVWPerMIInput == 4:
+                                # generally numberLRVWPerMIInput should be 2, for the dense matrix of sparse cases, it will be 4
+                                incrementBytes = incrementBytes // 2
+                                sparseDenseOffset = incrementBytes // 2  # for sparse dense matrix, we read the 2nd half of the data seperately.
+                            offset_val = unpaddedOffset + incrementBytes - sparseDenseOffset
                             if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                                 offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
                             ds = DSModifiers(na=1, offset=offset_val)
                             localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
-                            destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth * 3), blockWidth)
-                            offset_val = unpaddedOffset + incrementBytes * 2 + sparseDenseOffset
-                            if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
-                                offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
-                            ds = DSModifiers(na=1, offset=offset_val)
-                            localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
+                            if numberLRVWPerMIInput == 4:
+                                # for the dense case when sparse.
+                                destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth * 2), blockWidth)
+                                offset_val = unpaddedOffset + incrementBytes * 2
+                                if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
+                                    offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
+                                ds = DSModifiers(na=1, offset=offset_val)
+                                localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
+                                destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth * 3), blockWidth)
+                                offset_val = unpaddedOffset + incrementBytes * 2 + sparseDenseOffset
+                                if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
+                                    offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
+                                ds = DSModifiers(na=1, offset=offset_val)
+                                localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
                 else:
                     assert False, f"Unhandled bpeDS: {tP['bpeDS']}"
             else:

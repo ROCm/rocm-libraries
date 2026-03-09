@@ -36,7 +36,7 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
                          bool               isWave32 = false)
 {
     std::vector<std::string> options;
-    if(!isWave32 && isaVersion[0] >= 10)
+    if(!isWave32 && isaVersion[0] >= 10 && isaVersion[0] != 13)
         options.push_back("-mwavefrontsize64");
 
     std::string isastr = getGfxNameTuple(isaVersion);
