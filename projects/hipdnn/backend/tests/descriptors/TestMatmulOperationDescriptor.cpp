@@ -280,7 +280,7 @@ TEST_F(TestMatmulOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedA));
+                                       static_cast<void*>(&retrievedA)));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedA, nullptr);

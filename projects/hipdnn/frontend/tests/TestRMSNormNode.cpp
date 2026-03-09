@@ -80,6 +80,7 @@ TEST(TestRMSNormNode, PreValidateNodeMissingValues)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
+    rmsnormAttributes = RMSNormAttributes{};
     rmsnormAttributes.set_x(std::make_shared<TensorAttributes>());
     rmsnormAttributes.set_forward_phase(NormFwdPhase::TRAINING);
     auto rmsnormAttributesCopy = rmsnormAttributes;

@@ -145,7 +145,8 @@ public:
     {
         auto desc = getDescriptor();
         hipdnnHandle_t handle = &_mockHandle;
-        desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        desc->setAttribute(
+            HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle));
     }
 
 protected:
@@ -176,7 +177,7 @@ TEST_F(TestGraphDescriptorOps, BuildFromSingleOperation)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     // Verify the built graph
@@ -241,7 +242,7 @@ TEST_F(TestGraphDescriptorOps, BuildFromMultipleOperations)
 
     std::array<HipdnnBackendDescriptor*, 2> ops = {conv1.convOp.get(), convOp2.get()};
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, ops.data()));
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
@@ -326,7 +327,7 @@ TEST_F(TestGraphDescriptorOps, TensorDeduplication)
 
     std::array<HipdnnBackendDescriptor*, 2> ops = {conv1.convOp.get(), convOp2.get()};
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, ops.data()));
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, static_cast<const void*>(ops.data())));
     ASSERT_NO_THROW(desc->finalize());
 
     auto serialized = desc->getSerializedGraph();
@@ -404,7 +405,7 @@ TEST_F(TestGraphDescriptorOps, ComputeDataTypePreserved)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -456,11 +457,11 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
     HipdnnBackendDescriptor* y = conv.yDesc.get();
 
     convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &x);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&x));
     convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &w);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&w));
     convDesc->setAttribute(
-        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &y);
+        HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&y));
 
     const std::vector<int64_t> kCustomPrePadding = {2, 3};
     const std::vector<int64_t> kCustomPostPadding = {4, 5};
@@ -489,7 +490,7 @@ TEST_F(TestGraphDescriptorOps, ConvolutionAttributesPreserved)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {wrapper.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -543,11 +544,11 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 
         std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
         ASSERT_NO_THROW(desc->setAttribute(
-            HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+            HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data())));
 
         hipdnnHandle_t handle = &_mockHandle;
         ASSERT_NO_THROW(
-            desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle));
+            desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)));
 
         ASSERT_NO_THROW(desc->finalize());
 
@@ -596,11 +597,11 @@ TEST_F(TestGraphDescriptorOps, SetOperationsAndHandleAnyOrder)
 
         hipdnnHandle_t handle = &_mockHandle;
         ASSERT_NO_THROW(
-            desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle));
+            desc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)));
 
         std::array<HipdnnBackendDescriptor*, 1> ops = {convOp.get()};
         ASSERT_NO_THROW(desc->setAttribute(
-            HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+            HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data())));
 
         ASSERT_NO_THROW(desc->finalize());
 
@@ -654,7 +655,7 @@ TEST_F(TestGraphDescriptorOps, SetOperationsMultipleBatches)
     // Set multiple operations in a single setAttribute call
     std::array<HipdnnBackendDescriptor*, 2> ops = {conv1.convOp.get(), convOp2.get()};
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, ops.data()));
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, static_cast<const void*>(ops.data())));
 
     ASSERT_NO_THROW(desc->finalize());
 
@@ -773,7 +774,7 @@ TEST_F(TestGraphDescriptorOps, SetOperationsFailsAfterFinalize)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
     desc->finalize();
 
     // Try to set operations after finalize
@@ -792,7 +793,7 @@ TEST_F(TestGraphDescriptorOps, FinalizeFailsWithoutHandle)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -819,7 +820,7 @@ TEST_F(TestGraphDescriptorOps, SerializedGraphVerifiable)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -852,7 +853,7 @@ TEST_F(TestGraphDescriptorOps, SerializedGraphUnpackable)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -903,7 +904,7 @@ TEST_F(TestGraphDescriptorOps, GetSerializedGraphMultipleCalls)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
     desc->finalize();
 
     // Call getSerializedGraph multiple times
@@ -950,7 +951,7 @@ TEST_F(TestGraphDescriptorOps, GraphHasCorrectNodeCount)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -980,7 +981,7 @@ TEST_F(TestGraphDescriptorOps, GraphHasCorrectTensorCount)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
     desc->finalize();
 
     auto serialized = desc->getSerializedGraph();
@@ -1107,11 +1108,11 @@ public:
         HipdnnBackendDescriptor* y = yDesc.get();
 
         convDesc->setAttribute(
-            HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &x);
+            HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&x));
         convDesc->setAttribute(
-            HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &w);
+            HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&w));
         convDesc->setAttribute(
-            HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &y);
+            HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&y));
         convDesc->setAttribute(HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
                                HIPDNN_TYPE_INT64,
                                static_cast<int64_t>(prePadding.size()),
@@ -1140,11 +1141,11 @@ public:
         auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
         hipdnnHandle_t handle = &_mockHandle;
-        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+        graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle));
 
         std::array<HipdnnBackendDescriptor*, 1> ops = {convWrapper.get()};
         graphDesc->setAttribute(
-            HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+            HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
         graphDesc->finalize();
 
         auto serialized = graphDesc->getSerializedGraph();
@@ -1332,7 +1333,7 @@ TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesPreserved)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
 
     // Set graph-level data types before finalize
     auto computeDt = HIPDNN_DATA_HALF;
@@ -1368,7 +1369,7 @@ TEST_F(TestGraphDescriptorOps, PreferredEngineIdPreserved)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
 
     int64_t engineId = 42;
     desc->setAttribute(
@@ -1391,7 +1392,7 @@ TEST_F(TestGraphDescriptorOps, GraphLevelDataTypesDefaultToUnset)
 
     std::array<HipdnnBackendDescriptor*, 1> ops = {conv.convOp.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(ops.data()));
 
     // Finalize without setting any graph-level data types
     desc->finalize();
@@ -1411,7 +1412,7 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
     auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
     auto handle = reinterpret_cast<hipdnnHandle_t>(&_mockHandle);
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle));
 
     // Create tensors (Y tensor shared between ops)
     auto xDesc1 = createFinalizedTensor(K_TENSOR_X_UID);
@@ -1431,7 +1432,7 @@ TEST_F(TestGraphDescriptorOps, SharedTensorDifferentPositions)
 
     std::array<HipdnnBackendDescriptor*, 2> opDescs = {op1.get(), op2.get()};
     graphDesc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, opDescs.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, static_cast<const void*>(opDescs.data()));
 
     graphDesc->finalize();
 
@@ -1519,7 +1520,7 @@ TEST_F(TestGraphDescriptorOps, FinalizeFailsDuplicateTensorUidDifferentDescripto
 
     std::array<HipdnnBackendDescriptor*, 2> ops = {op1.get(), op2.get()};
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, ops.data());
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, static_cast<const void*>(ops.data()));
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
@@ -1531,7 +1532,7 @@ TEST_F(TestGraphDescriptorOps, SetOperationsRejectsNonOperationDescriptor)
 
     // Set handle first
     auto handle = reinterpret_cast<hipdnnHandle_t>(&_mockHandle);
-    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    graphDesc->setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle));
 
     // Create a tensor descriptor (does NOT implement IGraphOperation)
     auto tensorWrapper = createFinalizedTensor(99);

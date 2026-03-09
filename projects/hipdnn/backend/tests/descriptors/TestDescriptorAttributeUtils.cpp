@@ -527,7 +527,7 @@ TEST(TestDescriptorAttributeUtils, SetTensorDescriptorSuccess)
     const auto* ptr = wrapper.get();
 
     ASSERT_NO_THROW(setTensorDescriptor(
-        descTarget, uidTarget, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &ptr, "test"));
+        descTarget, uidTarget, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&ptr), "test"));
     ASSERT_NE(descTarget, nullptr);
     ASSERT_EQ(uidTarget, 42);
 }
@@ -555,7 +555,7 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorQueryReturnsOneOnZeroReque
     HipdnnBackendDescriptor* output = nullptr;
 
     ASSERT_NO_THROW(
-        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, &output, "test"));
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &count, static_cast<void*>(&output), "test"));
     ASSERT_EQ(count, 1);
 }
 
@@ -605,7 +605,7 @@ TEST(TestDescriptorAttributeUtils, GetTensorDescriptorSuccess)
     HipdnnBackendDescriptor* output = nullptr;
 
     ASSERT_NO_THROW(
-        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, &output, "test"));
+        getTensorDescriptor(source, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, static_cast<void*>(&output), "test"));
     ASSERT_EQ(count, 1);
     ASSERT_NE(output, nullptr);
 }

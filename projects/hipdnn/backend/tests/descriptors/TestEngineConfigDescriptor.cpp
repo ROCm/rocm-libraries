@@ -227,12 +227,12 @@ TEST_F(TestEngineConfigDescriptor, GetEngineConfigDescriptorEngine)
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     ASSERT_NO_THROW(engineConfig->getAttribute(
-        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr, engine.getPtr()));
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, nullptr, static_cast<void*>(engine.getPtr())));
     ASSERT_EQ(*engine.get(), *(_mockEngineWrapper.get()));
 
     int64_t count;
     ASSERT_NO_THROW(engineConfig->getAttribute(
-        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, engine2.getPtr()));
+        HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &count, static_cast<void*>(engine2.getPtr())));
     ASSERT_EQ(count, 1);
 }
 
@@ -463,7 +463,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorSuccess)
     auto* knobPtr = knobWrapper.get();
 
     ASSERT_NO_THROW(engineConfig->setAttribute(
-        HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &knobPtr));
+        HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&knobPtr)));
 }
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorMultiple)
@@ -481,7 +481,7 @@ TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorMultiple)
     std::array<HipdnnBackendDescriptor*, 2> knobPtrs = {knobWrapper1.get(), knobWrapper2.get()};
 
     ASSERT_NO_THROW(engineConfig->setAttribute(
-        HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, knobPtrs.data()));
+        HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 2, static_cast<const void*>(knobPtrs.data())));
 }
 
 TEST_F(TestEngineConfigDescriptor, SetKnobChoiceViaDescriptorRejectNotFinalized)

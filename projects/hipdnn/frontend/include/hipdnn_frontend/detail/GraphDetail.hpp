@@ -60,7 +60,7 @@ inline Error
                                              HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                              static_cast<int64_t>(engineConfigsShallow.size()),
                                              &count,
-                                             engineConfigsShallow.data()),
+                                             static_cast<void*>(engineConfigsShallow.data())),
         "Failed to get engine configurations from the heuristic descriptor.");
 
     if(count == 0)
@@ -84,7 +84,7 @@ inline Error
                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                  1,
                                                  nullptr,
-                                                 &engineDesc),
+                                                 static_cast<void*>(&engineDesc)),
             "Failed to get engine from engine configuration descriptor.");
 
         // Clean-up engineDesc once we no longer need it within this scope.

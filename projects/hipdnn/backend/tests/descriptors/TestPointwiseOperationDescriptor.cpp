@@ -368,7 +368,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeTensorDescriptor)
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrievedIn0));
+                                       static_cast<void*>(&retrievedIn0)));
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedIn0, nullptr);
@@ -875,7 +875,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn1ReturnsZeroCountForUnary
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved));
+                                       static_cast<void*>(&retrieved)));
     ASSERT_EQ(elementCount, 0);
     ASSERT_EQ(retrieved, nullptr);
 }
@@ -891,7 +891,7 @@ TEST_F(TestPointwiseOperationDescriptor, GetAttributeIn2ReturnsZeroCountForUnary
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
-                                       &retrieved));
+                                       static_cast<void*>(&retrieved)));
     ASSERT_EQ(elementCount, 0);
     ASSERT_EQ(retrieved, nullptr);
 }

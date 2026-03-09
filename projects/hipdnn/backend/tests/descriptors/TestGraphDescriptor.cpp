@@ -42,7 +42,7 @@ TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
     descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
 
     auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle);
+    descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle));
     descriptor.finalize();
 
     auto output = descriptor.getSerializedGraph();
@@ -62,7 +62,7 @@ TEST_F(TestGraphDescriptor, WillCorrectlySetGraph)
 
     auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
     ASSERT_NO_THROW(
-        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle));
+        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)));
     ASSERT_NO_THROW(descriptor.finalize());
 }
 
@@ -74,7 +74,7 @@ TEST_F(TestGraphDescriptor, WillCorrectlySetGraphReverseOrder)
     GraphDescriptor descriptor;
     auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
     ASSERT_NO_THROW(
-        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle));
+        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)));
 
     ASSERT_THROW_HIPDNN_STATUS(descriptor.finalize(), HIPDNN_STATUS_BAD_PARAM);
 

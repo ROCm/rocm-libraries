@@ -44,7 +44,7 @@ void createTestGraph(hipdnnBackendDescriptor_t* descriptor, hipdnnHandle_t handl
               HIPDNN_STATUS_SUCCESS);
 
     ASSERT_EQ(hipdnnBackendSetAttribute(
-                  *descriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+                  *descriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -62,7 +62,7 @@ void populateTestEngine(hipdnnBackendDescriptor_t engine,
     ASSERT_EQ(hipdnnBackendFinalize(*graph), HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(
         hipdnnBackendSetAttribute(
-            engine, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, graph),
+            engine, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(graph)),
         HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendSetAttribute(
                   engine, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &gidx),
@@ -99,7 +99,7 @@ void populateTestEngineConfig(hipdnnBackendDescriptor_t* engineConfig,
 
     ASSERT_EQ(
         hipdnnBackendSetAttribute(
-            *engineConfig, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, engine),
+            *engineConfig, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(engine)),
         HIPDNN_STATUS_SUCCESS);
 
     if(finalize)
@@ -130,7 +130,7 @@ void populateTestExecutionPlan(hipdnnBackendDescriptor_t* executionPlan,
 {
     ASSERT_EQ(
         hipdnnBackendSetAttribute(
-            *executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+            *executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)),
         HIPDNN_STATUS_SUCCESS);
 
     if(*engineConfig == nullptr)
@@ -142,7 +142,7 @@ void populateTestExecutionPlan(hipdnnBackendDescriptor_t* executionPlan,
                                         HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        engineConfig),
+                                        static_cast<const void*>(engineConfig)),
               HIPDNN_STATUS_SUCCESS);
 
     if(finalize)
@@ -185,7 +185,7 @@ void setTensorMappingsInVariantPack(hipdnnBackendDescriptor_t variantPack,
                                         HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
                                         HIPDNN_TYPE_VOID_PTR,
                                         static_cast<int64_t>(dataPtrs.size()),
-                                        dataPtrs.data()),
+                                        static_cast<const void*>(dataPtrs.data())),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -197,7 +197,7 @@ void setWorkspaceInVariantPack(hipdnnBackendDescriptor_t variantPack, void* work
                                             HIPDNN_ATTR_VARIANT_PACK_WORKSPACE,
                                             HIPDNN_TYPE_VOID_PTR,
                                             1,
-                                            &workspace),
+                                            static_cast<const void*>(&workspace)),
                   HIPDNN_STATUS_SUCCESS);
     }
 }
@@ -247,7 +247,7 @@ void createAndInitializeBackendDescriptor(hipdnnBackendDescriptor_t* backendDesc
 
     ASSERT_EQ(
         hipdnnBackendSetAttribute(
-            *backendDescriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, &handle),
+            *backendDescriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)),
         HIPDNN_STATUS_SUCCESS);
 
     status = hipdnnBackendFinalize(*backendDescriptor);

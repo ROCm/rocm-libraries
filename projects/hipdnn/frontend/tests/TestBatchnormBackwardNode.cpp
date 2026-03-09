@@ -45,6 +45,7 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeMissingValues)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::ATTRIBUTE_NOT_SET);
 
+    batchnormAttributes = BatchnormBackwardAttributes{};
     batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
     auto batchnormAttributesCopy = batchnormAttributes;
     BatchnormBackwardNode nodeWithDy(std::move(batchnormAttributesCopy), graphAttributes);

@@ -67,7 +67,7 @@ TEST_F(IntegrationExecutionPlanApi, SetExecutionPlanHandle)
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     EXPECT_EQ(hipdnnBackendSetAttribute(
-                  _plan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+                  _plan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&_handle)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -86,7 +86,7 @@ TEST_F(IntegrationExecutionPlanApi, SetExecutionPlanEngineConfig)
                                         HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_engineConfig),
+                                        static_cast<const void*>(&_engineConfig)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -119,7 +119,7 @@ TEST_F(IntegrationExecutionPlanApi, Finalize)
     EXPECT_EQ(hipdnnBackendFinalize(_plan), HIPDNN_STATUS_BAD_PARAM);
 
     ASSERT_EQ(hipdnnBackendSetAttribute(
-                  _plan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, &_handle),
+                  _plan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&_handle)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnBackendFinalize(_plan), HIPDNN_STATUS_BAD_PARAM);
 
