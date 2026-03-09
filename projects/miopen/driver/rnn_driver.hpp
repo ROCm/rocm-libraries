@@ -344,7 +344,7 @@ std::vector<int> RNNDriver<Tgpu, Tref>::GetInputTensorLengthsFromCmdLine()
 
     in_n.push_back(in_h);
 
-    return in_n;
+    return std::move(in_n);
 }
 
 template <typename Tgpu, typename Tref>
