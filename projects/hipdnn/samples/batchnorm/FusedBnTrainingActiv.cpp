@@ -289,14 +289,10 @@ int main(int argc, char* argv[])
 {
     auto config = parseCommandLineArgs(argc, argv, SampleType::BN_TRAINING);
 
-    initializeFrontendLogging();
+    auto [handle, handleError] = createHipdnnHandle();
+    HIPDNN_FE_CHECK(handleError);
 
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    bool allPassed = run(SampleRunner{*handle, config});
 
     if(allPassed)
     {

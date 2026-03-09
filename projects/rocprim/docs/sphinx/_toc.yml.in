@@ -25,6 +25,8 @@ subtrees:
   entries:
     - file: how-to/rocPRIM-spir-v.rst
       title: Use the SPIR-V target
+    - file: how-to/rocPRIM-primbench.rst
+      title: Use primbench for benchmarking
 
 - caption: Reference
   entries:

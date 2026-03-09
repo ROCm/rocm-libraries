@@ -57,7 +57,7 @@ Tests:
 - name: sptrsv_coo
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_checkin
   alpha_alphai: *alpha_range_checkin
@@ -198,7 +198,7 @@ Tests:
 - name: sptrsv_coo
   category: nightly
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_nightly
@@ -213,7 +213,7 @@ Tests:
 - name: sptrsv_coo
   category: nightly
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_nightly

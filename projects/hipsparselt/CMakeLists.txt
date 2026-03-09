@@ -176,12 +176,22 @@ if(HIPSPARSELT_ENABLE_HIP)
 
     set(ORIGAMI_ENABLE_INSTALL OFF)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
+    # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
+    target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
     endblock()
 endif()
 
 add_subdirectory(library)
 
 if(HIPSPARSELT_ENABLE_CLIENT)
+    if(NOT HIPSPARSELT_ENABLE_THEROCK)
+        if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
+            set(CMAKE_Fortran_COMPILER "gfortran")
+        endif()
+        enable_language(Fortran)
+        find_package(LAPACK)
+        include(fetch_lapack)
+    endif()
     add_subdirectory(clients)
 endif()
 

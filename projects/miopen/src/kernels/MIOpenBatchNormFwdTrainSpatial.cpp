@@ -415,9 +415,28 @@ struct MIOpenBatchNormFwdTrainSpatialImpl<1, FpType, FpPrecType, FpAccumType>
                         xhat[j]              = (cast<FpPrecType>(in[index]) - mean) * invVariance;
                     }
 
+                    // Synchronization is not required for correctness but enhances performance.
+                    //
+                    // Loop is memory bound as it iterates across all the batches in the tensor,
+                    // and has memory access strides of CHW size once all the elements in a single
+                    // sample have been processed, which may be large.
+                    //
+                    // `__syncthreads()` helps to coalesce memory accesses as each work-item
+                    // accesses adjacent elements to its neighbours on the same loop iteration,
+                    // leading to contiguous memory access across all the waves in a workgroup. By
+                    // keeping all the waves on the same loop iteration it prevents waves on
+                    // different loop iterations from stalling as they wait for memory.
+                    //
+                    // This can be seen by profiling the kernel with rocprofv3 and comparing the
+                    // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
+                    // compute viewer and seeing the impact on occupancy.
+                    //
+                    // TODO: This call is within the scope of an `if` condition, but it is not clear
+                    // that this control flow is guanteed to be uniform across all threads in a
+                    // workgroup, risking deadlock. Further investigation is needed.
                     __syncthreads();
 
-                    for(unsigned int j = 0; j < max_read; ++j) // This part takes 0.405
+                    for(unsigned int j = 0; j < max_read; ++j)
                     {
                         const unsigned int l = k + (max_read * lid) + j;
                         nidx                 = l / mio_bn_config::hw;

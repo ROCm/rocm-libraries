@@ -71,6 +71,7 @@ public:
     // Mock inherited methods from PluginBase
     MOCK_METHOD(std::string_view, name, (), (const));
     MOCK_METHOD(std::string_view, version, (), (const));
+    MOCK_METHOD(std::string_view, apiVersion, (), (const));
     MOCK_METHOD(hipdnnPluginType_t, type, (), (const));
     MOCK_METHOD(hipdnnPluginStatus_t, setLoggingCallback, (hipdnnCallback_t callback), (const));
 };

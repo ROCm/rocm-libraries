@@ -823,6 +823,12 @@ using enable_if_target_wave64_t =
 
 #endif // __cplusplus <= 201703L
 
+template <typename... Ts>
+constexpr bool all_types_void = std::conjunction_v<std::is_same<void, Ts>...>;
+
+template <typename... Enablers>
+using enable_if_all = std::enable_if_t<all_types_void<Enablers...>>;
+
 } // namespace core::arch
 
 CK_TILE_HOST bool is_wave32()
@@ -911,14 +917,15 @@ struct WaitcntLayoutGfx12
 };
 
 struct WaitcntLayoutGfx11
-{ // vm[15:10] (6), lgkm[9:4] (6), exp unused
+{ // vm[15:10] (6), lgkm[9:4] (6), exp [2:0] (3)
     CK_TILE_DEVICE static constexpr index_t VM_MASK   = 0x3F;
     CK_TILE_DEVICE static constexpr index_t LGKM_MASK = 0x3F;
-    CK_TILE_DEVICE static constexpr bool HAS_EXP      = false;
+    CK_TILE_DEVICE static constexpr index_t EXP_MASK  = 0x07;
+    CK_TILE_DEVICE static constexpr bool HAS_EXP      = true;
 
     CK_TILE_DEVICE static constexpr index_t pack_vm(index_t c) { return ((c & VM_MASK) << 10); }
     CK_TILE_DEVICE static constexpr index_t pack_lgkm(index_t c) { return ((c & LGKM_MASK) << 4); }
-    CK_TILE_DEVICE static constexpr index_t pack_exp(index_t) { return 0; }
+    CK_TILE_DEVICE static constexpr index_t pack_exp(index_t c) { return (c & EXP_MASK); }
 };
 
 struct WaitcntLayoutLegacy
@@ -952,10 +959,14 @@ using Waitcnt = WaitcntLayoutLegacy;
 struct waitcnt_arg
 {
     // kMax* exposed for callers; match field widths per-arch
-#if defined(__gfx12__) || defined(__gfx11__)
+#if defined(__gfx12__)
     CK_TILE_DEVICE static constexpr index_t kMaxVmCnt   = 0x3F; // 6 bits
     CK_TILE_DEVICE static constexpr index_t kMaxLgkmCnt = 0x3F; // 6 bits
     CK_TILE_DEVICE static constexpr index_t kMaxExpCnt  = 0x0;  // none
+#elif defined(__gfx11__)
+    CK_TILE_DEVICE static constexpr index_t kMaxVmCnt   = 0x3F; // 6 bits
+    CK_TILE_DEVICE static constexpr index_t kMaxLgkmCnt = 0x3F; // 6 bits
+    CK_TILE_DEVICE static constexpr index_t kMaxExpCnt  = 0x07; // 3 bits
 #else
     CK_TILE_DEVICE static constexpr index_t kMaxVmCnt   = 0x3F; // 6 bits (split)
     CK_TILE_DEVICE static constexpr index_t kMaxLgkmCnt = 0x0F; // 4 bits
@@ -981,8 +992,8 @@ struct waitcnt_arg
     {
         if constexpr(Waitcnt::HAS_EXP)
         {
-            // EXP_MASK only exists on legacy
-#if !defined(__gfx12__) && !defined(__gfx11__)
+            // EXP_MASK only exists on pre-gfx12
+#if !defined(__gfx12__)
             static_assert((cnt & ~Waitcnt::EXP_MASK) == 0, "expcnt out of range");
             return Waitcnt::pack_exp(cnt);
 #else

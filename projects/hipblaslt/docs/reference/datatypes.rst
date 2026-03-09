@@ -16,6 +16,8 @@ hipblasLtPointerMode_t
 ----------------------
 .. doxygenenum:: hipblasLtPointerMode_t
 
+.. _hipblaslthandle_t_desc:
+
 hipblasLtHandle_t
 -------------------
 .. doxygentypedef:: hipblasLtHandle_t

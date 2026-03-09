@@ -7,11 +7,10 @@
 #include <memory>
 #include <vector>
 
+#include "HipdnnMiopenHandle.hpp"
+
 namespace miopen_plugin
 {
-
-class EngineManager;
-class IEngine;
 
 /*
  * Container class to manage the intantiation and ownership of all MIOpen plan builders and engines.
@@ -34,18 +33,25 @@ public:
     // Returns: Total number of available engines (regardless of maxEngines value).
     static uint32_t copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines);
 
-    EngineManager& getEngineManager();
+    hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
+        getEngineManager();
 
 private:
     struct EngineDefinition
     {
         int64_t id; // Set id using EngineNames.hpp.
-        std::function<std::unique_ptr<IEngine>()> createEngine;
+        std::function<std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
+                                                                 HipdnnMiopenSettings,
+                                                                 HipdnnMiopenContext>>()>
+            createEngine;
     };
 
     static const std::vector<EngineDefinition>& getEngineDefinitions();
 
-    std::unique_ptr<EngineManager> _engineManager;
+    std::unique_ptr<hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle,
+                                                     HipdnnMiopenSettings,
+                                                     HipdnnMiopenContext>>
+        _engineManager;
 };
 
 }

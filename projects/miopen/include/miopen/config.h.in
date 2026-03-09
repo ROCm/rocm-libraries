@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #ifndef GUARD_CONFIG_H_IN
 #define GUARD_CONFIG_H_IN
 
@@ -53,7 +31,6 @@
 #cmakedefine01 MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 #cmakedefine01 MIOPEN_ENABLE_AI_KERNEL_TUNING
 #cmakedefine01 MIOPEN_HIP_COMPILER_HAS_OPTION_OFFLOAD_UNIFORM_BLOCK
-#cmakedefine01 MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM
 #cmakedefine01 MIOPEN_ENABLE_FIN_INTERFACE
 
 // "_PACKAGE_" to avoid name contentions: the macros like
@@ -193,15 +170,6 @@ const char* getOffloadBundlerBinPath();
     ((MIOPEN_HIPBLASLT_VERSION_MAJOR * 1000 + MIOPEN_HIPBLASLT_VERSION_MINOR) * 1000 + \
      MIOPEN_HIPBLASLT_VERSION_PATCH)
 #endif // MIOPEN_USE_HIPBLASLT
-
-/// WORKAROUND_BOOST_ISSUE_392
-/// Workaround for https://github.com/boostorg/config/issues/392#issuecomment-1109889533
-/// See also https://github.com/ROCm/MIOpen/pull/1490#issuecomment-1109928102,
-/// https://github.com/ROCm/MIOpen/pull/1543
-/// TODO: Remove the W/A as soon we switch to the properly fixed boost.
-#if MIOPEN_BACKEND_HIP
-#include <hip/hip_version.h>
-#endif
 
 #define MIOPEN_GOLDEN_DB_VERSION 21
 

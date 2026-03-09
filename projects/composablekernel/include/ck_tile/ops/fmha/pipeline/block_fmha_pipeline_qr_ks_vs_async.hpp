@@ -335,16 +335,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                 {
                     auto lse =
                         make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
-
-                    if(__builtin_isinf_sign(sink_v) >= 0)
-                    {
-                        set_tile(lse, SMPLComputeDataType{sink_v * scale_s});
-                    }
-                    else
-                    {
-                        set_tile(lse, -numeric<SMPLComputeDataType>::infinity());
-                    }
-
+                    set_tile(lse, SMPLComputeDataType{sink_v * scale_s});
                     store_tile(lse_dram_window_tmp, tile_elementwise_in(lse_element_func, lse));
                 }
 
@@ -598,6 +589,12 @@ struct BlockFmhaPipelineQRKSVSAsync
                 s.get_tile_distribution()); // Pcompute{j}
 
             __builtin_amdgcn_sched_barrier(0x7F);
+            // Ensure gemm_0's LDS reads (K tile) from all threads are completed before V store
+            // Only needed when K tail and V use the same LDS buffer
+            if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
+            {
+                __builtin_amdgcn_s_barrier();
+            }
             // store & prefetch next v, after the max reduction
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
