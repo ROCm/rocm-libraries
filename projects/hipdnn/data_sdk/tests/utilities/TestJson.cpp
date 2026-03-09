@@ -135,6 +135,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid block scale dequantize graph)";
             break;
+        case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidBlockScaleQuantizeGraph();
+            graph = hipdnn_data_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid block scale quantize graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;

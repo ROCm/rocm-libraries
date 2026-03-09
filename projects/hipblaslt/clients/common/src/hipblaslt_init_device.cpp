@@ -42,7 +42,7 @@ __global__ void fill_kernel(T* A, size_t size, size_t offset, F f)
 template <typename T, typename F>
 void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, const F& f)
 {
-    size_t           size_64   = stride >= lda ? lda * N + size_t(batch_count - 1) * stride : lda * N;
+    size_t           size_64 = stride >= lda ? lda * N + size_t(batch_count - 1) * stride : lda * N;
     constexpr size_t c_i32_max = size_t(std::numeric_limits<int32_t>::max());
     for(size_t offset = 0; offset < size_64; offset += c_i32_max)
     {
@@ -112,6 +112,31 @@ __device__ int8_t random_hpl(size_t idx)
     return int8_t(v > 127.f ? 127.f : v < -128.f ? -128.f : v);
 }
 
+template <typename T>
+struct is_std_complex : std::false_type
+{
+};
+
+template <typename U>
+struct is_std_complex<std::complex<U>> : std::true_type
+{
+};
+
+template <typename T>
+struct get_real_type
+{
+    using type = T; // Default for non-complex types (e.g., float, double)
+};
+
+template <typename U>
+struct get_real_type<std::complex<U>>
+{
+    using type = U; // Correctly extracts float or double
+};
+
+template <typename T>
+using get_real_type_t = typename get_real_type<T>::type;
+
 /*! \brief  generate a random number in [0.,1.0]  */
 template <typename T>
 __device__ T uniform_01(size_t idx)
@@ -141,11 +166,30 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            size_t                   stride,
                            size_t                   batch_count)
 {
+    using T_real = get_real_type_t<T>;
+
+    // Helper to construct std::complex types from two real components
+    auto make_std_complex = [] __device__ __host__ (T_real r, T_real i) -> T {
+        if constexpr(std::is_same_v<T, std::complex<float>>)
+            return std::complex<float>(r, i);
+        else if constexpr(std::is_same_v<T, std::complex<double>>)
+            return std::complex<double>(r, i);
+        else
+            return T(r);
+    };
+
     if(is_nan)
     {
         std::array<T, 100> rand_nans;
         for(auto& r : rand_nans)
-            r = T(hipblaslt_nan_rng());
+        {
+            if constexpr(is_std_complex<T>::value)
+                // Use T_real for casting and the helper for construction
+                r = make_std_complex(static_cast<T_real>(hipblaslt_nan_rng()),
+                                     static_cast<T_real>(hipblaslt_nan_rng()));
+            else
+                r = T(hipblaslt_nan_rng());
+        }
         fill_batch(A, M, N, lda, stride, batch_count, [rand_nans](size_t idx) -> T {
             return rand_nans[pseudo_random_device(idx) % rand_nans.size()];
         });
@@ -156,11 +200,47 @@ void hipblaslt_init_device(ABC_dims                 abc,
         {
         case hipblaslt_initialization::rand_int:
             if(abc == ABC_dims::A || abc == ABC_dims::C)
-                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
-                    return random_int<T>(idx);
+            {
+                if constexpr(is_std_complex<T>::value)
+                    fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex](size_t idx) -> T {                    
+                        return make_std_complex(random_int<T_real>(idx), random_int<T_real>(idx + 1000000) );
+                    });
+                else
+                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {                    
+                        return random_int<T>(idx);               
                 });
+            }
             else if(abc == ABC_dims::B)
             {
+                if constexpr(is_std_complex<T>::value)
+                {
+                if(stride >= lda)
+                {
+                    stride = std::max(lda * N, stride);
+                    fill_batch(A, M, N, lda, stride, batch_count, [stride, lda, make_std_complex](size_t idx) -> T {
+                        auto b     = idx / stride;
+                        auto j     = (idx - b * stride) / lda;
+                        auto i     = (idx - b * stride) - j * lda;
+                        auto real_val = random_int<T_real>(idx);
+                        auto imag_val = random_int<T_real>(idx + 1000000); // Offset for different seed
+                        auto complex_val = make_std_complex(real_val, imag_val);
+                        return (i ^ j) & 1 ? complex_val : negate(complex_val);
+                    });
+                }
+                else
+                {
+                    fill_batch(A, M, N, lda, stride, batch_count, [stride, lda, make_std_complex](size_t idx) -> T {
+                        auto j     = idx / lda;
+                        auto b     = (idx - j * lda) / stride;
+                        auto i     = (idx - j * lda) - b * stride;
+                        auto real_val = random_int<T_real>(idx);
+                        auto imag_val = random_int<T_real>(idx + 1000000); // Offset for different seed
+                        auto complex_val = make_std_complex(real_val, imag_val);
+                        return (i ^ j) & 1 ? complex_val : negate(complex_val);
+                    });
+                }
+                }
+                else{
                 if(stride >= lda)
                 {
                     stride = std::max(lda * N, stride);
@@ -182,49 +262,78 @@ void hipblaslt_init_device(ABC_dims                 abc,
                         return (i ^ j) & 1 ? value : negate(value);
                     });
                 }
+                } 
             }
             break;
         case hipblaslt_initialization::trig_float:
-            if(stride >= lda)
+            if constexpr(is_std_complex<T>::value)
+            {
+                if(stride >= lda)
             {
                 stride = std::max(lda * N, stride);
-                if(abc == ABC_dims::A || abc == ABC_dims::C)
-                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                        auto b = idx / stride;
-                        auto j = (idx - b * stride) / lda;
-                        auto i = (idx - b * stride) - j * lda;
-                        return T(sin(double(i + j * M + b * M * N)));
-                    });
-                else if(abc == ABC_dims::B)
-                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                        auto b = idx / stride;
-                        auto j = (idx - b * stride) / lda;
-                        auto i = (idx - b * stride) - j * lda;
-                        return T(cos(double(i + j * M + b * M * N)));
-                    });
+                    fill_batch(
+                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex](size_t idx) -> T {
+                            auto b = idx / stride;
+                            auto j = (idx - b * stride) / lda;
+                            auto i = (idx - b * stride) - j * lda;
+                            auto arg = double(i + j * M + b * M * N);
+                            auto real_val = sin(random_int<T_real>(arg));
+                            auto imag_val = cos(random_int<T_real>(arg + 1000000)); // Offset for different seed
+                            auto complex_val = make_std_complex(real_val, imag_val);
+                            return complex_val;
+                        });
             }
             else
             {
-                if(abc == ABC_dims::A || abc == ABC_dims::C)
-                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                        auto j = idx / lda;
-                        auto b = (idx - j * lda) / stride;
-                        auto i = (idx - j * lda) - b * stride;
-                        return T(sin(double(i + j * M + b * M * N)));
-                    });
-                else if(abc == ABC_dims::B)
-                    fill_batch(A, M, N, lda, stride, batch_count, [M, N, stride, lda](size_t idx) -> T {
-                        auto j = idx / lda;
-                        auto b = (idx - j * lda) / stride;
-                        auto i = (idx - j * lda) - b * stride;
-                        return T(cos(double(i + j * M + b * M * N)));
-                    });
+                    fill_batch(
+                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex](size_t idx) -> T {
+                            auto j = idx / lda;
+                            auto b = (idx - j * lda) / stride;
+                            auto i = (idx - j * lda) - b * stride;
+                            auto arg = double(i + j * M + b * M * N);
+                            auto real_val = sin(random_int<T_real>(arg));
+                            auto imag_val = cos(random_int<T_real>(arg + 1000000)); // Offset for different seed
+                            auto complex_val = make_std_complex(real_val, imag_val);
+                            return complex_val;
+                        });
+            }
+            }
+            else
+            {
+                if(stride >= lda)
+            {
+                stride = std::max(lda * N, stride);
+                    fill_batch(
+                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda](size_t idx) -> T {
+                            auto b = idx / stride;
+                            auto j = (idx - b * stride) / lda;
+                            auto i = (idx - b * stride) - j * lda;
+                            auto arg = double(i + j * M + b * M * N);
+                            return T((abc == ABC_dims::B) ? cos(arg) : sin(arg));
+                        });
+            }
+            else
+            {
+                    fill_batch(
+                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda](size_t idx) -> T {
+                            auto j = idx / lda;
+                            auto b = (idx - j * lda) / stride;
+                            auto i = (idx - j * lda) - b * stride;
+                            auto arg = double(i + j * M + b * M * N);
+                            return T((abc == ABC_dims::B) ? cos(arg) : sin(arg));
+                        });
+            }
             }
             break;
         case hipblaslt_initialization::hpl:
-            fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
-                return random_hpl<T>(idx);
-            });
+            if constexpr(is_std_complex<T>::value)
+                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex](size_t idx) -> T {
+                    return make_std_complex(random_hpl<T_real>(idx), random_hpl<T_real>(idx + 1000000));
+                });
+            else
+                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                    return random_hpl<T>(idx);
+                });
             break;
         case hipblaslt_initialization::special:
             if(abc == ABC_dims::A)
@@ -241,7 +350,12 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 });
             break;
         case hipblaslt_initialization::zero:
-            fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T { return T(0); });
+            if constexpr(is_std_complex<T>::value)
+                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex](size_t idx) -> T { 
+                    return make_std_complex(T_real(0), T_real(0));
+                });
+            else
+                fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T { return T(0); });
             break;
         case hipblaslt_initialization::norm_dist:
             {
@@ -331,6 +445,28 @@ void hipblaslt_init_device(ABC_dims                 abc,
         break;
     case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
         hipblaslt_cerr << "hip device initialization does NOT support FP4 yet" << std::endl;
+        break;
+    case HIP_C_32F:
+        hipblaslt_init_device<std::complex<float>>(abc,
+                                                   init,
+                                                   is_nan,
+                                                   static_cast<std::complex<float>*>(A),
+                                                   M,
+                                                   N,
+                                                   lda,
+                                                   stride,
+                                                   batch_count);
+        break;
+    case HIP_C_64F:
+        hipblaslt_init_device<std::complex<double>>(abc,
+                                                    init,
+                                                    is_nan,
+                                                    static_cast<std::complex<double>*>(A),
+                                                    M,
+                                                    N,
+                                                    lda,
+                                                    stride,
+                                                    batch_count);
         break;
     default:
         hipblaslt_cerr << "Error type in hipblaslt_init_device" << std::endl;
