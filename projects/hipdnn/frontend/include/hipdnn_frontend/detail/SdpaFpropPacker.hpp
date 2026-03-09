@@ -6,6 +6,9 @@
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 
+#include "HipdnnAttentionImplementation.h"
+#include "HipdnnDiagonalAlignment.h"
+
 namespace hipdnn_frontend::detail
 {
 
@@ -207,11 +210,12 @@ inline Error createSdpaFpropOperation(
                                                    "SDPA fprop max_seq_len_kv"));
     }
 
-    // Set enum parameters as int64
-    auto diagonalAlignment = static_cast<int64_t>(toSdkType(attributes.diagonal_alignment));
+    // Set enum parameters using dedicated backend enum types
+    auto diagonalAlignment = static_cast<hipdnnDiagonalAlignment_t>(
+        toSdkType(attributes.diagonal_alignment));
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                               HIPDNN_TYPE_INT64,
+                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
                                                diagonalAlignment,
                                                "SDPA fprop diagonal_alignment"));
 
@@ -222,10 +226,11 @@ inline Error createSdpaFpropOperation(
                                                mmaCoreMode,
                                                "SDPA fprop mma_core_mode"));
 
-    auto implementationVal = static_cast<int64_t>(toSdkType(attributes.implementation));
+    auto implementationVal = static_cast<hipdnnAttentionImplementation_t>(
+        toSdkType(attributes.implementation));
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                               HIPDNN_TYPE_INT64,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
                                                implementationVal,
                                                "SDPA fprop implementation"));
 
