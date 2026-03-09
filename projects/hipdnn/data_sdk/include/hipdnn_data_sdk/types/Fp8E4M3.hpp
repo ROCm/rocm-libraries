@@ -114,7 +114,8 @@ inline uint8_t float_to_fp8_e4m3_bits(float f, bool saturate = true) noexcept
     std::memcpy(&bits, &f, sizeof(float));
 
     uint32_t sign = (bits >> 24) & 0x80; // Extract sign to bit 7
-    int32_t exp = static_cast<int32_t>((bits >> 23) & 0xFF) - 127 + 7; // Rebias from float (127) to E4M3 (7)
+    int32_t exp = static_cast<int32_t>((bits >> 23) & 0xFF) - 127
+                  + 7; // Rebias from float (127) to E4M3 (7)
     uint32_t mant = bits & 0x007FFFFF;
 
     // Handle overflow

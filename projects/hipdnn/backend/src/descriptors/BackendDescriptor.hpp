@@ -58,7 +58,6 @@ private:
     }
 
 public:
-
     void finalize() override
     {
         _finalized = true;

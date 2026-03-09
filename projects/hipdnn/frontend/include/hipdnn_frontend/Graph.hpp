@@ -304,13 +304,13 @@ private:
         auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
 
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendSetAttribute(engineConfigDesc->get(),
-                                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
-                                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                         1,
-                                                         static_cast<const void*>(&engineDesc.get())),
-            "Failed to set engine on the engine config descriptor.");
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             engineConfigDesc->get(),
+                                             HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             1,
+                                             static_cast<const void*>(&engineDesc.get())),
+                                         "Failed to set engine on the engine config descriptor.");
 
         _engineConfigDesc = std::move(engineConfigDesc);
         return {ErrorCode::OK, ""};
@@ -1372,14 +1372,13 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Building plans for graph " << graph_attributes.get_name());
 
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendSetAttribute(
-                _executionPlanDesc->get(),
-                HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
-                HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                1,
-                static_cast<const void*>(&_engineConfigDesc->get())),
-            "Failed to set the engine config on execution plan.");
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(detail::hipdnnBackend()->backendSetAttribute(
+                                             _executionPlanDesc->get(),
+                                             HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                             1,
+                                             static_cast<const void*>(&_engineConfigDesc->get())),
+                                         "Failed to set the engine config on execution plan.");
 
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             detail::hipdnnBackend()->backendFinalize(_executionPlanDesc->get()),

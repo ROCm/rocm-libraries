@@ -343,7 +343,10 @@ public:
         }
 
         return throwIfOutOfBounds(std::inner_product( // NOLINT(bugprone-fold-init-type)
-            indices.begin(), indices.end(), strides().begin(), int64_t{0}));
+            indices.begin(),
+            indices.end(),
+            strides().begin(),
+            int64_t{0}));
     }
 
     virtual ITensorIterator<false> begin() = 0;

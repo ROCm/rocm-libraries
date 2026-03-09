@@ -66,7 +66,10 @@ public:
         auto desc = getDescriptor();
         for(const auto& [attributeName, tensorDesc] : tensorMap)
         {
-            desc->setAttribute(attributeName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&tensorDesc));
+            desc->setAttribute(attributeName,
+                               HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                               1,
+                               static_cast<const void*>(&tensorDesc));
         }
     }
 

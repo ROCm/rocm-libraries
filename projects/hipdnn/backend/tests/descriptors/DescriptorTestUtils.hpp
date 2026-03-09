@@ -38,17 +38,17 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto desc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
 
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
-                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                        1,
-                        static_cast<const void*>(&xDesc));
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&xDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W,
-                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                        1,
-                        static_cast<const void*>(&wDesc));
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&wDesc));
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y,
-                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                        1,
-                        static_cast<const void*>(&yDesc));
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       static_cast<const void*>(&yDesc));
 
     auto padding = hipdnn_tests::toVec(hipdnn_tests::constants::K_CONV_PADDING);
     auto stride = hipdnn_tests::toVec(hipdnn_tests::constants::K_CONV_STRIDE);

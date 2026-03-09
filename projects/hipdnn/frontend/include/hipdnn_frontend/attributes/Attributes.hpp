@@ -158,7 +158,6 @@ private:
     Attributes() = default;
 
 protected:
-
     /**
      * @brief Get an input tensor by name
      * @tparam InputNameT The input name enum or type

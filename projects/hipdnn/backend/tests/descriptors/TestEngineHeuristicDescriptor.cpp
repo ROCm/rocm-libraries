@@ -375,8 +375,11 @@ TEST_F(TestEngineHeuristicDescriptor, GetEngineHeuristicDescriptorEngineConfigs)
                                HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     count = 0;
-    ASSERT_NO_THROW(heur->getAttribute(
-        HIPDNN_ATTR_ENGINEHEUR_RESULTS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 3, &count, static_cast<void*>(configs.data())));
+    ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       3,
+                                       &count,
+                                       static_cast<void*>(configs.data())));
     ASSERT_EQ(count, 3);
 
     for(auto config : configs)
@@ -446,8 +449,11 @@ TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsWithNoEngineIds)
     }
 
     int64_t count = 0;
-    ASSERT_NO_THROW(heur->getAttribute(
-        HIPDNN_ATTR_ENGINEHEUR_RESULTS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 3, &count, static_cast<void*>(configs.data())));
+    ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       3,
+                                       &count,
+                                       static_cast<void*>(configs.data())));
     ASSERT_EQ(count, 0);
 
     for(auto config : configs)
@@ -477,8 +483,11 @@ TEST_F(TestEngineHeuristicDescriptor, GetEngineConfigsRequestMoreThanAvailable)
     }
 
     int64_t count = 0;
-    ASSERT_NO_THROW(heur->getAttribute(
-        HIPDNN_ATTR_ENGINEHEUR_RESULTS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 5, &count, static_cast<void*>(configs.data())));
+    ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       5,
+                                       &count,
+                                       static_cast<void*>(configs.data())));
     ASSERT_EQ(count, 3);
 
     for(auto config : configs)

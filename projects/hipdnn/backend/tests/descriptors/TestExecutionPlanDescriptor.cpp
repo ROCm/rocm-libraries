@@ -176,7 +176,10 @@ TEST_F(TestExecutionPlanDescriptor, SetHandle)
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
-    plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle));
+    plan->setAttribute(HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                       HIPDNN_TYPE_HANDLE,
+                       1,
+                       static_cast<const void*>(&handle));
 }
 
 TEST_F(TestExecutionPlanDescriptor, SetEngineConfig)

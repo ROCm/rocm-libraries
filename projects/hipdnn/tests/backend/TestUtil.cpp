@@ -43,8 +43,11 @@ void createTestGraph(hipdnnBackendDescriptor_t* descriptor, hipdnnHandle_t handl
                   descriptor, serializedGraph.data(), serializedGraph.size()),
               HIPDNN_STATUS_SUCCESS);
 
-    ASSERT_EQ(hipdnnBackendSetAttribute(
-                  *descriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)),
+    ASSERT_EQ(hipdnnBackendSetAttribute(*descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -60,10 +63,12 @@ void populateTestEngine(hipdnnBackendDescriptor_t engine,
     }
 
     ASSERT_EQ(hipdnnBackendFinalize(*graph), HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            engine, HIPDNN_ATTR_ENGINE_OPERATION_GRAPH, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(graph)),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(engine,
+                                        HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(graph)),
+              HIPDNN_STATUS_SUCCESS);
     ASSERT_EQ(hipdnnBackendSetAttribute(
                   engine, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &gidx),
               HIPDNN_STATUS_SUCCESS);
@@ -97,10 +102,12 @@ void populateTestEngineConfig(hipdnnBackendDescriptor_t* engineConfig,
         createTestEngine(engine, graph, handle, gidx, true);
     }
 
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            *engineConfig, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(engine)),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(*engineConfig,
+                                        HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(engine)),
+              HIPDNN_STATUS_SUCCESS);
 
     if(finalize)
     {
@@ -128,10 +135,12 @@ void populateTestExecutionPlan(hipdnnBackendDescriptor_t* executionPlan,
                                int64_t gidx,
                                bool finalize)
 {
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            *executionPlan, HIPDNN_ATTR_EXECUTION_PLAN_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(*executionPlan,
+                                        HIPDNN_ATTR_EXECUTION_PLAN_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
+              HIPDNN_STATUS_SUCCESS);
 
     if(*engineConfig == nullptr)
     {
@@ -245,10 +254,12 @@ void createAndInitializeBackendDescriptor(hipdnnBackendDescriptor_t* backendDesc
         backendDescriptor, serializedGraph.data(), serializedGraph.size());
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
 
-    ASSERT_EQ(
-        hipdnnBackendSetAttribute(
-            *backendDescriptor, HIPDNN_ATTR_OPERATIONGRAPH_HANDLE, HIPDNN_TYPE_HANDLE, 1, static_cast<const void*>(&handle)),
-        HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(hipdnnBackendSetAttribute(*backendDescriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                        HIPDNN_TYPE_HANDLE,
+                                        1,
+                                        static_cast<const void*>(&handle)),
+              HIPDNN_STATUS_SUCCESS);
 
     status = hipdnnBackendFinalize(*backendDescriptor);
     ASSERT_EQ(status, HIPDNN_STATUS_SUCCESS);
