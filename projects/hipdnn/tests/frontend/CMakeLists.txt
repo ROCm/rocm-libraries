@@ -8,9 +8,11 @@ find_package(Threads REQUIRED)
 add_executable(
     public_hipdnn_frontend_tests
     main.cpp
+    IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormForwardInference.cpp
     IntegrationBatchnormForwardInferenceVarianceExt.cpp
     IntegrationBatchnormInferenceDescriptorLowering.cpp
+    IntegrationBatchnormInferenceNodeVarianceExtDescriptorLowering.cpp
     IntegrationBlockScaleDequantize.cpp
     IntegrationBlockScaleQuantize.cpp
     IntegrationConvForward.cpp
@@ -24,6 +26,8 @@ add_executable(
     IntegrationGraphKnobsApi.cpp
     IntegrationLayernormForward.cpp
     IntegrationMatmul.cpp
+    IntegrationMatmulDescriptorLowering.cpp
+    IntegrationPointwiseDescriptorLowering.cpp
     IntegrationRMSNormForward.cpp
     IntegrationSdpaFpropDescriptorLowering.cpp
 )
