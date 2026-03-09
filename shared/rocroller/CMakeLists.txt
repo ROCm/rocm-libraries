@@ -13,17 +13,27 @@ include(FetchContent)
 include(CMakeDependentOption)
 include(rocroller_target_configure_sanitizers)
 
-FetchContent_Declare(
-    ROCmCMakeBuildTools
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG rocm-6.3.0
-    SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
-)
-FetchContent_MakeAvailable(ROCmCMakeBuildTools)
-list(
-    APPEND CMAKE_MODULE_PATH
-    ${rocmcmakebuildtools_SOURCE_DIR}/share/rocmcmakebuildtools/cmake
-)
+option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_package fails." OFF)
+
+find_package(ROCmCMakeBuildTools CONFIG QUIET)
+if(NOT ROCmCMakeBuildTools_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        message(STATUS "ROCm CMake not found. Fetching...")
+        FetchContent_Declare(
+            ROCmCMakeBuildTools
+            GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
+            GIT_TAG rocm-6.3.0
+            SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
+        )
+        FetchContent_MakeAvailable(ROCmCMakeBuildTools)
+        list(
+            APPEND CMAKE_MODULE_PATH
+            ${rocmcmakebuildtools_SOURCE_DIR}/share/rocmcmakebuildtools/cmake
+        )
+    else()
+        message(FATAL_ERROR "Failed to find ROCmCMakeBuildTools (rocm-cmake)")
+    endif()
+endif()
 include(ROCMInstallTargets)
 include(ROCMSetupVersion)
 
@@ -40,7 +50,6 @@ option(ROCROLLER_ENABLE_COVERAGE "Build code coverage." OFF)
 cmake_dependent_option(ROCROLLER_ENABLE_SLOW_TESTS "Disable slow running tests." ON "NOT ROCROLLER_ENABLE_COVERAGE" OFF)
 option(ROCROLLER_EMBED_ARCH_DEF "Embed msgpack architecture data in library." ON)
 option(ROCROLLER_BUILD_SHARED_LIBS "Build rocRoller as a shared library." ON)
-option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_package fails." OFF)
 option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
 option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
