@@ -101,17 +101,18 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
 
     // Set-up for elementwise op kernel.
     const ck_tile::index_t spatial_lengths_accum =
-            std::accumulate(host_args.filter_spatial_lengths_.begin(),
-                            host_args.filter_spatial_lengths_.end(),
-                            1,
-                            std::multiplies<ck_tile::index_t>());
-    ck_tile::DeviceMem ws_m_n_dev_buf(host_args.G_ * host_args.K_ * host_args.C_ * spatial_lengths_accum *
-                                          sizeof(WorkspaceDataType));
-    ck_tile::GroupedConvBwdWeightHostArgs ws_args = ck_tile::GroupedConvBwdWeightHostArgs(host_args);
-    auto c_ptr                                    = ws_args.wei_ptr;
-    ws_args.wei_ptr                               = ws_m_n_dev_buf.GetDeviceBuffer();
+        std::accumulate(host_args.filter_spatial_lengths_.begin(),
+                        host_args.filter_spatial_lengths_.end(),
+                        1,
+                        std::multiplies<ck_tile::index_t>());
+    ck_tile::DeviceMem ws_m_n_dev_buf(host_args.G_ * host_args.K_ * host_args.C_ *
+                                      spatial_lengths_accum * sizeof(WorkspaceDataType));
+    ck_tile::GroupedConvBwdWeightHostArgs ws_args =
+        ck_tile::GroupedConvBwdWeightHostArgs(host_args);
+    auto c_ptr      = ws_args.wei_ptr;
+    ws_args.wei_ptr = ws_m_n_dev_buf.GetDeviceBuffer();
 
-    auto kargs = Conv::MakeKernelArgs(ws_args);
+    auto kargs        = Conv::MakeKernelArgs(ws_args);
     const dim3 grids  = Conv::GridSize(kargs);
     const dim3 blocks = Conv::BlockSize();
 
@@ -140,7 +141,7 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
         return RunResult::not_supported("unsupported ck_tile arguments for elementwise op");
     }
 
-    auto preprocess                = [&]() {
+    auto preprocess = [&]() {
         if constexpr(ConvDirectionIsBackwardWeight<SIGNATURE>)
         {
             if(args.k_batch > 1)
@@ -157,22 +158,19 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
     constexpr index_t minimum_occupancy =
         Conv::GemmPipeline::Scheduler == ck_tile::GemmPipelineScheduler::Intrawave ? 1 : 2;
 
-    return RunResult::from_runtime(
-        ck_tile::launch_kernel_time_mask(
-            s_conf,
-            preprocess,
-            ck_tile::make_kernel<minimum_occupancy>(conv, grids, blocks, 0, kargs),
-            ck_tile::make_kernel<minimum_occupancy>(
-                    elementwise_op,
-                    kGridSize,
-                    kBlockSize,
-                    0,
-                    input_size,
-                    ck_tile::make_tuple(shape[1], 1), // Input Stride
-                    ck_tile::make_tuple(shape[1], 1), // Output Stride
-                    input_tensors,
-                    static_cast<CDataType*>(c_ptr))
-    ));
+    return RunResult::from_runtime(ck_tile::launch_kernel_time_mask(
+        s_conf,
+        preprocess,
+        ck_tile::make_kernel<minimum_occupancy>(conv, grids, blocks, 0, kargs),
+        ck_tile::make_kernel<minimum_occupancy>(elementwise_op,
+                                                kGridSize,
+                                                kBlockSize,
+                                                0,
+                                                input_size,
+                                                ck_tile::make_tuple(shape[1], 1), // Input Stride
+                                                ck_tile::make_tuple(shape[1], 1), // Output Stride
+                                                input_tensors,
+                                                static_cast<CDataType*>(c_ptr))));
 }
 
 } // namespace detail

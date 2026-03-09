@@ -34,7 +34,7 @@ struct TileOptimizations
     int num_groups_to_merge = 1;
     bool split_image        = false;
     bool explicit_gemm      = false;
-    bool two_stage          = false;    
+    bool two_stage          = false;
 };
 
 template <ConvAlgorithmDescriptor auto ALGORITHM>

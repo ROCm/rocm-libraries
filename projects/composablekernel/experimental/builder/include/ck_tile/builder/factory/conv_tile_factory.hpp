@@ -70,7 +70,9 @@ struct ConvTileFactory
         GroupedConvTraitsType::FixedGemmParams::TilePartitionerGroupNum,
         GroupedConvTraitsType::FixedGemmParams::TilePartitionerM01>;
 
-    using WorkspaceDataType = std::conditional_t<OPTIMIZATIONS.two_stage, typename Types::AccDataType, typename Types::EDataType>;
+    using WorkspaceDataType = std::conditional_t<OPTIMIZATIONS.two_stage,
+                                                 typename Types::AccDataType,
+                                                 typename Types::EDataType>;
 
     using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<
         GroupedConvTraitsType::FixedGemmParams::kPadM,
@@ -135,8 +137,8 @@ template <ConvSignatureDescriptor auto SIGNATURE,
           StringLiteral VERSION = LATEST_API_VERSION>
 struct ElementwiseOpTileFactory
 {
-    static constexpr auto BLOCK               = internal::SetTileThreadBlockInfo<ALGORITHM>();
-    static constexpr auto BLOCK_GEMM          = internal::SetTileBlockGemm<ALGORITHM>();
+    static constexpr auto BLOCK      = internal::SetTileThreadBlockInfo<ALGORITHM>();
+    static constexpr auto BLOCK_GEMM = internal::SetTileBlockGemm<ALGORITHM>();
 
     using Types                 = internal::TileConvTensorTypes<SIGNATURE.data_type>;
     using XDataType             = Types::AccDataType;
@@ -145,8 +147,9 @@ struct ElementwiseOpTileFactory
     using YDataType             = Types::EDataType;
     using BlockTile             = ck_tile::sequence<BLOCK.per_block.m * BLOCK.per_block.n>;
     using BlockWarps            = ck_tile::sequence<BLOCK_GEMM.warps.m * BLOCK_GEMM.warps.n>;
-    using WarpTile              = ck_tile::sequence<BLOCK_GEMM.warp_tile.m * BLOCK_GEMM.warp_tile.n>;
-    using ElementwiseShape      = ck_tile::ElementWiseShape<BlockWarps, BlockTile, WarpTile, WorkspaceDataType>;
+    using WarpTile = ck_tile::sequence<BLOCK_GEMM.warp_tile.m * BLOCK_GEMM.warp_tile.n>;
+    using ElementwiseShape =
+        ck_tile::ElementWiseShape<BlockWarps, BlockTile, WarpTile, WorkspaceDataType>;
 
     // Conversion from X -> Y.
     using Problem = ck_tile::ElementWisePipelineProblem<XDataType,

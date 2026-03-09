@@ -32,8 +32,10 @@ constexpr auto ALGORITHM =
         .with_tile_thread_block(cku::TileThreadBlock_64x64x64)
         .with_tile_block_gemm(cku::TileBlockGemmDesc_16x16_v3_intrawave)
         .with_tile_transfer(cku::TileTransfer_4x4x4)
-        .with_tile_optimizations(ckt::TileOptimizations{
-            .num_groups_to_merge = 1, .split_image = false, .explicit_gemm = false, .two_stage = false});
+        .with_tile_optimizations(ckt::TileOptimizations{.num_groups_to_merge = 1,
+                                                        .split_image         = false,
+                                                        .explicit_gemm       = false,
+                                                        .two_stage           = false});
 
 constexpr auto TWO_STAGE_ALGORITHM =
     cku::ConvAlgorithm_Tile_GroupedConvolutionKernel{}
@@ -41,33 +43,35 @@ constexpr auto TWO_STAGE_ALGORITHM =
         .with_tile_thread_block(cku::TileThreadBlock_64x64x64)
         .with_tile_block_gemm(cku::TileBlockGemmDesc_16x16_v3_intrawave)
         .with_tile_transfer(cku::TileTransfer_4x4x4)
-        .with_tile_optimizations(ckt::TileOptimizations{
-            .num_groups_to_merge = 1, .split_image = false, .explicit_gemm = false, .two_stage = true});
+        .with_tile_optimizations(ckt::TileOptimizations{.num_groups_to_merge = 1,
+                                                        .split_image         = false,
+                                                        .explicit_gemm       = false,
+                                                        .two_stage           = true});
 
 constexpr ckt::Args<SIGNATURE> Args = {
-        .lengths =
-            {
-                .batch_size      = 2,
-                .groups          = 4,
-                .input_channels  = 32,
-                .output_channels = 48,
-                .image           = {.width = 32, .height = 56},
-                .filter          = {.width = 3, .height = 3},
-            },
-        .filter_strides     = {.width = 1, .height = 1},
-        .filter_dilation    = {.width = 1, .height = 1},
-        .input_left_pad     = {.width = 0, .height = 0},
-        .input_right_pad    = {.width = 0, .height = 0},
-        .a_elementwise_op   = {},
-        .b_elementwise_op   = {},
-        .cde_elementwise_op = {},
-    };
+    .lengths =
+        {
+            .batch_size      = 2,
+            .groups          = 4,
+            .input_channels  = 32,
+            .output_channels = 48,
+            .image           = {.width = 32, .height = 56},
+            .filter          = {.width = 3, .height = 3},
+        },
+    .filter_strides     = {.width = 1, .height = 1},
+    .filter_dilation    = {.width = 1, .height = 1},
+    .input_left_pad     = {.width = 0, .height = 0},
+    .input_right_pad    = {.width = 0, .height = 0},
+    .a_elementwise_op   = {},
+    .b_elementwise_op   = {},
+    .cde_elementwise_op = {},
+};
 
 using Builder  = ckb::ConvBuilder<SIGNATURE, ALGORITHM>;
 using Instance = Builder::Instance;
 
-using TwoStageBuilder  = ckb::ConvBuilder<SIGNATURE, TWO_STAGE_ALGORITHM>;
-using TwoStageInstance = TwoStageBuilder::Instance;
+using TwoStageBuilder       = ckb::ConvBuilder<SIGNATURE, TWO_STAGE_ALGORITHM>;
+using TwoStageInstance      = TwoStageBuilder::Instance;
 using ElementwiseOpBuilder  = ckf::ElementwiseOpTileFactory<SIGNATURE, TWO_STAGE_ALGORITHM>;
 using ElementwiseOpInstance = ElementwiseOpBuilder::Instance;
 
@@ -97,13 +101,11 @@ TEST(BwdWeight_2D_FP16_NHWGC, Create)
 
 TEST(ElementWiseOp, Create)
 {
-    cku::run_ck_tile_test<ElementwiseOpBuilder>({
-        "elementwise_kernel",
-        "4096_256_4_4_64_4_256",
-        "UnaryConvert",
-        "kPad_1",
-        "ElementWiseDefaultPolicy"
-    });
+    cku::run_ck_tile_test<ElementwiseOpBuilder>({"elementwise_kernel",
+                                                 "4096_256_4_4_64_4_256",
+                                                 "UnaryConvert",
+                                                 "kPad_1",
+                                                 "ElementWiseDefaultPolicy"});
 }
 
 TEST(BwdWeight_2D_FP16_NHWGC, Execution)
@@ -131,7 +133,7 @@ TEST(BwdWeight_TwoStage_2D_FP16_NHWGC, Execution)
 
     ckt::init_inputs(Args, inputs.get());
 
-    auto conv = TwoStageInstance{};
+    auto conv           = TwoStageInstance{};
     auto elementwise_op = ElementwiseOpInstance{};
 
     EXPECT_THAT(ckt::run(conv, elementwise_op, Args, inputs.get(), outputs.get()), SuccessfulRun());
