@@ -18,6 +18,7 @@ Documentation for rocRAND is available at
 
 ### Changed
 
+* Optimized `xorwow` generator performance for `gfx908` and `gfx942` architectures.
 * Updated `benchmark_rocrand_device_api` to use occupancy-based tooling to increase benchmark workloads.
 * Changed input size for `benchmark_rocrand_host_api` to increase it's workload.
 
