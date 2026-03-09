@@ -42,7 +42,6 @@ set(__default_cxx_compile_options
     -Wundef
     -Wuninitialized
     -Wunreachable-code
-    -Wunused
     -Wno-ignored-qualifiers
     -Wno-sign-compare
 )
@@ -67,10 +66,8 @@ set(__clang_cxx_compile_options
     -Wno-shorten-64-to-32
     -Wno-sign-conversion
     -Wno-unknown-warning-option
-    -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
-    -Wno-unused-result
     -Wno-unsafe-buffer-usage
     -Wno-deprecated-declarations
     -Wno-shadow-uncaptured-local
@@ -89,7 +86,6 @@ set(__clang_cxx_compile_options
     -Wno-float-equal
     -Wno-redundant-parens
     -Wno-format-nonliteral
-    -Wno-unused-template
     -Wno-comma
     -Wno-suggest-destructor-override
     -Wno-switch-enum
@@ -102,8 +98,6 @@ set(__clang_cxx_compile_options
     -Wno-documentation
     -Wno-deprecated-builtins
     -Wno-enum-constexpr-conversion
-    -Wunused-value
-    -Wno-unused-parameter
     -Wno-missing-noreturn
     -Wno-tautological-constant-out-of-range-compare
     -Wno-nrvo

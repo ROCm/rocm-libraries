@@ -30,18 +30,17 @@
 #include <miopen/logger.hpp>
 
 namespace miopen {
-std::ostream& operator<<(std::ostream& stream, const FusionOpDescriptor& x)
+std::ostream& operator<<(std::ostream& stream, [[maybe_unused]] const FusionOpDescriptor& x)
 {
-    MIOPEN_LOG_ENUM(stream,
-                    x.kind(),
-                    miopenFusionOpConvForward,
-                    miopenFusionOpActivForward,
-                    miopenFusionOpBatchNormInference,
-                    miopenFusionOpBiasForward,
-                    miopenFusionOpBatchNormFwdTrain,
-                    miopenFusionOpBatchNormBwdTrain,
-                    miopenFusionOpActivBackward);
-    return stream;
+    return MIOPEN_LOG_ENUM(stream,
+                           x.kind(),
+                           miopenFusionOpConvForward,
+                           miopenFusionOpActivForward,
+                           miopenFusionOpBatchNormInference,
+                           miopenFusionOpBiasForward,
+                           miopenFusionOpBatchNormFwdTrain,
+                           miopenFusionOpBatchNormBwdTrain,
+                           miopenFusionOpActivBackward);
 }
 
 std::ostream& operator<<(std::ostream& stream, const std::any& a)

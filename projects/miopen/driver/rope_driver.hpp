@@ -26,27 +26,14 @@
 #ifndef GUARD_MIOPEN_ROPE_DRIVER_HPP
 #define GUARD_MIOPEN_ROPE_DRIVER_HPP
 
-#include "InputFlags.hpp"
 #include "driver.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
-#include "random.hpp"
-#include <algorithm>
-#include <cfloat>
-#include <cstdlib>
-#include <memory>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
-#include <numeric>
-#include <vector>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
+#include "../test/verify.hpp"
 
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
                               miopenTensorDescriptor_t cosDesc,
-                              miopenTensorDescriptor_t sinDesc,
-                              miopenTensorDescriptor_t yDesc,
                               Tgpu* x,
                               Tgpu* cos,
                               Tgpu* sin,
@@ -82,8 +69,6 @@ int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                miopenTensorDescriptor_t cosDesc,
-                               miopenTensorDescriptor_t sinDesc,
-                               miopenTensorDescriptor_t dxDesc,
                                Tgpu* dy,
                                Tgpu* cos,
                                Tgpu* sin,
@@ -329,7 +314,7 @@ template <typename Tgpu, typename Tref>
 int RoPEDriver<Tgpu, Tref>::RunForwardCPU()
 {
     mloRoPEForwardRunHost<Tgpu, Tref>(
-        x_dyDesc, cosDesc, sinDesc, y_dxDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
 
     return miopenStatusSuccess;
 }
@@ -387,7 +372,7 @@ template <typename Tgpu, typename Tref>
 int RoPEDriver<Tgpu, Tref>::RunBackwardCPU()
 {
     mloRoPEBackwardRunHost<Tgpu, Tref>(
-        x_dyDesc, cosDesc, sinDesc, y_dxDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
+        x_dyDesc, cosDesc, x_dy.data(), cos.data(), sin.data(), y_dxhost.data());
 
     return miopenStatusSuccess;
 }

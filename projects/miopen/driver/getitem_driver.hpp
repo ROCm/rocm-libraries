@@ -26,29 +26,18 @@
 #ifndef GUARD_MIOPEN_GETITEM_DRIVER_HPP
 #define GUARD_MIOPEN_GETITEM_DRIVER_HPP
 
-#include "InputFlags.hpp"
 #include "driver.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
-#include "random.hpp"
-#include <algorithm>
-#include <cfloat>
-#include <cstdlib>
-#include <memory>
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
+#include "../test/verify.hpp"
+
 #include <miopen/tensor_view_utils.hpp>
-#include <numeric>
-#include <vector>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
 
 template <typename Tgpu, typename Tcheck>
 int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                   uint32_t indexCount,
                                   miopenTensorDescriptor_t* indexDescs,
                                   miopenTensorDescriptor_t dxDesc,
-                                  miopenTensorDescriptor_t errorDesc,
                                   Tgpu* dy,
                                   int32_t** indexs,
                                   Tcheck* dxhost,
@@ -56,8 +45,7 @@ int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,
                                   uint32_t dimCount,
                                   int32_t* dims,
                                   uint32_t sliceCount,
-                                  int32_t* slices,
-                                  uint32_t offset)
+                                  int32_t* slices)
 {
     auto dy_dims  = miopen::deref(dyDesc).GetLengths();
     auto dy_numel = std::accumulate(dy_dims.begin(), dy_dims.end(), 1L, std::multiplies<int64_t>());
@@ -470,7 +458,6 @@ int GetitemDriver<Tgpu, Tref>::RunBackwardCPU()
                                           indexDescs.size(),
                                           indexDescs.data(),
                                           dxDesc,
-                                          errorDesc,
                                           dy.data(),
                                           indexs_ptr.data(),
                                           dxhost.data(),
@@ -478,8 +465,7 @@ int GetitemDriver<Tgpu, Tref>::RunBackwardCPU()
                                           dims.size(),
                                           dims.data(),
                                           slices.size(),
-                                          slices_flat.data(),
-                                          offset);
+                                          slices_flat.data());
 
     return miopenStatusSuccess;
 }
