@@ -3,6 +3,7 @@
 
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnAttentionImplementation.h"
+#include "HipdnnDataType.h"
 #include "HipdnnDiagonalAlignment.h"
 #include "HipdnnException.hpp"
 #include "TensorDescriptorTestUtils.hpp"
@@ -630,25 +631,25 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetDiagonalAlignmentWrongElementCount)
                                HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestSdpaFpropOperationDescriptor, SetDataType)
+TEST_F(TestSdpaFpropOperationDescriptor, SetMmaCoreMode)
 {
     auto desc = getDescriptor();
-    auto mmaCoreMode = static_cast<int64_t>(DataType::UNSET);
+    hipdnnDataType_t mmaCoreMode = HIPDNN_DATA_HALF;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_INT64, 1, &mmaCoreMode));
+        HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &mmaCoreMode));
 
-    ASSERT_EQ(desc->getData().mma_core_mode, DataType::UNSET);
+    ASSERT_EQ(desc->getData().mma_core_mode, DataType::HALF);
 }
 
-TEST_F(TestSdpaFpropOperationDescriptor, SetDataTypeWrongElementCount)
+TEST_F(TestSdpaFpropOperationDescriptor, SetMmaCoreModeWrongElementCount)
 {
     auto desc = getDescriptor();
-    int64_t mmaCoreMode = 0;
+    hipdnnDataType_t mmaCoreMode = HIPDNN_DATA_FLOAT;
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_INT64, 2, &mmaCoreMode),
+            HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &mmaCoreMode),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -751,8 +752,14 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescriptor)
 
 TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeSdpafpropParams)
 {
-    makeFinalized();
     auto desc = getDescriptor();
+    setAllAttributesExcept({});
+
+    // Set mma_core_mode to a valid value so it can be retrieved
+    hipdnnDataType_t mmaCoreValue = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &mmaCoreValue);
+    desc->finalize();
 
     // diagonal alignment
     auto diagonalAlignment = static_cast<hipdnnDiagonalAlignment_t>(-1);
@@ -766,15 +773,15 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeSdpafpropParams)
     EXPECT_EQ(diagonalAlignment, HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT);
 
     // mma core mode
-    int64_t mmaCoreMode = -1;
+    auto mmaCoreMode = static_cast<hipdnnDataType_t>(-1);
     int64_t mmaCoreModeCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT,
-                                       HIPDNN_TYPE_INT64,
+                                       HIPDNN_TYPE_DATA_TYPE,
                                        1,
                                        &mmaCoreModeCount,
                                        &mmaCoreMode));
     ASSERT_EQ(mmaCoreModeCount, 1);
-    EXPECT_EQ(mmaCoreMode, static_cast<int64_t>(DataType::UNSET));
+    EXPECT_EQ(mmaCoreMode, HIPDNN_DATA_FLOAT);
 
     // implementation
     auto implementation = static_cast<hipdnnAttentionImplementation_t>(-1);
@@ -1264,8 +1271,11 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDataTypeQueryReturnsOne)
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT,
+                                       HIPDNN_TYPE_DATA_TYPE,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -1327,7 +1337,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDataTypeQueryFailsNullEleme
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->getAttribute(
-            HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_INT64, 0, nullptr, nullptr),
+            HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, nullptr, nullptr),
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
@@ -1618,4 +1628,239 @@ TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)
     // TensorDescriptor does not implement IGraphOperation
     auto graphOp = _qDesc->tryAsInterface<IGraphOperation>();
     EXPECT_EQ(graphOp, nullptr);
+}
+
+// =============================================================================
+// Scalar/Enum Attribute Round-Trip Tests
+// =============================================================================
+
+TEST_F(TestSdpaFpropOperationDescriptor, SetAndGetBooleanAttributes)
+{
+    auto desc = getDescriptor();
+    setAllAttributesExcept({});
+
+    // Set boolean attributes to true
+    bool trueVal = true;
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_PADDING_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
+
+    desc->finalize();
+
+    // Verify all boolean attributes are true
+    bool retrieved = false;
+    int64_t elementCount = 0;
+
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT,
+                       HIPDNN_TYPE_BOOLEAN,
+                       1,
+                       &elementCount,
+                       &retrieved);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_TRUE(retrieved);
+
+    retrieved = false;
+    desc->getAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &retrieved);
+    EXPECT_TRUE(retrieved);
+
+    retrieved = false;
+    desc->getAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_PADDING_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &retrieved);
+    EXPECT_TRUE(retrieved);
+
+    retrieved = false;
+    desc->getAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &retrieved);
+    EXPECT_TRUE(retrieved);
+
+    retrieved = false;
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_CAUSAL_MASK_BOTTOM_RIGHT_EXT,
+                       HIPDNN_TYPE_BOOLEAN,
+                       1,
+                       &elementCount,
+                       &retrieved);
+    EXPECT_TRUE(retrieved);
+
+    // Verify setting to false works (false != unset)
+    auto desc2 = createDescriptor<SdpaFpropOperationDescriptor>();
+    auto sdpa2 = desc2->asDescriptor<SdpaFpropOperationDescriptor>();
+    // Set up required attributes on desc2
+    sdpa2->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_qDesc);
+    sdpa2->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_kDesc);
+    sdpa2->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_vDesc);
+    sdpa2->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_oDesc);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    sdpa2->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    bool falseVal = false;
+    sdpa2->setAttribute(HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &falseVal);
+    sdpa2->finalize();
+
+    retrieved = true;
+    sdpa2->getAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT, HIPDNN_TYPE_BOOLEAN, 1, &elementCount, &retrieved);
+    EXPECT_FALSE(retrieved);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, SetAndGetFloatAttributes)
+{
+    auto desc = getDescriptor();
+    setAllAttributesExcept({});
+
+    float dropoutProb = 0.5f;
+    float attnScale = 1.5f;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT, HIPDNN_TYPE_FLOAT, 1, &dropoutProb);
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT, HIPDNN_TYPE_FLOAT, 1, &attnScale);
+
+    desc->finalize();
+
+    float retrievedDropout = 0.0f;
+    float retrievedScale = 0.0f;
+    int64_t elementCount = 0;
+
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT,
+                       HIPDNN_TYPE_FLOAT,
+                       1,
+                       &elementCount,
+                       &retrievedDropout);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_FLOAT_EQ(retrievedDropout, 0.5f);
+
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT,
+                       HIPDNN_TYPE_FLOAT,
+                       1,
+                       &elementCount,
+                       &retrievedScale);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_FLOAT_EQ(retrievedScale, 1.5f);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, SetAndGetIntAttributes)
+{
+    auto desc = getDescriptor();
+    setAllAttributesExcept({});
+
+    int64_t leftBound = 10;
+    int64_t rightBound = 20;
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &leftBound);
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &rightBound);
+
+    int32_t maxSeqLenKv = 512;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT, HIPDNN_TYPE_INT32, 1, &maxSeqLenKv);
+
+    desc->finalize();
+
+    int64_t retrievedLeft = 0;
+    int64_t retrievedRight = 0;
+    int32_t retrievedMaxSeqLen = 0;
+    int64_t elementCount = 0;
+
+    desc->getAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &elementCount, &retrievedLeft);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_EQ(retrievedLeft, 10);
+
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &elementCount,
+                       &retrievedRight);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_EQ(retrievedRight, 20);
+
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT,
+                       HIPDNN_TYPE_INT32,
+                       1,
+                       &elementCount,
+                       &retrievedMaxSeqLen);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_EQ(retrievedMaxSeqLen, 512);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, SetAndGetNonDefaultEnumAttributes)
+{
+    auto desc = getDescriptor();
+    setAllAttributesExcept({});
+
+    auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       1,
+                       &diagonalAlignment);
+
+    auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                       1,
+                       &implementation);
+
+    hipdnnDataType_t mmaCoreMode = HIPDNN_DATA_HALF;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &mmaCoreMode);
+
+    desc->finalize();
+
+    hipdnnDiagonalAlignment_t retrievedAlignment = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
+    hipdnnAttentionImplementation_t retrievedImpl = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
+    hipdnnDataType_t retrievedMmaCore = HIPDNN_DATA_FLOAT;
+    int64_t elementCount = 0;
+
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       1,
+                       &elementCount,
+                       &retrievedAlignment);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_EQ(retrievedAlignment, HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT);
+
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                       1,
+                       &elementCount,
+                       &retrievedImpl);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_EQ(retrievedImpl, HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT);
+
+    desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT,
+                       HIPDNN_TYPE_DATA_TYPE,
+                       1,
+                       &elementCount,
+                       &retrievedMmaCore);
+    ASSERT_EQ(elementCount, 1);
+    EXPECT_EQ(retrievedMmaCore, HIPDNN_DATA_HALF);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, FinalizeWithOnlyRequiredAttributes)
+{
+    auto desc = getDescriptor();
+
+    // Only set Q, K, V, O tensor descriptors and compute type
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_qDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_kDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_vDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_oDesc);
+
+    auto computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    // Finalize should succeed with only required attributes
+    ASSERT_NO_THROW(desc->finalize());
+    ASSERT_TRUE(desc->isFinalized());
 }

@@ -502,6 +502,10 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
                  "HIPDNN_TYPE_CONVOLUTION_MODE");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_POINTWISE_MODE),
                  "HIPDNN_TYPE_POINTWISE_MODE");
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_DIAGONAL_ALIGNMENT),
+                 "HIPDNN_TYPE_DIAGONAL_ALIGNMENT");
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION),
+                 "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION");
 
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT),
                  "HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT");

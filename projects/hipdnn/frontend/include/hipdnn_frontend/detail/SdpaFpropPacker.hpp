@@ -202,10 +202,10 @@ inline Error createSdpaFpropOperation(
     }
     if(attributes.max_seq_len_kv.has_value())
     {
-        auto val = static_cast<int64_t>(attributes.max_seq_len_kv.value());
+        auto val = static_cast<int32_t>(attributes.max_seq_len_kv.value());
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT,
-                                                   HIPDNN_TYPE_INT64,
+                                                   HIPDNN_TYPE_INT32,
                                                    val,
                                                    "SDPA fprop max_seq_len_kv"));
     }
@@ -219,12 +219,13 @@ inline Error createSdpaFpropOperation(
                                                diagonalAlignment,
                                                "SDPA fprop diagonal_alignment"));
 
-    auto mmaCoreMode = static_cast<int64_t>(toSdkType(attributes.mma_core_mode));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT,
-                                               HIPDNN_TYPE_INT64,
-                                               mmaCoreMode,
-                                               "SDPA fprop mma_core_mode"));
+    if(attributes.mma_core_mode != DataType::NOT_SET)
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
+                                                     HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT,
+                                                     attributes.mma_core_mode,
+                                                     "SDPA fprop mma_core_mode"));
+    }
 
     auto implementationVal
         = static_cast<hipdnnAttentionImplementation_t>(toSdkType(attributes.implementation));

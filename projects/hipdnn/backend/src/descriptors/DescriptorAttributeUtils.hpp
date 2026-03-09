@@ -196,6 +196,32 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
                               void* arrayOfElements,
                               const char* errorPrefix);
 
+void setOptionalBool(flatbuffers::Optional<bool>& target,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* context);
+
+void getOptionalBool(const flatbuffers::Optional<bool>& source,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* context);
+
+void setOptionalInt32(flatbuffers::Optional<int32_t>& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* context);
+
+void getOptionalInt32(const flatbuffers::Optional<int32_t>& source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* context);
+
 void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& target,
                           hipdnnBackendAttributeType_t attributeType,
                           int64_t elementCount,

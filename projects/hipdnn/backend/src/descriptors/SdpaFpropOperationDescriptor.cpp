@@ -271,17 +271,12 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                     "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT:
-    {
-        bool val = false;
-        setScalar(val,
-                  HIPDNN_TYPE_BOOLEAN,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.generate_stats = val;
+        setOptionalBool(_data.generate_stats,
+                        attributeType,
+                        elementCount,
+                        arrayOfElements,
+                        "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT:
         setScalar(_data.alibi_mask,
                   HIPDNN_TYPE_BOOLEAN,
@@ -343,18 +338,12 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                          "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT:
-    {
-        int64_t val = 0;
-        setScalar(val,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::setAttribute()");
-        _data.max_seq_len_kv
-            = static_cast<int32_t>(val); // FlatBuffer schema uses int32 for max_seq_len_kv
+        setOptionalInt32(_data.max_seq_len_kv,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
         hipdnn_backend::setDiagonalAlignment(_data.diagonal_alignment,
                                              attributeType,
@@ -363,7 +352,11 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                              "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT:
-        setMmaCoreMode(attributeType, elementCount, arrayOfElements);
+        setDataType(_data.mma_core_mode,
+                    attributeType,
+                    elementCount,
+                    arrayOfElements,
+                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT:
         hipdnn_backend::setAttentionImplementation(_data.implementation,
@@ -384,27 +377,6 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                               "SdpaFpropOperationDescriptor::setAttribute: attributeName not "
                               "supported");
     }
-}
-
-void SdpaFpropOperationDescriptor::setMmaCoreMode(hipdnnBackendAttributeType_t attributeType,
-                                                  int64_t elementCount,
-                                                  const void* arrayOfElements)
-{
-    checkSetArgs(HIPDNN_TYPE_INT64,
-                 attributeType,
-                 arrayOfElements,
-                 "SdpaFpropOperationDescriptor::setAttribute()");
-    THROW_IF_FALSE(elementCount == 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "SdpaFpropOperationDescriptor::setAttribute(): elementCount is not 1");
-    auto mode = static_cast<hipdnn_data_sdk::data_objects::DataType>(
-        *static_cast<const int64_t*>(arrayOfElements));
-    THROW_IF_TRUE(
-        mode < hipdnn_data_sdk::data_objects::DataType::MIN
-            || mode > hipdnn_data_sdk::data_objects::DataType::MAX,
-        HIPDNN_STATUS_BAD_PARAM,
-        "SdpaFpropOperationDescriptor::setAttribute(): invalid MMA core mode (DataType) value");
-    _data.mma_core_mode = mode;
 }
 
 // ============================================================================
@@ -648,17 +620,13 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                     "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT:
-    {
-        bool val = _data.generate_stats.value_or(false);
-        getScalar(val,
-                  HIPDNN_TYPE_BOOLEAN,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalBool(_data.generate_stats,
+                        attributeType,
+                        requestedElementCount,
+                        elementCount,
+                        arrayOfElements,
+                        "SdpaFpropOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT:
         getScalar(_data.alibi_mask,
                   HIPDNN_TYPE_BOOLEAN,
@@ -728,17 +696,13 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                          "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT:
-    {
-        int64_t val = static_cast<int64_t>(_data.max_seq_len_kv.value_or(0));
-        getScalar(val,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalInt32(_data.max_seq_len_kv,
+                         attributeType,
+                         requestedElementCount,
+                         elementCount,
+                         arrayOfElements,
+                         "SdpaFpropOperationDescriptor::getAttribute()");
         break;
-    }
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
         hipdnn_backend::getDiagonalAlignment(_data.diagonal_alignment,
                                              attributeType,
@@ -748,7 +712,12 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                              "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT:
-        getMmaCoreMode(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        getDataType(_data.mma_core_mode,
+                    attributeType,
+                    requestedElementCount,
+                    elementCount,
+                    arrayOfElements,
+                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT:
         hipdnn_backend::getAttentionImplementation(_data.implementation,
@@ -771,33 +740,6 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                               "SdpaFpropOperationDescriptor::getAttribute: attributeName not "
                               "supported");
     }
-}
-
-void SdpaFpropOperationDescriptor::getMmaCoreMode(hipdnnBackendAttributeType_t attributeType,
-                                                  int64_t requestedElementCount,
-                                                  int64_t* elementCount,
-                                                  void* arrayOfElements) const
-{
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, "SdpaFpropOperationDescriptor::getAttribute()");
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      "SdpaFpropOperationDescriptor::getAttribute(): elementCount is null");
-        *elementCount = 1;
-        return;
-    }
-
-    THROW_IF_FALSE(requestedElementCount >= 1,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   "SdpaFpropOperationDescriptor::getAttribute(): requestedElementCount < 1");
-
-    if(elementCount != nullptr)
-    {
-        *elementCount = 1;
-    }
-    *static_cast<int64_t*>(arrayOfElements) = static_cast<int64_t>(_data.mma_core_mode);
 }
 
 // ============================================================================
