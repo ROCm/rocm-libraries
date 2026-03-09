@@ -104,7 +104,7 @@ set(__clang_cxx_compile_options
     -Wno-enum-constexpr-conversion
     -Wno-unused-parameter
     -Wmissing-noreturn
-    -Wnrvo)
+    -Wno-nrvo)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
         -Wno-unique-object-duplication
