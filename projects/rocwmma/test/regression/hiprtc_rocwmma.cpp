@@ -250,7 +250,7 @@ TEST_F(HipRTC_rocWMMA, RocwmmaBasicIncludeTest)
 
     // Build compile options
     auto options    = buildCompileOptions();
-    options.push_back(getIncludeDir(binary_name).c_str());
+    options.push_back(getIncludeDirArg(binary_name).c_str());
     int  numOptions = options.size();
 
     // Compile the program
@@ -387,7 +387,7 @@ TEST_F(HipRTC_rocWMMA, RocwmmaGemmTest)
 
     // Build compile options
     auto options    = buildCompileOptions();
-    options.push_back(getIncludeDir(binary_name).c_str());
+    options.push_back(getIncludeDirArg(binary_name).c_str());
     int  numOptions = options.size();
 
     // Compile the program
