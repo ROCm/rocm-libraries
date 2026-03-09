@@ -62,13 +62,17 @@ TEST(CkTileSequence, SequenceGenZero)
 
 TEST(CkTileSequence, SequenceGenZeroNonIdentityFunctor)
 {
-    // N=0 specialization should produce empty sequence regardless of functor
+    // N=0 specialization should produce empty sequence regardless of functor.
+    // Use sequence_gen<1, F> to exercise the functor (suppresses -Wunused-member-function),
+    // then verify that N=0 still produces an empty sequence with the same functor type.
     struct F
     {
         constexpr index_t operator()(index_t) const { return 999; }
     };
-    using Result = typename sequence_gen<0, F>::type;
-    EXPECT_EQ(Result::size(), 0);
+    using ResultOne  = typename sequence_gen<1, F>::type;
+    using ResultZero = typename sequence_gen<0, F>::type;
+    EXPECT_EQ(ResultOne{}.at(0), 999);
+    EXPECT_EQ(ResultZero::size(), 0);
 }
 
 TEST(CkTileSequence, SequenceGenIdentity)
