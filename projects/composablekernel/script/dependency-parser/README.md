@@ -479,6 +479,30 @@ ctest --output-on-failure -R "^(test_atomic|test_ck_tile_.*|...)$"
 | Tests Run | ~10,000 (all) | 1,261 (affected) | 87% reduction |
 | Estimated Time | 4-6 hours | 30-45 minutes | 85% faster |
 
+**Method Validation (Commit 5ccc1387ea):**
+
+Validated that new pre-build method produces identical test selection as legacy post-build method:
+
+**Commit:** 5ccc1387ea - "Proof of concept for removing forward declarations (#5135)"
+- **Modified files:** 6 files in `experimental/builder/` and `include/ck/` (grouped conv bwd weight)
+- **Legacy method** (`ninja -t deps`): 7 executables selected
+- **New method** (`clang -MM`): 7 executables selected
+- **Result:** ✅ **100% match** - Both methods selected identical executables:
+  ```
+  bin/ckProfiler
+  bin/example_grouped_conv_bwd_weight_xdl_bf16
+  bin/example_grouped_conv_bwd_weight_xdl_fp16
+  bin/example_grouped_conv_bwd_weight_xdl_fp16_comp_bf8_fp8
+  bin/test_grouped_convnd_bwd_weight
+  bin/test_grouped_convnd_bwd_weight_dataset_xdl
+  bin/test_grouped_convnd_bwd_weight_interface_xdl
+  ```
+
+**Key Difference:**
+- Legacy method requires building affected tests first (~30 min), then extracting dependencies
+- New method extracts dependencies during CMake configure (~5-6 min), no build needed
+- **Total time savings:** ~25 minutes per commit analysis
+
 **Bugs Fixed During Validation:**
 
 1. **Test Prefix Filter Bug**: Filter checked `exe.startswith("test_")` but executables have `bin/` prefix (e.g., `bin/test_gemm`). Fixed by checking `"test_" in exe`.
@@ -487,7 +511,7 @@ ctest --output-on-failure -R "^(test_atomic|test_ck_tile_.*|...)$"
 
 3. **Git Path Filter Bug**: Using `git diff -- projects/composablekernel/` from build directory returned empty results. Fixed by removing git path filtering.
 
-**Conclusion:** ✅ Smart build system validated and ready for production deployment.
+**Conclusion:** ✅ New smart build method validated - produces identical test selection as legacy method with significantly faster dependency analysis!
 
 ## Development
 
