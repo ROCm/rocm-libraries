@@ -429,8 +429,20 @@ TEST_F(IntegrationSdpaFpropDescriptorLowering, SdpaFpropWithStatsRoundTrip)
     EXPECT_EQ(sdpa->k_tensor_uid, K_SDPA_TENSOR_K_UID);
     EXPECT_EQ(sdpa->v_tensor_uid, K_SDPA_TENSOR_V_UID);
     EXPECT_EQ(sdpa->o_tensor_uid, K_SDPA_TENSOR_O_UID);
-    EXPECT_EQ(sdpa->stats_tensor_uid, K_SDPA_TENSOR_STATS_UID);
+    ASSERT_TRUE(sdpa->stats_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->stats_tensor_uid.value(), K_SDPA_TENSOR_STATS_UID);
     EXPECT_TRUE(sdpa->generate_stats);
+
+    // Verify inferred stats tensor shape
+    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
+    for(const auto& t : graphT.tensors)
+    {
+        tensorMap[t->uid] = t.get();
+    }
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_STATS_UID), 0u);
+    auto* statsT = tensorMap[K_SDPA_TENSOR_STATS_UID];
+    EXPECT_EQ(statsT->dims, toVec(K_SDPA_TENSOR_STATS_DIMS));
+    EXPECT_EQ(statsT->data_type, DataTypeSdk::FLOAT);
 }
 
 // Exercises packer code paths for optional input tensors (attn_mask, seed,

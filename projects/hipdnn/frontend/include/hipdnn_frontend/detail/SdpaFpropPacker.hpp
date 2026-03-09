@@ -252,7 +252,7 @@ inline Error createSdpaFpropOperation(
     }
     if(attributes.max_seq_len_kv.has_value())
     {
-        auto val = static_cast<int32_t>(attributes.max_seq_len_kv.value());
+        auto val = attributes.max_seq_len_kv.value();
         HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                    HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT,
                                                    HIPDNN_TYPE_INT32,

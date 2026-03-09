@@ -412,59 +412,8 @@ TEST_F(TestGraphDescriptorSdpaFprop, ComputeDataTypePreserved)
         K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
     auto oDesc = createFinalizedTensor(
         K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
-    auto attnMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_ATTN_MASK_UID);
-    auto scaleDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_UID);
-    auto seqLenQDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_Q_UID);
-    auto seqLenKvDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_KV_UID);
-    auto seedDesc = createFinalizedTensor(K_SDPA_TENSOR_SEED_UID);
-    auto offsetDesc = createFinalizedTensor(K_SDPA_TENSOR_OFFSET_UID);
-    auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_MASK_UID);
-    auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_SCALE_UID);
-    auto pageTableKDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_K_UID);
-    auto pageTableVDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_V_UID);
-    auto blockMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_BLOCK_MASK_UID);
-    auto sinkTokenDesc = createFinalizedTensor(K_SDPA_TENSOR_SINK_TOKEN_UID);
-    auto descaleQDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_Q_UID);
-    auto descaleKDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_K_UID);
-    auto descaleVDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_V_UID);
-    auto descaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_S_UID);
-    auto scaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_S_UID);
-    auto scaleODesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_O_UID);
-    auto statsDesc = createFinalizedTensor(K_SDPA_TENSOR_STATS_UID);
-    auto maxDesc = createFinalizedTensor(K_SDPA_TENSOR_MAX_UID);
-    auto sumExpDesc = createFinalizedTensor(K_SDPA_TENSOR_SUM_EXP_UID);
-    auto rngDumpDesc = createFinalizedTensor(K_SDPA_TENSOR_RNG_DUMP_UID);
-    auto amaxSDesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_S_UID);
-    auto amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
-    auto opDesc = createFinalizedSdpaFpropOp(qDesc.get(),
-                                             kDesc.get(),
-                                             vDesc.get(),
-                                             oDesc.get(),
-                                             attnMaskDesc.get(),
-                                             scaleDesc.get(),
-                                             seqLenQDesc.get(),
-                                             seqLenKvDesc.get(),
-                                             seedDesc.get(),
-                                             offsetDesc.get(),
-                                             dropoutMaskDesc.get(),
-                                             dropoutScaleDesc.get(),
-                                             pageTableKDesc.get(),
-                                             pageTableVDesc.get(),
-                                             blockMaskDesc.get(),
-                                             sinkTokenDesc.get(),
-                                             descaleQDesc.get(),
-                                             descaleKDesc.get(),
-                                             descaleVDesc.get(),
-                                             descaleSDesc.get(),
-                                             scaleSDesc.get(),
-                                             scaleODesc.get(),
-                                             statsDesc.get(),
-                                             maxDesc.get(),
-                                             sumExpDesc.get(),
-                                             rngDumpDesc.get(),
-                                             amaxSDesc.get(),
-                                             amaxODesc.get(),
-                                             HIPDNN_DATA_HALF);
+    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+        qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get(), HIPDNN_DATA_HALF);
 
     auto desc = getDescriptor();
     setHandle();

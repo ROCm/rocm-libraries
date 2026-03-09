@@ -163,40 +163,6 @@ protected:
         _amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
-
-    void TearDown() override
-    {
-        _wrapper.reset();
-        _qDesc.reset();
-        _kDesc.reset();
-        _vDesc.reset();
-        _oDesc.reset();
-        _attnMaskDesc.reset();
-        _scaleDesc.reset();
-        _seqLenQDesc.reset();
-        _seqLenKvDesc.reset();
-        _seedDesc.reset();
-        _offsetDesc.reset();
-        _dropoutMaskDesc.reset();
-        _dropoutScaleDesc.reset();
-        _pageTableKDesc.reset();
-        _pageTableVDesc.reset();
-        _blockMaskDesc.reset();
-        _sinkTokenDesc.reset();
-        _descaleQDesc.reset();
-        _descaleKDesc.reset();
-        _descaleVDesc.reset();
-        _descaleSDesc.reset();
-        _scaleSDesc.reset();
-        _scaleODesc.reset();
-        _statsDesc.reset();
-        _maxDesc.reset();
-        _sumExpDesc.reset();
-        _rngDumpDesc.reset();
-        _amaxSDesc.reset();
-        _amaxODesc.reset();
-        _unfinalizedTensor.reset();
-    }
 };
 
 // =============================================================================
@@ -758,6 +724,15 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescriptor)
     auto unpackedQ = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
         &retrievedQ, HIPDNN_STATUS_BAD_PARAM, "unpack retrieved Q");
     ASSERT_EQ(unpackedQ->getData().uid, K_SDPA_TENSOR_Q_UID);
+
+    const auto& qData = unpackedQ->getData();
+    const std::vector<int64_t> expectedDims(K_SDPA_TENSOR_Q_DIMS.begin(),
+                                            K_SDPA_TENSOR_Q_DIMS.end());
+    const std::vector<int64_t> expectedStrides(K_SDPA_TENSOR_Q_STRIDES.begin(),
+                                               K_SDPA_TENSOR_Q_STRIDES.end());
+    ASSERT_EQ(qData.dims, expectedDims);
+    ASSERT_EQ(qData.strides, expectedStrides);
+    ASSERT_EQ(qData.data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
 }
 
 // =============================================================================
@@ -1316,9 +1291,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeWithHalfComputeType)
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
 
-TEST_F(
-    TestSdpaFpropOperationDescriptor,
-    GetTensorDescriptorsOrderIsQKVOAttnMaskScaleSeqLenQSeqLenKvSeedOffsetDropoutMaskDropoutScalePageTableKPageTableVBlockMaskSinkTokenDescaleQDescaleKDescaleVDescaleSScaleSScaleOStatsMaxSumExpRngDumpAmaxSAmaxO)
+TEST_F(TestSdpaFpropOperationDescriptor, GetTensorDescriptorsReturnsExpectedOrder)
 {
     makeFinalized();
     auto desc = getDescriptor();

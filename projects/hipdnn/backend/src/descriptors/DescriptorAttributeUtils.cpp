@@ -288,10 +288,10 @@ void getOptionalTensorDescriptor(const std::shared_ptr<TensorDescriptor>& descSo
     if(!descSource)
     {
         checkGetArgs(HIPDNN_TYPE_BACKEND_DESCRIPTOR, attributeType, errorPrefix);
-        if(elementCount != nullptr)
-        {
-            *elementCount = 0;
-        }
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 0;
         return;
     }
     getTensorDescriptor(descSource,
