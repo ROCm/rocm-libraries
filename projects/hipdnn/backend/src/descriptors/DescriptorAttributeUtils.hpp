@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace hipdnn_backend
@@ -51,6 +52,7 @@ void setScalar(T& target,
                const void* arrayOfElements,
                const char* errorPrefix)
 {
+    static_assert(std::is_trivially_copyable_v<T>, "setScalar requires a trivially copyable type");
     checkSetArgs(expectedType, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
@@ -67,6 +69,7 @@ void getScalar(const T& source,
                void* arrayOfElements,
                const char* errorPrefix)
 {
+    static_assert(std::is_trivially_copyable_v<T>, "getScalar requires a trivially copyable type");
     checkGetArgs(expectedType, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
@@ -135,6 +138,8 @@ void setOptionalScalar(flatbuffers::Optional<T>& target,
                        const void* arrayOfElements,
                        const char* context)
 {
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "setOptionalScalar requires a trivially copyable type");
     checkSetArgs(ExpectedType, attributeType, arrayOfElements, context);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
@@ -153,6 +158,8 @@ void getOptionalScalar(const flatbuffers::Optional<T>& source,
                        void* arrayOfElements,
                        const char* context)
 {
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "getOptionalScalar requires a trivially copyable type");
     checkGetArgs(ExpectedType, attributeType, context);
 
     if(!source.has_value())

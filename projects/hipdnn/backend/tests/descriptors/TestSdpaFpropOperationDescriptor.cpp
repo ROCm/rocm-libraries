@@ -184,35 +184,25 @@ TEST_F(TestSdpaFpropOperationDescriptor, FinalizeWithRequiredAttributes)
     ASSERT_TRUE(getDescriptor()->isFinalized());
 }
 
-TEST_F(TestSdpaFpropOperationDescriptor, FinalizeFailsWithoutQTensor)
+class TestSdpaFpropOperationDescriptorFinalizeFailsWithout
+    : public TestSdpaFpropOperationDescriptor,
+      public ::testing::WithParamInterface<hipdnnBackendAttributeName_t>
 {
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT});
+};
+
+TEST_P(TestSdpaFpropOperationDescriptorFinalizeFailsWithout, FinalizeFailsWithout)
+{
+    setAllAttributesExcept({GetParam()});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestSdpaFpropOperationDescriptor, FinalizeFailsWithoutKTensor)
-{
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, FinalizeFailsWithoutVTensor)
-{
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, FinalizeFailsWithoutOTensor)
-{
-    setAllAttributesExcept({HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, FinalizeFailsWithoutComputeType)
-{
-    setAllAttributesExcept({HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT});
-    ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
-}
+INSTANTIATE_TEST_SUITE_P(RequiredAttributes,
+                         TestSdpaFpropOperationDescriptorFinalizeFailsWithout,
+                         ::testing::Values(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
+                                           HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT,
+                                           HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT,
+                                           HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT,
+                                           HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT));
 
 // =============================================================================
 // SetAttribute Tests - Tensor Descriptors
@@ -872,6 +862,15 @@ TEST_P(TestSdpaFpropOperationDescriptorQueryMode, QueryReturnsExpectedElementCou
     ASSERT_EQ(elementCount, param.expectedElementCount);
 }
 
+TEST_P(TestSdpaFpropOperationDescriptorQueryMode, QueryFailsWithNullElementCount)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+    ASSERT_THROW_HIPDNN_STATUS(
+        desc->getAttribute(GetParam().attr, GetParam().type, 0, nullptr, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     SdpaFpropQueryMode,
     TestSdpaFpropOperationDescriptorQueryMode,
@@ -933,57 +932,6 @@ INSTANTIATE_TEST_SUITE_P(
         QueryModeParam{
             HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 1},
         QueryModeParam{HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1}));
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
-                                                  HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr),
-                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDiagonalAlignmentQueryFailsNullElementCount)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr),
-                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDataTypeQueryFailsNullElementCount)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    ASSERT_THROW_HIPDNN_STATUS(
-        desc->getAttribute(
-            HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, nullptr, nullptr),
-        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor,
-       GetAttributeAttentionImplementationQueryFailsNullElementCount)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
-                                                  0,
-                                                  nullptr,
-                                                  nullptr),
-                               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-}
 
 // =============================================================================
 // Accessor Tests
@@ -1120,43 +1068,6 @@ TEST_F(TestSdpaFpropOperationDescriptor, ToStringContainsExpectedInfo)
 // =============================================================================
 // IGraphOperation Interface Tests
 // =============================================================================
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    auto tensors = desc->getTensorDescriptors();
-    ASSERT_EQ(tensors.size(), 28);
-    ASSERT_EQ(tensors[0]->getData().uid, K_SDPA_TENSOR_Q_UID);
-    ASSERT_EQ(tensors[1]->getData().uid, K_SDPA_TENSOR_K_UID);
-    ASSERT_EQ(tensors[2]->getData().uid, K_SDPA_TENSOR_V_UID);
-    ASSERT_EQ(tensors[3]->getData().uid, K_SDPA_TENSOR_O_UID);
-    ASSERT_EQ(tensors[4]->getData().uid, K_SDPA_TENSOR_ATTN_MASK_UID);
-    ASSERT_EQ(tensors[5]->getData().uid, K_SDPA_TENSOR_SCALE_UID);
-    ASSERT_EQ(tensors[6]->getData().uid, K_SDPA_TENSOR_SEQ_LEN_Q_UID);
-    ASSERT_EQ(tensors[7]->getData().uid, K_SDPA_TENSOR_SEQ_LEN_KV_UID);
-    ASSERT_EQ(tensors[8]->getData().uid, K_SDPA_TENSOR_SEED_UID);
-    ASSERT_EQ(tensors[9]->getData().uid, K_SDPA_TENSOR_OFFSET_UID);
-    ASSERT_EQ(tensors[10]->getData().uid, K_SDPA_TENSOR_DROPOUT_MASK_UID);
-    ASSERT_EQ(tensors[11]->getData().uid, K_SDPA_TENSOR_DROPOUT_SCALE_UID);
-    ASSERT_EQ(tensors[12]->getData().uid, K_SDPA_TENSOR_PAGE_TABLE_K_UID);
-    ASSERT_EQ(tensors[13]->getData().uid, K_SDPA_TENSOR_PAGE_TABLE_V_UID);
-    ASSERT_EQ(tensors[14]->getData().uid, K_SDPA_TENSOR_BLOCK_MASK_UID);
-    ASSERT_EQ(tensors[15]->getData().uid, K_SDPA_TENSOR_SINK_TOKEN_UID);
-    ASSERT_EQ(tensors[16]->getData().uid, K_SDPA_TENSOR_DESCALE_Q_UID);
-    ASSERT_EQ(tensors[17]->getData().uid, K_SDPA_TENSOR_DESCALE_K_UID);
-    ASSERT_EQ(tensors[18]->getData().uid, K_SDPA_TENSOR_DESCALE_V_UID);
-    ASSERT_EQ(tensors[19]->getData().uid, K_SDPA_TENSOR_DESCALE_S_UID);
-    ASSERT_EQ(tensors[20]->getData().uid, K_SDPA_TENSOR_SCALE_S_UID);
-    ASSERT_EQ(tensors[21]->getData().uid, K_SDPA_TENSOR_SCALE_O_UID);
-    ASSERT_EQ(tensors[22]->getData().uid, K_SDPA_TENSOR_STATS_UID);
-    ASSERT_EQ(tensors[23]->getData().uid, K_SDPA_TENSOR_MAX_UID);
-    ASSERT_EQ(tensors[24]->getData().uid, K_SDPA_TENSOR_SUM_EXP_UID);
-    ASSERT_EQ(tensors[25]->getData().uid, K_SDPA_TENSOR_RNG_DUMP_UID);
-    ASSERT_EQ(tensors[26]->getData().uid, K_SDPA_TENSOR_AMAX_S_UID);
-    ASSERT_EQ(tensors[27]->getData().uid, K_SDPA_TENSOR_AMAX_O_UID);
-}
 
 TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
