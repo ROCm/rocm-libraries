@@ -13,6 +13,7 @@ class ConvInstanceTemplateParams:
         warp_tile,
         double_smem_buffer,
         num_wave_groups,
+        is_two_stage_instance,
         pipeline_version,
         scheduler,
         scalar_per_vector,
@@ -27,6 +28,7 @@ class ConvInstanceTemplateParams:
         self.warp_tile = warp_tile
         self.double_smem_buffer = double_smem_buffer
         self.num_wave_groups = num_wave_groups
+        self.is_two_stage_instance = is_two_stage_instance
         self.pipeline_version = pipeline_version
         self.scheduler = scheduler
         self.scalar_per_vector = scalar_per_vector
@@ -39,7 +41,8 @@ class ConvInstanceTemplateParams:
         explicit_gemm = "true" if self.explicit_gemm else "false"
         split_image = "true" if self.split_image else "false"
         num_groups_to_merge = str(self.num_groups_to_merge)
-        return f"ckt::TileOptimizations{{.num_groups_to_merge = {num_groups_to_merge}, .split_image = {split_image}, .explicit_gemm = {explicit_gemm}}}"
+        two_stage_instance = "true" if self.is_two_stage_instance else "false"
+        return f"ckt::TileOptimizations{{.num_groups_to_merge = {num_groups_to_merge}, .split_image = {split_image}, .explicit_gemm = {explicit_gemm}, .two_stage = {two_stage_instance}}}"
 
     def get_specialization(self):
         namespace = "ckb::TileConvSpecialization::"
@@ -232,6 +235,8 @@ def parse_fwd_instances(instances, problem_name):
                 k_per_xdl = 32
         k_per_xdl = min(k_per_xdl, k_per_block)
 
+        is_two_stage = False
+
         conv = ConvInstanceTemplateParams(
             spec,
             [m_per_block, n_per_block, k_per_block],
@@ -239,6 +244,7 @@ def parse_fwd_instances(instances, problem_name):
             [m_per_xdl, n_per_xdl, k_per_xdl],
             double_smem_buffer,
             num_wave_groups,
+            is_two_stage,
             pipeline_version,
             scheduler,
             [a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector],
@@ -363,12 +369,21 @@ def parse_bwd_weight_instances(instances, problem_name):
                 blk_gemm_pipeline_schduler = args[39]
                 blk_gemm_pipeline_version = args[40]
             elif is_two_stage_instance:
-                print(f"Skipping instance {instance_id} with device op {device_op_name} since it's not supported yet.")
-                continue
+                if len(args) != 46:
+                    raise RuntimeError(f"Wrong number of parameters in the TwoStage instance string: {instance}" + 
+                                       f"Expected 46 parameters for TwoStage instance. Found {len(args)} parameters.")
+                
+                num_groups_to_merge = args[41]
+
+                # Block GEMM pipeline parameters
+                blk_gemm_pipeline_schduler = args[39]
+                blk_gemm_pipeline_version = args[40]
+
             else:
                 # Regular V1 XDL CShuffle instance
                 if len(args) != 43:
-                    raise RuntimeError(f"Wrong number of parameters in the XDL CShuffle instance string: {instance}")
+                    raise RuntimeError(f"Wrong number of parameters in the XDL CShuffle instance string: {instance}" + 
+                                       f"Expected 43 parameters for V1 instance. Found {len(args)} parameters.")
                 
                 num_groups_to_merge = 1
 
@@ -416,6 +431,7 @@ def parse_bwd_weight_instances(instances, problem_name):
             [m_per_xdl, n_per_xdl, k_per_xdl],
             double_smem_buffer,
             num_wave_groups,
+            is_two_stage_instance,
             pipeline_version,
             scheduler,
             [a_scalar_per_vector, b_scalar_per_vector, c_scalar_per_vector],
