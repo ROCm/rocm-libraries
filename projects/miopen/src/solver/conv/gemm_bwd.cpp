@@ -540,17 +540,23 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
         dyDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
 
     const auto wei_c = wDesc.GetLengths()[1];
+    const auto in_n  = dyDesc.GetLengths()[0];
 
-    const auto gemm_size = wei_c *
-                           std::accumulate(wei_spatial.begin(),
-                                           wei_spatial.end(),
-                                           std::size_t(1),
-                                           std::multiplies<std::size_t>()) *
-                           std::accumulate(out_spatial.begin(),
-                                           out_spatial.end(),
-                                           std::size_t(1),
-                                           std::multiplies<std::size_t>()) *
-                           GetTypeSize(dyDesc.GetType()) * conv.group_count;
+    auto gemm_size = wei_c *
+                     std::accumulate(wei_spatial.begin(),
+                                     wei_spatial.end(),
+                                     std::size_t(1),
+                                     std::multiplies<std::size_t>()) *
+                     std::accumulate(out_spatial.begin(),
+                                     out_spatial.end(),
+                                     std::size_t(1),
+                                     std::multiplies<std::size_t>()) *
+                     GetTypeSize(dyDesc.GetType()) * conv.group_count;
+
+    // For regular convolution, GemmBwdRest now launches one strided-batched GEMM over N,
+    // so workspace must hold all N GEMM outputs before per-sample Col2Im.
+    if(conv.group_count == 1)
+        gemm_size *= in_n;
 
     if(gemm_size > handle.GetMaxMemoryAllocSize())
     {
@@ -636,6 +642,8 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
 
     const auto in_spatial_size = std::accumulate(
         in_spatial.begin(), in_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
+    const auto wei_spatial_size = std::accumulate(
+        wei_spatial.begin(), wei_spatial.end(), std::size_t(1), std::multiplies<std::size_t>());
 
     const auto workspace_req = GetWorkspaceSize(context, problem);
 
@@ -675,48 +683,104 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
             }();
 
             float time_gemm = 0;
+
+            // tensors.dx = transpose(tensors.w) * tensors.dy
+            if(group_count == 1)
+            {
+                auto batched_gemm_desc   = gemm_desc;
+                batched_gemm_desc.batch_count = static_cast<int>(in_n);
+                batched_gemm_desc.strideA     = 0;
+                batched_gemm_desc.strideB =
+                    static_cast<long long>(wei_k) * static_cast<long long>(out_spatial_size);
+                batched_gemm_desc.strideC =
+                    static_cast<long long>(in_c) * static_cast<long long>(wei_spatial_size) *
+                    static_cast<long long>(out_spatial_size);
+
+                constexpr auto batched_backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+
+                const auto gemm_status = CallGemmStridedBatched(
+                    handle, batched_gemm_desc, w, 0, dy, 0, workspace, 0, batched_backend);
+                if(gemm_status != miopenStatusSuccess)
+                    MIOPEN_THROW("GemmBwdRest batched GEMM execution failure.");
+
+                if(handle.IsProfilingEnabled())
+                    time_gemm += handle.GetKernelTime();
+
+                if(spatial_dims == 3)
+                {
+                    time_gemm += Col2Im3dGPUBatched(handle,
+                                                    workspace,
+                                                    out_spatial[0],
+                                                    out_spatial[1],
+                                                    out_spatial[2],
+                                                    wei_spatial[0],
+                                                    wei_spatial[1],
+                                                    wei_spatial[2],
+                                                    static_cast<uint32_t>(pads[0]),
+                                                    static_cast<uint32_t>(pads[1]),
+                                                    static_cast<uint32_t>(pads[2]),
+                                                    static_cast<uint32_t>(strides[0]),
+                                                    static_cast<uint32_t>(strides[1]),
+                                                    static_cast<uint32_t>(strides[2]),
+                                                    static_cast<uint32_t>(dilations[0]),
+                                                    static_cast<uint32_t>(dilations[1]),
+                                                    static_cast<uint32_t>(dilations[2]),
+                                                    static_cast<uint32_t>(in_c),
+                                                    static_cast<uint32_t>(in_spatial[0]),
+                                                    static_cast<uint32_t>(in_spatial[1]),
+                                                    static_cast<uint32_t>(in_spatial[2]),
+                                                    static_cast<uint32_t>(in_n),
+                                                    static_cast<uint64_t>(in_c) * wei_spatial_size *
+                                                        out_spatial_size,
+                                                    dx,
+                                                    static_cast<uint64_t>(in_c) * in_spatial_size,
+                                                    0,
+                                                    dyDesc_.GetType());
+                    if(handle.IsProfilingEnabled())
+                    {
+                        handle.ResetKernelTime();
+                        handle.AccumKernelTime(time_gemm);
+                    }
+                    return;
+                }
+            }
+
             for(std::size_t i = 0; i < in_n; i++)
             {
                 std::size_t out_offset = i * wei_k * out_spatial_size;
                 std::size_t in_offset  = i * in_c * in_spatial_size;
 
-                miopenStatus_t gemm_status;
-
-                // tensors.dx = transpose(tensors.w) * tensors.dy
                 if(group_count > 1)
                 {
-                    gemm_status = CallGemmStridedBatched(handle,
-                                                         gemm_desc,
-                                                         w,
-                                                         0,
-                                                         dy,
-                                                         out_offset,
-                                                         workspace,
-                                                         0,
-                                                         GemmBackend_t::rocblas);
-                }
-                else
-                {
-                    gemm_status = CallGemm(handle,
-                                           gemm_desc,
-                                           w,
-                                           0,
-                                           dy,
-                                           out_offset,
-                                           workspace,
-                                           0,
-                                           GemmBackend_t::rocblas);
-                }
+                    const auto gemm_status = CallGemmStridedBatched(handle,
+                                                                    gemm_desc,
+                                                                    w,
+                                                                    0,
+                                                                    dy,
+                                                                    out_offset,
+                                                                    workspace,
+                                                                    0,
+                                                                    GemmBackend_t::rocblas);
+                    if(gemm_status != miopenStatusSuccess)
+                        MIOPEN_THROW("GemmBwdRest execution failure.");
 
-                if(gemm_status != miopenStatusSuccess)
-                    MIOPEN_THROW("GemmBwdRest execution failure.");
-
-                if(handle.IsProfilingEnabled())
-                    time_gemm += handle.GetKernelTime();
+                    if(handle.IsProfilingEnabled())
+                        time_gemm += handle.GetKernelTime();
+                }
 
                 time_gemm += Col2ImGPU(handle,
                                        spatial_dims,
-                                       workspace,
+                                       static_cast<const uint8_t*>(workspace) +
+                                           (group_count == 1 ? i * in_c *
+                                                                 wei_spatial_size *
+                                                                 out_spatial_size *
+                                                                 GetTypeSize(dyDesc_.GetType())
+                                                             : 0),
                                        out_spatial,
                                        wei_spatial,
                                        pads,
