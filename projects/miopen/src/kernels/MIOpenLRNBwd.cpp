@@ -43,25 +43,55 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
     const int bot_x      = x + lcl_id0 * HORIZ_OUT_PIX;
     const int bot_y      = y + lcl_id1 * VERT_OUT_PIX;
 
-    FLOAT prv_exp_scale[VERT_OUT_PIX][HORIZ_OUT_PIX];
-
-    // load top_diff and scale tiles
-    #pragma unroll VERT_OUT_PIX
+// load top_diff and scale tiles
+#pragma unroll VERT_OUT_PIX
     for(int b_j = lcl_id1; b_j < local_data_height; b_j += GROUP_SIZE_Y)
     {
-        int top_y_act   = top_y + b_j - PAD;
-        bool invisibleY = (top_y_act < 0) || (top_y_act >= TOP_HEIGHT);
-        top_y_act       = (invisibleY) ? 0 : top_y_act;
+        int top_y_act         = top_y + b_j - PAD;
+        const bool invisibleY = (top_y_act < 0) || (top_y_act >= TOP_HEIGHT);
+        top_y_act             = (invisibleY) ? 0 : top_y_act;
 
         const int top_df_y_off = top_y_act * TOPDF_STRIDE;
         const int scale_y_off  = top_y_act * SCALE_STRIDE;
         const int lcl_off_v    = b_j * local_data_width;
-        #pragma unroll HORIZ_OUT_PIX
-        for(int b_i = lcl_id0; b_i < local_data_width; b_i += GROUP_SIZE_X)
+
+/*
+  Note: Code duplication from manual loop peeling
+
+  The HIP compiler does not unroll this loop if the loop statement is written as
+  `for(int b_i = lcl_id0; b_i < local_data_width; b_i += GROUP_SIZE_X)`, leading
+  to a loss in performance.
+
+  To enable unrolling the last loop iteration is manually peeled. As this is the
+  iteration that may not be uniformly executed by all work-items in a work-group.
+
+  Unfortunately there is code duplication in the body is the loop/if statments, as
+  refactoring it into a __alwaysinline__ free function seems inhibits compiler
+  optimizations.
+*/
+#pragma unroll
+        for(int i = 0; i < HORIZ_OUT_PIX; i++)
         {
-            int top_x_act   = top_x + b_i - PAD;
-            bool invisibleX = (top_x_act < 0) || (top_x_act >= TOP_WIDTH);
-            top_x_act       = (invisibleX) ? 0 : top_x_act;
+            const int b_i         = i * GROUP_SIZE_X + lcl_id0;
+            int top_x_act         = top_x + b_i - PAD;
+            const bool invisibleX = (top_x_act < 0) || (top_x_act >= TOP_WIDTH);
+            top_x_act             = (invisibleX) ? 0 : top_x_act;
+
+            FLOAT top_df_val = top_df[top_df_off + top_df_y_off + top_x_act];
+            FLOAT scale_val  = scale[scale_off + scale_y_off + top_x_act];
+
+            top_df_val = (invisibleX || invisibleY) ? 0 : top_df_val;
+            scale_val  = (invisibleX || invisibleY) ? FLOAT(1.f) : scale_val;
+
+            top_df_data[lcl_off_v + b_i] = top_df_val;
+            ratio_data[lcl_off_v + b_i]  = scale_val;
+        }
+        if(lcl_id0 < (KERNEL_SIZE - 1))
+        {
+            const int b_i         = GROUP_SIZE_X * HORIZ_OUT_PIX + lcl_id0;
+            int top_x_act         = top_x + b_i - PAD;
+            const bool invisibleX = (top_x_act < 0) || (top_x_act >= TOP_WIDTH);
+            top_x_act             = (invisibleX) ? 0 : top_x_act;
 
             FLOAT top_df_val = top_df[top_df_off + top_df_y_off + top_x_act];
             FLOAT scale_val  = scale[scale_off + scale_y_off + top_x_act];
@@ -77,6 +107,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
     __syncthreads();
 
     // actual top_diffs and scales
+    FLOAT prv_exp_scale[VERT_OUT_PIX][HORIZ_OUT_PIX];
     for(int j = 0; j < VERT_OUT_PIX; ++j)
     {
         const int lcl_off_v = (lcl_id1 * VERT_OUT_PIX + PAD + j) * local_data_width;
@@ -92,18 +123,51 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
 
     // read top and load ratio tile
     const int top_off = b * TOP_BATCH_STRIDE + o * TOP_CHANNEL_STRIDE;
-    #pragma unroll VERT_OUT_PIX
+#pragma unroll VERT_OUT_PIX
     for(int b_j = lcl_id1; b_j < local_data_height; b_j += GROUP_SIZE_Y)
     {
-        int top_y_act   = top_y + b_j - PAD;
-        bool invisibleY = (top_y_act < 0) || (top_y_act >= TOP_HEIGHT);
-        top_y_act       = (invisibleY) ? 0 : top_y_act;
+        int top_y_act         = top_y + b_j - PAD;
+        const bool invisibleY = (top_y_act < 0) || (top_y_act >= TOP_HEIGHT);
+        top_y_act             = (invisibleY) ? 0 : top_y_act;
 
         const int top_y_off = top_y_act * TOP_STRIDE;
         const int lcl_off_v = b_j * local_data_width;
-        #pragma unroll HORIZ_OUT_PIX
-        for(int b_i = lcl_id0; b_i < local_data_width; b_i += GROUP_SIZE_X)
+/*
+  Note: Code duplication from manual loop peeling
+
+  The HIP compiler does not unroll this loop if the loop statement is written as
+  `for(int b_i = lcl_id0; b_i < local_data_width; b_i += GROUP_SIZE_X)`, leading
+  to a loss in performance.
+
+  To enable unrolling the last loop iteration is manually peeled. As this is the
+  iteration that may not be uniformly executed by all work-items in a work-group.
+
+  Unfortunately there is code duplication in the body is the loop/if statments, as
+  refactoring it into a __alwaysinline__ free function seems inhibits compiler
+  optimizations.
+*/
+#pragma unroll
+        for(int i = 0; i < HORIZ_OUT_PIX; i++)
         {
+            int b_i         = i * GROUP_SIZE_X + lcl_id0;
+            int top_x_act   = top_x + b_i - PAD;
+            bool invisibleX = (top_x_act < 0) || (top_x_act >= TOP_WIDTH);
+            top_x_act       = (invisibleX) ? 0 : top_x_act;
+
+            FLOAT top_val = top[top_off + top_y_off + top_x_act];
+            top_val       = (invisibleX || invisibleY) ? 0 : top_val;
+
+            const FLOAT top_df_val = top_df_data[lcl_off_v + b_i];
+            const FLOAT scale_val  = ratio_data[lcl_off_v + b_i];
+
+            // scale val is not 0
+            FLOAT ratio_dta = (top_df_val * top_val) / scale_val;
+            // replacing scale with ratio
+            ratio_data[lcl_off_v + b_i] = ratio_dta;
+        }
+        if(lcl_id0 < (KERNEL_SIZE - 1))
+        {
+            int b_i         = GROUP_SIZE_X * HORIZ_OUT_PIX + lcl_id0;
             int top_x_act   = top_x + b_i - PAD;
             bool invisibleX = (top_x_act < 0) || (top_x_act >= TOP_WIDTH);
             top_x_act       = (invisibleX) ? 0 : top_x_act;
