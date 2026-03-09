@@ -76,6 +76,7 @@ void testStreamCapture()
 
     // Launch kernel
     hipLaunchKernelGGL(increment, dim3(1), dim3(1), 0, stream, d_data);
+    HIP_CHECK(hipGetLastError());
 
     // Transfer result back to host
     HIP_CHECK(hipMemcpyAsync(&h_data, d_data, sizeof(int), hipMemcpyDeviceToHost, stream));
@@ -193,6 +194,7 @@ void testStreamCaptureWithAtomics()
 
     // Launch kernel
     hipLaunchKernelGGL(atomicIncrement, dim3(num_blocks), dim3(num_threads), 0, stream, d_data);
+    HIP_CHECK(hipGetLastError());
 
     // Transfer result back to host
     HIP_CHECK(hipMemcpyAsync(&h_data, d_data, sizeof(int), hipMemcpyDeviceToHost, stream));

@@ -5,9 +5,10 @@
 #include "Node.hpp"
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend/Error.hpp>
-#include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
+#include <hipdnn_frontend/detail/BatchnormInferencePacker.hpp>
+#include <hipdnn_frontend/node/detail/Utilities.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -78,17 +79,18 @@ public:
         // SECTION 2: Validate Required Tensor Dimensions
         // Why: All required tensors must have dimensions set by user - they are never inferred.
         // For inference: x, scale, bias, mean, invVar are all required user parameters.
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(mean, 2, "Mean tensor"));
-        HIPDNN_CHECK_ERROR(validateMinimumTensorDimensions(invVar, 2, "Inverse variance tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(x, 2, "Input tensor (x)"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(scale, 2, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(bias, 2, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateMinimumTensorDimensions(mean, 2, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(
+            detail::validateMinimumTensorDimensions(invVar, 2, "Inverse variance tensor"));
 
         // SECTION 3: Validate Output Tensor Shape Consistency
         // Why: BN preserves tensor shape during inference just as in training.
         // Output y[n,c,h,w] has same shape as input x[n,c,h,w].
         HIPDNN_CHECK_ERROR(
-            validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
+            detail::validateTensorShapesMatchIfSet(x, y, "Input tensor (x)", "Output tensor (y)"));
 
         // SECTION 4: Validate Channel Dimensions and Parameter Tensor Shapes
         // Why: All parameters are per-channel with shape [1, C, 1, 1]:
@@ -101,17 +103,17 @@ public:
         int64_t channels = xDims[1];
 
         // Validate scale has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(scale, channels, "Scale tensor"));
 
         // Validate bias has correct channel-only shape (required user parameter)
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(bias, channels, "Bias tensor"));
 
         // Validate mean has correct channel-only shape (required user parameter for inference)
-        HIPDNN_CHECK_ERROR(validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
+        HIPDNN_CHECK_ERROR(detail::validateChannelOnlyTensorShape(mean, channels, "Mean tensor"));
 
         // Validate inv_variance has correct channel-only shape (required user parameter for inference)
         HIPDNN_CHECK_ERROR(
-            validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
+            detail::validateChannelOnlyTensorShape(invVar, channels, "Inverse variance tensor"));
 
         // NOTE: Unlike training, inference does NOT require m > 1 (where m = N*H*W for 4D
         // or m = N*D*H*W for 5D) since it uses pre-computed statistics rather than
@@ -161,6 +163,13 @@ public:
             toSdkType(attributes.compute_data_type),
             hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
             attributes.pack_attributes(builder).Union());
+    }
+
+    Error create_operation(
+        std::unordered_map<int64_t, detail::ScopedHipdnnBackendDescriptor>& tensorDescs,
+        std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
+    {
+        return detail::createBatchnormInferenceOperation(attributes, tensorDescs, operations);
     }
 };
 }

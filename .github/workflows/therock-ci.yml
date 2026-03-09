@@ -60,7 +60,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 55fa089eecd5f20d13357b82b74b5572dda1d67b # 2026-02-03 commit
+          ref: 085571a87f8050f94c77eb90454995b6d1b75658 # 2026-02-26
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -71,6 +71,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pydantic requests
+
+      - name: Set PR_LABELS variable with labels assigned to pull request
+        if: ${{ github.event.pull_request }} # only set PR labels var if this is a pull request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          echo "PR_LABELS=$(gh pr view ${PR_NUMBER} --json labels)" >> $GITHUB_ENV
 
       - name: Determine Linux projects to run
         id: linux_projects

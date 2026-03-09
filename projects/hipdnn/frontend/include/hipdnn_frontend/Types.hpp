@@ -1,19 +1,33 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file Types.hpp
+ * @brief Core type definitions and enumerations for the hipDNN Frontend API
+ *
+ * This file contains all the fundamental types used throughout the hipDNN Frontend,
+ * including data types, convolution modes, pointwise operation modes, and utility
+ * functions for type conversion between frontend and SDK types.
+ */
+
 #pragma once
 
 #include <HipdnnBackendHeuristicType.h>
+#include <HipdnnConvolutionMode.h>
+#include <HipdnnDataType.h>
+#include <HipdnnPointwiseMode.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_data_sdk/data_objects/norm_common_generated.h>
 #include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PointwiseValidation.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp8.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp8.hpp>
 
 #include <bitset>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -21,105 +35,191 @@
 
 namespace hipdnn_frontend
 {
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::fp8_e4m3;
+using hipdnn_data_sdk::types::fp8_e5m2;
+using hipdnn_data_sdk::types::half;
 
+/**
+ * @enum ConvolutionMode
+ * @brief Specifies the convolution algorithm mode
+ *
+ * Determines how the convolution filter is applied to the input tensor.
+ */
 enum class ConvolutionMode
 {
-    NOT_SET = 0,
-    CROSS_CORRELATION = 1,
-    CONVOLUTION = 2
+    NOT_SET = 0, ///< Mode not specified
+    CROSS_CORRELATION = 1, ///< Cross-correlation mode (standard deep learning convolution)
+    CONVOLUTION = 2 ///< Mathematical convolution (filter is flipped)
 };
-typedef ConvolutionMode ConvolutionMode_t; // NOLINT(readability-identifier-naming)
+typedef ConvolutionMode ConvolutionMode_t; ///< @brief Type alias for ConvolutionMode
 
+/**
+ * @enum PointwiseMode
+ * @brief Specifies the type of element-wise (pointwise) operation
+ *
+ * Pointwise operations are applied element-by-element to tensors.
+ * They can be unary (1 input), binary (2 inputs), or ternary (3 inputs).
+ *
+ * @see isUnaryPointwiseMode(), isBinaryPointwiseMode(), isTernaryPointwiseMode()
+ */
 enum class PointwiseMode
 {
-    NOT_SET = 0,
-    ABS = 1,
-    ADD = 2,
-    ADD_SQUARE = 3,
-    BINARY_SELECT = 4,
-    CEIL = 5,
-    CMP_EQ = 6,
-    CMP_GE = 7,
-    CMP_GT = 8,
-    CMP_LE = 9,
-    CMP_LT = 10,
-    CMP_NEQ = 11,
-    DIV = 12,
-    ELU_BWD = 13,
-    ELU_FWD = 14,
-    ERF = 15,
-    EXP = 16,
-    FLOOR = 17,
-    GELU_APPROX_TANH_BWD = 18,
-    GELU_APPROX_TANH_FWD = 19,
-    GELU_BWD = 20,
-    GELU_FWD = 21,
-    GEN_INDEX = 22,
-    IDENTITY = 23,
-    LOG = 24,
-    LOGICAL_AND = 25,
-    LOGICAL_NOT = 26,
-    LOGICAL_OR = 27,
-    MAX = 28,
-    MIN = 29,
-    MUL = 30,
-    NEG = 31,
-    RECIPROCAL = 32,
-    RELU_BWD = 33,
-    RELU_FWD = 34,
-    RSQRT = 35,
-    SIGMOID_BWD = 36,
-    SIGMOID_FWD = 37,
-    SIN = 38,
-    SOFTPLUS_BWD = 39,
-    SOFTPLUS_FWD = 40,
-    SQRT = 41,
-    SUB = 42,
-    SWISH_BWD = 43,
-    SWISH_FWD = 44,
-    TAN = 45,
-    TANH_BWD = 46,
-    TANH_FWD = 47,
+    NOT_SET = 0, ///< Mode not specified
+    ABS = 1, ///< Absolute value: |x|
+    ADD = 2, ///< Addition: x + y
+    ADD_SQUARE = 3, ///< Add and square: (x + y)²
+    BINARY_SELECT = 4, ///< Ternary select based on condition
+    CEIL = 5, ///< Ceiling function
+    CMP_EQ = 6, ///< Compare equal: x == y
+    CMP_GE = 7, ///< Compare greater or equal: x >= y
+    CMP_GT = 8, ///< Compare greater than: x > y
+    CMP_LE = 9, ///< Compare less or equal: x <= y
+    CMP_LT = 10, ///< Compare less than: x < y
+    CMP_NEQ = 11, ///< Compare not equal: x != y
+    DIV = 12, ///< Division: x / y
+    ELU_BWD = 13, ///< ELU activation backward pass
+    ELU_FWD = 14, ///< ELU activation forward pass
+    ERF = 15, ///< Error function
+    EXP = 16, ///< Exponential: e^x
+    FLOOR = 17, ///< Floor function
+    GELU_APPROX_TANH_BWD = 18, ///< GELU (tanh approximation) backward
+    GELU_APPROX_TANH_FWD = 19, ///< GELU (tanh approximation) forward
+    GELU_BWD = 20, ///< GELU activation backward
+    GELU_FWD = 21, ///< GELU activation forward
+    GEN_INDEX = 22, ///< Generate index tensor
+    IDENTITY = 23, ///< Identity: y = x
+    LOG = 24, ///< Natural logarithm
+    LOGICAL_AND = 25, ///< Logical AND
+    LOGICAL_NOT = 26, ///< Logical NOT
+    LOGICAL_OR = 27, ///< Logical OR
+    MAX = 28, ///< Element-wise maximum
+    MIN = 29, ///< Element-wise minimum
+    MUL = 30, ///< Multiplication: x * y
+    NEG = 31, ///< Negation: -x
+    RECIPROCAL = 32, ///< Reciprocal: 1/x
+    RELU_BWD = 33, ///< ReLU backward pass
+    RELU_FWD = 34, ///< ReLU forward pass
+    RSQRT = 35, ///< Reciprocal square root: 1/sqrt(x)
+    SIGMOID_BWD = 36, ///< Sigmoid backward pass
+    SIGMOID_FWD = 37, ///< Sigmoid forward pass
+    SIN = 38, ///< Sine function
+    SOFTPLUS_BWD = 39, ///< Softplus backward pass
+    SOFTPLUS_FWD = 40, ///< Softplus forward pass
+    SQRT = 41, ///< Square root
+    SUB = 42, ///< Subtraction: x - y
+    SWISH_BWD = 43, ///< Swish activation backward
+    SWISH_FWD = 44, ///< Swish activation forward
+    TAN = 45, ///< Tangent function
+    TANH_BWD = 46, ///< Tanh backward pass
+    TANH_FWD = 47, ///< Tanh forward pass
 };
-typedef PointwiseMode PointwiseMode_t; // NOLINT(readability-identifier-naming)
+typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
+/**
+ * @enum DataType
+ * @brief Specifies the data type for tensor elements
+ *
+ * Defines the numeric precision and format for tensor data. Different operations
+ * may support different subsets of data types.
+ */
 enum class DataType
 {
-    NOT_SET = 0,
-    FLOAT = 1,
-    HALF = 2,
-    BFLOAT16 = 3,
-    DOUBLE = 4,
-    UINT8 = 5,
-    INT32 = 6,
-    INT8 = 7,
-    FP8_E4M3 = 8,
-    FP8_E5M2 = 9,
+    NOT_SET = 0, ///< Data type not specified
+    FLOAT = 1, ///< 32-bit floating point (fp32)
+    HALF = 2, ///< 16-bit floating point (fp16, IEEE 754)
+    BFLOAT16 = 3, ///< 16-bit brain floating point (bf16)
+    DOUBLE = 4, ///< 64-bit floating point (fp64)
+    UINT8 = 5, ///< 8-bit unsigned integer
+    INT32 = 6, ///< 32-bit signed integer
+    INT8 = 7, ///< 8-bit signed integer
+    FP8_E4M3 = 8, ///< 8-bit floating point (4 exponent, 3 mantissa bits)
+    FP8_E5M2 = 9, ///< 8-bit floating point (5 exponent, 2 mantissa bits)
 };
-typedef DataType DataType_t; // NOLINT(readability-identifier-naming)
+typedef DataType DataType_t; ///< @brief Type alias for DataType
 
+enum class DiagonalAlignment
+{
+    TOP_LEFT = 0,
+    BOTTOM_RIGHT = 1,
+};
+typedef DiagonalAlignment DiagonalAlignment_t; // NOLINT(readability-identifier-naming)
+
+enum class AttentionImplementation
+{
+    AUTO = 0,
+    COMPOSITE = 1,
+    UNIFIED = 2,
+};
+typedef AttentionImplementation AttentionImplementation_t; // NOLINT(readability-identifier-naming)
+
+/**
+ * @enum HeuristicMode
+ * @brief Specifies the heuristic mode for engine selection
+ *
+ * Controls how the hipDNN backend selects execution plans and engines.
+ */
 enum class HeuristicMode
 {
-    FALLBACK,
+    FALLBACK, ///< Use fallback heuristics for engine selection
 };
-typedef HeuristicMode HeurMode_t; // NOLINT(readability-identifier-naming)
+typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
 
+/**
+ * @enum BuildPlanPolicy
+ * @brief Specifies how execution plans are selected during graph building
+ */
 enum class BuildPlanPolicy
 {
-    HEURISTICS_CHOICE, // Use heuristics to select the best plan
-    ALL // Build all available plans (currently unused)
+    HEURISTICS_CHOICE, ///< Use heuristics to select the best plan
+    ALL ///< Build all available plans (currently unused)
 };
-typedef BuildPlanPolicy BuildPlanPolicy_t; // NOLINT(readability-identifier-naming)
+typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
 
+/**
+ * @enum NormFwdPhase
+ * @brief Specifies the forward phase for normalization operations
+ *
+ * Controls whether the normalization operation computes auxiliary outputs
+ * (e.g., inverse variance/RMS) needed for backward pass training.
+ */
+enum class NormFwdPhase
+{
+    NOT_SET = 0, ///< Phase not specified (invalid for execution)
+    INFERENCE = 1, ///< Inference mode: only Y output computed
+    TRAINING = 2 ///< Training mode: Y and inverse RMS/variance outputs computed
+};
+typedef NormFwdPhase NormFwdPhase_t; ///< @brief Type alias for NormFwdPhase
+
+/**
+ * @enum KnobValueType
+ * @brief Specifies the data type of a knob value
+ *
+ * Knobs are configuration parameters for engine execution. This enum
+ * indicates what type of value a particular knob expects.
+ *
+ * @see Knob, KnobSetting
+ */
 enum class KnobValueType
 {
-    NOT_SET = 0,
-    INT64 = 1,
-    FLOAT64 = 2,
-    STRING = 3,
+    NOT_SET = 0, ///< Value type not specified
+    INT64 = 1, ///< 64-bit signed integer value
+    FLOAT64 = 2, ///< 64-bit floating point value
+    STRING = 3, ///< String value
 };
-typedef KnobValueType KnobValueType_t; // NOLINT(readability-identifier-naming)
+typedef KnobValueType KnobValueType_t; ///< @brief Type alias for KnobValueType
 
+/**
+ * @brief Get the DataType enum value corresponding to a C++ type
+ *
+ * @tparam T The C++ type (float, half, hip_bfloat16, double, etc.)
+ * @return The corresponding DataType enum value
+ *
+ * @code{.cpp}
+ * DataType dt = getDataTypeEnumFromType<float>();  // Returns DataType::FLOAT
+ * DataType dt2 = getDataTypeEnumFromType<half>();  // Returns DataType::HALF
+ * @endcode
+ */
 template <typename T>
 DataType getDataTypeEnumFromType()
 {
@@ -131,7 +231,7 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::HALF;
     }
-    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    else if constexpr(std::is_same_v<T, bfloat16>)
     {
         return DataType::BFLOAT16;
     }
@@ -151,11 +251,11 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::INT8;
     }
-    else if constexpr(std::is_same_v<T, hip_fp8_e4m3>)
+    else if constexpr(std::is_same_v<T, fp8_e4m3>)
     {
         return DataType::FP8_E4M3;
     }
-    else if constexpr(std::is_same_v<T, hip_fp8_e5m2>)
+    else if constexpr(std::is_same_v<T, fp8_e5m2>)
     {
         return DataType::FP8_E5M2;
     }
@@ -175,6 +275,140 @@ inline hipdnn_data_sdk::data_objects::ConvMode toSdkType(const ConvolutionMode& 
         return hipdnn_data_sdk::data_objects::ConvMode::CONVOLUTION;
     default:
         return hipdnn_data_sdk::data_objects::ConvMode::UNSET;
+    }
+}
+
+/**
+ * @brief Convert frontend ConvolutionMode to backend hipdnnConvolutionMode_t
+ *
+ * Maps frontend convolution mode enum to the backend C API enum type for use
+ * with HIPDNN_TYPE_CONVOLUTION_MODE attributes.
+ *
+ * @param type The frontend ConvolutionMode value
+ * @return The corresponding hipdnnConvolutionMode_t value, or std::nullopt if not set
+ */
+inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const ConvolutionMode& type)
+{
+    switch(type)
+    {
+    case ConvolutionMode::CROSS_CORRELATION:
+        return HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
+    case ConvolutionMode::CONVOLUTION:
+        return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert frontend PointwiseMode to backend hipdnnPointwiseMode_t
+ *
+ * Maps frontend pointwise mode enum to the backend C API enum type for use
+ * with HIPDNN_TYPE_POINTWISE_MODE attributes.
+ *
+ * @param type The frontend PointwiseMode value
+ * @return The corresponding hipdnnPointwiseMode_t value, or std::nullopt if not set
+ */
+inline std::optional<hipdnnPointwiseMode_t> toBackendPointwiseMode(const PointwiseMode& type)
+{
+    switch(type)
+    {
+    case PointwiseMode::ABS:
+        return HIPDNN_POINTWISE_ABS;
+    case PointwiseMode::ADD:
+        return HIPDNN_POINTWISE_ADD;
+    case PointwiseMode::ADD_SQUARE:
+        return HIPDNN_POINTWISE_ADD_SQUARE;
+    case PointwiseMode::BINARY_SELECT:
+        return HIPDNN_POINTWISE_BINARY_SELECT;
+    case PointwiseMode::CEIL:
+        return HIPDNN_POINTWISE_CEIL;
+    case PointwiseMode::CMP_EQ:
+        return HIPDNN_POINTWISE_CMP_EQ;
+    case PointwiseMode::CMP_GE:
+        return HIPDNN_POINTWISE_CMP_GE;
+    case PointwiseMode::CMP_GT:
+        return HIPDNN_POINTWISE_CMP_GT;
+    case PointwiseMode::CMP_LE:
+        return HIPDNN_POINTWISE_CMP_LE;
+    case PointwiseMode::CMP_LT:
+        return HIPDNN_POINTWISE_CMP_LT;
+    case PointwiseMode::CMP_NEQ:
+        return HIPDNN_POINTWISE_CMP_NEQ;
+    case PointwiseMode::DIV:
+        return HIPDNN_POINTWISE_DIV;
+    case PointwiseMode::ELU_BWD:
+        return HIPDNN_POINTWISE_ELU_BWD;
+    case PointwiseMode::ELU_FWD:
+        return HIPDNN_POINTWISE_ELU_FWD;
+    case PointwiseMode::ERF:
+        return HIPDNN_POINTWISE_ERF;
+    case PointwiseMode::EXP:
+        return HIPDNN_POINTWISE_EXP;
+    case PointwiseMode::FLOOR:
+        return HIPDNN_POINTWISE_FLOOR;
+    case PointwiseMode::GELU_APPROX_TANH_BWD:
+        return HIPDNN_POINTWISE_GELU_APPROX_TANH_BWD;
+    case PointwiseMode::GELU_APPROX_TANH_FWD:
+        return HIPDNN_POINTWISE_GELU_APPROX_TANH_FWD;
+    case PointwiseMode::GELU_BWD:
+        return HIPDNN_POINTWISE_GELU_BWD;
+    case PointwiseMode::GELU_FWD:
+        return HIPDNN_POINTWISE_GELU_FWD;
+    case PointwiseMode::GEN_INDEX:
+        return HIPDNN_POINTWISE_GEN_INDEX;
+    case PointwiseMode::IDENTITY:
+        return HIPDNN_POINTWISE_IDENTITY;
+    case PointwiseMode::LOG:
+        return HIPDNN_POINTWISE_LOG;
+    case PointwiseMode::LOGICAL_AND:
+        return HIPDNN_POINTWISE_LOGICAL_AND;
+    case PointwiseMode::LOGICAL_NOT:
+        return HIPDNN_POINTWISE_LOGICAL_NOT;
+    case PointwiseMode::LOGICAL_OR:
+        return HIPDNN_POINTWISE_LOGICAL_OR;
+    case PointwiseMode::MAX:
+        return HIPDNN_POINTWISE_MAX;
+    case PointwiseMode::MIN:
+        return HIPDNN_POINTWISE_MIN;
+    case PointwiseMode::MUL:
+        return HIPDNN_POINTWISE_MUL;
+    case PointwiseMode::NEG:
+        return HIPDNN_POINTWISE_NEG;
+    case PointwiseMode::RECIPROCAL:
+        return HIPDNN_POINTWISE_RECIPROCAL;
+    case PointwiseMode::RELU_BWD:
+        return HIPDNN_POINTWISE_RELU_BWD;
+    case PointwiseMode::RELU_FWD:
+        return HIPDNN_POINTWISE_RELU_FWD;
+    case PointwiseMode::RSQRT:
+        return HIPDNN_POINTWISE_RSQRT;
+    case PointwiseMode::SIGMOID_BWD:
+        return HIPDNN_POINTWISE_SIGMOID_BWD;
+    case PointwiseMode::SIGMOID_FWD:
+        return HIPDNN_POINTWISE_SIGMOID_FWD;
+    case PointwiseMode::SIN:
+        return HIPDNN_POINTWISE_SIN;
+    case PointwiseMode::SOFTPLUS_BWD:
+        return HIPDNN_POINTWISE_SOFTPLUS_BWD;
+    case PointwiseMode::SOFTPLUS_FWD:
+        return HIPDNN_POINTWISE_SOFTPLUS_FWD;
+    case PointwiseMode::SQRT:
+        return HIPDNN_POINTWISE_SQRT;
+    case PointwiseMode::SUB:
+        return HIPDNN_POINTWISE_SUB;
+    case PointwiseMode::SWISH_BWD:
+        return HIPDNN_POINTWISE_SWISH_BWD;
+    case PointwiseMode::SWISH_FWD:
+        return HIPDNN_POINTWISE_SWISH_FWD;
+    case PointwiseMode::TAN:
+        return HIPDNN_POINTWISE_TAN;
+    case PointwiseMode::TANH_BWD:
+        return HIPDNN_POINTWISE_TANH_BWD;
+    case PointwiseMode::TANH_FWD:
+        return HIPDNN_POINTWISE_TANH_FWD;
+    default:
+        return std::nullopt;
     }
 }
 
@@ -243,6 +477,93 @@ inline hipdnn_frontend::DataType fromSdkType(const hipdnn_data_sdk::data_objects
         return hipdnn_frontend::DataType::FP8_E5M2;
     default:
         return hipdnn_frontend::DataType::NOT_SET;
+    }
+}
+
+inline hipdnn_data_sdk::data_objects::DiagonalAlignment toSdkType(const DiagonalAlignment& type)
+{
+    switch(type)
+    {
+    case DiagonalAlignment::TOP_LEFT:
+        return hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+    case DiagonalAlignment::BOTTOM_RIGHT:
+        return hipdnn_data_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    default:
+        return hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+    }
+}
+
+inline hipdnn_frontend::DiagonalAlignment
+    fromSdkType(const hipdnn_data_sdk::data_objects::DiagonalAlignment& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::DiagonalAlignment::TOP_LEFT:
+        return hipdnn_frontend::DiagonalAlignment::TOP_LEFT;
+    case hipdnn_data_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT:
+        return hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT;
+    default:
+        return hipdnn_frontend::DiagonalAlignment::TOP_LEFT;
+    }
+}
+
+inline hipdnn_data_sdk::data_objects::AttentionImplementation
+    toSdkType(const AttentionImplementation& type)
+{
+    switch(type)
+    {
+    case AttentionImplementation::AUTO:
+        return hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO;
+    case AttentionImplementation::COMPOSITE:
+        return hipdnn_data_sdk::data_objects::AttentionImplementation::COMPOSITE;
+    case AttentionImplementation::UNIFIED:
+        return hipdnn_data_sdk::data_objects::AttentionImplementation::UNIFIED;
+    default:
+        return hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO;
+    }
+}
+
+inline hipdnn_frontend::AttentionImplementation
+    fromSdkType(const hipdnn_data_sdk::data_objects::AttentionImplementation& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::AttentionImplementation::AUTO:
+        return hipdnn_frontend::AttentionImplementation::AUTO;
+    case hipdnn_data_sdk::data_objects::AttentionImplementation::COMPOSITE:
+        return hipdnn_frontend::AttentionImplementation::COMPOSITE;
+    case hipdnn_data_sdk::data_objects::AttentionImplementation::UNIFIED:
+        return hipdnn_frontend::AttentionImplementation::UNIFIED;
+    default:
+        return hipdnn_frontend::AttentionImplementation::AUTO;
+    }
+}
+
+inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
+{
+    switch(type)
+    {
+    case DataType::FLOAT:
+        return HIPDNN_DATA_FLOAT;
+    case DataType::DOUBLE:
+        return HIPDNN_DATA_DOUBLE;
+    case DataType::HALF:
+        return HIPDNN_DATA_HALF;
+    case DataType::INT8:
+        return HIPDNN_DATA_INT8;
+    case DataType::INT32:
+        return HIPDNN_DATA_INT32;
+    case DataType::UINT8:
+        return HIPDNN_DATA_UINT8;
+    case DataType::BFLOAT16:
+        return HIPDNN_DATA_BFLOAT16;
+    case DataType::FP8_E4M3:
+        return HIPDNN_DATA_FP8_E4M3;
+    case DataType::FP8_E5M2:
+        return HIPDNN_DATA_FP8_E5M2;
+    case DataType::NOT_SET:
+    default:
+        return std::nullopt;
     }
 }
 
@@ -464,6 +785,32 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
     }
 }
 
+/**
+ * @brief Convert ConvolutionMode to a human-readable string
+ * @param mode The convolution mode to convert
+ * @return A C-string representation of the convolution mode
+ */
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const ConvolutionMode& mode)
+{
+    switch(mode)
+    {
+    case ConvolutionMode::NOT_SET:
+        return "not_set";
+    case ConvolutionMode::CROSS_CORRELATION:
+        return "cross_correlation";
+    case ConvolutionMode::CONVOLUTION:
+        return "convolution";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const ConvolutionMode& mode)
+{
+    return os << to_string(mode);
+}
+
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const DataType& type)
 {
@@ -564,6 +911,33 @@ inline hipdnn_frontend::KnobValueType
     }
 }
 
+inline hipdnn_data_sdk::data_objects::NormFwdPhase toSdkType(const NormFwdPhase& type)
+{
+    switch(type)
+    {
+    case NormFwdPhase::INFERENCE:
+        return hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE;
+    case NormFwdPhase::TRAINING:
+        return hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING;
+    default:
+        return hipdnn_data_sdk::data_objects::NormFwdPhase::NOT_SET;
+    }
+}
+
+inline hipdnn_frontend::NormFwdPhase
+    fromSdkType(const hipdnn_data_sdk::data_objects::NormFwdPhase& type)
+{
+    switch(type)
+    {
+    case hipdnn_data_sdk::data_objects::NormFwdPhase::INFERENCE:
+        return hipdnn_frontend::NormFwdPhase::INFERENCE;
+    case hipdnn_data_sdk::data_objects::NormFwdPhase::TRAINING:
+        return hipdnn_frontend::NormFwdPhase::TRAINING;
+    default:
+        return hipdnn_frontend::NormFwdPhase::NOT_SET;
+    }
+}
+
 // NOLINTNEXTLINE(readability-identifier-naming)
 inline const char* to_string(const KnobValueType& type)
 {
@@ -583,6 +957,25 @@ inline const char* to_string(const KnobValueType& type)
 inline std::ostream& operator<<(std::ostream& os, const KnobValueType& type)
 {
     return os << to_string(type);
+}
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const NormFwdPhase& phase)
+{
+    switch(phase)
+    {
+    case NormFwdPhase::INFERENCE:
+        return "INFERENCE";
+    case NormFwdPhase::TRAINING:
+        return "TRAINING";
+    default:
+        return "NOT_SET";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const NormFwdPhase& phase)
+{
+    return os << to_string(phase);
 }
 
 // Helper function to get KnobValueType from a variant
@@ -607,19 +1000,31 @@ inline KnobValueType getKnobValueTypeFromVariant(const std::variant<Ts...>& valu
     return ret;
 }
 
-// Frontend functions delegate to SDK for single source of truth
-// Convert frontend PointwiseMode to SDK type and call SDK validation functions
-
+/**
+ * @brief Check if a pointwise mode is a unary operation (1 input)
+ * @param mode The pointwise mode to check
+ * @return true if the mode is unary, false otherwise
+ */
 inline bool isUnaryPointwiseMode(PointwiseMode mode)
 {
     return hipdnn_data_sdk::utilities::isUnaryPointwiseMode(toSdkType(mode));
 }
 
+/**
+ * @brief Check if a pointwise mode is a binary operation (2 inputs)
+ * @param mode The pointwise mode to check
+ * @return true if the mode is binary, false otherwise
+ */
 inline bool isBinaryPointwiseMode(PointwiseMode mode)
 {
     return hipdnn_data_sdk::utilities::isBinaryPointwiseMode(toSdkType(mode));
 }
 
+/**
+ * @brief Check if a pointwise mode is a ternary operation (3 inputs)
+ * @param mode The pointwise mode to check
+ * @return true if the mode is ternary, false otherwise
+ */
 inline bool isTernaryPointwiseMode(PointwiseMode mode)
 {
     return hipdnn_data_sdk::utilities::isTernaryPointwiseMode(toSdkType(mode));

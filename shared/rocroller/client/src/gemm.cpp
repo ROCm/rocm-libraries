@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "rocRoller/Serialization/YAML.hpp"
 #include <algorithm>
@@ -227,10 +204,37 @@ namespace rocRoller::Client::GEMMClient
                       problemParams.initModeC);
         }
 
+        // Pre-tile B on the host when pretileB is set (kernel expects pre-tiled layout)
+        std::vector<PackedTypeB> hostBForKernel(hostB);
+        if(not problemParams.types.pretileB.empty() && problemParams.types.pretileB.size() == 2)
+        {
+            auto const packing = TypeInfo<PackedTypeB>::ElementBits / TypeInfo<B>::ElementBits;
+
+            std::vector<size_t> sizes       = descB.sizes();
+            std::vector<size_t> preTileSize = problemParams.types.pretileB;
+            if(packing > 1)
+            {
+                // Tile sizes are in logical elements; convert sizes and preTileSize to packed
+                // element space so that product(sizes) == hostB.size() and tiles align.
+                // Packing is along the first (fast) dimension for B (K).
+                AssertFatal(sizes[0] % packing == 0,
+                            "pretileB: K dimension must be a multiple of packing factor (",
+                            packing,
+                            ") for packed type B.");
+                AssertFatal(preTileSize[0] % packing == 0,
+                            "pretileB: tile K must be a multiple of packing factor (",
+                            packing,
+                            ") for packed type B.");
+                sizes[0] /= packing;
+                preTileSize[0] /= packing;
+            }
+            hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
+        }
+
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
         RotatingBuffer<PackedTypeA> rotatingA(hostA, rotatingSize);
-        RotatingBuffer<PackedTypeB> rotatingB(hostB, rotatingSize);
+        RotatingBuffer<PackedTypeB> rotatingB(hostBForKernel, rotatingSize);
         RotatingBuffer<C>           rotatingC(hostC, rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
 
@@ -247,7 +251,7 @@ namespace rocRoller::Client::GEMMClient
                     ShowValue(problemParams.types.scaleB));
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
-            if((problemParams.types.scaleSkipPermlane)
+            if((problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                || (not problemParams.types.scalePretileA.empty()))
             {
                 auto descScaleA = descA.withNormalizedDimensions();
@@ -258,7 +262,7 @@ namespace rocRoller::Client::GEMMClient
                 }
 
                 std::vector<size_t> preSwizzleSize;
-                if(problemParams.types.scaleSkipPermlane)
+                if(problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                 {
                     AssertFatal(problemParams.types.scaleShuffleTileA.size() == 3);
                     preSwizzleSize = problemParams.types.scaleShuffleTileA;
@@ -279,8 +283,15 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileA[0]};
                 }
 
-                auto tmpScaleA
-                    = DGen::preSwizzle(hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                auto tmpScaleA = [&]() {
+                    if(problemParams.types.scaleSkipPermlane
+                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        return DGen::preSwizzleScalesGFX950(
+                            hostScaleA, {descScaleA.sizes()[1], descScaleA.sizes()[0]});
+                    else
+                        return DGen::preSwizzle(
+                            hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
+                }();
                 deviceScaleA = make_shared_device(tmpScaleA);
             }
             else
@@ -290,7 +301,7 @@ namespace rocRoller::Client::GEMMClient
         }
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            if((problemParams.types.scaleSkipPermlane)
+            if((problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                || (not problemParams.types.scalePretileB.empty()))
             {
                 auto descScaleB = descB.withNormalizedDimensions();
@@ -301,7 +312,7 @@ namespace rocRoller::Client::GEMMClient
                 }
 
                 std::vector<size_t> preSwizzleSize;
-                if(problemParams.types.scaleSkipPermlane)
+                if(problemParams.types.scaleSkipPermlane != ScaleSkipPermlaneMode::None)
                 {
                     AssertFatal(problemParams.types.scaleShuffleTileB.size() == 3);
                     preSwizzleSize = problemParams.types.scaleShuffleTileB;
@@ -322,8 +333,15 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.types.scalePretileB[1]};
                 };
 
-                auto tmpScaleB
-                    = DGen::preSwizzle(hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                auto tmpScaleB = [&]() {
+                    if(problemParams.types.scaleSkipPermlane
+                       == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+                        return DGen::preSwizzleScalesGFX950(
+                            hostScaleB, {descScaleB.sizes()[1], descScaleB.sizes()[0]});
+                    else
+                        return DGen::preSwizzle(
+                            hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
+                }();
                 deviceScaleB = make_shared_device(tmpScaleB);
             }
             else
@@ -355,6 +373,8 @@ namespace rocRoller::Client::GEMMClient
                 //
                 //   tileM * ((K // T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
                 //
+                // Note the strides.
+                //
 
                 // Only works for TranspostType::T for now
                 AssertFatal(problemParams.types.transA == TransposeType::T,
@@ -366,14 +386,9 @@ namespace rocRoller::Client::GEMMClient
                 auto const tileK = problemParams.types.scalePretileA[1];
 
                 descAScale = TensorDescriptor(problemParams.types.scaleTypeA,
-                                              {static_cast<size_t>(M / tileM),
-                                               static_cast<size_t>(K / tileK),
-                                               static_cast<size_t>(tileM),
-                                               static_cast<size_t>(tileK)},
+                                              {M, K},
                                               {static_cast<size_t>((K / tileK) * tileM * tileK),
-                                               static_cast<size_t>(tileM * tileK),
-                                               static_cast<size_t>(tileK),
-                                               static_cast<size_t>(1)});
+                                               static_cast<size_t>(tileM * tileK)});
             }
             else
             {
@@ -409,6 +424,8 @@ namespace rocRoller::Client::GEMMClient
                 //
                 //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
                 //
+                // Note the strides.
+                //
 
                 // Only works for TranspostType::T for now
                 AssertFatal(problemParams.types.transB == TransposeType::N,
@@ -420,16 +437,9 @@ namespace rocRoller::Client::GEMMClient
                 auto const tileN = problemParams.types.scalePretileB[1];
 
                 descBScale = TensorDescriptor(problemParams.types.scaleTypeB,
-                                              {static_cast<size_t>(K / tileK),
-                                               static_cast<size_t>(N / tileN),
-                                               static_cast<size_t>(tileK),
-                                               static_cast<size_t>(tileN)},
-                                              {
-                                                  static_cast<size_t>(tileK * tileN),
-                                                  static_cast<size_t>((K / tileK) * tileK * tileN),
-                                                  static_cast<size_t>(1),
-                                                  static_cast<size_t>(tileK),
-                                              });
+                                              {K, N},
+                                              {static_cast<size_t>(tileK * tileN),
+                                               static_cast<size_t>((K / tileK) * tileK * tileN)});
             }
             else
             {
@@ -1255,11 +1265,8 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--prefetchLDSFactor", &SolutionParameters::prefetchLDSFactor),
         std::make_pair("--prefetchMixMemOps", &SolutionParameters::prefetchMixMemOps),
         std::make_pair("--betaInFMA", &SolutionParameters::betaInFma),
-        std::make_pair("--unroll_x", &SolutionParameters::unrollX),
-        std::make_pair("--unroll_y", &SolutionParameters::unrollY),
         std::make_pair("--scheduler", &SolutionParameters::scheduler),
         std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
-        std::make_pair("--matchMemoryAccess", &SolutionParameters::matchMemoryAccess),
         std::make_pair("--tailLoops", &SolutionParameters::tailLoops),
         std::make_pair("--streamK", &SolutionParameters::streamK));
 
@@ -1365,8 +1372,27 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         // Workgroup size
 
-        update(SN(&SP::workgroupSizeX), solution.workgroupSizeX);
-        update(SN(&SP::workgroupSizeY), solution.workgroupSizeY);
+        bool wgsXYSet = false;
+        wgsXYSet |= update(SN(&SP::workgroupSizeX), solution.workgroupSizeX);
+        wgsXYSet |= update(SN(&SP::workgroupSizeY), solution.workgroupSizeY);
+
+        bool wgsSet = false;
+        if(app.get_option("--wgs")->count())
+        {
+            XYTuple xy{0, 0};
+            if(!ParseXY(app.get_option("--wgs")->as<std::string>(), xy))
+                Throw<FatalError>("Failed to parse WGS argument.");
+            solution.workgroupSizeX = xy.x;
+            solution.workgroupSizeY = xy.y;
+            wgsSet                  = true;
+        }
+
+        if(wgsSet && wgsXYSet)
+        {
+            Throw<FatalError>(
+                "Workgroup size was overspecified.  Please use only --wgs or "
+                "the --workgroup_size_x and --workgroup_size_y arguments; but not both.");
+        }
 
         // Workgroup mapping
 
@@ -1466,11 +1492,8 @@ namespace rocRoller::Client::GEMMClient::CLI
         // Other
 
         update(SN(&SP::betaInFma), solution.betaInFma);
-        update(SN(&SP::unrollX), solution.unrollX);
-        update(SN(&SP::unrollY), solution.unrollY);
         update(SN(&SP::scheduler), solution.scheduler);
         update(SN(&SP::schedulerCost), solution.schedulerCost);
-        update(SN(&SP::matchMemoryAccess), solution.matchMemoryAccess);
     }
 }
 
@@ -1533,11 +1556,7 @@ int main(int argc, const char* argv[])
 
         .betaInFma = true,
 
-        .unrollX = 0,
-        .unrollY = 0,
-
-        .scheduler         = "Priority",
-        .matchMemoryAccess = true,
+        .scheduler = "Priority",
 
         .tailLoops = true,
 
@@ -1700,7 +1719,10 @@ int main(int argc, const char* argv[])
                    "Set MX scaling block size for A and B. (default: 32)");
     app.add_option("--scaleSkipPermlane",
                    types.scaleSkipPermlane,
-                   "Experimental: Skip Permlane instructions for scale data for performance.");
+                   "Experimental: Skip Permlane instructions for scale data. Options: None, "
+                   "PreSwizzleScale, PreSwizzleScaleGFX950.");
+
+    auto pretileBOption = app.add_option("--pretileB", "Pre-tile B matrix. Dimensions are: KxN.");
 
     bool pretileScale = false;
     app.add_flag("--pretileScale", pretileScale, "Experimental: pretile scale data.");
@@ -1728,6 +1750,7 @@ int main(int argc, const char* argv[])
 
     app.add_option(SN(&SP::workgroupSizeX), "Workgroup size in the x dimension.");
     app.add_option(SN(&SP::workgroupSizeY), "Workgroup size in the y dimension.");
+    app.add_option("--wgs", "Workgroup size (x/y pair).");
 
     app.add_option(SN(&SP::workgroupMappingDim),
                    "Workgroup mapping dimension (-1, 0, 1). Default: -1")
@@ -1735,8 +1758,6 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::workgroupRemapXCC), "Use an XCC-aware workgroup remapping.");
     app.add_option(SN(&SP::workgroupRemapXCCValue),
                    "Force an XCC-aware workgroup remapping value. (Optional)");
-    app.add_option(SN(&SP::unrollX), "Unroll size in X.");
-    app.add_option(SN(&SP::unrollY), "Unroll size in Y.");
 
     app.add_option(
         SN(&SP::loadPathA),
@@ -1755,9 +1776,6 @@ int main(int argc, const char* argv[])
     app.add_flag(SN(&SP::betaInFma), "Use beta in FMA instruction instead of alpha.");
     app.add_option(SN(&SP::scheduler), "Which scheduler to use.");
     app.add_option(SN(&SP::schedulerCost), "Which scheduler cost function to use.");
-
-    app.add_flag(SN(&SP::matchMemoryAccess),
-                 "Match memory access to transpose.  Currently decreases performance.");
     auto descriptionPadLDSA = fmt::format("Byte padding for A LDS buffer.  Passed as a pair: "
                                           "contiguous-bytes,padding-bytes, eg {}=1024,8",
                                           SN(&SP::padLDSA));
@@ -1924,6 +1942,12 @@ int main(int argc, const char* argv[])
     //
 
     CLI11_PARSE(app, argc, argv);
+
+    if(pretileBOption->count() > 0)
+    {
+        auto xy        = pretileBOption->as<Client::GEMMClient::XYTuple>();
+        types.pretileB = {static_cast<unsigned long>(xy.x), static_cast<unsigned long>(xy.y)};
+    }
 
     updateSolutionFromArguments(solution, app);
 
@@ -2170,7 +2194,17 @@ int main(int argc, const char* argv[])
                             solution.macK,
                             solution.waveK));
 
-    if(types.scaleSkipPermlane)
+    if(types.scaleSkipPermlane == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
+    {
+        AssertFatal(solution.swizzleTileSize.m == 32 && solution.swizzleTileSize.n == 32
+                        && solution.swizzleTileSize.k == 8,
+                    "When scaleSkipPermlane is PreSwizzleScaleGFX950, swizzleTileSize must be "
+                    "(m=32, n=32, k=8).");
+        AssertFatal(pretileScale,
+                    "pretileScale must be true when scaleSkipPermlane is PreSwizzleScaleGFX950.");
+    }
+
+    if(types.scaleSkipPermlane != rocRoller::ScaleSkipPermlaneMode::None)
     {
         AssertFatal(types.transA == Client::GEMMClient::TransposeType::T, ShowValue(types));
         AssertFatal(types.scaleA == Operations::ScaleMode::Separate, ShowValue(types));
@@ -2187,7 +2221,7 @@ int main(int argc, const char* argv[])
                                    kSubtile};
     }
 
-    if(types.scaleSkipPermlane)
+    if(types.scaleSkipPermlane != rocRoller::ScaleSkipPermlaneMode::None)
     {
         AssertFatal(types.transB == Client::GEMMClient::TransposeType::N, ShowValue(types));
         AssertFatal(types.scaleB == Operations::ScaleMode::Separate, ShowValue(types));

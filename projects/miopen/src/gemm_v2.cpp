@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/config.h>
 #include <miopen/gemm_v2.hpp>
 #include <miopen/logger.hpp>
@@ -64,7 +42,7 @@
 #include <miopen/perf_field.hpp>
 #endif
 
-#include <boost/range/adaptors.hpp>
+#include <ranges>
 #include <tuple> // std::ignore
 
 #if MIOPEN_USE_ROCBLAS
@@ -280,25 +258,17 @@ bool IsFP8Supported(const std::string& device_name)
 
 std::ostream& operator<<(std::ostream& stream, const GemmDescriptor& gemm_desc)
 {
-    return stream << "{"
-                  << "isColMajor " << gemm_desc.isColMajor << ", "
-                  << "transA " << gemm_desc.transA << ", "
-                  << "transB " << gemm_desc.transB << ", "
-                  << "m " << gemm_desc.m << ", "
-                  << "n " << gemm_desc.n << ", "
-                  << "k " << gemm_desc.k << ", "
-                  << "lda " << gemm_desc.lda << ", "
-                  << "ldb " << gemm_desc.ldb << ", "
-                  << "ldc " << gemm_desc.ldc << ", "
-                  << "batch_count " << gemm_desc.batch_count << ", "
-                  << "strideA " << gemm_desc.strideA << ", "
-                  << "strideB " << gemm_desc.strideB << ", "
-                  << "strideC " << gemm_desc.strideC << ", "
-                  << "alpha " << gemm_desc.alpha << ", "
-                  << "beta " << gemm_desc.beta << ", "
-                  << "dataType " << GetDataType(gemm_desc.dataType) << ", "
-                  << "a_cast_type " << GetDataType(gemm_desc.a_cast_type) << ", "
-                  << "b_cast_type " << GetDataType(gemm_desc.b_cast_type) << "} ";
+    return stream << "{" << "isColMajor " << gemm_desc.isColMajor << ", " << "transA "
+                  << gemm_desc.transA << ", " << "transB " << gemm_desc.transB << ", " << "m "
+                  << gemm_desc.m << ", " << "n " << gemm_desc.n << ", " << "k " << gemm_desc.k
+                  << ", " << "lda " << gemm_desc.lda << ", " << "ldb " << gemm_desc.ldb << ", "
+                  << "ldc " << gemm_desc.ldc << ", " << "batch_count " << gemm_desc.batch_count
+                  << ", " << "strideA " << gemm_desc.strideA << ", " << "strideB "
+                  << gemm_desc.strideB << ", " << "strideC " << gemm_desc.strideC << ", "
+                  << "alpha " << gemm_desc.alpha << ", " << "beta " << gemm_desc.beta << ", "
+                  << "dataType " << GetDataType(gemm_desc.dataType) << ", " << "a_cast_type "
+                  << GetDataType(gemm_desc.a_cast_type) << ", " << "b_cast_type "
+                  << GetDataType(gemm_desc.b_cast_type) << "} ";
 }
 
 #if MIOPEN_USE_ROCBLAS
@@ -331,15 +301,15 @@ inline void ProfilingRecordStart(const Handle& handle, HipEventPtr& start, HipEv
 {
     start = make_hip_event();
     stop  = make_hip_event();
-    hipEventRecord(start.get(), handle.GetStream());
+    (void)hipEventRecord(start.get(), handle.GetStream());
 }
 
 inline void ProfilingRecordStop(const Handle& handle, HipEventPtr& start, HipEventPtr& stop)
 {
-    hipEventRecord(stop.get(), handle.GetStream());
-    hipEventSynchronize(stop.get());
+    (void)hipEventRecord(stop.get(), handle.GetStream());
+    (void)hipEventSynchronize(stop.get());
     float mS = 0;
-    hipEventElapsedTime(&mS, start.get(), stop.get());
+    (void)hipEventElapsedTime(&mS, start.get(), stop.get());
     handle.ResetKernelTime();
     handle.AccumKernelTime(mS);
 }
@@ -1547,8 +1517,10 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, wDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, yDesc.GetLengths().size());
+    auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(wDesc.GetLengths().size() - 2);
+    auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
@@ -1598,8 +1570,10 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, wDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(wDesc.GetLengths().size() - 2);
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
@@ -1649,8 +1623,10 @@ GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
     std::size_t in_c  = xDesc.GetLengths()[1];
     std::size_t wei_k = dwDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(dwDesc.GetLengths(), 2, dwDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto wei_spatial = dwDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dwDesc.GetLengths().size() - 2);
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
@@ -1703,7 +1679,8 @@ GemmDescriptor CreateGemmDescriptorConvCNHWFwd(const TensorDescriptor& wDesc,
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, yDesc.GetLengths().size());
+    auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
@@ -1754,7 +1731,8 @@ GemmDescriptor CreateGemmDescriptorConvCNHWBwdData(const TensorDescriptor& wDesc
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
@@ -1809,7 +1787,8 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1Fwd(const TensorDescript
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto in_spatial = boost::adaptors::slice(xDesc.GetLengths(), 2, xDesc.GetLengths().size());
+    auto in_spatial =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(xDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
@@ -1861,7 +1840,8 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdData(const TensorDesc
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto in_spatial = boost::adaptors::slice(dxDesc.GetLengths(), 2, dxDesc.GetLengths().size());
+    auto in_spatial = dxDesc.GetLengths() | std::views::drop(2) |
+                      std::views::take(dxDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
@@ -1913,7 +1893,8 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(const TensorDe
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = dwDesc.GetLengths()[0];
 
-    auto in_spatial = boost::adaptors::slice(xDesc.GetLengths(), 2, xDesc.GetLengths().size());
+    auto in_spatial =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(xDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
@@ -1963,8 +1944,10 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, wDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, yDesc.GetLengths().size());
+    auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(wDesc.GetLengths().size() - 2);
+    auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
@@ -2015,8 +1998,10 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, wDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(wDesc.GetLengths().size() - 2);
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
@@ -2067,8 +2052,10 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const TensorDescriptor& dy
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = dwDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(dwDesc.GetLengths(), 2, dwDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto wei_spatial = dwDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dwDesc.GetLengths().size() - 2);
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
@@ -2120,7 +2107,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvCNHWFwd(const TensorDescriptor& wDes
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, yDesc.GetLengths().size());
+    auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
@@ -2172,7 +2160,8 @@ GemmDescriptor CreateGemmDescriptorGroupConvCNHWBwdData(const TensorDescriptor& 
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;

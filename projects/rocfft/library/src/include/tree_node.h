@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "../../../shared/device_properties.h"
@@ -393,14 +394,16 @@ public:
 
     // Device pointers:
     // twiddle memory is owned by the repo
-    void*            twiddles            = nullptr;
-    size_t           twiddles_size       = 0;
-    void*            twiddles_large      = nullptr;
-    size_t           twiddles_large_size = 0;
-    void*            twiddles_pp         = nullptr;
-    size_t           twiddles_pp_size    = 0;
-    void*            chirp               = nullptr;
-    size_t           chirp_size          = 0;
+    void*            twiddles              = nullptr;
+    size_t           twiddles_size         = 0;
+    void*            twiddles_off_dim      = nullptr;
+    size_t           twiddles_off_dim_size = 0;
+    void*            twiddles_large        = nullptr;
+    size_t           twiddles_large_size   = 0;
+    void*            twiddles_pp           = nullptr;
+    size_t           twiddles_pp_size      = 0;
+    void*            chirp                 = nullptr;
+    size_t           chirp_size            = 0;
     gpubuf_t<size_t> devKernArg;
 
     // callback parameters
@@ -836,6 +839,15 @@ struct rocfft_location_t
     bool operator==(const rocfft_location_t& other) const
     {
         return comm_rank == other.comm_rank && device == other.device;
+    }
+
+    std::string str() const
+    {
+        std::string ret = "comm rank ";
+        ret += std::to_string(comm_rank);
+        ret += " device ";
+        ret += std::to_string(device);
+        return ret;
     }
 
     int comm_rank = 0;

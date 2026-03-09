@@ -65,8 +65,8 @@ struct ABQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Pro
     using BlockGemm = remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem>())>;
 
     // A/B DataType gets converted from PkInt4/PkFp4 during loading
-    using OverrideADataType = BlockGemm::OverrideADataType;
-    using OverrideBDataType = BlockGemm::OverrideBDataType;
+    using OverrideADataType = typename BlockGemm::OverrideADataType;
+    using OverrideBDataType = typename BlockGemm::OverrideBDataType;
 
     static constexpr index_t BlockSize   = Problem::kBlockSize;
     static constexpr index_t MPerBlock   = BlockGemmShape::kM;
@@ -202,20 +202,16 @@ struct ABQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Pro
         CK_TILE_DEVICE static void LoadAndConvertATile(ABlockTile_& a_block_tile,
                                                        const ADramWindow& a_dram_window)
         {
-            using DestDataType            = typename ABlockTile_::DataType;
-            using SrcDataType             = typename ADramWindow::Base::TileWindowBase::DataType;
             constexpr index_t UnaryOpSize = 8;
-            load_int4_tile<SrcDataType, DestDataType, UnaryOpSize>(a_block_tile, a_dram_window);
+            load_and_convert_tile<UnaryOpSize>(a_block_tile, a_dram_window);
         }
 
         template <typename BDramWindow, typename BBlockTile_>
         CK_TILE_DEVICE static void LoadAndConvertBTile(BBlockTile_& b_block_tile,
                                                        const BDramWindow& b_dram_window)
         {
-            using DestDataType            = typename BBlockTile_::DataType;
-            using SrcDataType             = typename BDramWindow::Base::TileWindowBase::DataType;
             constexpr index_t UnaryOpSize = 8;
-            load_int4_tile<SrcDataType, DestDataType, UnaryOpSize>(b_block_tile, b_dram_window);
+            load_and_convert_tile<UnaryOpSize>(b_block_tile, b_dram_window);
         }
 
         template <bool HasHotLoop,

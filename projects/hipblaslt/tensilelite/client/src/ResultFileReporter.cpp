@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <ResultFileReporter.hpp>
+#include "TimingInstrumentation.hpp"
 
 #include <cstddef>
 
@@ -303,6 +304,7 @@ namespace TensileLite
 
         void ResultFileReporter::postSolution()
         {
+            ScopedTimer timer("post_solution_result_file");
             m_solutionName    = "";
             m_invalidSolution = false;
         }

@@ -82,6 +82,13 @@ if(ORIGAMI_PYTHON_ENABLE_WARNINGS)
     )
 endif()
 
+# Set RPATH so the Python extension can find liborigami.so at runtime.
+if(NOT WIN32)
+    set_target_properties(_pyorigami PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../../..:$ORIGIN/../../lib"
+    )
+endif()
+
 # Install the compiled module to the package directory
 install(TARGETS _pyorigami LIBRARY DESTINATION "${PYTHON_INSTALL_DIR}")
 
@@ -124,20 +131,48 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
             ENVIRONMENT
             "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
             DEPENDS _pyorigami
+            SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
     )
 
-    # Install Python module to bin/origami for TheRock CI testing
-    install(TARGETS _pyorigami
-        LIBRARY DESTINATION "${CMAKE_INSTALL_BINDIR}/origami"
-        COMPONENT tests
+    # Run hardware tests
+    add_test(
+        NAME "Python: test_hardware"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_hardware.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
 
-    # Install Python test files to bin/origami/tests for TheRock CI testing  
+    set_tests_properties(
+        "Python: test_hardware"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run ranking regression tests
+    add_test(
+        NAME "Python: test_ranking_regression"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_ranking_regression.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_ranking_regression"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Install Python test files to bin/origami/tests for TheRock CI testing.
     install(
         DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
         DESTINATION "${CMAKE_INSTALL_BINDIR}/origami/tests"
         COMPONENT tests
-        FILES_MATCHING 
+        FILES_MATCHING
         PATTERN "*.py"
+        PATTERN "*.csv"
+        PATTERN "*.yaml"
+        PATTERN "*.md"
     )
 endif()

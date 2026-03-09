@@ -1,74 +1,621 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+// SPDX-License-Identifier: MIT
+
+/**
+ * @file HipdnnBackendAttributeName.h
+ * @brief Attribute identifiers for hipDNN backend descriptors
+ *
+ * This file defines the attribute names used with hipdnnBackendSetAttribute()
+ * and hipdnnBackendGetAttribute() to configure and query backend descriptors.
+ *
+ * Attributes are organized by descriptor type, with each group having a
+ * distinct numeric range for identification.
+ */
 
 #pragma once
 
+/**
+ * @enum hipdnnBackendAttributeName_t
+ * @brief Identifiers for backend descriptor attributes
+ *
+ * These constants are used with hipdnnBackendSetAttribute() and
+ * hipdnnBackendGetAttribute() to specify which attribute to access.
+ *
+ * Attribute ranges by descriptor type:
+ * - 100-199: Engine heuristic attributes
+ * - 200-299: Engine configuration attributes
+ * - 300-399: Execution plan attributes
+ * - 400-499: Intermediate info attributes
+ * - 500-599: Knob choice attributes
+ * - 600-699: Operation graph attributes
+ * - 700-799: Variant pack attributes
+ * - 800-899: Layout info attributes
+ * - 900-999: Knob info attributes
+ * - 1000-1099: Engine attributes
+ * - 1100-1199: Kernel cache attributes
+ * - 1200-1299: Device properties attributes
+ * - 1300-1399: Tensor attributes
+ * - 1400-1499: Convolution forward operation attributes
+ * - 1500-1599: Shared convolution descriptor attributes
+ * - 1600-1699: Convolution backward filter operation attributes
+ * - 1700-1799: Convolution backward data operation attributes
+ * - 1800-1899: Batchnorm inference operation attributes
+ * - 1900-1999: Batchnorm inference variance ext operation attributes
+ * - 2000-2099: Batchnorm backward ext operation attributes
+ * - 2100-2199: Shared batchnorm backward ext attributes
+ * - 2200-2299: Pointwise operation attributes
+ * - 2300-2399: Shared pointwise descriptor attributes
+ * - 2500-2599: Matmul operation attributes
+ * - 60000+: Extension attributes
+ */
 typedef enum
 {
+    /**
+     * @name Engine Heuristic Attributes (100-199)
+     * Attributes for HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Heuristic search mode (hipdnnBackendHeuristicMode_t) */
     HIPDNN_ATTR_ENGINEHEUR_MODE = 100,
+
+    /** @brief Operation graph to find engines for (backend descriptor) */
     HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH = 101,
+
+    /** @brief Results from heuristic search (array of engine configs) */
     HIPDNN_ATTR_ENGINEHEUR_RESULTS = 102,
+
+    /** @brief Target SM count for heuristic evaluation */
     HIPDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET = 103,
+
+    /** @brief Device properties for heuristic evaluation */
     HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP = 104,
 
+    /** @} */
+
+    /**
+     * @name Engine Configuration Attributes (200-299)
+     * Attributes for HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief The engine this configuration is for (backend descriptor) */
     HIPDNN_ATTR_ENGINECFG_ENGINE = 200,
+
+    /** @brief Intermediate tensor information */
     HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO = 201,
+
+    /** @brief Knob choices for this configuration */
     HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES = 202,
+
+    /** @brief Required workspace size in bytes */
     HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE = 203,
 
-    HIPDNN_ATTR_EXECUTION_PLAN_HANDLE = 300, // Deprecated
+    /** @} */
+
+    /**
+     * @name Execution Plan Attributes (300-399)
+     * Attributes for HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Associated handle (deprecated, do not use) */
+    HIPDNN_ATTR_EXECUTION_PLAN_HANDLE = 300,
+
+    /** @brief Engine configuration for this plan (backend descriptor) */
     HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG = 301,
+
+    /** @brief Required workspace size in bytes (int64_t) */
     HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE = 302,
+
+    /** @brief UIDs of computed intermediate tensors */
     HIPDNN_ATTR_EXECUTION_PLAN_COMPUTED_INTERMEDIATE_UIDS = 303,
+
+    /** @brief UIDs of run-only intermediate tensors */
     HIPDNN_ATTR_EXECUTION_PLAN_RUN_ONLY_INTERMEDIATE_UIDS = 304,
+
+    /** @brief JSON representation of the execution plan */
     HIPDNN_ATTR_EXECUTION_PLAN_JSON_REPRESENTATION = 305,
+
+    /** @brief Kernel cache for this plan */
     HIPDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE = 306,
+
+    /** @brief Device properties for this plan */
     HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP = 307,
 
+    /** @} */
+
+    /**
+     * @name Intermediate Info Attributes (400-499)
+     * Attributes for intermediate tensor information
+     * @{
+     */
+
+    /** @brief Unique ID of the intermediate tensor */
     HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID = 400,
+
+    /** @brief Size of the intermediate tensor in bytes */
     HIPDNN_ATTR_INTERMEDIATE_INFO_SIZE = 401,
+
+    /** @brief UIDs of dependent input data */
     HIPDNN_ATTR_INTERMEDIATE_INFO_DEPENDENT_DATA_UIDS = 402,
+
+    /** @brief Dependent attribute identifiers */
     HIPDNN_ATTR_INTERMEDIATE_INFO_DEPENDENT_ATTRIBUTES = 403,
 
+    /** @} */
+
+    /**
+     * @name Knob Choice Attributes (500-599)
+     * Attributes for HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Type of the knob */
     HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE = 500,
+
+    /** @brief Selected value for the knob */
     HIPDNN_ATTR_KNOB_CHOICE_KNOB_VALUE = 501,
 
+    /** @} */
+
+    /**
+     * @name Operation Graph Attributes (600-699)
+     * Attributes for HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief hipDNN handle for this graph */
     HIPDNN_ATTR_OPERATIONGRAPH_HANDLE = 600,
+
+    /** @brief Array of operations in the graph */
     HIPDNN_ATTR_OPERATIONGRAPH_OPS = 601,
+
+    /** @brief Total number of engines available globally */
     HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT = 602,
+
+    /** @brief Whether dynamic shapes are enabled for this graph */
     HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED = 603,
 
+    /** @brief Compute data type for the operation graph (hipdnnDataType_t, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT = 604,
+
+    /** @brief Intermediate data type for the operation graph (hipdnnDataType_t, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_INTERMEDIATE_DATA_TYPE_EXT = 605,
+
+    /** @brief I/O data type for the operation graph (hipdnnDataType_t, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_IO_DATA_TYPE_EXT = 606,
+
+    /** @brief Preferred engine ID for execution plan selection (int64_t, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_PREFERRED_ENGINE_ID_EXT = 607,
+
+    /** @} */
+
+    /**
+     * @name Variant Pack Attributes (700-799)
+     * Attributes for HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Tensor unique IDs for data pointer mapping */
     HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS = 700,
+
+    /** @brief Device pointers to tensor data */
     HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS = 701,
+
+    /** @brief Intermediate tensor data pointers */
     HIPDNN_ATTR_VARIANT_PACK_INTERMEDIATES = 702,
+
+    /** @brief Workspace pointer for execution */
     HIPDNN_ATTR_VARIANT_PACK_WORKSPACE = 703,
 
+    /** @} */
+
+    /**
+     * @name Layout Info Attributes (800-899)
+     * Attributes for tensor layout information
+     * @{
+     */
+
+    /** @brief Tensor UID for layout query */
     HIPDNN_ATTR_LAYOUT_INFO_TENSOR_UID = 800,
+
+    /** @brief Supported layout types */
     HIPDNN_ATTR_LAYOUT_INFO_TYPES = 801,
 
+    /** @} */
+
+    /**
+     * @name Knob Info Attributes (900-999)
+     * Attributes for querying knob metadata
+     * @{
+     */
+
+    /** @brief Type identifier of the knob */
     HIPDNN_ATTR_KNOB_INFO_TYPE = 900,
+
+    /** @brief Maximum allowed value for the knob */
     HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE = 901,
+
+    /** @brief Minimum allowed value for the knob */
     HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE = 902,
+
+    /** @brief Step size for valid knob values */
     HIPDNN_ATTR_KNOB_INFO_STRIDE = 903,
 
+    /** @} */
+
+    /**
+     * @name Engine Attributes (1000-1099)
+     * Attributes for HIPDNN_BACKEND_ENGINE_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Operation graph this engine supports */
     HIPDNN_ATTR_ENGINE_OPERATION_GRAPH = 1000,
+
+    /** @brief Global index of this engine */
     HIPDNN_ATTR_ENGINE_GLOBAL_INDEX = 1001,
+
+    /** @brief Available knob information for this engine */
     HIPDNN_ATTR_ENGINE_KNOB_INFO = 1002,
+
+    /** @brief Numerical behavior notes (precision guarantees) */
     HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE = 1003,
+
+    /** @brief Layout information for this engine */
     HIPDNN_ATTR_ENGINE_LAYOUT_INFO = 1004,
+
+    /** @brief Behavioral notes for this engine */
     HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE = 1005,
+
+    /** @brief Target SM count for this engine */
     HIPDNN_ATTR_ENGINE_SM_COUNT_TARGET = 1006,
+
+    /** @brief Device properties for this engine */
     HIPDNN_ATTR_ENGINE_DEVICEPROP = 1007,
 
+    /** @} */
+
+    /**
+     * @name Kernel Cache Attributes (1100-1199)
+     * Attributes for kernel caching functionality
+     * @{
+     */
+
+    /** @brief Whether engine config kernel is cached */
     HIPDNN_ATTR_KERNEL_CACHE_IS_ENGINECFG_KERNEL_CACHED = 1100,
 
+    /** @} */
+
+    /**
+     * @name Device Properties Attributes (1200-1299)
+     * Attributes for HIPDNN_BACKEND_DEVICEPROP_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief HIP device ID */
     HIPDNN_ATTR_DEVICEPROP_DEVICE_ID = 1200,
+
+    /** @brief hipDNN handle associated with device */
     HIPDNN_ATTR_DEVICEPROP_HANDLE = 1201,
+
+    /** @brief JSON representation of device properties */
     HIPDNN_ATTR_DEVICEPROP_JSON_REPRESENTATION = 1202,
 
-    // Extension API
+    /** @} */
+
+    /**
+     * @name Tensor Attributes (1300-1399)
+     * Attributes for HIPDNN_BACKEND_TENSOR_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Unique ID for this tensor */
+    HIPDNN_ATTR_TENSOR_UNIQUE_ID = 1300,
+
+    /** @brief Tensor name (extension) */
+    HIPDNN_ATTR_TENSOR_NAME_EXT = 1301,
+
+    /** @brief Data type of tensor elements (hipdnnDataType_t) */
+    HIPDNN_ATTR_TENSOR_DATA_TYPE = 1302,
+
+    /** @brief Tensor dimensions */
+    HIPDNN_ATTR_TENSOR_DIMENSIONS = 1303,
+
+    /** @brief Tensor strides */
+    HIPDNN_ATTR_TENSOR_STRIDES = 1304,
+
+    /** @brief Whether this tensor is virtual */
+    HIPDNN_ATTR_TENSOR_IS_VIRTUAL = 1305,
+
+    /** @brief Pass-by-value tensor data (extension) */
+    HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
+
+    /** @} */
+
+    /**
+     * @name Convolution Forward Operation Attributes (1400-1499)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Weight tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W = 1400,
+
+    /** @brief Input tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X = 1401,
+
+    /** @brief Output tensor for forward convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_Y = 1402,
+
+    /** @} */
+
+    /**
+     * @name Shared Convolution Descriptor Attributes (1500-1599)
+     * Attributes shared across convolution operation descriptors (forward,
+     * dgrad, wgrad). These are set directly on the operation descriptor.
+     * @{
+     */
+
+    /** @brief Compute data type for convolution */
+    HIPDNN_ATTR_CONVOLUTION_COMP_TYPE = 1500,
+
+    /** @brief Convolution mode (e.g., cross-correlation) */
+    HIPDNN_ATTR_CONVOLUTION_CONV_MODE = 1501,
+
+    /** @brief Dilation values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_DILATIONS = 1502,
+
+    /** @brief Filter stride values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES = 1503,
+
+    /** @brief Post-padding values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS = 1504,
+
+    /** @brief Pre-padding values for each spatial dimension */
+    HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS = 1505,
+
+    /** @} */
+
+    /**
+     * @name Convolution Backward Filter Operation Attributes (1600-1699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X = 1600,
+
+    /** @brief Output gradient tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY = 1601,
+
+    /** @brief Weight gradient tensor for backward filter convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW = 1602,
+
+    /** @} */
+
+    /**
+     * @name Convolution Backward Data Operation Attributes (1700-1799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY = 1700,
+
+    /** @brief Weight tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W = 1701,
+
+    /** @brief Input gradient tensor for backward data convolution */
+    HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX = 1702,
+
+    /** @} */
+
+    /**
+     * @name Batchnorm Inference Operation Attributes (1800-1899)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_EXT_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_X_EXT = 1800,
+
+    /** @brief Mean tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_MEAN_EXT = 1801,
+
+    /** @brief Inverse variance tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_INV_VARIANCE_EXT = 1802,
+
+    /** @brief Scale tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_SCALE_EXT = 1803,
+
+    /** @brief Bias tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_BIAS_EXT = 1804,
+
+    /** @brief Output tensor for batchnorm inference */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_Y_EXT = 1805,
+
+    /** @brief Compute data type for batchnorm inference */
+    HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT = 1806,
+
+    /** @} */
+
+    /**
+     * @name Batchnorm Inference Variance Ext Operation Attributes (1900-1999)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Input tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_X_EXT = 1900,
+
+    /** @brief Mean tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_MEAN_EXT = 1901,
+
+    /** @brief Variance tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_VARIANCE_EXT = 1902,
+
+    /** @brief Scale tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_SCALE_EXT = 1903,
+
+    /** @brief Bias tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_BIAS_EXT = 1904,
+
+    /** @brief Output tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_Y_EXT = 1905,
+
+    /** @brief Epsilon tensor for batchnorm inference variance ext */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_INFERENCE_VARIANCE_EPSILON_EXT = 1906,
+
+    /** @brief Compute data type for batchnorm inference variance ext */
+    HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT = 1907,
+
+    /** @} */
+
+    /**
+     * @name Batchnorm Backward Ext Operation Attributes (2000-2099)
+     * Attributes for HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Gradient input tensor (dy) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DY_EXT = 2000,
+
+    /** @brief Input tensor (x) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_X_EXT = 2001,
+
+    /** @brief Scale tensor for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_SCALE_EXT = 2002,
+
+    /** @brief Gradient output tensor (dx) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DX_EXT = 2003,
+
+    /** @brief Scale gradient tensor (dscale) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DSCALE_EXT = 2004,
+
+    /** @brief Bias gradient tensor (dbias) for batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_DBIAS_EXT = 2005,
+
+    /** @brief Saved mean tensor from forward pass */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_MEAN_EXT = 2006,
+
+    /** @brief Saved inverse variance tensor from forward pass */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_INV_VARIANCE_EXT = 2007,
+
+    /** @} */
+
+    /**
+     * @name Shared Batchnorm Backward Ext Attributes (2100-2199)
+     * @{
+     */
+
+    /** @brief Compute data type for batchnorm backward */
+    HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT = 2100,
+
+    /** @brief Peer statistics tensor array for multi-GPU batchnorm backward */
+    HIPDNN_ATTR_OPERATION_BATCHNORM_BACKWARD_PEER_STATS_EXT = 2101,
+
+    /** @} */
+
+    /**
+     * @name Pointwise Operation Attributes (2200-2299)
+     * Attributes for HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Primary input tensor for pointwise operation */
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_0_EXT = 2200,
+
+    /** @brief Output tensor for pointwise operation */
+    HIPDNN_ATTR_OPERATION_POINTWISE_OUT_0_EXT = 2201,
+
+    /** @brief Secondary input tensor for pointwise operation (binary/ternary) */
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_1_EXT = 2202,
+
+    /** @brief Tertiary input tensor for pointwise operation (ternary) */
+    HIPDNN_ATTR_OPERATION_POINTWISE_IN_2_EXT = 2203,
+
+    /** @} */
+
+    /**
+     * @name Shared Pointwise Descriptor Attributes (2300-2399)
+     * Attributes shared across pointwise operation descriptors.
+     * These are set directly on the operation descriptor.
+     * @{
+     */
+
+    /** @brief Pointwise operation mode */
+    HIPDNN_ATTR_POINTWISE_MODE = 2300,
+
+    /** @brief Lower clip value for ReLU activation */
+    HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP = 2301,
+
+    /** @brief Upper clip value for ReLU activation */
+    HIPDNN_ATTR_POINTWISE_RELU_UPPER_CLIP = 2302,
+
+    /** @brief Lower clip slope for leaky ReLU activation */
+    HIPDNN_ATTR_POINTWISE_RELU_LOWER_CLIP_SLOPE = 2303,
+
+    /** @brief Beta parameter for Swish activation */
+    HIPDNN_ATTR_POINTWISE_SWISH_BETA = 2304,
+
+    /** @brief Alpha parameter for ELU activation */
+    HIPDNN_ATTR_POINTWISE_ELU_ALPHA = 2305,
+
+    /** @brief Beta parameter for Softplus activation */
+    HIPDNN_ATTR_POINTWISE_SOFTPLUS_BETA = 2306,
+
+    /** @brief Compute data type for pointwise operation */
+    HIPDNN_ATTR_POINTWISE_MATH_PREC = 2307,
+
+    /** @brief Axis index for pointwise operation */
+    HIPDNN_ATTR_POINTWISE_AXIS = 2308,
+
+    /** @} */
+
+    /**
+     * @name Matmul Operation Attributes (2500-2599)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Left input matrix tensor (A) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_A_EXT = 2500,
+
+    /** @brief Right input matrix tensor (B) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_B_EXT = 2501,
+
+    /** @brief Output matrix tensor (C) for matmul */
+    HIPDNN_ATTR_OPERATION_MATMUL_C_EXT = 2502,
+
+    /** @brief Compute data type for matmul */
+    HIPDNN_ATTR_MATMUL_MATH_PREC_EXT = 2503,
+
+    /** @} */
+
+    /**
+     * @name Extension Attributes (60000+)
+     * hipDNN-specific extension attributes
+     * @{
+     */
+
+    /**
+     * @brief Serialized knob info as FlatBuffer (extension)
+     *
+     * Used to retrieve knob information in serialized FlatBuffer format.
+     * Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
+     */
     HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE_EXT = 60000,
 
+    /**
+     * @brief Serialized knob choice as FlatBuffer (extension)
+     *
+     * Used to set knob values in serialized FlatBuffer format.
+     * Type: HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
+     */
     HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE_EXT = 60100,
+
+    /** @} */
 
 } hipdnnBackendAttributeName_t;

@@ -3,7 +3,7 @@
 
 #include "ck_builder_shared.hpp"
 
-#include <miopen/ck_builder/factories/grouped_conv_2d_fwd_multiple_abd.hpp>
+#include <miopen/ck_builder/factories/grouped_convolution_forward.hpp>
 
 #include <ck_tile/builder/conv_builder.hpp>
 #include <ck_tile/builder/reflect/conv_description.hpp>
@@ -51,12 +51,19 @@ void CompareInstanceLists()
     compare_instance_vectors(ckFactoryInstances, builderFactoryInstances);
 }
 
-TEST(CKBuilderGroupedFwdConv2D, CompareInstanceListsFloat) { CompareInstanceLists<float>(); }
+TEST(CPU_CKBuilderGroupedFwdConv2D_FP32, CompareInstanceListsFloat)
+{
+    CompareInstanceLists<float>();
+}
 
-/*
-TEST(CKBuilderGroupedFwdConv2D, CompareInstanceListsHalf) { CompareInstanceLists<ck::half_t>(); }
+TEST(CPU_CKBuilderGroupedFwdConv2D_FP16, CompareInstanceListsHalf)
+{
+    CompareInstanceLists<ck::half_t>();
+}
 
-TEST(CKBuilderGroupedFwdConv2D, CompareInstanceListsBHalf) { CompareInstanceLists<ck::bhalf_t>(); }
+TEST(CPU_CKBuilderGroupedFwdConv2D_BFP16, CompareInstanceListsBHalf)
+{
+    CompareInstanceLists<ck::bhalf_t>();
+}
 
-TEST(CKBuilderGroupedFwdConv2D, CompareInstanceListsInt8) { CompareInstanceLists<int8_t>(); }
-*/
+TEST(CPU_CKBuilderGroupedFwdConv2D_I8, CompareInstanceListsInt8) { CompareInstanceLists<int8_t>(); }
