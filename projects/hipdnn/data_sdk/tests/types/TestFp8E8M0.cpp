@@ -2,14 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 /// @file TestFp8E8M0.cpp
-/// @brief Unit tests for fp8_e8m0 (MX scale format) portable type.
+/// @brief Type-specific unit tests for fp8_e8m0 (MX scale format).
+///
+/// This file contains tests for fp8_e8m0-specific behavior that cannot be generalized:
+/// - Unsigned type behavior (no sign bit, clamping of negative values)
+/// - No zero representation (scale=0 = 2^-127)
+/// - Power of 2 only representation
+/// - Cross-type conversions
+///
+/// Generic tests (construction, conversion, numeric_limits basics, stream output)
+/// are in TestPortableTypes.cpp.
+///
 /// @see fp8_e8m0 struct for format specification.
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/types.hpp>
 
-#include <sstream>
 #include <vector>
 
 using namespace hipdnn_data_sdk::types;
@@ -27,7 +36,7 @@ constexpr uint8_t E8M0_BITS_NAN = 0xFF; // NaN
 } // anonymous namespace
 
 // ============================================================================
-// Construction Tests
+// Construction Tests (E8M0-specific behavior)
 // ============================================================================
 
 TEST(TestFp8E8M0, DefaultConstruction)
@@ -36,8 +45,9 @@ TEST(TestFp8E8M0, DefaultConstruction)
     EXPECT_EQ(val.data, E8M0_BITS_MIN);
 }
 
-TEST(TestFp8E8M0, ConstructFromFloat)
+TEST(TestFp8E8M0, ConstructFromFloatBitPatterns)
 {
+    // Test specific E8M0 bit patterns for powers of 2
     fp8_e8m0 half(0.5f);
     EXPECT_EQ(half.data, E8M0_BITS_HALF);
 
@@ -51,44 +61,18 @@ TEST(TestFp8E8M0, ConstructFromFloat)
     EXPECT_EQ(four.data, E8M0_BITS_FOUR);
 }
 
-TEST(TestFp8E8M0, ConstructFromDouble)
+TEST(TestFp8E8M0, ConstructFromIntegralNegativeClamping)
 {
-    fp8_e8m0 one(1.0);
-    EXPECT_EQ(one.data, E8M0_BITS_ONE);
-}
-
-TEST(TestFp8E8M0, ConstructFromIntegral)
-{
-    fp8_e8m0 one(1);
-    EXPECT_EQ(one.data, E8M0_BITS_ONE);
-
-    fp8_e8m0 four(4);
-    EXPECT_EQ(four.data, E8M0_BITS_FOUR);
-
-    // Negative values clamp to min
+    // Negative values clamp to min (E8M0-specific)
     fp8_e8m0 negVal(-4);
     EXPECT_EQ(negVal.data, E8M0_BITS_MIN);
 }
 
-TEST(TestFp8E8M0, FromBits)
+TEST(TestFp8E8M0, FromBitsMinValue)
 {
-    fp8_e8m0 one = fp8_e8m0::from_bits(E8M0_BITS_ONE);
-    EXPECT_EQ(static_cast<float>(one), 1.0f);
-
-    // scale=0 is 2^-127, NOT zero
+    // scale=0 is 2^-127, NOT zero (E8M0-specific)
     fp8_e8m0 minVal = fp8_e8m0::from_bits(0x00);
     EXPECT_EQ(static_cast<float>(minVal), 0x1p-127f);
-
-    // NaN
-    fp8_e8m0 nan = fp8_e8m0::from_bits(E8M0_BITS_NAN);
-    EXPECT_TRUE(isnan(nan));
-}
-
-TEST(TestFp8E8M0, CopyConstruct)
-{
-    fp8_e8m0 a(2.0f);
-    fp8_e8m0 b(a);
-    EXPECT_EQ(a.data, b.data);
 }
 
 TEST(TestFp8E8M0, CopyAssignment)
@@ -100,22 +84,8 @@ TEST(TestFp8E8M0, CopyAssignment)
 }
 
 // ============================================================================
-// Conversion Tests
+// Power of 2 Representation Tests (E8M0-specific)
 // ============================================================================
-
-TEST(TestFp8E8M0, ExplicitConversionToFloat)
-{
-    fp8_e8m0 a(1.0f);
-    auto f = static_cast<float>(a);
-    EXPECT_EQ(f, 1.0f);
-}
-
-TEST(TestFp8E8M0, ExplicitConversionToDouble)
-{
-    fp8_e8m0 a(2.0f);
-    auto d = static_cast<double>(a);
-    EXPECT_EQ(d, 2.0);
-}
 
 TEST(TestFp8E8M0, RoundTripConversion)
 {
@@ -141,8 +111,15 @@ TEST(TestFp8E8M0, NonPowerOfTwoRounding)
     EXPECT_EQ(result, 2.0f);
 }
 
+TEST(TestFp8E8M0, MaximumValue)
+{
+    // Maximum value: exponent = 254, value = 2^(254-127) = 2^127
+    fp8_e8m0 maxVal = fp8_e8m0::from_bits(E8M0_BITS_MAX);
+    EXPECT_EQ(static_cast<float>(maxVal), 0x1p127f);
+}
+
 // ============================================================================
-// Special Values Tests
+// Special Values Tests (E8M0-specific: no zero, no sign, no infinity)
 // ============================================================================
 
 TEST(TestFp8E8M0, MinimumValue)
@@ -183,9 +160,13 @@ TEST(TestFp8E8M0, Isfinite)
     EXPECT_FALSE(isfinite(fp8_e8m0::from_bits(E8M0_BITS_NAN))); // NaN
 }
 
+// ============================================================================
+// Clamping Tests (E8M0-specific: unsigned type)
+// ============================================================================
+
 TEST(TestFp8E8M0, NegativeValuesClampToMin)
 {
-    // E8M0 has no zero - negative values clamp to min
+    // E8M0 is unsigned - negative values clamp to min
     fp8_e8m0 neg(-1.0f);
     EXPECT_EQ(neg.data, E8M0_BITS_MIN);
 
@@ -221,87 +202,8 @@ TEST(TestFp8E8M0, NaNFromFloat)
 }
 
 // ============================================================================
-// Power of 2 Range Tests
+// numeric_limits Tests (E8M0-specific)
 // ============================================================================
-
-TEST(TestFp8E8M0, MaximumValue)
-{
-    // Maximum value: exponent = 254, value = 2^(254-127) = 2^127
-    fp8_e8m0 maxVal = fp8_e8m0::from_bits(E8M0_BITS_MAX);
-    EXPECT_EQ(static_cast<float>(maxVal), 0x1p127f);
-}
-
-// ============================================================================
-// Unary Operator Tests
-// ============================================================================
-
-TEST(TestFp8E8M0, UnaryPlus)
-{
-    fp8_e8m0 a(4.0f);
-    fp8_e8m0 b = +a;
-    EXPECT_EQ(a.data, b.data);
-}
-
-// Note: Unary negation is not provided for E8M0 (unsigned type)
-
-// ============================================================================
-// Stream Output Tests
-// ============================================================================
-
-TEST(TestFp8E8M0, StreamOutput)
-{
-    fp8_e8m0 a(2.0f);
-    std::ostringstream oss;
-    oss << a;
-    float parsed = std::stof(oss.str());
-    EXPECT_EQ(parsed, 2.0f);
-}
-
-// ============================================================================
-// numeric_limits Tests
-// ============================================================================
-
-TEST(TestFp8E8M0, NumericLimitsBasic)
-{
-    EXPECT_TRUE(std::numeric_limits<fp8_e8m0>::is_specialized);
-    EXPECT_FALSE(std::numeric_limits<fp8_e8m0>::is_signed); // Unsigned type
-    EXPECT_FALSE(std::numeric_limits<fp8_e8m0>::is_integer);
-    EXPECT_FALSE(std::numeric_limits<fp8_e8m0>::has_infinity);
-    EXPECT_TRUE(std::numeric_limits<fp8_e8m0>::has_quiet_NaN);
-}
-
-TEST(TestFp8E8M0, NumericLimitsNaN)
-{
-    fp8_e8m0 nan = std::numeric_limits<fp8_e8m0>::quiet_NaN();
-    EXPECT_TRUE(isnan(nan));
-    EXPECT_EQ(nan.data, E8M0_BITS_NAN);
-}
-
-TEST(TestFp8E8M0, NumericLimitsMax)
-{
-    fp8_e8m0 maxVal = std::numeric_limits<fp8_e8m0>::max();
-    EXPECT_EQ(maxVal.data, E8M0_BITS_MAX);
-}
-
-TEST(TestFp8E8M0, NumericLimitsMin)
-{
-    // min() is the smallest positive value: scale=0 = 2^-127
-    fp8_e8m0 minVal = std::numeric_limits<fp8_e8m0>::min();
-    EXPECT_EQ(minVal.data, E8M0_BITS_MIN);
-}
-
-TEST(TestFp8E8M0, NumericLimitsLowest)
-{
-    fp8_e8m0 lowestVal = std::numeric_limits<fp8_e8m0>::lowest();
-    EXPECT_EQ(lowestVal.data, E8M0_BITS_MIN);
-}
-
-TEST(TestFp8E8M0, LowestEqualsMin)
-{
-    // E8M0 is unsigned and has no zero, so lowest() equals min()
-    EXPECT_EQ(std::numeric_limits<fp8_e8m0>::lowest().data,
-              std::numeric_limits<fp8_e8m0>::min().data);
-}
 
 TEST(TestFp8E8M0, NumericLimitsInfinityReturnsMax)
 {
@@ -311,7 +213,7 @@ TEST(TestFp8E8M0, NumericLimitsInfinityReturnsMax)
     EXPECT_EQ(inf.data, maxVal.data);
 }
 
-TEST(TestFp8E8M0, NumericLimitsEpsilon)
+TEST(TestFp8E8M0, NumericLimitsEpsilonValue)
 {
     // E8M0 epsilon = 1.0 (smallest difference at 1.0 is to 2.0)
     fp8_e8m0 eps = std::numeric_limits<fp8_e8m0>::epsilon();
@@ -333,6 +235,13 @@ TEST(TestFp8E8M0, NumericLimitsSignalingNaN)
     fp8_e8m0 snan = std::numeric_limits<fp8_e8m0>::signaling_NaN();
     EXPECT_TRUE(isnan(snan));
     EXPECT_EQ(snan.data, E8M0_BITS_NAN);
+}
+
+TEST(TestFp8E8M0, LowestEqualsMin)
+{
+    // E8M0 is unsigned and has no zero, so lowest() equals min()
+    EXPECT_EQ(std::numeric_limits<fp8_e8m0>::lowest().data,
+              std::numeric_limits<fp8_e8m0>::min().data);
 }
 
 // ============================================================================
