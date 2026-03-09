@@ -184,7 +184,8 @@ def fast_yaml_dump(solutionStates, f):
     """
     for sol in solutionStates:
         first = True
-        for k, v in sol.items():
+        for k in sorted(sol.keys()):
+            v = sol[k]
             if first:
                 prefix = '- '
                 first = False
@@ -192,8 +193,8 @@ def fast_yaml_dump(solutionStates, f):
                 prefix = '  '
             if isinstance(v, dict):
                 f.write(f'{prefix}{k}:\n')
-                for k2, v2 in v.items():
-                    f.write(f'    {k2}: {_fast_yaml_scalar(v2)}\n')
+                for k2 in sorted(v.keys()):
+                    f.write(f'    {k2}: {_fast_yaml_scalar(v[k2])}\n')
             else:
                 f.write(f'{prefix}{k}: {_fast_yaml_scalar(v)}\n')
 
