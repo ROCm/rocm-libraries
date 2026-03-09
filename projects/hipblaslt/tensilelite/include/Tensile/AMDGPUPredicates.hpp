@@ -231,7 +231,7 @@ namespace TensileLite
                     return ChipIdRegistry::canUseSolution(gpuChipId, value);
                 }
 
-                virtual bool isFallbackMatch(AMDGPU const& gpu) const override
+                bool isFallbackMatch(AMDGPU const& gpu) const
                 {
                     if(!ChipIdRegistry::supportsChipIdPredicate(gpu.processor))
                         return false;

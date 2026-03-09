@@ -117,13 +117,6 @@ namespace TensileLite
         virtual std::string toString() const = 0;
 
         /**
-   * Check if this property evaluation involved a fallback match.
-   * Default implementation returns false (no fallback).
-   * Subclasses that support fallback matching should override this.
-   */
-        virtual bool isFallbackMatch(Object const& object) const { return false; }
-
-        /**
    * Retrieve the value from the specified object, while printing
    * relevant debug information to the specified stream.
    */

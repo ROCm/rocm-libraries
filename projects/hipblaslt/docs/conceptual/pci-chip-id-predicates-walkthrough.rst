@@ -142,3 +142,27 @@ Why this matters:
 - Device ``75a3`` can still use ``75a0`` fallback kernels at runtime.
 - But exact ``75a3`` rows are evaluated first, preventing broad/mixed rows from
   accidentally shadowing more specific rows.
+
+
+Runtime Selection
+-----------------
+
+``ExactLogicLibrary::findBestSolution`` iterates hardware predicate rows in priority order. 
+For each row that matches the GPU, it calls ``HardwarePredicate::isFallbackMatch(hardware)``
+to classify the match:
+
+- Exact match (``isFallbackMatch`` returns false): The row's ``PciChipIdEqual`` target
+  matches the GPU's chip ID exactly (e.g., mi350 GPU matching a ``PciChipIdEqual(0x75a0)`` row),
+  or the row has no chip ID predicate at all. The solution is returned immediately.
+- Fallback match (``isFallbackMatch`` returns true): The GPU matched via chip ID fallback 
+  (e.g., mi355 0x75a3 matching an mi350 0x75a0 row through ``ChipIdRegistry``). The solution is
+  saved but the loop continues searching for an exact match.
+
+After all rows are checked, if no exact match was found, the saved fallback solution is returned.
+This ensures that device-specific solutions (mi355-targeted kernels) are always preferred over 
+fallback solutions (mi350 kernels running on mi355), regardless of row ordering.
+An exact match anywhere in the list beats a fallback match that appeared earlier.
+
+.. important::
+
+    This means that the first fallback match is the one that is returned, and all subsequent ones are ignored.

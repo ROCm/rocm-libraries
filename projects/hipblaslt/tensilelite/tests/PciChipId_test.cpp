@@ -181,7 +181,8 @@ TEST(PciChipIdTest, HardwareSelectionWithPciChipId)
         std::initializer_list<std::shared_ptr<Predicates::Predicate<AMDGPU>>>{isProcessor, isPciChip});
     
     HardwarePredicate deviceSpecificPred(
-        std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(isSpecificDevice));
+        std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(isSpecificDevice),
+        actualPciChipId);
 
     // Create fallback predicate (processor only, no chip ID)
     HardwarePredicate fallbackPred(

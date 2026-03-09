@@ -33,7 +33,6 @@
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/SolutionLibrary.hpp>
-#include <type_traits>
 
 namespace TensileLite
 {
@@ -112,7 +111,7 @@ namespace TensileLite
                 if(!row.first(problem, hardware))
                     continue;
 
-                if(!isPredicateFallback(row.first, hardware))
+                if(!row.first.isFallbackMatch(hardware))
                 {
                     auto rv = row.second->findBestSolution(problem, hardware, fitness);
 
@@ -149,27 +148,6 @@ namespace TensileLite
             }
 
             return fallbackRv;
-        }
-
-    private:
-        // Use SFINAE to handle predicates with and without isFallbackMatch method
-        template <typename Pred>
-        auto isPredicateFallbackImpl(Pred const& pred, Hardware const& hardware, int) const
-            -> decltype(pred.isFallbackMatch(hardware), bool())
-        {
-            return pred.isFallbackMatch(hardware);
-        }
-
-        template <typename Pred>
-        bool isPredicateFallbackImpl(Pred const&, Hardware const&, ...) const
-        {
-            return false; // If no isFallbackMatch method, assume not a fallback
-        }
-
-        template <typename Pred>
-        bool isPredicateFallback(Pred const& pred, Hardware const& hardware) const
-        {
-            return isPredicateFallbackImpl(pred, hardware, 0);
         }
 
     public:
@@ -364,9 +342,16 @@ namespace TensileLite
     {
         std::shared_ptr<Predicates::Predicate<Hardware>> value;
 
+        // The chip ID this predicate targets, if any.  Set by callers that
+        // know the chip ID (e.g. makeHwPred, deserialization).  When nullopt
+        // the predicate has no chip-ID constraint and every match is exact.
+        std::optional<int> targetPciChipId;
+
         HardwarePredicate() = default;
-        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init)
+        HardwarePredicate(std::shared_ptr<Predicates::Predicate<Hardware>> init,
+                          std::optional<int> chipId = std::nullopt)
             : value(init)
+            , targetPciChipId(chipId)
         {
         }
 
@@ -386,9 +371,19 @@ namespace TensileLite
             return rv;
         }
 
+        // A match is a fallback when the predicate targets a specific chip ID
+        // and the GPU's chip ID is different (operator() already confirmed
+        // compatibility via ChipIdRegistry::canUseSolution).
         bool isFallbackMatch(Hardware const& hardware) const
         {
-            return value->isFallbackMatch(hardware);
+            if(!targetPciChipId)
+                return false;
+
+            auto gpuChipId = hardware.pciChipId();
+            if(!gpuChipId)
+                return false;
+
+            return gpuChipId.value() != targetPciChipId.value();
         }
     };
 
@@ -443,6 +438,12 @@ namespace TensileLite
             }
 
             return rv;
+        }
+
+        // Problem predicates never involve hardware fallback.
+        bool isFallbackMatch(Hardware const&) const
+        {
+            return false;
         }
     };
 

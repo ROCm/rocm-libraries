@@ -107,7 +107,8 @@ namespace testing
             inner = std::make_shared<Predicates::And<AMDGPU>>(preds);
 
         return HardwarePredicate(
-            std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(inner));
+            std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(inner),
+            chipId);
     }
 
     // -----------------------------------------------------------------------
