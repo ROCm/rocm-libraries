@@ -21,7 +21,8 @@ int main(int argc, char** argv)
 
     // Initialize plugin logger with test recording callback so that plugin logs
     // logs are first routed to the log recorder for capture and use by the unit tests.
-    hipdnn_plugin_sdk::logging::initializeCallbackLogging("hip_kernel-provider_tests", recordingCallback);
+    hipdnn_plugin_sdk::logging::initializeCallbackLogging("hip_kernel-provider_tests",
+                                                          recordingCallback);
 
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
