@@ -43,7 +43,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: a98fff0df48d86e639136ab63591c1174833b46b # users/todavis/ctest_rocblas_on_miopen_filters for testing
+          ref: 886f3ea69d7860dd26bd84fb98d7c4cc05dc9fd1 # users/todavis/ctest_rocblas_on_miopen_filters for testing
 
       - name: Install python deps
         run: |
