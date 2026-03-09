@@ -2,19 +2,18 @@
 # SPDX-License-Identifier:  MIT
 
 # Function to find the version file path given the component name
-function(hipdnn_version_file_dir COMPONENT_NAME OUTPUT_PATH)
-    string(REPLACE "hipdnn_" "" _simple_component_name ${COMPONENT_NAME})
-    set(${OUTPUT_PATH} "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../${_simple_component_name}/" PARENT_SCOPE)
+function(miopen_provider_version_file_dir COMPONENT_NAME OUTPUT_PATH)
+    set(${OUTPUT_PATH} "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../" PARENT_SCOPE)
 endfunction()
 
 
 # Function to setup versioning for a component
 # Reads version.json, gets git hash, sets version variables, and calls project()
-function(hipdnn_setup_version COMPONENT_NAME)
+function(miopen_provider_setup_version COMPONENT_NAME)
     string(TOUPPER ${COMPONENT_NAME} COMPONENT_NAME_UPPER)
 
     # Read version from version.json
-    hipdnn_version_file_dir(${COMPONENT_NAME} _version_dir)
+    miopen_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
     file(READ "${_version_dir}/version.json" _version_json)
     string(JSON ${COMPONENT_NAME_UPPER}_VERSION GET ${_version_json} "${COMPONENT_NAME}_version")
 
@@ -27,7 +26,7 @@ function(hipdnn_setup_version COMPONENT_NAME)
     # Get git commit hash for tweak version
     execute_process(
         COMMAND git rev-parse --short HEAD
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE ${COMPONENT_NAME_UPPER}_VERSION_TWEAK
         RESULT_VARIABLE GIT_RESULT
         OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -53,33 +52,16 @@ function(hipdnn_setup_version COMPONENT_NAME)
 endfunction()
 
 # Function to generate the version header
-function(hipdnn_generate_version_header COMPONENT_NAME)
-
-    hipdnn_version_file_dir(${COMPONENT_NAME} _version_dir)
+function(miopen_provider_generate_version_header COMPONENT_NAME TARGET_NAME)
+    miopen_provider_version_file_dir(${COMPONENT_NAME} _version_dir)
     configure_file(
         "${_version_dir}/version.h.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/include/${COMPONENT_NAME}/version.h"
+        "${CMAKE_CURRENT_BINARY_DIR}/include/version.h"
         @ONLY
     )
 
-    # Add generated include directory for build interface
+    # Add generated include directory
     target_include_directories(
-        ${COMPONENT_NAME} INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+        ${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/include
     )
-endfunction()
-
-# Function to read component version for minimum requirement
-function(hipdnn_get_component_version COMPONENT_NAME OUTPUT_VAR)
-    # Determine path to data_sdk/version.json relative to this file location
-    # This makes it resilient to where the macro is called from
-    hipdnn_version_file_dir(${COMPONENT_NAME} _version_dir)
-
-    if(EXISTS "${_version_dir}/version.json")
-        file(READ "${_version_dir}/version.json" _${COMPONENT_NAME}_version_json)
-        string(JSON _version_value GET ${_${COMPONENT_NAME}_version_json} "${COMPONENT_NAME}_version")
-        # Propagate OUTPUT_VAR to parent scope
-        set(${OUTPUT_VAR} ${_version_value} PARENT_SCOPE)
-    else()
-        message(FATAL_ERROR "Could not find ${COMPONENT_NAME} version file at ${_${COMPONENT_NAME}_version_file}")
-    endif()
 endfunction()
