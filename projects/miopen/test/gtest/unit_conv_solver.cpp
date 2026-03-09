@@ -26,18 +26,12 @@
 
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
-#include <miopen/errors.hpp>
-#include <miopen/generic_search.hpp>
 #include <miopen/any_solver.hpp>
 
 #include "unit_conv_solver.hpp"
-
-#include "get_handle.hpp"
-#include "../gpu_conv.hpp"
 #include "conv_common.hpp"
 #include "conv_tensor_gen.hpp"
-#include "tensor_holder.hpp"
-
+#include "../gpu_conv.hpp"
 #include "../workspace.hpp"
 
 namespace miopen {
@@ -339,9 +333,7 @@ miopen::solver::ConvSolution FindSolution(const miopen::solver::conv::ConvSolver
 }
 
 template <typename T>
-double GetThreshold(miopenConvAlgorithm_t algo,
-                    miopen::conv::Direction direction,
-                    const Tolerances& tolerances,
+double GetThreshold(const Tolerances& tolerances,
                     const bool use_tf32_compute)
 {
     double tolerance = tolerances.Get(GetDevGpuType(), miopen_type<T>{});
@@ -359,8 +351,6 @@ double GetThreshold(miopenConvAlgorithm_t algo,
 template <typename T, typename Tref>
 void VerifyData(const std::vector<T>& data,
                 const std::vector<Tref>& ref_data,
-                miopenConvAlgorithm_t algo,
-                miopen::conv::Direction direction,
                 const Tolerances& tolerances,
                 bool use_tf32_compute = false)
 {
@@ -389,7 +379,7 @@ void VerifyData(const std::vector<T>& data,
     else
     {
         const auto error       = miopen::rms_range(ref_data, data);
-        const double threshold = GetThreshold<T>(algo, direction, tolerances, use_tf32_compute);
+        const double threshold = GetThreshold<T>(tolerances, use_tf32_compute);
         ASSERT_LT(error, threshold) << "Error beyond tolerance";
         // std::cout << "error: " << error << " threshold: " << threshold << std::endl;
     }
@@ -401,8 +391,7 @@ void VerifyData(const std::vector<T>& data,
 template <typename Tin, typename Twei, typename Tout, typename Tref>
 void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
                   const UnitTestConvSolverParams& params,
-                  const ConvTestCase& conv_config,
-                  miopenConvAlgorithm_t algo)
+                  const ConvTestCase& conv_config)
 {
     //**********************************
     // Prepare
@@ -514,8 +503,6 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     VerifyData(output.data,
                ref_out.data,
-               algo,
-               miopen::conv::Direction::Forward,
                params.tolerances,
                problem.UseTF32());
 }
@@ -523,10 +510,9 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
 template <typename T, typename Tref>
 void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
                   const UnitTestConvSolverParams& params,
-                  const ConvTestCase& conv_config,
-                  miopenConvAlgorithm_t algo)
+                  const ConvTestCase& conv_config)
 {
-    RunSolverFwd<T, T, T, Tref>(solv, params, conv_config, algo);
+    RunSolverFwd<T, T, T, Tref>(solv, params, conv_config);
 }
 
 //**********************************
@@ -535,8 +521,7 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
 template <typename Tin, typename Twei, typename Tout, typename Tref>
 void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
                   const UnitTestConvSolverParams& params,
-                  const ConvTestCase& conv_config,
-                  miopenConvAlgorithm_t algo)
+                  const ConvTestCase& conv_config)
 {
     //**********************************
     // Prepare
@@ -640,8 +625,6 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     VerifyData(input.data,
                ref_in.data,
-               algo,
-               miopen::conv::Direction::BackwardData,
                params.tolerances,
                problem.UseTF32());
 }
@@ -649,10 +632,9 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
 template <typename T, typename Tref>
 void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
                   const UnitTestConvSolverParams& params,
-                  const ConvTestCase& conv_config,
-                  miopenConvAlgorithm_t algo)
+                  const ConvTestCase& conv_config)
 {
-    RunSolverBwd<T, T, T, Tref>(solv, params, conv_config, algo);
+    RunSolverBwd<T, T, T, Tref>(solv, params, conv_config);
 }
 
 //**********************************
@@ -661,8 +643,7 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
 template <typename Tin, typename Twei, typename Tout, typename Tref>
 void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
                   const UnitTestConvSolverParams& params,
-                  const ConvTestCase& conv_config,
-                  miopenConvAlgorithm_t algo)
+                  const ConvTestCase& conv_config)
 {
     //**********************************
     // Prepare
@@ -766,8 +747,6 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
 
     VerifyData(weights.data,
                ref_weights.data,
-               algo,
-               miopen::conv::Direction::BackwardWeights,
                params.tolerances,
                problem.UseTF32());
 }
@@ -775,30 +754,28 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
 template <typename T, typename Tref>
 void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
                   const UnitTestConvSolverParams& params,
-                  const ConvTestCase& conv_config,
-                  miopenConvAlgorithm_t algo)
+                  const ConvTestCase& conv_config)
 {
-    RunSolverWrw<T, T, T, Tref>(solv, params, conv_config, algo);
+    RunSolverWrw<T, T, T, Tref>(solv, params, conv_config);
 }
 
 template <typename T, typename Tref>
 void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
                const UnitTestConvSolverParams& params,
                miopen::conv::Direction direction,
-               const ConvTestCase& conv_config,
-               miopenConvAlgorithm_t algo)
+               const ConvTestCase& conv_config)
 {
     // clang-format off
     switch(direction)
     {
     case miopen::conv::Direction::Forward:
-        RunSolverFwd<T, Tref>(solver, params, conv_config, algo);
+        RunSolverFwd<T, Tref>(solver, params, conv_config);
         return;
     case miopen::conv::Direction::BackwardData:
-        RunSolverBwd<T, Tref>(solver, params, conv_config, algo);
+        RunSolverBwd<T, Tref>(solver, params, conv_config);
         return;
     case miopen::conv::Direction::BackwardWeights:
-        RunSolverWrw<T, Tref>(solver, params, conv_config, algo);
+        RunSolverWrw<T, Tref>(solver, params, conv_config);
         return;
     default:
         throw std::runtime_error("unknown direction");
@@ -809,8 +786,7 @@ void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
 void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
                const UnitTestConvSolverParams& params,
                miopen::conv::Direction direction,
-               const ConvTestCase& conv_config,
-               miopenConvAlgorithm_t algo)
+               const ConvTestCase& conv_config)
 {
     if(conv_config.GetXDataType() == conv_config.GetWDataType() &&
        conv_config.GetWDataType() == conv_config.GetYDataType())
@@ -819,16 +795,16 @@ void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
         switch(conv_config.GetXDataType())
         {
         case miopenHalf:
-            RunSolver<half_float::half, half_float::half>(solver, params, direction, conv_config, algo);
+            RunSolver<half_float::half, half_float::half>(solver, params, direction, conv_config);
             return;
         case miopenFloat:
-            RunSolver<float, float>(solver, params, direction, conv_config, algo);
+            RunSolver<float, float>(solver, params, direction, conv_config);
             return;
         case miopenBFloat16:
-            RunSolver<bfloat16, bfloat16>(solver, params, direction, conv_config, algo);
+            RunSolver<bfloat16, bfloat16>(solver, params, direction, conv_config);
             return;
         case miopenInt8:
-            RunSolver<int8_t, int8_t>(solver, params, direction, conv_config, algo);
+            RunSolver<int8_t, int8_t>(solver, params, direction, conv_config);
             return;
         default:
             throw std::runtime_error("handling of this data type is not yet implemented");
@@ -839,7 +815,7 @@ void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
             conv_config.GetXDataType() == miopenInt8 && conv_config.GetWDataType() == miopenInt8 &&
             conv_config.GetYDataType() == miopenInt32)
     {
-        RunSolverFwd<int8_t, int8_t, int32_t, int32_t>(solver, params, conv_config, algo);
+        RunSolverFwd<int8_t, int8_t, int32_t, int32_t>(solver, params, conv_config);
         return;
     }
 
@@ -866,11 +842,12 @@ void UnitTestConvSolverBase::RunTestImpl(const miopen::solver::conv::ConvSolverI
                                          const ConvTestCase& conv_config,
                                          miopenConvAlgorithm_t algo)
 {
+    (void)algo;
     ConvAttrFp16AltScopedSetter conv_attr_fp16_alt_setter;
     if(params.conv_attr_fp16_alt)
         conv_attr_fp16_alt_setter.SetValue(params.conv_attr_fp16_alt.value());
 
-    RunSolver(solver, params, direction, conv_config, algo);
+    RunSolver(solver, params, direction, conv_config);
 }
 
 //************************************************************************************
