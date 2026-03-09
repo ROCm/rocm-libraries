@@ -967,7 +967,7 @@ void testing_spic0(const Arguments& arg)
     int64_t batch_count = arg.batch_count;
     if(batch_count == -1)
         batch_count = 1;
-    batch_count                                       = 2;
+
     static constexpr const bool             full_rank = true;
     rocsparse_clients::spmat_descr<T, I, J> A(arg, batch_count, full_rank);
 
