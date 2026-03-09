@@ -17,6 +17,10 @@ add_executable(
     TestAttributes.cpp
     TestBackendInterface.cpp
     TestBackendLoggingHelpers.cpp
+    TestBlockScaleDequantizeAttributes.cpp
+    TestBlockScaleDequantizeNode.cpp
+    TestBlockScaleQuantizeAttributes.cpp
+    TestBlockScaleQuantizeNode.cpp
     TestBatchnormAttributes.cpp
     TestBatchnormBackwardAttributes.cpp
     TestBatchnormBackwardNode.cpp
@@ -34,6 +38,7 @@ add_executable(
     TestConvolutionWgradNode.cpp
     TestEngineOverrideConfig.cpp
     TestError.cpp
+    TestFrontendLogging.cpp
     TestGraph.cpp
     TestGraphAttributes.cpp
     TestGraphGenerated.cpp
@@ -60,6 +65,7 @@ add_executable(
     TestUtilities.cpp
     TestTopologicalSortingUtils.cpp
     TestSdkLogging.cpp
+    TestVersion.cpp
 )
 
 target_compile_options(hipdnn_frontend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
