@@ -2167,93 +2167,17 @@ public:
 
         while(true)
         {
-            iterations++;
-
-            run_batch(events, kernel);
-
-            fill_iterations_ms(iterations_ms, events);
-
-            double batch_gpu_ms = std::accumulate(iterations_ms.begin(), iterations_ms.end(), 0.0);
-            m_times.emplace_back(batch_gpu_ms);
-
-            m_logger.save(batch_gpu_ms, iterations_ms);
-
-            // Compute noise (CV) for recent window.
-            auto window_start = m_times.end() - std::min(iterations, s.batch_window_size);
-            std::vector<double> recent_times(window_start, m_times.end());
-            double              recent_mean   = get_mean(recent_times);
-            double              recent_stddev = get_stddev(recent_times);
-            double noise_percent = get_cv(recent_times, recent_stddev, recent_mean) * 100.0;
-
-            double batch_gpu_secs = batch_gpu_ms / 1000;
-
-            elapsed_gpu_secs += batch_gpu_secs;
-
-            double bytes_per_batch = m_read_write_bytes * m_kernels_per_batch;
-            double bytes_per_sec   = bytes_per_batch / batch_gpu_secs;
-
-            double items_per_batch = m_items * m_kernels_per_batch;
-            double items_per_sec   = items_per_batch / batch_gpu_secs;
-
-            auto now          = std::chrono::steady_clock::now();
-            auto elapsed_host = now - start;
-
-            // Stop early if the noise stabilized.
-            bool stop_early = elapsed_host >= std::chrono::duration<double>(s.min_secs)
-                              && iterations >= s.batch_window_size
-                              && noise_percent < s.noise_tolerance_percent;
-
-            // Stop early if the benchmark has been noisy for too long.
-            bool noise_timeout = elapsed_host > std::chrono::duration<double>(s.noise_timeout_secs)
-                                 && iterations >= s.batch_window_size
-                                 && noise_percent >= s.noise_tolerance_percent;
-
-            double elapsed_host_secs = std::chrono::duration<double>(elapsed_host).count();
-
-            std::string               status;
-            std::chrono::seconds::rep secs = elapsed_host_secs; // Casts to an integer.
-            if(stop_early)
-                status = "Success after " + std::to_string(secs) + "s";
-            else if(noise_timeout)
-                status = "Noisy timed out after " + std::to_string(secs) + "s";
-
-            uint16_t gpu_temp = m_monitor.get_temp();
-
-            progress::print_progress(iterations,
-                                     noise_percent,
-                                     bytes_per_sec,
-                                     status,
-                                     name,
-                                     m_algo,
-                                     s.batch_window_size,
-                                     m_family_index,
-                                     m_specialization_col_width,
-                                     m_family_col_width,
-                                     elapsed_host_secs,
-                                     s.noise_timeout_secs,
-                                     s.noise_tolerance_percent,
-                                     gpu_temp);
-
-            if(stop_early || noise_timeout)
+            if(run_iteration(kernel,
+                             events,
+                             iterations,
+                             iterations_ms,
+                             start,
+                             start_temp,
+                             elapsed_gpu_secs,
+                             name,
+                             serialized_meta,
+                             bytes_per_item))
             {
-                std::cout << "\n";
-
-                m_logger.output_specialization(m_family_index,
-                                               name,
-                                               serialized_meta,
-                                               m_kernels_per_batch,
-                                               m_ms_per_batch,
-                                               bytes_per_sec,
-                                               items_per_sec,
-                                               bytes_per_item,
-                                               m_items,
-                                               noise_percent,
-                                               start_temp,
-                                               gpu_temp,
-                                               elapsed_host_secs,
-                                               elapsed_gpu_secs,
-                                               noise_timeout);
-
                 break;
             }
         }
@@ -2268,6 +2192,117 @@ public:
     const uint32_t seed; ///< Random seed used for reproducible benchmark inputs.
 
 private:
+    /// Performs a single iteration of the benchmark loop.
+    ///
+    /// @return `true` if the benchmark should stop (stable noise or timeout).
+    bool run_iteration(std::function<void()>&       kernel,
+                       std::vector<event_t>&        events,
+                       uint64_t&                    iterations,
+                       std::vector<float>&          iterations_ms,
+                       const std::chrono::steady_clock::time_point& start,
+                       uint16_t                     start_temp,
+                       double&                      elapsed_gpu_secs,
+                       const std::string&           name,
+                       const std::string&           serialized_meta,
+                       size_t                       bytes_per_item)
+    {
+        const auto& s = m_settings;
+
+        iterations++;
+
+        run_batch(events, kernel);
+
+        fill_iterations_ms(iterations_ms, events);
+
+        double batch_gpu_ms = std::accumulate(iterations_ms.begin(), iterations_ms.end(), 0.0);
+        m_times.emplace_back(batch_gpu_ms);
+
+        m_logger.save(batch_gpu_ms, iterations_ms);
+
+        // Gather batch_window_size number of iteration times.
+        auto window_start = m_times.end() - std::min(iterations, s.batch_window_size);
+        std::vector<double> recent_times(window_start, m_times.end());
+
+        // Compute noise (CV) from recent times.
+        double recent_mean   = get_mean(recent_times);
+        double recent_stddev = get_stddev(recent_times);
+        double noise_percent = get_cv(recent_times, recent_stddev, recent_mean) * 100.0;
+
+        double batch_gpu_secs = batch_gpu_ms / 1000;
+
+        elapsed_gpu_secs += batch_gpu_secs;
+
+        double bytes_per_batch = m_read_write_bytes * m_kernels_per_batch;
+        double bytes_per_sec   = bytes_per_batch / batch_gpu_secs;
+
+        double items_per_batch = m_items * m_kernels_per_batch;
+        double items_per_sec   = items_per_batch / batch_gpu_secs;
+
+        auto now          = std::chrono::steady_clock::now();
+        auto elapsed_host = now - start;
+
+        // Stop early if the noise stabilized.
+        bool stop_early = elapsed_host >= std::chrono::duration<double>(s.min_secs)
+                          && iterations >= s.batch_window_size
+                          && noise_percent < s.noise_tolerance_percent;
+
+        // Stop early if the benchmark has been noisy for too long.
+        bool noise_timeout = elapsed_host > std::chrono::duration<double>(s.noise_timeout_secs)
+                             && iterations >= s.batch_window_size
+                             && noise_percent >= s.noise_tolerance_percent;
+
+        double elapsed_host_secs = std::chrono::duration<double>(elapsed_host).count();
+
+        std::string               status;
+        std::chrono::seconds::rep secs = elapsed_host_secs; // Casts to an integer.
+        if(stop_early)
+            status = "Success after " + std::to_string(secs) + "s";
+        else if(noise_timeout)
+            status = "Noisy timed out after " + std::to_string(secs) + "s";
+
+        uint16_t gpu_temp = m_monitor.get_temp();
+
+        progress::print_progress(iterations,
+                                 noise_percent,
+                                 bytes_per_sec,
+                                 status,
+                                 name,
+                                 m_algo,
+                                 s.batch_window_size,
+                                 m_family_index,
+                                 m_specialization_col_width,
+                                 m_family_col_width,
+                                 elapsed_host_secs,
+                                 s.noise_timeout_secs,
+                                 s.noise_tolerance_percent,
+                                 gpu_temp);
+
+        if(stop_early || noise_timeout)
+        {
+            std::cout << "\n";
+
+            m_logger.output_specialization(m_family_index,
+                                           name,
+                                           serialized_meta,
+                                           m_kernels_per_batch,
+                                           m_ms_per_batch,
+                                           bytes_per_sec,
+                                           items_per_sec,
+                                           bytes_per_item,
+                                           m_items,
+                                           noise_percent,
+                                           start_temp,
+                                           gpu_temp,
+                                           elapsed_host_secs,
+                                           elapsed_gpu_secs,
+                                           noise_timeout);
+
+            return true;
+        }
+
+        return false;
+    }
+
     /// Warms up the GPU until minimum temperature is reached.
     void warm_up() const
     {
