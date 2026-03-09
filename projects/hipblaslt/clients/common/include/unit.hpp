@@ -243,25 +243,25 @@ inline void unit_check_general(int64_t                   M,
 }
 
 template <>
-inline void unit_check_general(int64_t                 M,
-                               int64_t                 N,
-                               int64_t                 lda,
-                               int64_t                 strideA,
+inline void unit_check_general(int64_t             M,
+                               int64_t             N,
+                               int64_t             lda,
+                               int64_t             strideA,
                                const hipblaslt_f8* hCPU,
                                const hipblaslt_f8* hGPU,
-                               int64_t                 batch_count)
+                               int64_t             batch_count)
 {
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_F8_EQ);
 }
 
 template <>
-inline void unit_check_general(int64_t                  M,
-                               int64_t                  N,
-                               int64_t                  lda,
-                               int64_t                  strideA,
+inline void unit_check_general(int64_t              M,
+                               int64_t              N,
+                               int64_t              lda,
+                               int64_t              strideA,
                                const hipblaslt_bf8* hCPU,
                                const hipblaslt_bf8* hGPU,
-                               int64_t                  batch_count)
+                               int64_t              batch_count)
 {
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
 }
@@ -520,6 +520,32 @@ inline void unit_check_general(int64_t             M,
     UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_DOUBLE_EQ);
 }
 
+// Specialization for std::complex<float>
+template <>
+inline void unit_check_general(int64_t                    M,
+                               int64_t                    N,
+                               int64_t                    lda,
+                               int64_t                    strideA,
+                               const std::complex<float>* hCPU,
+                               const std::complex<float>* hGPU,
+                               int64_t                    batch_count)
+{
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_FLOAT_COMPLEX_EQ);
+}
+
+// Specialization for std::complex<double>
+template <>
+inline void unit_check_general(int64_t                     M,
+                               int64_t                     N,
+                               int64_t                     lda,
+                               int64_t                     strideA,
+                               const std::complex<double>* hCPU,
+                               const std::complex<double>* hGPU,
+                               int64_t                     batch_count)
+{
+    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_DOUBLE_COMPLEX_EQ);
+}
+
 template <typename T>
 constexpr double get_epsilon()
 {
@@ -575,6 +601,24 @@ inline void unit_check_general(int64_t     M,
                            strideA,
                            static_cast<double*>(hCPU),
                            static_cast<double*>(hGPU),
+                           batch_count);
+        break;
+    case HIP_C_32F:
+        unit_check_general(M,
+                           N,
+                           lda,
+                           strideA,
+                           static_cast<std::complex<float>*>(hCPU),
+                           static_cast<std::complex<float>*>(hGPU),
+                           batch_count);
+        break;
+    case HIP_C_64F:
+        unit_check_general(M,
+                           N,
+                           lda,
+                           strideA,
+                           static_cast<std::complex<double>*>(hCPU),
+                           static_cast<std::complex<double>*>(hGPU),
                            batch_count);
         break;
     case HIP_R_16F:
