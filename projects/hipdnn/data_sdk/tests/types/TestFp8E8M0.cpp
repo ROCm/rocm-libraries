@@ -61,13 +61,6 @@ TEST(TestFp8E8M0, ConstructFromFloatBitPatterns)
     EXPECT_EQ(four.data, E8M0_BITS_FOUR);
 }
 
-TEST(TestFp8E8M0, ConstructFromIntegralNegativeClamping)
-{
-    // Negative values clamp to min (E8M0-specific)
-    fp8_e8m0 negVal(-4);
-    EXPECT_EQ(negVal.data, E8M0_BITS_MIN);
-}
-
 TEST(TestFp8E8M0, FromBitsMinValue)
 {
     // scale=0 is 2^-127, NOT zero (E8M0-specific)
@@ -166,12 +159,16 @@ TEST(TestFp8E8M0, Isfinite)
 
 TEST(TestFp8E8M0, NegativeValuesClampToMin)
 {
-    // E8M0 is unsigned - negative values clamp to min
+    // E8M0 is unsigned - negative float values clamp to min
     fp8_e8m0 neg(-1.0f);
     EXPECT_EQ(neg.data, E8M0_BITS_MIN);
 
     fp8_e8m0 negLarge(-1000.0f);
     EXPECT_EQ(negLarge.data, E8M0_BITS_MIN);
+
+    // Negative integral values also clamp to min
+    fp8_e8m0 negInt(-4);
+    EXPECT_EQ(negInt.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, ZeroClampedToMin)
@@ -179,6 +176,17 @@ TEST(TestFp8E8M0, ZeroClampedToMin)
     // E8M0 has no zero representation - 0.0f clamps to min
     fp8_e8m0 zero(0.0f);
     EXPECT_EQ(zero.data, E8M0_BITS_MIN);
+
+    // Negative zero also clamps to min
+    fp8_e8m0 negZero(-0.0f);
+    EXPECT_EQ(negZero.data, E8M0_BITS_MIN);
+}
+
+TEST(TestFp8E8M0, VerySmallFloatClampedToMin)
+{
+    // Float denormal values clamp to min
+    fp8_e8m0 tiny(1e-40f);
+    EXPECT_EQ(tiny.data, E8M0_BITS_MIN);
 }
 
 TEST(TestFp8E8M0, InfinityClampedToMax)
@@ -242,6 +250,42 @@ TEST(TestFp8E8M0, LowestEqualsMin)
     // E8M0 is unsigned and has no zero, so lowest() equals min()
     EXPECT_EQ(std::numeric_limits<fp8_e8m0>::lowest().data,
               std::numeric_limits<fp8_e8m0>::min().data);
+}
+
+TEST(TestFp8E8M0, NumericLimitsRoundError)
+{
+    fp8_e8m0 roundErr = std::numeric_limits<fp8_e8m0>::round_error();
+    EXPECT_EQ(roundErr.data, E8M0_BITS_ONE);
+    EXPECT_EQ(static_cast<float>(roundErr), 1.0f);
+}
+
+TEST(TestFp8E8M0, NumericLimitsStaticProperties)
+{
+    using limits = std::numeric_limits<fp8_e8m0>;
+
+    EXPECT_TRUE(limits::is_specialized);
+    EXPECT_FALSE(limits::is_signed);
+    EXPECT_FALSE(limits::is_integer);
+    EXPECT_FALSE(limits::is_exact);
+    EXPECT_FALSE(limits::has_infinity);
+    EXPECT_TRUE(limits::has_quiet_NaN);
+    EXPECT_FALSE(limits::has_signaling_NaN);
+    EXPECT_EQ(limits::has_denorm, std::denorm_absent);
+    EXPECT_FALSE(limits::has_denorm_loss);
+    EXPECT_EQ(limits::round_style, std::round_to_nearest);
+    EXPECT_FALSE(limits::is_iec559);
+    EXPECT_TRUE(limits::is_bounded);
+    EXPECT_FALSE(limits::is_modulo);
+    EXPECT_EQ(limits::digits, 1);
+    EXPECT_EQ(limits::digits10, 0);
+    EXPECT_EQ(limits::max_digits10, 1);
+    EXPECT_EQ(limits::radix, 2);
+    EXPECT_EQ(limits::min_exponent, -126);
+    EXPECT_EQ(limits::min_exponent10, -38);
+    EXPECT_EQ(limits::max_exponent, 128);
+    EXPECT_EQ(limits::max_exponent10, 38);
+    EXPECT_FALSE(limits::traps);
+    EXPECT_FALSE(limits::tinyness_before);
 }
 
 // ============================================================================
