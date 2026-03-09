@@ -200,6 +200,9 @@ void RTCCache::db_file::connect_db(const fs::path& path, bool readonly)
 {
     db.reset();
 
+    cache_read_disabled  = !rocfft_getenv("ROCFFT_RTC_CACHE_READ_DISABLE").empty();
+    cache_write_disabled = !rocfft_getenv("ROCFFT_RTC_CACHE_WRITE_DISABLE").empty();
+
     sqlite3* db_raw = nullptr;
     int      flags  = SQLITE_OPEN_FULLMUTEX;
     if(readonly)
@@ -325,8 +328,7 @@ std::vector<char> RTCCache::db_file::get_code_object(const std::string&         
 {
     std::vector<char> code;
 
-    // allow env variable to disable reads
-    if(!rocfft_getenv("ROCFFT_RTC_CACHE_READ_DISABLE").empty() || !db || !get_stmt)
+    if(cache_read_disabled || !db || !get_stmt)
         return code;
 
     std::lock_guard<std::mutex> lock(get_mutex);
@@ -378,8 +380,7 @@ void RTCCache::db_file::store_code_object(const std::string&          kernel_nam
                                           const std::array<char, 32>& generator_sum,
                                           const std::vector<char>&    code)
 {
-    // allow env variable to disable writes
-    if(!rocfft_getenv("ROCFFT_RTC_CACHE_WRITE_DISABLE").empty() || !db || !store_stmt)
+    if(cache_write_disabled || !db || !store_stmt)
         return;
 
     std::lock_guard<std::mutex> lock(store_mutex);
