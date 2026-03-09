@@ -155,9 +155,11 @@ HIPCUB_FORCEINLINE auto
 // Extracts \p num_bits from \p source starting at bit-offset \p bit_start.
 // The input \p source may be an 8b, 16b, 32b, or 64b unsigned integer type.
 template<typename UnsignedBits>
+//! deprecated [Since 5.0]
+HIPCUB_DEPRECATED_BECAUSE("Use hip::bitfield_extract()")
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE unsigned int
-    BFE(UnsignedBits source, unsigned int bit_start, unsigned int num_bits)
+HIPCUB_FORCEINLINE
+    unsigned int BFE(UnsignedBits source, unsigned int bit_start, unsigned int num_bits)
 {
     static_assert(std::is_unsigned<UnsignedBits>::value, "UnsignedBits must be unsigned");
     return detail::unsigned_bit_extract(source, bit_start, num_bits);
@@ -168,7 +170,8 @@ HIPCUB_FORCEINLINE unsigned int
  * Bitfield-extract for 128-bit types.
  */
 template<typename UnsignedBits>
-HIPCUB_DEVICE
+//! deprecated [Since 5.0]
+HIPCUB_DEPRECATED_BECAUSE("Use hip::bitfield_extract()") HIPCUB_DEVICE
 HIPCUB_FORCEINLINE unsigned int BFE(UnsignedBits source,
                                     unsigned int bit_start,
                                     unsigned int num_bits,
