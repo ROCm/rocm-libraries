@@ -44,6 +44,25 @@ constexpr auto TWO_STAGE_ALGORITHM =
         .with_tile_optimizations(ckt::TileOptimizations{
             .num_groups_to_merge = 1, .split_image = false, .explicit_gemm = false, .two_stage = true});
 
+constexpr ckt::Args<SIGNATURE> Args = {
+        .lengths =
+            {
+                .batch_size      = 2,
+                .groups          = 4,
+                .input_channels  = 32,
+                .output_channels = 48,
+                .image           = {.width = 32, .height = 56},
+                .filter          = {.width = 3, .height = 3},
+            },
+        .filter_strides     = {.width = 1, .height = 1},
+        .filter_dilation    = {.width = 1, .height = 1},
+        .input_left_pad     = {.width = 0, .height = 0},
+        .input_right_pad    = {.width = 0, .height = 0},
+        .a_elementwise_op   = {},
+        .b_elementwise_op   = {},
+        .cde_elementwise_op = {},
+    };
+
 using Builder  = ckb::ConvBuilder<SIGNATURE, ALGORITHM>;
 using Instance = Builder::Instance;
 
@@ -89,74 +108,36 @@ TEST(ElementWiseOp, Create)
 
 TEST(BwdWeight_2D_FP16_NHWGC, Execution)
 {
-    ckt::Args<SIGNATURE> args = {
-        .lengths =
-            {
-                .batch_size      = 2,
-                .groups          = 4,
-                .input_channels  = 32,
-                .output_channels = 48,
-                .image           = {.width = 32, .height = 56},
-                .filter          = {.width = 3, .height = 3},
-            },
-        .filter_strides     = {.width = 1, .height = 1},
-        .filter_dilation    = {.width = 1, .height = 1},
-        .input_left_pad     = {.width = 0, .height = 0},
-        .input_right_pad    = {.width = 0, .height = 0},
-        .a_elementwise_op   = {},
-        .b_elementwise_op   = {},
-        .cde_elementwise_op = {},
-    };
+    auto inputs    = ckt::alloc_inputs(Args);
+    auto outputs   = ckt::alloc_outputs(Args);
+    auto reference = ckt::alloc_outputs(Args);
 
-    auto inputs    = ckt::alloc_inputs(args);
-    auto outputs   = ckt::alloc_outputs(args);
-    auto reference = ckt::alloc_outputs(args);
-
-    ckt::init_inputs(args, inputs.get());
+    ckt::init_inputs(Args, inputs.get());
 
     auto conv = Instance{};
-    EXPECT_THAT(ckt::run(conv, args, inputs.get(), outputs.get()), SuccessfulRun());
+    EXPECT_THAT(ckt::run(conv, Args, inputs.get(), outputs.get()), SuccessfulRun());
 
     auto ref_conv = Reference{};
-    EXPECT_THAT(ckt::run(ref_conv, args, inputs.get(), reference.get()), SuccessfulRun());
+    EXPECT_THAT(ckt::run(ref_conv, Args, inputs.get(), reference.get()), SuccessfulRun());
 
-    EXPECT_THAT(outputs.get(), MatchesReference(args, reference.get()));
+    EXPECT_THAT(outputs.get(), MatchesReference(Args, reference.get()));
 }
 
 TEST(BwdWeight_TwoStage_2D_FP16_NHWGC, Execution)
 {
-    ckt::Args<SIGNATURE> args = {
-        .lengths =
-            {
-                .batch_size      = 2,
-                .groups          = 4,
-                .input_channels  = 32,
-                .output_channels = 48,
-                .image           = {.width = 32, .height = 56},
-                .filter          = {.width = 3, .height = 3},
-            },
-        .filter_strides     = {.width = 1, .height = 1},
-        .filter_dilation    = {.width = 1, .height = 1},
-        .input_left_pad     = {.width = 0, .height = 0},
-        .input_right_pad    = {.width = 0, .height = 0},
-        .a_elementwise_op   = {},
-        .b_elementwise_op   = {},
-        .cde_elementwise_op = {},
-    };
+    auto inputs    = ckt::alloc_inputs(Args);
+    auto outputs   = ckt::alloc_outputs(Args);
+    auto reference = ckt::alloc_outputs(Args);
 
-    auto inputs    = ckt::alloc_inputs(args);
-    auto outputs   = ckt::alloc_outputs(args);
-    auto reference = ckt::alloc_outputs(args);
-
-    ckt::init_inputs(args, inputs.get());
+    ckt::init_inputs(Args, inputs.get());
 
     auto conv = TwoStageInstance{};
     auto elementwise_op = ElementwiseOpInstance{};
 
-    EXPECT_THAT(ckt::run(conv, elementwise_op, args, inputs.get(), outputs.get()), SuccessfulRun());
+    EXPECT_THAT(ckt::run(conv, elementwise_op, Args, inputs.get(), outputs.get()), SuccessfulRun());
 
     auto ref_conv = Reference{};
-    EXPECT_THAT(ckt::run(ref_conv, args, inputs.get(), reference.get()), SuccessfulRun());
+    EXPECT_THAT(ckt::run(ref_conv, Args, inputs.get(), reference.get()), SuccessfulRun());
 
-    EXPECT_THAT(outputs.get(), MatchesReference(args, reference.get()));
+    EXPECT_THAT(outputs.get(), MatchesReference(Args, reference.get()));
 }
