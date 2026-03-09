@@ -117,7 +117,7 @@ typedef enum
      * Used for passing serialized FlatBuffer data to/from the backend.
      * The value should be a hipdnnBackendFlatbufferData_t struct.
      */
-    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT = 28
+    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT = 10000
 
     /** @} */
 

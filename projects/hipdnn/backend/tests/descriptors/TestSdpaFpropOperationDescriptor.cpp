@@ -755,6 +755,9 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescriptor)
 
     ASSERT_EQ(elementCount, 1);
     ASSERT_NE(retrievedQ, nullptr);
+    auto unpackedQ = HipdnnBackendDescriptor::unpackDescriptor<TensorDescriptor>(
+        &retrievedQ, HIPDNN_STATUS_BAD_PARAM, "unpack retrieved Q");
+    ASSERT_EQ(unpackedQ->getData().uid, K_SDPA_TENSOR_Q_UID);
 }
 
 // =============================================================================
@@ -870,450 +873,91 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeUnsupported)
 // GetAttribute Query Mode Tests
 // =============================================================================
 
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorQQueryReturnsOne)
+struct QueryModeParam
+{
+    hipdnnBackendAttributeName_t attr;
+    hipdnnBackendAttributeType_t type;
+    int64_t expectedElementCount;
+};
+
+class TestSdpaFpropOperationDescriptorQueryMode
+    : public TestSdpaFpropOperationDescriptor,
+      public ::testing::WithParamInterface<QueryModeParam>
+{
+};
+
+TEST_P(TestSdpaFpropOperationDescriptorQueryMode, QueryReturnsExpectedElementCount)
 {
     makeFinalized();
     auto desc = getDescriptor();
+    const auto& param = GetParam();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
+    ASSERT_NO_THROW(desc->getAttribute(param.attr, param.type, 0, &elementCount, nullptr));
+    ASSERT_EQ(elementCount, param.expectedElementCount);
 }
 
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorKQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorVQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorOQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorAttnMaskQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorScaleQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorSeqLenQQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorSeqLenKvQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorSeedQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorOffsetQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDropoutMaskQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDropoutScaleQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorPageTableKQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorPageTableVQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorBlockMaskQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorSinkTokenQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescaleQQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescaleKQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescaleVQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorDescaleSQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorScaleSQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorScaleOQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorStatsQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorMaxQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorSumExpQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorRngDumpQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorAmaxSQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorAmaxOQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT,
-                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDiagonalAlignmentQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDataTypeQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT,
-                                       HIPDNN_TYPE_DATA_TYPE,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeAttentionImplementationQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
-                                       0,
-                                       &elementCount,
-                                       nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
-
-TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
-{
-    makeFinalized();
-    auto desc = getDescriptor();
-
-    int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
-    ASSERT_EQ(elementCount, 1);
-}
+INSTANTIATE_TEST_SUITE_P(
+    SdpaFpropQueryMode,
+    TestSdpaFpropOperationDescriptorQueryMode,
+    ::testing::Values(
+        QueryModeParam{HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT, HIPDNN_TYPE_DIAGONAL_ALIGNMENT, 1},
+        QueryModeParam{HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 1},
+        QueryModeParam{
+            HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT, HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, 1},
+        QueryModeParam{HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1}));
 
 TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeTensorQueryFailsNullElementCount)
 {
@@ -1584,6 +1228,77 @@ TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeProducesCorrectNodeT)
     ASSERT_EQ(attrs->rng_dump_tensor_uid, K_SDPA_TENSOR_RNG_DUMP_UID);
     ASSERT_EQ(attrs->amax_s_tensor_uid, K_SDPA_TENSOR_AMAX_S_UID);
     ASSERT_EQ(attrs->amax_o_tensor_uid, K_SDPA_TENSOR_AMAX_O_UID);
+}
+
+TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeProducesCorrectNodeTNonDefaults)
+{
+    setAllAttributesExcept();
+
+    auto desc = getDescriptor();
+
+    // Set non-default scalar/enum attributes before finalizing
+    auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
+                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+                       1,
+                       &diagonalAlignment);
+
+    auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_UNIFIED_EXT;
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
+                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+                       1,
+                       &implementation);
+
+    hipdnnDataType_t mmaCoreMode = HIPDNN_DATA_HALF;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &mmaCoreMode);
+
+    bool generateStats = true;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT, HIPDNN_TYPE_BOOLEAN, 1, &generateStats);
+
+    float dropoutProbability = 0.5f;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT, HIPDNN_TYPE_FLOAT, 1, &dropoutProbability);
+
+    int64_t leftBound = 10;
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &leftBound);
+
+    int64_t rightBound = 20;
+    desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &rightBound);
+
+    int32_t maxSeqLenKv = 512;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT, HIPDNN_TYPE_INT32, 1, &maxSeqLenKv);
+
+    auto computeType = HIPDNN_DATA_FLOAT;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    desc->finalize();
+
+    auto node = desc->buildNode();
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
+    ASSERT_EQ(node->attributes.type, NodeAttributes::SdpaAttributes);
+
+    auto* attrs = node->attributes.AsSdpaAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    // Verify non-default scalar/enum attributes are propagated correctly
+    ASSERT_EQ(attrs->diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
+    ASSERT_EQ(attrs->implementation, AttentionImplementation::UNIFIED);
+    ASSERT_EQ(attrs->mma_core_mode, DataType::HALF);
+    ASSERT_TRUE(attrs->generate_stats.has_value());
+    ASSERT_TRUE(attrs->generate_stats.value());
+    ASSERT_TRUE(attrs->dropout_probability.has_value());
+    ASSERT_FLOAT_EQ(attrs->dropout_probability.value(), 0.5f);
+    ASSERT_TRUE(attrs->left_bound.has_value());
+    ASSERT_EQ(attrs->left_bound.value(), 10);
+    ASSERT_TRUE(attrs->right_bound.has_value());
+    ASSERT_EQ(attrs->right_bound.value(), 20);
+    ASSERT_TRUE(attrs->max_seq_len_kv.has_value());
+    ASSERT_EQ(attrs->max_seq_len_kv.value(), 512);
 }
 
 TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeWithHalfComputeType)

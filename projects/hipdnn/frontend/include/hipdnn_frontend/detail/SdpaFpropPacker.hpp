@@ -211,8 +211,7 @@ inline Error createSdpaFpropOperation(
     }
 
     // Set enum parameters using dedicated backend enum types
-    auto diagonalAlignment
-        = static_cast<hipdnnDiagonalAlignment_t>(toSdkType(attributes.diagonal_alignment));
+    auto diagonalAlignment = toBackendDiagonalAlignment(attributes.diagonal_alignment);
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
                                                HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
@@ -227,8 +226,7 @@ inline Error createSdpaFpropOperation(
                                                      "SDPA fprop mma_core_mode"));
     }
 
-    auto implementationVal
-        = static_cast<hipdnnAttentionImplementation_t>(toSdkType(attributes.implementation));
+    auto implementationVal = toBackendAttentionImplementation(attributes.implementation);
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
                                                HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,

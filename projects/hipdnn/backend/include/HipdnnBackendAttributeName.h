@@ -712,16 +712,16 @@ typedef enum
     /** @brief Right bound for sliding window (int64) */
     HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT = 2636,
 
-    /** @brief Maximum sequence length KV (int64) */
+    /** @brief Maximum sequence length KV (int32_t) */
     HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT = 2637,
 
-    /** @brief Diagonal alignment mode (DiagonalAlignment as int64) */
+    /** @brief Diagonal alignment mode (hipdnnDiagonalAlignment_t) */
     HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT = 2638,
 
-    /** @brief MMA core mode (DataType as int64) */
+    /** @brief MMA core mode (hipdnnDataType_t) */
     HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT = 2639,
 
-    /** @brief Attention implementation mode (AttentionImplementation as int64) */
+    /** @brief Attention implementation mode (hipdnnAttentionImplementation_t) */
     HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT = 2640,
 
     /** @brief Compute data type for SDPA forward */
