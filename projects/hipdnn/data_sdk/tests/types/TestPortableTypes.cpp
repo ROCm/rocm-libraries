@@ -84,7 +84,6 @@ template <>
 struct PortableTypeTraits<fp8_e4m3>
 {
     static constexpr float tolerance = 0.2f;
-    static constexpr float large_tolerance = 0.5f;
     static constexpr bool has_infinity = false;
     static constexpr uint8_t one_bits = 0x38;
     static constexpr uint8_t neg_one_bits = 0xB8;
@@ -108,7 +107,6 @@ template <>
 struct PortableTypeTraits<fp8_e5m2>
 {
     static constexpr float tolerance = 0.5f;
-    static constexpr float large_tolerance = 1.0f;
     static constexpr bool has_infinity = true;
     static constexpr uint8_t one_bits = 0x3C;
     static constexpr uint8_t neg_one_bits = 0xBC;
@@ -133,7 +131,6 @@ template <>
 struct PortableTypeTraits<fp8_e8m0>
 {
     static constexpr float tolerance = 0.01f;
-    static constexpr float large_tolerance = 0.1f;
     static constexpr bool has_infinity = false;
     static constexpr uint8_t one_bits = 0x7F; // 2^0 = 1.0
     static constexpr uint8_t nan_bits = 0xFF;
@@ -221,7 +218,6 @@ TYPED_TEST(PortableFloatTypes, TypeProperties)
 TYPED_TEST(PortableFloatTypes, ConstructFromFloat)
 {
     using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
 
     T a(1.0f);
     EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 1.0f));
@@ -233,7 +229,7 @@ TYPED_TEST(PortableFloatTypes, ConstructFromFloat)
         EXPECT_TRUE(this->nearEqual(static_cast<float>(b), 0.0f));
 
         T c(-2.0f);
-        EXPECT_TRUE(this->nearEqual(static_cast<float>(c), -2.0f, Traits::large_tolerance));
+        EXPECT_TRUE(this->nearEqual(static_cast<float>(c), -2.0f));
     }
 }
 
@@ -251,16 +247,15 @@ TYPED_TEST(PortableFloatTypes, ConstructFromDouble)
 TYPED_TEST(PortableFloatTypes, ConstructFromIntegral)
 {
     using T = TypeParam;
-    using Traits = PortableTypeTraits<T>;
 
     T a(4);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 4.0f, Traits::large_tolerance));
+    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 4.0f));
 
     // fp8_e8m0 zero/negative behavior tested in type-specific tests
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
     {
         T b(-8);
-        EXPECT_TRUE(this->nearEqual(static_cast<float>(b), -8.0f, Traits::large_tolerance));
+        EXPECT_TRUE(this->nearEqual(static_cast<float>(b), -8.0f));
 
         T c(0u);
         EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 0.0f));
