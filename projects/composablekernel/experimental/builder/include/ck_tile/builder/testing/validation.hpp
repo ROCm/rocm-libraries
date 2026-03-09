@@ -172,19 +172,6 @@ bool ValidationReport::check(std::string_view tensor_name,
 
     const auto result = ck::profiler::gpu_verify<CKType>(a_it, e_it, rtol, atol, numel);
 
-    // In case of errors, print few values from the beginning.
-    if(result.error_count > 0)
-    {
-        const int max_print = 10;
-        int printed         = 0;
-        for(size_t i = 0; i < numel && printed < max_print; ++i)
-        {
-            std::cerr << "  At index " << i << ": actual=" << static_cast<float>(a_it[i])
-                      << ", expected=" << static_cast<float>(e_it[i]) << "\n";
-            ++printed;
-        }
-    }
-
     // TODO: Gather detailed coordinates.
 
     reports_.push_back(Case{
