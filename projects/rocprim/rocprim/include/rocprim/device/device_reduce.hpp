@@ -291,7 +291,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             else
             {
                 // Decrease IPT to prevent kernel launch
-                if(config_items_per_thread >= 16u && too_large >= 16u)
+                if(too_large >= 16u)
                 {
                     constexpr unsigned int items_per_thread
                         = ceiling_div(config_items_per_thread, 16u);
@@ -304,7 +304,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                                                                initial_value,
                                                                reduce_op);
                 }
-                else if(config_items_per_thread >= 8u && too_large >= 8)
+                else if(too_large >= 8)
                 {
                     constexpr unsigned int items_per_thread
                         = ceiling_div(config_items_per_thread, 8u);
@@ -317,7 +317,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                                                                initial_value,
                                                                reduce_op);
                 }
-                else if(config_items_per_thread >= 4u && too_large >= 4)
+                else if(too_large >= 4)
                 {
                     constexpr unsigned int items_per_thread
                         = ceiling_div(config_items_per_thread, 4u);
@@ -330,7 +330,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
                                                                initial_value,
                                                                reduce_op);
                 }
-                else if(config_items_per_thread >= 2u && too_large >= 2)
+                else if(too_large >= 2)
                 {
                     constexpr unsigned int items_per_thread
                         = ceiling_div(config_items_per_thread, 2u);
