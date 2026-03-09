@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <filesystem>
 #include "common.hpp"
 #include "reference.hpp"
 
@@ -79,6 +80,12 @@
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+static inline std::string getIncludeDir(const std::string &binary_name) {
+    auto binary_path = std::filesystem::canonical(binary_name).parent_path();
+    auto include_path = std::filesystem::canonical(std::string(binary_path) + "/../include");
+    return "-I" + std::string(include_path);
+}
 
 // Get ROCM installation path from environment or use default
 static inline std::string getRocwmmaIncludePath()
