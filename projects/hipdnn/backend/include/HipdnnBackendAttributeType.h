@@ -99,6 +99,12 @@ typedef enum
     /** @brief Pointwise mode enumeration (hipdnnPointwiseMode_t) */
     HIPDNN_TYPE_POINTWISE_MODE,
 
+    /** @brief Diagonal alignment mode enumeration (hipdnnDiagonalAlignment_t) */
+    HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
+
+    /** @brief Attention implementation mode enumeration (hipdnnAttentionImplementation_t) */
+    HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
+
     /**
      * @name Extension Types
      * hipDNN-specific extension types
@@ -111,13 +117,7 @@ typedef enum
      * Used for passing serialized FlatBuffer data to/from the backend.
      * The value should be a hipdnnBackendFlatbufferData_t struct.
      */
-    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT,
-
-    /** @brief Diagonal alignment mode enumeration (hipdnnDiagonalAlignment_t) */
-    HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
-
-    /** @brief Attention implementation mode enumeration (hipdnnAttentionImplementation_t) */
-    HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT
+    HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT
 
     /** @} */
 

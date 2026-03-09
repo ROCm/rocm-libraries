@@ -725,7 +725,7 @@ typedef enum
     HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT = 2640,
 
     /** @brief Compute data type for SDPA forward */
-    HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT = 2641,
+    HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT = 2641,
 
     /** @} */
 

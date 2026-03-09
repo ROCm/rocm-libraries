@@ -211,11 +211,11 @@ inline Error createSdpaFpropOperation(
     }
 
     // Set enum parameters using dedicated backend enum types
-    auto diagonalAlignment = static_cast<hipdnnDiagonalAlignment_t>(
-        toSdkType(attributes.diagonal_alignment));
+    auto diagonalAlignment
+        = static_cast<hipdnnDiagonalAlignment_t>(toSdkType(attributes.diagonal_alignment));
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                               HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
                                                diagonalAlignment,
                                                "SDPA fprop diagonal_alignment"));
 
@@ -226,17 +226,17 @@ inline Error createSdpaFpropOperation(
                                                mmaCoreMode,
                                                "SDPA fprop mma_core_mode"));
 
-    auto implementationVal = static_cast<hipdnnAttentionImplementation_t>(
-        toSdkType(attributes.implementation));
+    auto implementationVal
+        = static_cast<hipdnnAttentionImplementation_t>(toSdkType(attributes.implementation));
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                               HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
                                                implementationVal,
                                                "SDPA fprop implementation"));
 
     // Set compute data type
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT,
+                                                 HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT,
                                                  attributes.compute_data_type,
                                                  "SDPA fprop compute data type"));
 

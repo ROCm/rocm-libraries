@@ -72,11 +72,11 @@ public:
         setIf(HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT, _amaxSDesc);
         setIf(HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT, _amaxODesc);
         // Compute data type
-        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT) == skip.end())
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT) == skip.end())
         {
             auto computeType = HIPDNN_DATA_FLOAT;
             desc->setAttribute(
-                HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+                HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
         }
     }
 
@@ -232,7 +232,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, FinalizeFailsWithoutOTensor)
 
 TEST_F(TestSdpaFpropOperationDescriptor, FinalizeFailsWithoutComputeType)
 {
-    setAllAttributesExcept({HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT});
+    setAllAttributesExcept({HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT});
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -611,7 +611,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetDiagonalAlignment)
     auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
                                        1,
                                        &diagonalAlignment));
 
@@ -624,7 +624,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetDiagonalAlignmentWrongElementCount)
     auto diagonalAlignment = HIPDNN_DIAGONAL_ALIGNMENT_TOP_LEFT_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
                                                   2,
                                                   &diagonalAlignment),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -658,7 +658,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetAttentionImplementation)
     auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
                                        1,
                                        &implementation));
 
@@ -671,7 +671,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetAttentionImplementationWrongElementC
     auto implementation = HIPDNN_ATTENTION_IMPLEMENTATION_AUTO_EXT;
 
     ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
                                                   2,
                                                   &implementation),
                                HIPDNN_STATUS_BAD_PARAM);
@@ -683,7 +683,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetComputeDataType)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -695,7 +695,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetComputeDataTypeWrongElementCount)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+            HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -758,7 +758,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeSdpafpropParams)
     auto diagonalAlignment = static_cast<hipdnnDiagonalAlignment_t>(-1);
     int64_t diagonalAlignmentCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
                                        1,
                                        &diagonalAlignmentCount,
                                        &diagonalAlignment));
@@ -780,7 +780,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeSdpafpropParams)
     auto implementation = static_cast<hipdnnAttentionImplementation_t>(-1);
     int64_t implementationCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
                                        1,
                                        &implementationCount,
                                        &implementation));
@@ -794,13 +794,13 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeComputeType)
     setAllAttributesExcept();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
 
     ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
     ASSERT_EQ(elementCount, 1);
@@ -1251,7 +1251,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDiagonalAlignmentQueryRetur
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                       HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
                                        0,
                                        &elementCount,
                                        nullptr));
@@ -1276,7 +1276,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeAttentionImplementationQuer
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                       HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
                                        0,
                                        &elementCount,
                                        nullptr));
@@ -1290,7 +1290,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -1313,7 +1313,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetAttributeDiagonalAlignmentQueryFails
     auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT,
-                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
+                                                  HIPDNN_TYPE_DIAGONAL_ALIGNMENT,
                                                   0,
                                                   nullptr,
                                                   nullptr),
@@ -1338,7 +1338,7 @@ TEST_F(TestSdpaFpropOperationDescriptor,
     auto desc = getDescriptor();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT,
-                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
+                                                  HIPDNN_TYPE_ATTENTION_IMPLEMENTATION,
                                                   0,
                                                   nullptr,
                                                   nullptr),
@@ -1505,7 +1505,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeProducesCorrectNodeT)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -1552,7 +1552,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeWithHalfComputeType)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
     desc->setAttribute(
-        HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();

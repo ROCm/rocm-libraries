@@ -429,8 +429,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_SDPA_FPROP_MMA_CORE_MODE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT),
                  "HIPDNN_ATTR_SDPA_FPROP_IMPLEMENTATION_EXT");
-    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT),
-                 "HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT),
+                 "HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)

@@ -372,7 +372,7 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                                    arrayOfElements,
                                                    "SdpaFpropOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -758,7 +758,7 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                                    arrayOfElements,
                                                    "SdpaFpropOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_SDPA_FPROP_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,

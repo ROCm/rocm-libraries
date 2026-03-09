@@ -487,7 +487,7 @@ void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& targ
                           const void* arrayOfElements,
                           const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
@@ -503,7 +503,7 @@ void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment sourc
                           void* arrayOfElements,
                           const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -531,8 +531,7 @@ void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 const void* arrayOfElements,
                                 const char* errorPrefix)
 {
-    checkSetArgs(
-        HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
@@ -548,7 +547,7 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                                 void* arrayOfElements,
                                 const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
