@@ -193,6 +193,8 @@ public:
 class ShaderModelFactory
 {
 public:
+    // We keep two kernel versions because V4_6 delivers better performance
+    // on both gfx12x(+4%) and gfx942(+6%) for cases where input channels <= 16.
     enum class KernelVersion
     {
         V4_6, // 3x3 filters, FP16 only
