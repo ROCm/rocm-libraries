@@ -329,7 +329,7 @@ struct PoolingFwdNCHWTransposingSolver
         // Before C++20 you can't aggregate initialize non-first union element
         ret[1].as_output = &InvokeParams::y;
 
-        return ret;
+        return std::move(ret);
     }
 };
 
@@ -486,7 +486,7 @@ struct PoolingBwdNCHWTransposingSolver
         // Before C++20 you can't aggregate initialize non-first union element
         ret[0].as_output = &InvokeParams::dx;
 
-        return ret;
+        return std::move(ret);
     }
 };
 

@@ -441,7 +441,7 @@ auto GenericSearch(const Solver s,
     const auto invoke_ctx = [invoke_ctx_]() {
         auto copy = invoke_ctx_;
         copy.SetInvokeType(InvokeType::AutoTune);
-        return copy;
+        return std::move(copy);
     }();
 
     // list of sampled solutions
@@ -712,7 +712,8 @@ auto GenericSearch(const Solver s,
     {
         MIOPEN_LOG_I(
             "Search cutoff or skipped for all kernels.  Last config returned: " << last_config);
-        return last_config;
+        best_config = std::move(last_config);
+        return best_config;
     }
 
     if(!is_passed)
