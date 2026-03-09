@@ -1049,7 +1049,7 @@ private:
         ss << ",\"seed\":" << s.seed;
         ss << ",\"json_out\":\"" << s.json_out << "\"";
         ss << ",\"csv_out\":\"" << s.csv_out << "\"";
-        ss << ",\"filter\":\"" << s.filter << "\"";
+        ss << ",\"filter\":\"" << json_escape(s.filter) << "\"";
         ss << ",\"dry\":" << s.dry;
         ss << ",\"min_gpu_ms_per_batch\":" << s.min_gpu_ms_per_batch;
         ss << ",\"min_secs\":" << s.min_secs;
@@ -1066,6 +1066,32 @@ private:
 
         ss << "}";
         return ss.str();
+    }
+
+    /// Escapes a JSON string, so it transforms "\" to "\\".
+    std::string json_escape(std::string_view s) const
+    {
+        std::ostringstream o;
+        for (unsigned char c : s) {
+            switch (c) {
+                case '\"': o << "\\\""; break;
+                case '\\': o << "\\\\"; break;
+                case '\b': o << "\\b"; break;
+                case '\f': o << "\\f"; break;
+                case '\n': o << "\\n"; break;
+                case '\r': o << "\\r"; break;
+                case '\t': o << "\\t"; break;
+                default:
+                    if (c < 0x20) {
+                        o << "\\u"
+                        << std::hex << std::setw(4) << std::setfill('0')
+                        << (int)c;
+                    } else {
+                        o << c;
+                    }
+            }
+        }
+        return o.str();
     }
 
     /// Serializes custom CLI settings into JSON.
