@@ -169,6 +169,14 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_DESCRIPTOR_EXT,
 
     /**
+     * @brief Pointwise operation descriptor
+     *
+     * Represents a pointwise (element-wise) operation with 1-3 input tensors
+     * and activation parameters. Supports unary, binary, and ternary operations.
+     */
+    HIPDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR,
+
+    /**
      * @brief Convolution backward data (Dgrad) operation descriptor
      *
      * Represents a backward data convolution operation with output gradient (DY),
@@ -177,11 +185,27 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR,
 
     /**
+     * @brief Batchnorm backward operation descriptor (extension)
+     *
+     * Represents a backward batch normalization operation computing gradients
+     * with respect to input (DX), scale (DScale), and bias (DBias).
+     */
+    HIPDNN_BACKEND_OPERATION_BATCHNORM_BACKWARD_DESCRIPTOR_EXT,
+
+    /**
      * @brief Batchnorm inference variance ext operation descriptor
      *
      * Represents a batch normalization inference operation (variance ext variant)
      * with input (X), mean, variance, scale, bias, epsilon, and output (Y) tensors.
      */
     HIPDNN_BACKEND_OPERATION_BATCHNORM_INFERENCE_VARIANCE_DESCRIPTOR_EXT,
+
+    /**
+     * @brief Matrix multiplication operation descriptor
+     *
+     * Represents a matrix multiplication operation with input (A),
+     * input (B), and output (C) tensors plus a compute data type.
+     */
+    HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT,
 
 } hipdnnBackendDescriptorType_t;
