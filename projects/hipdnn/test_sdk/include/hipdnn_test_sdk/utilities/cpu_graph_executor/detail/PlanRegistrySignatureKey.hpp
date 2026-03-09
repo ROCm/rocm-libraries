@@ -47,6 +47,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
 
 struct PlanRegistrySignatureKeyHash
 {
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     std::size_t operator()(const PlanRegistrySignatureKey& k) const noexcept
     {
         return std::visit([](auto const& x) { return x.hashSelf(); }, k);
@@ -67,7 +68,7 @@ struct PlanRegistrySignatureKeyEqual
         return a == b;
     }
 
-    // NOLINTNEXTLINE(readability-redundant-casting)
+    // NOLINTNEXTLINE(readability-redundant-casting, bugprone-exception-escape)
     bool operator()(const PlanRegistrySignatureKey& a,
                     const PlanRegistrySignatureKey& b) const noexcept
     {
