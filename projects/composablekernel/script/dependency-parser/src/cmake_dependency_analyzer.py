@@ -92,7 +92,7 @@ class DependencyExtractor:
         self.timeout = timeout
         self._temp_dir = None
 
-    def convert_to_dependency_command(self, compile_command: str, deps_output_file: str) -> str:
+    def convert_to_dependency_command(self, compile_command: str, deps_output_file: str) -> List[str]:
         """Convert a compile command to a dependency extraction command.
 
         Replaces -c with -MM and removes -o output specification.
@@ -102,7 +102,7 @@ class DependencyExtractor:
             deps_output_file: Path to write dependency output
 
         Returns:
-            Modified command string for dependency extraction
+            Modified command as a list of arguments for dependency extraction
         """
         parts = shlex.split(compile_command)
 
@@ -135,7 +135,7 @@ class DependencyExtractor:
             rest = new_parts[1:]
             new_parts = [compiler, "-MM", "-MF", deps_output_file] + rest
 
-        return " ".join(shlex.quote(p) for p in new_parts)
+        return new_parts
 
     def parse_makefile_deps(self, deps_content: str) -> List[str]:
         """Parse makefile-style dependency output from clang -MM.
@@ -200,7 +200,6 @@ class DependencyExtractor:
             # Note: Use errors='replace' to handle non-UTF8 output from AMD clang
             result = subprocess.run(
                 dep_command,
-                shell=True,
                 cwd=directory,
                 capture_output=True,
                 text=True,
@@ -562,7 +561,16 @@ class CMakeDependencyAnalyzer:
 
         Args:
             progress_callback: Optional callback(phase, current, total) for progress
+
+        Raises:
+            ValueError: If compile_commands_path or ninja_path is None
         """
+        # Validate required paths
+        if self.compile_commands_path is None:
+            raise ValueError("compile_commands_path is required for analysis but was None")
+        if self.ninja_path is None:
+            raise ValueError("ninja_path is required for analysis but was None")
+
         # Phase 1: Parse compile commands
         if progress_callback:
             progress_callback("parsing_compile_commands", 0, 1)

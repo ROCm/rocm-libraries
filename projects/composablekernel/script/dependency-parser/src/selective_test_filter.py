@@ -94,7 +94,7 @@ def select_tests(file_to_executables, changed_files, filter_mode):
             for exe in file_to_executables[f]:
                 if filter_mode == "all":
                     affected.add(exe)
-                elif filter_mode == "test_prefix" and ("test_" in exe or exe.startswith("test_")):
+                elif filter_mode == "test_prefix" and os.path.basename(exe).startswith("test_"):
                     affected.add(exe)
     return sorted(affected)
 
@@ -169,10 +169,28 @@ def main():
     else:
         tests = select_tests(file_to_executables, changed_files, filter_mode)
 
+    # Generate ctest regex from test names
+    if tests:
+        # Extract basenames for regex (e.g., bin/test_gemm -> test_gemm)
+        test_names = [os.path.basename(t) for t in tests]
+        regex = "|".join(test_names)
+    else:
+        regex = ""
+
+    # Output format matches Jenkinsfile usage and documentation
+    output = {
+        "tests_to_run": tests,  # For backward compatibility and length check
+        "executables": tests,  # Used by Jenkinsfile for ninja build
+        "regex": regex,  # Used by Jenkinsfile for ctest
+        "changed_files": sorted(changed_files),
+        "statistics": {
+            "total_changed_files": len(changed_files),
+            "total_affected_executables": len(tests),
+        },
+    }
+
     with open(output_json, "w") as f:
-        json.dump(
-            {"tests_to_run": tests, "changed_files": sorted(changed_files)}, f, indent=2
-        )
+        json.dump(output, f, indent=2)
 
     print(f"Exported {len(tests)} tests to run to {output_json}")
 
