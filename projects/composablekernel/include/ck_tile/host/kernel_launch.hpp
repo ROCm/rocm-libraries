@@ -153,7 +153,7 @@ CK_TILE_HOST double timing_loop_impl(TimerType timer,
     }
     timer.stop(s.stream_id_);
 
-    if(!i)
+    if(i == 0)
         return 0.;
     return timer.duration() / s.nrepeat_;
 }
