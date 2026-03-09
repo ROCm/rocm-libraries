@@ -18,7 +18,7 @@ option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_pac
 find_package(ROCmCMakeBuildTools CONFIG QUIET)
 if(NOT ROCmCMakeBuildTools_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
-        message(STATUS "ROCm CMake not found. Fetching...")
+        message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
         FetchContent_Declare(
             ROCmCMakeBuildTools
             GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
@@ -31,7 +31,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
             ${rocmcmakebuildtools_SOURCE_DIR}/share/rocmcmakebuildtools/cmake
         )
     else()
-        message(FATAL_ERROR "Failed to find ROCmCMakeBuildTools (rocm-cmake)")
+        message(FATAL_ERROR "Failed to find ROCmCMakeBuildTools")
     endif()
 endif()
 include(ROCMInstallTargets)
