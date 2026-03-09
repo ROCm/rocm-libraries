@@ -74,17 +74,13 @@ int64_t getDataTypeByteSize(hipdnn_data_sdk::data_objects::DataType type)
     case DataType::DOUBLE:
         return 8;
     case DataType::HALF:
-        return 2;
     case DataType::BFLOAT16:
         return 2;
     case DataType::INT32:
         return 4;
     case DataType::UINT8:
-        return 1;
     case DataType::INT8:
-        return 1;
     case DataType::FP8_E4M3:
-        return 1;
     case DataType::FP8_E5M2:
         return 1;
     default:

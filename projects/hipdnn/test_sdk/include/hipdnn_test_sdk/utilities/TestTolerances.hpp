@@ -79,11 +79,7 @@ constexpr float getToleranceTraining()
     {
         return 1e-7f; // this needs to be changed when double is supported
     }
-    else if constexpr(std::is_same_v<T, float>)
-    {
-        return 4e-3f;
-    }
-    else if constexpr(std::is_same_v<T, half>)
+    else if constexpr(std::is_same_v<T, float> || std::is_same_v<T, half>)
     {
         return 4e-3f;
     }
@@ -127,15 +123,7 @@ constexpr float getRmsToleranceTraining()
 {
     // RMS tolerance values for use with CpuFpReferenceMiopenRmsValidation
     // These match MIOpen's relative RMS error tolerance (typically 0.4% = 4e-3)
-    if constexpr(std::is_same_v<T, double>)
-    {
-        return 4e-3f; // 0.4% relative RMS error
-    }
-    else if constexpr(std::is_same_v<T, float>)
-    {
-        return 4e-3f; // 0.4% relative RMS error
-    }
-    else if constexpr(std::is_same_v<T, half>)
+    if constexpr(std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, half>)
     {
         return 4e-3f; // 0.4% relative RMS error
     }
@@ -161,11 +149,7 @@ constexpr float getToleranceFwd()
     {
         return 1e-5f;
     }
-    else if constexpr(std::is_same_v<T, half>)
-    {
-        return 1e-2f;
-    }
-    else if constexpr(std::is_same_v<T, bfloat16>)
+    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
     {
         return 1e-2f;
     }
@@ -189,11 +173,7 @@ constexpr float getToleranceBwd()
     {
         return 8.5e-6f;
     }
-    else if constexpr(std::is_same_v<T, half>)
-    {
-        return 2e-2f;
-    }
-    else if constexpr(std::is_same_v<T, bfloat16>)
+    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
     {
         return 2e-2f;
     }
@@ -216,11 +196,7 @@ constexpr float getToleranceWrw()
     {
         return 2e-4f;
     }
-    else if constexpr(std::is_same_v<T, half>)
-    {
-        return 2e-1f;
-    }
-    else if constexpr(std::is_same_v<T, bfloat16>)
+    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
     {
         return 2e-1f;
     }
@@ -242,11 +218,7 @@ constexpr float getTolerance()
     {
         return 1e-5f;
     }
-    else if constexpr(std::is_same_v<T, half>)
-    {
-        return 1e-2f;
-    }
-    else if constexpr(std::is_same_v<T, bfloat16>)
+    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
     {
         return 1e-2f;
     }
