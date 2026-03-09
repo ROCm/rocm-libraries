@@ -5,6 +5,8 @@
 #include "descriptors/DataTypeConversion.hpp"
 #include <gtest/gtest.h>
 
+#include <string>
+
 namespace hipdnn_backend
 {
 namespace testing
@@ -12,6 +14,7 @@ namespace testing
 
 using hipdnn_data_sdk::data_objects::ConvMode;
 using hipdnn_data_sdk::data_objects::DataType;
+using hipdnn_data_sdk::data_objects::PointwiseMode;
 
 // =============================================================================
 // Parameterized Data Type Conversion Tests
@@ -135,6 +138,127 @@ TEST(TestDataTypeConversion, FromSdkConvModeConvertsCrossCorrelation)
 TEST(TestDataTypeConversion, FromSdkConvModeThrowsOnUnset)
 {
     ASSERT_THROW_HIPDNN_STATUS(fromSdkConvMode(ConvMode::UNSET), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// Parameterized Pointwise Mode Conversion Tests
+// =============================================================================
+
+struct PointwiseModeConversionParam
+{
+    hipdnnPointwiseMode_t apiMode;
+    PointwiseMode sdkMode;
+    std::string name;
+};
+
+class TestPointwiseModeConversionRoundTrip
+    : public ::testing::TestWithParam<PointwiseModeConversionParam>
+{
+};
+
+TEST_P(TestPointwiseModeConversionRoundTrip, ToSdkPointwiseMode)
+{
+    const auto& param = GetParam();
+    ASSERT_EQ(toSdkPointwiseMode(param.apiMode), param.sdkMode);
+}
+
+TEST_P(TestPointwiseModeConversionRoundTrip, FromSdkPointwiseMode)
+{
+    const auto& param = GetParam();
+    ASSERT_EQ(fromSdkPointwiseMode(param.sdkMode), param.apiMode);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PointwiseModes,
+    TestPointwiseModeConversionRoundTrip,
+    ::testing::Values(
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_ABS, PointwiseMode::ABS, "Abs"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_ADD, PointwiseMode::ADD, "Add"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_ADD_SQUARE, PointwiseMode::ADD_SQUARE, "AddSquare"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_BINARY_SELECT, PointwiseMode::BINARY_SELECT, "BinarySelect"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_CEIL, PointwiseMode::CEIL, "Ceil"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_CMP_EQ, PointwiseMode::CMP_EQ, "CmpEq"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_CMP_GE, PointwiseMode::CMP_GE, "CmpGe"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_CMP_GT, PointwiseMode::CMP_GT, "CmpGt"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_CMP_LE, PointwiseMode::CMP_LE, "CmpLe"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_CMP_LT, PointwiseMode::CMP_LT, "CmpLt"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_CMP_NEQ, PointwiseMode::CMP_NEQ, "CmpNeq"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_DIV, PointwiseMode::DIV, "Div"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_ELU_BWD, PointwiseMode::ELU_BWD, "EluBwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_ELU_FWD, PointwiseMode::ELU_FWD, "EluFwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_ERF, PointwiseMode::ERF, "Erf"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_EXP, PointwiseMode::EXP, "Exp"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_FLOOR, PointwiseMode::FLOOR, "Floor"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_GELU_APPROX_TANH_BWD,
+                                     PointwiseMode::GELU_APPROX_TANH_BWD,
+                                     "GeluApproxTanhBwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_GELU_APPROX_TANH_FWD,
+                                     PointwiseMode::GELU_APPROX_TANH_FWD,
+                                     "GeluApproxTanhFwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_GELU_BWD, PointwiseMode::GELU_BWD, "GeluBwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_GELU_FWD, PointwiseMode::GELU_FWD, "GeluFwd"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_GEN_INDEX, PointwiseMode::GEN_INDEX, "GenIndex"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_IDENTITY, PointwiseMode::IDENTITY, "Identity"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_LOG, PointwiseMode::LOG, "Log"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_LOGICAL_AND, PointwiseMode::LOGICAL_AND, "LogicalAnd"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_LOGICAL_NOT, PointwiseMode::LOGICAL_NOT, "LogicalNot"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_LOGICAL_OR, PointwiseMode::LOGICAL_OR, "LogicalOr"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_MAX, PointwiseMode::MAX_OP, "Max"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_MIN, PointwiseMode::MIN_OP, "Min"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_MUL, PointwiseMode::MUL, "Mul"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_NEG, PointwiseMode::NEG, "Neg"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_RECIPROCAL, PointwiseMode::RECIPROCAL, "Reciprocal"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_RELU_BWD, PointwiseMode::RELU_BWD, "ReluBwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_RELU_FWD, PointwiseMode::RELU_FWD, "ReluFwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_RSQRT, PointwiseMode::RSQRT, "Rsqrt"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_SIGMOID_BWD, PointwiseMode::SIGMOID_BWD, "SigmoidBwd"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_SIGMOID_FWD, PointwiseMode::SIGMOID_FWD, "SigmoidFwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_SIN, PointwiseMode::SIN, "Sin"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_SOFTPLUS_BWD, PointwiseMode::SOFTPLUS_BWD, "SoftplusBwd"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_SOFTPLUS_FWD, PointwiseMode::SOFTPLUS_FWD, "SoftplusFwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_SQRT, PointwiseMode::SQRT, "Sqrt"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_SUB, PointwiseMode::SUB, "Sub"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_SWISH_BWD, PointwiseMode::SWISH_BWD, "SwishBwd"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_SWISH_FWD, PointwiseMode::SWISH_FWD, "SwishFwd"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_TAN, PointwiseMode::TAN, "Tan"},
+        PointwiseModeConversionParam{HIPDNN_POINTWISE_TANH_BWD, PointwiseMode::TANH_BWD, "TanhBwd"},
+        PointwiseModeConversionParam{
+            HIPDNN_POINTWISE_TANH_FWD, PointwiseMode::TANH_FWD, "TanhFwd"}),
+    [](const ::testing::TestParamInfo<PointwiseModeConversionParam>& info) {
+        return info.param.name;
+    });
+
+// =============================================================================
+// toSdkPointwiseMode Edge Cases
+// =============================================================================
+
+TEST(TestPointwiseModeConversionRoundTrip, InvalidEnumThrows)
+{
+    ASSERT_THROW_HIPDNN_STATUS(toSdkPointwiseMode(static_cast<hipdnnPointwiseMode_t>(-1)),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+// =============================================================================
+// fromSdkPointwiseMode Edge Cases
+// =============================================================================
+
+TEST(TestPointwiseModeConversionRoundTrip, UnsetSdkModeThrows)
+{
+    ASSERT_THROW_HIPDNN_STATUS(fromSdkPointwiseMode(PointwiseMode::UNSET), HIPDNN_STATUS_BAD_PARAM);
 }
 
 } // namespace testing
