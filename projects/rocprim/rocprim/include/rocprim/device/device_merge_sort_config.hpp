@@ -62,7 +62,8 @@ template<unsigned int MergeOddevenBlockSize            = 512,
          unsigned int MergeMergepathPartitionBlockSize = 128,
          unsigned int MergeMergepathBlockSize          = 128,
          unsigned int MergeMergepathItemsPerThread     = 4,
-         unsigned int MinInputSizeMergepath            = (1 << 17) + 70000>
+         unsigned int MinInputSizeMergepath            = (1 << 17) + 70000,
+         bool         UseFusedKernel                   = false>
 struct merge_sort_config : detail::merge_sort_config_params
 {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -71,12 +72,14 @@ struct merge_sort_config : detail::merge_sort_config_params
         = detail::merge_sort_block_sort_config<SortBlockSize,
                                                SortItemsPerThread,
                                                block_sort_algorithm::stable_merge_sort>;
-    using block_merge_config = detail::merge_sort_block_merge_config<MergeOddevenBlockSize,
-                                                                     1,
-                                                                     MinInputSizeMergepath,
-                                                                     MergeMergepathBlockSize,
-                                                                     MergeMergepathBlockSize,
-                                                                     MergeMergepathItemsPerThread>;
+    using block_merge_config
+        = detail::merge_sort_block_merge_config<MergeOddevenBlockSize,
+                                                1,
+                                                MinInputSizeMergepath,
+                                                MergeMergepathPartitionBlockSize,
+                                                MergeMergepathBlockSize,
+                                                MergeMergepathItemsPerThread,
+                                                UseFusedKernel>;
     constexpr merge_sort_config()
         : detail::merge_sort_config_params{block_sort_config(), block_merge_config()} {};
 #endif

@@ -150,14 +150,16 @@ template<unsigned int OddEvenBlockSize        = 256,
          unsigned int OddEvenSizeLimit        = (1 << 17) + 70000,
          unsigned int PartitionBlockSize      = 128,
          unsigned int MergePathBlockSize      = 128,
-         unsigned int MergePathItemsPerThread = 4>
+         unsigned int MergePathItemsPerThread = 4,
+         bool         UseFusedKernel          = false>
 struct merge_sort_block_merge_config : rocprim::detail::merge_sort_block_merge_config_params
 {
     constexpr merge_sort_block_merge_config()
         : rocprim::detail::merge_sort_block_merge_config_params{
-            {OddEvenBlockSize, OddEvenItemsPerThread, OddEvenSizeLimit},
-            {PartitionBlockSize, 1},
-            {MergePathBlockSize, MergePathItemsPerThread}
+              {OddEvenBlockSize, OddEvenItemsPerThread, OddEvenSizeLimit},
+              {PartitionBlockSize, 1},
+              {MergePathBlockSize, MergePathItemsPerThread},
+              UseFusedKernel
     } {};
 };
 
