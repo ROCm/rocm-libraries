@@ -22,6 +22,7 @@
 
 #include "../blas1/rocblas_copy.hpp"
 #include "../blas1/rocblas_copy_kernels.hpp"
+#include "asan_helpers.hpp"
 #include "check_numerics_vector.hpp"
 #include "handle.hpp"
 #include "rocblas_tbmv.hpp"
@@ -349,7 +350,7 @@ rocblas_status rocblas_internal_tbmv_launcher(rocblas_handle    handle,
 
     // (gemv) TBMVX_DIM_Y must be at least 4, 8 * 8 is very slow only 40Gflop/s
     static constexpr int TBMVX_DIM_X = 64;
-    static constexpr int TBMVX_DIM_Y = 16;
+    static constexpr int TBMVX_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
     rocblas_int          blocks      = (n - 1) / (TBMVX_DIM_X) + 1;
     dim3                 tbmvx_grid(blocks, 1, batches);
     dim3                 tbmvx_threads(TBMVX_DIM_X, TBMVX_DIM_Y);
