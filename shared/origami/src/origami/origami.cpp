@@ -161,8 +161,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   size_t out_wgmxcc = defaultWGMXCC;
 
   if (split_factor % numXCD == 0) out_wgmxcc = 0;
-  // Small GEMMs
-  else if (numMTs <= numXCD)
+  // Small output tiles with no split
+  else if (numMTs <= numXCD && split_factor == 1)
     out_wgmxcc = 0;
   else
     out_wgmxcc = defaultWGMXCC;

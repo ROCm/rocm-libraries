@@ -38,9 +38,17 @@ add_executable(
     descriptors/TestBatchnormInferenceOperationDescriptor.cpp
     descriptors/TestGraphDescriptorBatchnormInference.cpp
     descriptors/TestKnobSettingDescriptor.cpp
+    descriptors/TestBatchnormBackwardOperationDescriptor.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
+    descriptors/TestMatmulOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorMatmul.cpp
+    descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
+    descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorOps.cpp
+    descriptors/TestPointwiseOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestVariantPackDescriptor.cpp

@@ -336,6 +336,7 @@ class StateValues:
   doPackPreSchedulingThisLoop: bool      = False
   doPackPreSchedulingNextLoop: bool      = False
   doFullPackCodePrefetch: bool           = False
+  useCommonSgprSwap: bool                = False
 
   # Epilogue states
   preloadScaleA = False
@@ -4939,6 +4940,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.oneBufferScheduling = (kernel["1LDSBuffer"]) or \
                                       ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) and \
                                        self.states.numLDSBlk == kernel["PrefetchGlobalRead"])
+    # common sgprSwap
+    # enable it for the following case.
+    #  DTLA+B + numLDSBlk==2 + (not EPS) + (not sparse) + (MX or (StoreSwapAddr and (not CMS))
+    self.states.useCommonSgprSwap = False
+    if kernel["DirectToLds"] == 1 and self.states.numLDSBlk == 2 and \
+       (not kernel["ExpandPointerSwap"]) and (not kernel["ProblemType"]["Sparse"]) and \
+       ((kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]) or \
+         kernel["StoreSwapAddr"] and not kernel["UseCustomMainLoopSchedule"]):
+      self.states.useCommonSgprSwap = True
 
     # NamedTuple is immutable
     class intermediateTPValues(NamedTuple):
@@ -6673,7 +6683,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.defineSgpr("LocalWriteAddrMXSB", 1)
 
     # Allocate registers to swap between lds buffers
-    if kernel["StoreSwapAddr"]:
+    if self.states.useCommonSgprSwap:
+      self.defineSgpr("SwapCommon", 1)
+    elif kernel["StoreSwapAddr"]:
       if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("SwapA", 1)
       if kernel["LocalWriteUseSgprB"]:
