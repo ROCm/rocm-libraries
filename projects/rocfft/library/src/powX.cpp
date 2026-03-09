@@ -528,7 +528,7 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
 void TransformPowX(const ExecPlan&                         execPlan,
                    void*                                   in_buffer[],
                    void*                                   out_buffer[],
-                   rocfft_execution_info                   info,
+                   const rocfft_execution_info_internal&   info,
                    size_t                                  multiPlanIdx,
                    const std::map<int, device_callback_t>& callbacks)
 {
@@ -538,7 +538,8 @@ void TransformPowX(const ExecPlan&                         execPlan,
     auto tuningPacket      = TuningBenchmarker::GetSingleton().GetPacket();
     // we can log profile information if we're on the null stream,
     // since we will be able to wait for the transform to finish
-    bool emit_profile_log  = (processing_tuning || LOG_PROFILE_ENABLED()) && !info->rocfft_stream;
+    bool emit_profile_log = (processing_tuning || LOG_PROFILE_ENABLED())
+                            && !info.rocfft_streams[execPlan.location.device];
     bool emit_kernelio_log = LOG_KERNELIO_ENABLED();
 
     rocfft_ostream*    kernelio_stream = nullptr;
@@ -564,14 +565,14 @@ void TransformPowX(const ExecPlan&                         execPlan,
         {
             load_node->callbacks.load_cb_fn        = it->second.load_fn;
             load_node->callbacks.load_cb_data      = it->second.load_data;
-            load_node->callbacks.load_cb_lds_bytes = info->load_cb_lds_bytes;
+            load_node->callbacks.load_cb_lds_bytes = info.load_cb_lds_bytes;
         }
 
         if(execPlan.rootPlan->storeOps)
         {
             store_node->callbacks.store_cb_fn        = it->second.store_fn;
             store_node->callbacks.store_cb_data      = it->second.store_data;
-            store_node->callbacks.store_cb_lds_bytes = info->store_cb_lds_bytes;
+            store_node->callbacks.store_cb_lds_bytes = info.store_cb_lds_bytes;
         }
     }
 
@@ -579,8 +580,10 @@ void TransformPowX(const ExecPlan&                         execPlan,
     {
         DeviceCallIn data;
         data.node          = execPlan.execSeq[i];
-        data.rocfft_stream = (info == nullptr) ? 0 : info->rocfft_stream;
+        data.rocfft_stream = info.rocfft_streams[execPlan.location.device];
         data.deviceProp    = execPlan.deviceProp;
+
+        auto& local_work_buffer = info.workBuffers[execPlan.location.device];
 
         // Size of complex type
         const size_t complexTSize = complex_type_size(data.node->precision);
@@ -604,7 +607,7 @@ void TransformPowX(const ExecPlan&                         execPlan,
             }
             break;
         case OB_TEMP:
-            data.bufIn[0] = info->workBuffer;
+            data.bufIn[0] = local_work_buffer.data();
             if(data.node->inArrayType == rocfft_array_type_complex_planar
                || data.node->inArrayType == rocfft_array_type_hermitian_planar)
             {
@@ -612,12 +615,11 @@ void TransformPowX(const ExecPlan&                         execPlan,
                 // interleaved format, and we just need to split it for
                 // planar.
                 data.bufIn[1]
-                    = (void*)((char*)info->workBuffer + execPlan.tmpWorkBufSize * complexTSize / 2);
+                    = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize / 2);
             }
             break;
         case OB_TEMP_CMPLX_FOR_REAL:
-            data.bufIn[0]
-                = (void*)((char*)info->workBuffer + execPlan.tmpWorkBufSize * complexTSize);
+            data.bufIn[0] = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize);
             // TODO: Can we use this in planar as well ??
             // if(data.node->inArrayType == rocfft_array_type_complex_planar
             //    || data.node->inArrayType == rocfft_array_type_hermitian_planar)
@@ -628,9 +630,8 @@ void TransformPowX(const ExecPlan&                         execPlan,
             // }
             break;
         case OB_TEMP_BLUESTEIN:
-            data.bufIn[0]
-                = (void*)((char*)info->workBuffer
-                          + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
+            data.bufIn[0] = local_work_buffer.data_offset(
+                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
             // Bluestein mul-kernels (3 types) work well for CI->CI
             // so we only consider CI->CI now
             break;
@@ -662,7 +663,7 @@ void TransformPowX(const ExecPlan&                         execPlan,
             }
             break;
         case OB_TEMP:
-            data.bufOut[0] = info->workBuffer;
+            data.bufOut[0] = local_work_buffer.data();
             if(data.node->outArrayType == rocfft_array_type_complex_planar
                || data.node->outArrayType == rocfft_array_type_hermitian_planar)
             {
@@ -670,12 +671,11 @@ void TransformPowX(const ExecPlan&                         execPlan,
                 // interleaved format, and we just need to split it for
                 // planar.
                 data.bufOut[1]
-                    = (void*)((char*)info->workBuffer + execPlan.tmpWorkBufSize * complexTSize / 2);
+                    = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize / 2);
             }
             break;
         case OB_TEMP_CMPLX_FOR_REAL:
-            data.bufOut[0]
-                = (void*)((char*)info->workBuffer + execPlan.tmpWorkBufSize * complexTSize);
+            data.bufOut[0] = local_work_buffer.data_offset(execPlan.tmpWorkBufSize * complexTSize);
             // TODO: Can we use this in planar as well ??
             // if(data.node->outArrayType == rocfft_array_type_complex_planar
             //    || data.node->outArrayType == rocfft_array_type_hermitian_planar)
@@ -686,9 +686,8 @@ void TransformPowX(const ExecPlan&                         execPlan,
             // }
             break;
         case OB_TEMP_BLUESTEIN:
-            data.bufOut[0]
-                = (void*)((char*)info->workBuffer
-                          + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
+            data.bufOut[0] = local_work_buffer.data_offset(
+                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
             // Bluestein mul-kernels (3 types) work well for CI->CI
             // so we only consider CI->CI now
             break;
@@ -727,8 +726,8 @@ void TransformPowX(const ExecPlan&                         execPlan,
         // single-kernel bluestein requires a bluestein temp buffer separate from input and output
         if(data.node->scheme == CS_KERNEL_BLUESTEIN_SINGLE)
         {
-            data.bufTemp = ((char*)info->workBuffer
-                            + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
+            data.bufTemp = local_work_buffer.data_offset(
+                (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize) * complexTSize);
         }
 
         // if callbacks are enabled, make sure load_cb_fn and store_cb_fn are not nullptrs

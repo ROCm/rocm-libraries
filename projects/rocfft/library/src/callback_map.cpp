@@ -19,18 +19,13 @@
 // THE SOFTWARE.
 
 #include "callback_map.h"
+#include "exec_info.h"
 #include "plan.h"
-#include "transform.h"
 
-std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_t*   info,
-                                                   const rocfft_plan_description_t& desc,
-                                                   int                              local_comm_rank)
+std::map<int, device_callback_t> DeviceCallbackMap(const rocfft_execution_info_internal& exec_info,
+                                                   const rocfft_plan_description_t&      desc,
+                                                   int local_comm_rank)
 {
-    // tolerate user not providing an execution_info
-    rocfft_execution_info_t exec_info;
-    if(info)
-        exec_info = *info;
-
     int local_device = 0;
     if(hipGetDevice(&local_device) != hipSuccess)
         throw std::runtime_error("failed to get device");
