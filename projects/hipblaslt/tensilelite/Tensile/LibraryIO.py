@@ -288,9 +288,9 @@ def getRealDataTypeA(dataType):
     elif dataType == DataTypeEnum.BFloat8Float8.value:
         return DataTypeEnum.BFloat8.value
     elif dataType == DataTypeEnum.Float8BFloat8_fnuz.value:
-        return DataTypeEnum.float8_fnuz.value
+        return DataTypeEnum.Float8_fnuz.value
     elif dataType == DataTypeEnum.BFloat8Float8_fnuz.value:
-        return DataTypeEnum.bfloat8_fnuz.value
+        return DataTypeEnum.BFloat8_fnuz.value
     else:
         return dataType
 
