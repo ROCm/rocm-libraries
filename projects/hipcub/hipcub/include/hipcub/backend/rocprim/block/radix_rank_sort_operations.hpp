@@ -43,6 +43,8 @@
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
+#include _HIPCUB_LIBCXX_INCLUDE(bit)
+
 #include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -128,7 +130,19 @@ struct RadixSortTwiddle
 
         __device__ __forceinline__ uint32_t Digit(UnsignedBits key)
         {
-            return BFE(this->ProcessFloatMinusZero(key), bit_start, num_bits);
+            HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+
+            uint32_t result =
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+                _HIPCUB_LIBCXX::bitfield_extract
+#else
+                BFE
+#endif
+                (this->ProcessFloatMinusZero(key), bit_start, num_bits);
+
+            HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+
+            return result;
         }
     };
 
