@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <flatbuffers/flatbuffers.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
@@ -104,6 +105,22 @@ inline Error setDescriptorAttrDataType(hipdnnBackendDescriptor_t desc,
     }
     return setDescriptorAttrScalar(
         desc, attrName, HIPDNN_TYPE_DATA_TYPE, *hipdnnType, errorContext);
+}
+
+// Sets an optional scalar attribute on a backend descriptor. No-op if the
+// optional has no value.
+template <typename T>
+inline Error setDescriptorAttrOptionalScalar(hipdnnBackendDescriptor_t desc,
+                                             hipdnnBackendAttributeName_t attrName,
+                                             hipdnnBackendAttributeType_t attrType,
+                                             const flatbuffers::Optional<T>& value,
+                                             const std::string& errorContext)
+{
+    if(!value.has_value())
+    {
+        return {};
+    }
+    return setDescriptorAttrScalar(desc, attrName, attrType, value.value(), errorContext);
 }
 
 // Sets a tensor reference attribute on an operation descriptor by looking up

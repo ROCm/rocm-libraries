@@ -39,6 +39,7 @@ add_executable(
     TestMiopenHipdnnEnginePluginHandle.cpp
     TestMiopenHipdnnPluginExecutionContext.cpp
     TestMiopenTensor.cpp
+    TestMiopenPluginPublic.cpp
     TestMiopenUtils.cpp
 )
 
