@@ -1011,10 +1011,6 @@ target_include_directories( MIOpen PRIVATE ${ROCRAND_INCLUDE_DIR} )
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
-target_internal_library(MIOpen Boost::filesystem)
-target_compile_definitions(MIOpen PRIVATE BOOST_DISABLE_EXPLICIT_SYMBOL_VISIBILITY)
-list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
-
 if(NOT WIN32 AND NOT APPLE)
     target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
     set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
@@ -1027,14 +1023,6 @@ if(MIOPEN_ENABLE_SQLITE)
     target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
 endif()
 ############################################################
-# MIOpen depends on librt for Boost.Interprocess
-if(NOT WIN32 AND NOT APPLE)
-    find_library(LIBRT rt)
-    if(LIBRT)
-        message(STATUS "Librt: " ${LIBRT})
-        target_internal_library(MIOpen ${LIBRT})
-    endif()
-endif()
 
 if(MIOPEN_USE_ROCTRACER)
     target_include_directories(MIOpen PRIVATE ${ROCTRACER_INCLUDE_DIR})

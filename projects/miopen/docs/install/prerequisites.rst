@@ -18,12 +18,6 @@ all types of MIOpen installations.
 * `ROCm CMake <https://github.com/ROCm/rocm-cmake>`_: CMake modules for common
   build tasks needed for the ROCm software stack
 * `Half <http://half.sourceforge.net/>`_: An IEEE 754-based, half-precision floating-point library
-* `Boost <http://www.boost.org/>`_: Version 1.79 is recommended, because older versions might need patches
-  to work on newer systems
-
-  * MIOpen uses the ``boost-system`` and ``boost-filesystem`` packages to enable persistent
-    :doc:`kernel cache <../conceptual/cache>`
-
 * `SQLite3 <https://sqlite.org/index.html>`_: A read-write performance database
 * lbzip2: A multi-threaded compression and decompression utility
 * :doc:`rocBLAS <rocblas:index>`: AMD's library for Basic Linear Algebra Subprograms (BLAS) on the
