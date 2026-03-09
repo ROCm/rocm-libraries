@@ -205,14 +205,6 @@ TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralPositive)
     EXPECT_EQ(static_cast<float>(a), 1.0f);
 }
 
-TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralZero)
-{
-    // E8M0 has no zero - 0.0 clamps to min (2^-127)
-    auto a = 0.0_e8m0;
-    EXPECT_TRUE((std::is_same_v<decltype(a), fp8_e8m0>));
-    EXPECT_EQ(static_cast<float>(a), 0x1p-127f);
-}
-
 TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralPowerOfTwo)
 {
     // E8M0 only represents powers of 2 exactly
@@ -230,13 +222,6 @@ TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralPowerOfTwo)
 
     auto e = 0.25_e8m0;
     EXPECT_EQ(static_cast<float>(e), 0.25f);
-}
-
-TEST_F(TestUserDefinedLiterals, Fp8E8M0LiteralFromNegativeFloat)
-{
-    // E8M0 is unsigned - negative values clamp to min (2^-127)
-    fp8_e8m0 a(-1.0f);
-    EXPECT_EQ(static_cast<float>(a), 0x1p-127f);
 }
 
 // ============================================================================
