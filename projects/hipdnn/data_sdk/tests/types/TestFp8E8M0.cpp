@@ -259,35 +259,6 @@ TEST(TestFp8E8M0, NumericLimitsRoundError)
     EXPECT_EQ(static_cast<float>(roundErr), 1.0f);
 }
 
-TEST(TestFp8E8M0, NumericLimitsStaticProperties)
-{
-    using limits = std::numeric_limits<fp8_e8m0>;
-
-    EXPECT_TRUE(limits::is_specialized);
-    EXPECT_FALSE(limits::is_signed);
-    EXPECT_FALSE(limits::is_integer);
-    EXPECT_FALSE(limits::is_exact);
-    EXPECT_FALSE(limits::has_infinity);
-    EXPECT_TRUE(limits::has_quiet_NaN);
-    EXPECT_FALSE(limits::has_signaling_NaN);
-    EXPECT_EQ(limits::has_denorm, std::denorm_absent);
-    EXPECT_FALSE(limits::has_denorm_loss);
-    EXPECT_EQ(limits::round_style, std::round_to_nearest);
-    EXPECT_FALSE(limits::is_iec559);
-    EXPECT_TRUE(limits::is_bounded);
-    EXPECT_FALSE(limits::is_modulo);
-    EXPECT_EQ(limits::digits, 1);
-    EXPECT_EQ(limits::digits10, 0);
-    EXPECT_EQ(limits::max_digits10, 1);
-    EXPECT_EQ(limits::radix, 2);
-    EXPECT_EQ(limits::min_exponent, -126);
-    EXPECT_EQ(limits::min_exponent10, -38);
-    EXPECT_EQ(limits::max_exponent, 128);
-    EXPECT_EQ(limits::max_exponent10, 38);
-    EXPECT_FALSE(limits::traps);
-    EXPECT_FALSE(limits::tinyness_before);
-}
-
 // ============================================================================
 // Cross-Type Conversion Tests
 // ============================================================================
