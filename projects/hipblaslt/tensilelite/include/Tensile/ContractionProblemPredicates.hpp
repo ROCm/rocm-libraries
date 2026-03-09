@@ -1420,26 +1420,29 @@ namespace TensileLite
                     return "TypesEqual";
                 }
 
-                virtual bool operator()(ContractionProblemGemm const& problem) const override
-                {
-                    auto ret = problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
-                           && problem.c().dataType() == value[2]
-                           && problem.d().dataType() == value[3];
-
-                    using MyType = std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2>;
-                    std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2> ciA =
+		// This function checks if the computeInputType of a problem matches the computeInputType of a
+		// solution. Because for Float8_fnuz/BFloat8_fnuz, the computeInputTypeA and computeInputTypeB
+		// might be concatenated like this: computeInputTypeAcomputeInputTypeB_fnuz, this function
+		// includes special logic to inspect types at the concatenation position.
+		//
+                bool validateComputeType(rocisa::DataType const& problemComputeInputType, bool const isComputeInputTypeA) const
+		{
+		    // computeInputTypeA corresponds to the first type in the concatenated type
+                    std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2> const computeInputTypeAMapping =
                     {{
                         {rocisa::DataType::BFloat8_fnuz, rocisa::DataType::BFloat8Float8_fnuz},
                         {rocisa::DataType::Float8_fnuz,  rocisa::DataType::Float8BFloat8_fnuz},
                     }};
 
-                    std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2> ciB =
+		    // computeInputTypeB corresponds to the second type in the concatenated type
+                    std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2> const computeInputTypeBMapping =
                     {{
                         {rocisa::DataType::Float8_fnuz,  rocisa::DataType::BFloat8Float8_fnuz},
                         {rocisa::DataType::BFloat8_fnuz, rocisa::DataType::Float8BFloat8_fnuz},
                     }};
 
-                    auto check = [](MyType const& arr, rocisa::DataType const& t1, rocisa::DataType const& t2){
+                    auto validate = [](std::array<std::pair<rocisa::DataType, rocisa::DataType>, 2> const& arr,
+			    rocisa::DataType const& t1, rocisa::DataType const& t2){
                         if(t1 == t2)
                             return true;
                         return std::any_of(arr.begin(), arr.end(), [&](const auto& p){
@@ -1447,17 +1450,30 @@ namespace TensileLite
                         });
                     };
 
-                    ret = ret &&
-                          check(ciA, problem.computeInputTypeA(), value[4]) &&
-                          check(ciB, problem.computeInputTypeB(), value[5]);
+		    if(isComputeInputTypeA)
+		    {
+			// value[4] is computeInputTypeA
+			return
+			    validate(computeInputTypeAMapping, problemComputeInputType, value[4]);
+		    }
+		    else
+		    {
+			// value[5] is computeInputTypeB
+			return
+			    validate(computeInputTypeBMapping, problemComputeInputType, value[5]);
+		    }
+		}
 
-                    return ret;
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    auto ret = problem.a().dataType() == value[0]
+			    && problem.b().dataType() == value[1]
+                            && problem.c().dataType() == value[2]
+                            && problem.d().dataType() == value[3];
 
-                    //return problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
-                    //       && problem.c().dataType() == value[2]
-                    //       && problem.d().dataType() == value[3]
-                    //       && problem.computeInputTypeA() == value[4]
-                    //       && problem.computeInputTypeB() == value[5];
+		    return ret &&
+			validateComputeType(problem.computeInputTypeA(), true) &&
+			validateComputeType(problem.computeInputTypeB(), false);
                 }
 
                 virtual std::string toString() const override
