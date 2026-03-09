@@ -433,5 +433,39 @@ private:
     mutable bool use_tf32                 = false;
 };
 
+inline bool IsBwdDataPointOutput3dStrideEqFilter(const ProblemDescription& problem)
+{
+    if(problem.GetDirection() != Direction::BackwardData)
+        return false;
+
+    const auto& conv = problem.GetConv();
+    if(conv.GetSpatialDimension() != 3 || conv.group_count != 1)
+        return false;
+
+    const auto& dy_desc = problem.GetIn();
+    const auto& w_desc  = problem.GetWeights();
+
+    const auto& dy_lens = dy_desc.GetLengths();
+    if(dy_lens.size() != 5 || dy_lens[2] != 1 || dy_lens[3] != 1 || dy_lens[4] != 1)
+        return false;
+
+    const auto& pads      = conv.GetConvPads();
+    const auto& strides   = conv.GetConvStrides();
+    const auto& dilations = conv.GetConvDilations();
+    const auto& w_lens    = w_desc.GetLengths();
+    if(w_lens.size() != 5 || pads.size() != 3 || strides.size() != 3 || dilations.size() != 3)
+        return false;
+
+    for(int i = 0; i < 3; ++i)
+    {
+        if(pads[i] != 0 || dilations[i] != 1)
+            return false;
+        if(static_cast<int>(w_lens[2 + i]) != strides[i])
+            return false;
+    }
+
+    return true;
+}
+
 } // namespace conv
 } // namespace miopen

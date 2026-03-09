@@ -10,6 +10,7 @@
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/util.hpp>
+#include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
@@ -85,6 +86,8 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     const auto& wDesc  = problem.GetWeights();
     const auto& dxDesc = problem.GetOut();
 
+    const auto prefer_point_output_shape = miopen::conv::IsBwdDataPointOutput3dStrideEqFilter(problem);
+
     int n_SetTensor            = 0;
     int n_transpose_NCHW2CNHW  = 0;
     int n_transpose_CNHW2NCHW  = 0;
@@ -118,9 +121,21 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     // if not 1x1
     else
     {
-        n_gemm_strided_batched = conv.group_count;
-        n_gemm_runs            = in_n;
-        n_Col2ImGPU            = in_n;
+        if(conv.group_count == 1 && conv.GetSpatialDimension() == 3)
+        {
+            // Keep the WTI model aligned with the 3D execution path:
+            // one strided-batched GEMM + one batched Col2Im launch.
+            n_gemm_strided_batched = in_n;
+            n_gemm_runs            = 1;
+            n_Col2ImGPU            = 1;
+        }
+        else
+        {
+            // Preserve the previous non-3D behavior in WTI estimation.
+            n_gemm_strided_batched = conv.group_count;
+            n_gemm_runs            = in_n;
+            n_Col2ImGPU            = in_n;
+        }
     }
 
     auto wti = 1.0;
@@ -130,6 +145,8 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     wti *= gemm::SlowdownFactor(n_gemm_runs, 0.9, 0.9);
     wti *= gemm::SlowdownFactor(n_gemm_strided_batched, 1.0, 0.95);
     wti *= gemm::SlowdownFactor(n_Col2ImGPU, 0.4, 0.8);
+    if(prefer_point_output_shape && wti < 10.0)
+        wti = 10.0;
     return wti;
 }
 
@@ -553,9 +570,9 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
                                      std::multiplies<std::size_t>()) *
                      GetTypeSize(dyDesc.GetType()) * conv.group_count;
 
-    // For regular convolution, GemmBwdRest now launches one strided-batched GEMM over N,
-    // so workspace must hold all N GEMM outputs before per-sample Col2Im.
-    if(conv.group_count == 1)
+    // 3D regular convolution uses one strided-batched GEMM over N, so workspace must hold
+    // all N GEMM outputs before batched Col2Im.
+    if(conv.group_count == 1 && spatial_dim == 3)
         gemm_size *= in_n;
 
     if(gemm_size > handle.GetMaxMemoryAllocSize())
@@ -685,7 +702,7 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
             float time_gemm = 0;
 
             // tensors.dx = transpose(tensors.w) * tensors.dy
-            if(group_count == 1)
+            if(group_count == 1 && spatial_dims == 3)
             {
                 auto batched_gemm_desc   = gemm_desc;
                 batched_gemm_desc.batch_count = static_cast<int>(in_n);
@@ -711,43 +728,40 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                 if(handle.IsProfilingEnabled())
                     time_gemm += handle.GetKernelTime();
 
-                if(spatial_dims == 3)
+                time_gemm += Col2Im3dGPUBatched(handle,
+                                                workspace,
+                                                out_spatial[0],
+                                                out_spatial[1],
+                                                out_spatial[2],
+                                                wei_spatial[0],
+                                                wei_spatial[1],
+                                                wei_spatial[2],
+                                                static_cast<uint32_t>(pads[0]),
+                                                static_cast<uint32_t>(pads[1]),
+                                                static_cast<uint32_t>(pads[2]),
+                                                static_cast<uint32_t>(strides[0]),
+                                                static_cast<uint32_t>(strides[1]),
+                                                static_cast<uint32_t>(strides[2]),
+                                                static_cast<uint32_t>(dilations[0]),
+                                                static_cast<uint32_t>(dilations[1]),
+                                                static_cast<uint32_t>(dilations[2]),
+                                                static_cast<uint32_t>(in_c),
+                                                static_cast<uint32_t>(in_spatial[0]),
+                                                static_cast<uint32_t>(in_spatial[1]),
+                                                static_cast<uint32_t>(in_spatial[2]),
+                                                static_cast<uint32_t>(in_n),
+                                                static_cast<uint64_t>(in_c) * wei_spatial_size *
+                                                    out_spatial_size,
+                                                dx,
+                                                static_cast<uint64_t>(in_c) * in_spatial_size,
+                                                0,
+                                                dyDesc_.GetType());
+                if(handle.IsProfilingEnabled())
                 {
-                    time_gemm += Col2Im3dGPUBatched(handle,
-                                                    workspace,
-                                                    out_spatial[0],
-                                                    out_spatial[1],
-                                                    out_spatial[2],
-                                                    wei_spatial[0],
-                                                    wei_spatial[1],
-                                                    wei_spatial[2],
-                                                    static_cast<uint32_t>(pads[0]),
-                                                    static_cast<uint32_t>(pads[1]),
-                                                    static_cast<uint32_t>(pads[2]),
-                                                    static_cast<uint32_t>(strides[0]),
-                                                    static_cast<uint32_t>(strides[1]),
-                                                    static_cast<uint32_t>(strides[2]),
-                                                    static_cast<uint32_t>(dilations[0]),
-                                                    static_cast<uint32_t>(dilations[1]),
-                                                    static_cast<uint32_t>(dilations[2]),
-                                                    static_cast<uint32_t>(in_c),
-                                                    static_cast<uint32_t>(in_spatial[0]),
-                                                    static_cast<uint32_t>(in_spatial[1]),
-                                                    static_cast<uint32_t>(in_spatial[2]),
-                                                    static_cast<uint32_t>(in_n),
-                                                    static_cast<uint64_t>(in_c) * wei_spatial_size *
-                                                        out_spatial_size,
-                                                    dx,
-                                                    static_cast<uint64_t>(in_c) * in_spatial_size,
-                                                    0,
-                                                    dyDesc_.GetType());
-                    if(handle.IsProfilingEnabled())
-                    {
-                        handle.ResetKernelTime();
-                        handle.AccumKernelTime(time_gemm);
-                    }
-                    return;
+                    handle.ResetKernelTime();
+                    handle.AccumKernelTime(time_gemm);
                 }
+                return;
             }
 
             for(std::size_t i = 0; i < in_n; i++)
@@ -772,15 +786,24 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
                     if(handle.IsProfilingEnabled())
                         time_gemm += handle.GetKernelTime();
                 }
+                else
+                {
+                    const auto gemm_status =
+                        CallGemm(handle, gemm_desc, w, 0, dy, out_offset, workspace, 0);
+                    if(gemm_status != miopenStatusSuccess)
+                        MIOPEN_THROW("GemmBwdRest execution failure.");
+
+                    if(handle.IsProfilingEnabled())
+                        time_gemm += handle.GetKernelTime();
+                }
 
                 time_gemm += Col2ImGPU(handle,
                                        spatial_dims,
                                        static_cast<const uint8_t*>(workspace) +
-                                           (group_count == 1 ? i * in_c *
-                                                                 wei_spatial_size *
-                                                                 out_spatial_size *
-                                                                 GetTypeSize(dyDesc_.GetType())
-                                                             : 0),
+                                           (group_count == 1 && spatial_dims == 3
+                                                ? i * in_c * wei_spatial_size * out_spatial_size *
+                                                      GetTypeSize(dyDesc_.GetType())
+                                                : 0),
                                        out_spatial,
                                        wei_spatial,
                                        pads,
