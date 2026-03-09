@@ -28,7 +28,7 @@ public:
 
     // Builds a tensor map from a vector of FlatBuffer TensorAttributesT.
     // Each tensor is created via TensorDescriptor::fromFlatBuffer() and indexed by UID.
-    // Forwards to the free function hipdnn_backend::buildTensorMap() in GraphHelpers.hpp.
+    // Throws on null tensors or duplicate UIDs.
     static std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> buildTensorMap(
         const std::vector<std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>>&
             tensors);

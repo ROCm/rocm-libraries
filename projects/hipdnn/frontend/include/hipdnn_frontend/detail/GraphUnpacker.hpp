@@ -48,6 +48,23 @@
 namespace hipdnn_frontend::detail
 {
 
+/// Deserializes a FlatBuffer node's attributes into a frontend node and emplaces it.
+template <typename FrontendAttrType, typename FrontendNodeType, typename FbAttrType>
+void unpackNodeFromFlatBuffer(
+    const hipdnn_data_sdk::data_objects::Node* fbNode,
+    const FbAttrType* fbAttr,
+    const std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
+    const graph::GraphAttributes& outGraphAttrs,
+    std::vector<std::shared_ptr<graph::INode>>& outNodes)
+{
+    auto attr = FrontendAttrType::fromFlatBuffer(fbAttr, tensorMap);
+    if(fbNode->name() != nullptr)
+    {
+        attr.set_name(fbNode->name()->str());
+    }
+    outNodes.emplace_back(std::make_shared<FrontendNodeType>(std::move(attr), outGraphAttrs));
+}
+
 /// Builds frontend nodes and graph-level attributes from a parsed FlatBuffer Graph.
 /// Each node type is dispatched to its corresponding frontend node class.
 [[nodiscard]] inline Error
@@ -77,10 +94,15 @@ namespace hipdnn_frontend::detail
         for(const auto* fbTensor : *fbGraph->tensors())
         {
             auto tensor = graph::TensorAttributes::fromFlatBuffer(fbTensor);
-            if(tensor != nullptr && tensor->has_uid())
+            if(tensor == nullptr)
             {
-                tensorMap[tensor->get_uid()] = tensor;
+                return {ErrorCode::INVALID_VALUE, "Failed to deserialize tensor from FlatBuffer"};
             }
+            if(!tensor->has_uid())
+            {
+                return {ErrorCode::INVALID_VALUE, "Tensor in FlatBuffer graph has no UID"};
+            }
+            tensorMap[tensor->get_uid()] = tensor;
         }
     }
 
@@ -89,184 +111,143 @@ namespace hipdnn_frontend::detail
     {
         for(const auto* fbNode : *fbGraph->nodes())
         {
+            if(fbNode == nullptr)
+            {
+                return {ErrorCode::INVALID_VALUE, "Null node in FlatBuffer graph"};
+            }
+
             auto type = fbNode->attributes_type();
 
             switch(type)
             {
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormAttributes:
-            {
-                auto attr = graph::BatchnormAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_BatchnormAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::BatchnormNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::BatchnormAttributes, graph::BatchnormNode>(
+                    fbNode,
+                    fbNode->attributes_as_BatchnormAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes:
-            {
-                auto attr = graph::BatchnormBackwardAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_BatchnormBackwardAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::BatchnormBackwardNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::BatchnormBackwardAttributes,
+                                         graph::BatchnormBackwardNode>(
+                    fbNode,
+                    fbNode->attributes_as_BatchnormBackwardAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes:
-            {
-                auto attr = graph::BatchnormInferenceAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_BatchnormInferenceAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(std::make_shared<graph::BatchnormInferenceNode>(
-                    std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::BatchnormInferenceAttributes,
+                                         graph::BatchnormInferenceNode>(
+                    fbNode,
+                    fbNode->attributes_as_BatchnormInferenceAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::
                 BatchnormInferenceAttributesVarianceExt:
-            {
-                auto attr = graph::BatchnormInferenceAttributesVarianceExt::fromFlatBuffer(
-                    fbNode->attributes_as_BatchnormInferenceAttributesVarianceExt(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(std::make_shared<graph::BatchnormInferenceNodeVarianceExt>(
-                    std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::BatchnormInferenceAttributesVarianceExt,
+                                         graph::BatchnormInferenceNodeVarianceExt>(
+                    fbNode,
+                    fbNode->attributes_as_BatchnormInferenceAttributesVarianceExt(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes:
-            {
-                auto attr = graph::ConvFpropAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_ConvolutionFwdAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::ConvolutionFpropNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::ConvFpropAttributes, graph::ConvolutionFpropNode>(
+                    fbNode,
+                    fbNode->attributes_as_ConvolutionFwdAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
-            {
-                auto attr = graph::ConvDgradAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_ConvolutionBwdAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::ConvolutionDgradNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::ConvDgradAttributes, graph::ConvolutionDgradNode>(
+                    fbNode,
+                    fbNode->attributes_as_ConvolutionBwdAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
-            {
-                auto attr = graph::ConvWgradAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_ConvolutionWrwAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::ConvolutionWgradNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::ConvWgradAttributes, graph::ConvolutionWgradNode>(
+                    fbNode,
+                    fbNode->attributes_as_ConvolutionWrwAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::PointwiseAttributes:
-            {
-                auto attr = graph::PointwiseAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_PointwiseAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::PointwiseNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::PointwiseAttributes, graph::PointwiseNode>(
+                    fbNode,
+                    fbNode->attributes_as_PointwiseAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::MatmulAttributes:
-            {
-                auto attr = graph::MatmulAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_MatmulAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::MatmulNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::MatmulAttributes, graph::MatmulNode>(
+                    fbNode,
+                    fbNode->attributes_as_MatmulAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes:
-            {
-                auto attr = graph::SdpaAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_SdpaAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::SdpaFpropNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::SdpaAttributes, graph::SdpaFpropNode>(
+                    fbNode,
+                    fbNode->attributes_as_SdpaAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes:
-            {
-                auto attr = graph::LayernormAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_LayernormAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::LayerNormNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::LayernormAttributes, graph::LayerNormNode>(
+                    fbNode,
+                    fbNode->attributes_as_LayernormAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::RMSNormAttributes:
-            {
-                auto attr = graph::RMSNormAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_RMSNormAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(
-                    std::make_shared<graph::RMSNormNode>(std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::RMSNormAttributes, graph::RMSNormNode>(
+                    fbNode,
+                    fbNode->attributes_as_RMSNormAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
-            {
-                auto attr = graph::BlockScaleDequantizeAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_BlockScaleDequantizeAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(std::make_shared<graph::BlockScaleDequantizeNode>(
-                    std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::BlockScaleDequantizeAttributes,
+                                         graph::BlockScaleDequantizeNode>(
+                    fbNode,
+                    fbNode->attributes_as_BlockScaleDequantizeAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             case hipdnn_data_sdk::data_objects::NodeAttributes::BlockScaleQuantizeAttributes:
-            {
-                auto attr = graph::BlockScaleQuantizeAttributes::fromFlatBuffer(
-                    fbNode->attributes_as_BlockScaleQuantizeAttributes(), tensorMap);
-                if(fbNode->name() != nullptr)
-                {
-                    attr.set_name(fbNode->name()->str());
-                }
-                outNodes.emplace_back(std::make_shared<graph::BlockScaleQuantizeNode>(
-                    std::move(attr), outGraphAttrs));
+                unpackNodeFromFlatBuffer<graph::BlockScaleQuantizeAttributes,
+                                         graph::BlockScaleQuantizeNode>(
+                    fbNode,
+                    fbNode->attributes_as_BlockScaleQuantizeAttributes(),
+                    tensorMap,
+                    outGraphAttrs,
+                    outNodes);
                 break;
-            }
             default:
                 return {ErrorCode::INVALID_VALUE,
                         "Unsupported node type in FlatBuffer deserialization"};
             }
         }
+    }
+
+    if(outNodes.empty())
+    {
+        return {ErrorCode::INVALID_VALUE, "FlatBuffer graph has no nodes"};
     }
 
     return {};

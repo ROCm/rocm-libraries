@@ -55,7 +55,9 @@ std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> GraphDescriptor::buildGra
     graph->compute_data_type = _computeDataType;
     graph->intermediate_data_type = _intermediateDataType;
     graph->io_data_type = _ioDataType;
-    graph->preferred_engine_id = _preferredEngineId;
+    graph->preferred_engine_id = _preferredEngineId.has_value()
+                                     ? flatbuffers::Optional<int64_t>(_preferredEngineId.value())
+                                     : flatbuffers::nullopt;
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
 
@@ -122,11 +124,14 @@ void GraphDescriptor::setPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                            int64_t elementCount,
                                            const void* arrayOfElements)
 {
-    setOptionalInt64(_preferredEngineId,
+    flatbuffers::Optional<int64_t> fbOptional = flatbuffers::nullopt;
+    setOptionalInt64(fbOptional,
                      attributeType,
                      elementCount,
                      arrayOfElements,
                      "GraphDescriptor::setPreferredEngineId");
+    _preferredEngineId
+        = fbOptional.has_value() ? std::optional<int64_t>(fbOptional.value()) : std::nullopt;
 }
 
 void GraphDescriptor::setHandle(hipdnnBackendAttributeType_t attributeType,
@@ -245,17 +250,32 @@ void GraphDescriptor::getOperations(hipdnnBackendAttributeType_t attributeType,
     }
 
     auto outputArray = static_cast<HipdnnBackendDescriptor**>(arrayOfElements);
-    for(size_t i = 0; i < _operations.size(); ++i)
+
+    // Build into a local vector so no pointers leak if a later iteration fails.
+    std::vector<HipdnnBackendDescriptor*> packed;
+    packed.reserve(_operations.size());
+    try
     {
-        // Operations implement both IGraphOperation and IBackendDescriptor via
-        // HipdnnBackendDescriptorImpl. Cast to IBackendDescriptor for packDescriptor.
-        auto backendDesc = std::dynamic_pointer_cast<const IBackendDescriptor>(_operations[i]);
-        THROW_IF_NULL(backendDesc,
-                      HIPDNN_STATUS_INTERNAL_ERROR,
-                      "GraphDescriptor::getAttribute(): operation does not implement "
-                      "IBackendDescriptor");
-        outputArray[i] = HipdnnBackendDescriptor::packDescriptor(backendDesc);
+        for(const auto& operation : _operations)
+        {
+            auto backendDesc = std::dynamic_pointer_cast<const IBackendDescriptor>(operation);
+            THROW_IF_NULL(backendDesc,
+                          HIPDNN_STATUS_INTERNAL_ERROR,
+                          "GraphDescriptor::getAttribute(): operation does not implement "
+                          "IBackendDescriptor");
+            packed.push_back(HipdnnBackendDescriptor::packDescriptor(backendDesc));
+        }
     }
+    catch(...)
+    {
+        for(auto* p : packed)
+        {
+            delete p;
+        }
+        throw;
+    }
+
+    std::copy(packed.begin(), packed.end(), outputArray);
 }
 
 void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attributeType,
@@ -263,7 +283,11 @@ void GraphDescriptor::getPreferredEngineId(hipdnnBackendAttributeType_t attribut
                                            int64_t* elementCount,
                                            void* arrayOfElements) const
 {
-    getOptionalInt64(_preferredEngineId,
+    flatbuffers::Optional<int64_t> fbOptional
+        = _preferredEngineId.has_value()
+              ? flatbuffers::Optional<int64_t>(_preferredEngineId.value())
+              : flatbuffers::nullopt;
+    getOptionalInt64(fbOptional,
                      attributeType,
                      requestedElementCount,
                      elementCount,
@@ -386,7 +410,9 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _computeDataType = graph->compute_data_type;
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
-    _preferredEngineId = graph->preferred_engine_id;
+    _preferredEngineId = graph->preferred_engine_id.has_value()
+                             ? std::optional<int64_t>(graph->preferred_engine_id.value())
+                             : std::nullopt;
 
     // Cache the serialized bytes for getSerializedGraph() by re-serializing from the parsed GraphT
     flatbuffers::FlatBufferBuilder builder;

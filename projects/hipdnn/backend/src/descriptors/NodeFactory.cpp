@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include "NodeFactory.hpp"
-#include "GraphHelpers.hpp"
 #include "HipdnnException.hpp"
 
 namespace hipdnn_backend
@@ -30,7 +29,20 @@ std::shared_ptr<IGraphOperation> NodeFactory::createOperationFromNode(
 std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> NodeFactory::buildTensorMap(
     const std::vector<std::unique_ptr<hipdnn_data_sdk::data_objects::TensorAttributesT>>& tensors)
 {
-    return hipdnn_backend::buildTensorMap(tensors);
+    std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> tensorMap;
+    for(const auto& tensorT : tensors)
+    {
+        THROW_IF_NULL(
+            tensorT, HIPDNN_STATUS_INTERNAL_ERROR, "buildTensorMap: null tensor in graph");
+
+        THROW_IF_TRUE(tensorMap.count(tensorT->uid) > 0,
+                      HIPDNN_STATUS_INTERNAL_ERROR,
+                      "buildTensorMap: duplicate tensor UID " + std::to_string(tensorT->uid)
+                          + " in graph");
+
+        tensorMap[tensorT->uid] = TensorDescriptor::fromFlatBuffer(*tensorT);
+    }
+    return tensorMap;
 }
 
 } // namespace hipdnn_backend

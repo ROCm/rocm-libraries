@@ -9,6 +9,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace hipdnn_backend
@@ -47,9 +48,8 @@ private:
     hipdnn_data_sdk::data_objects::DataType _ioDataType
         = hipdnn_data_sdk::data_objects::DataType::UNSET;
 
-    // Uses flatbuffers::Optional<int64_t> to match the FlatBuffer schema type (GraphT)
-    // and enable use of the getOptionalInt64/setOptionalInt64 shared utilities.
-    flatbuffers::Optional<int64_t> _preferredEngineId = flatbuffers::nullopt;
+    // Preferred engine ID, empty when unset.
+    std::optional<int64_t> _preferredEngineId = std::nullopt;
 
     void setHandle(hipdnnBackendAttributeType_t attributeType,
                    int64_t elementCount,
