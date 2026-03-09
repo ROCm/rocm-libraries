@@ -405,7 +405,9 @@ def parse_bwd_weight_instances(instances, problem_name):
             elif pipeline_version == "V4":
                 pipeline_version = "ASYNC_V4"
             else:
-                raise RuntimeError("not supported pipeline for direct load")
+                raise RuntimeError(
+                    f"Not supported pipeline for direct load: pipeline_version={pipeline_version} in instance: {instance}"
+                )
 
         m_warp = int(m_per_block / (m_per_xdl * m_xdl_per_wave))
         n_warp = int(n_per_block / (n_per_xdl * n_xdl_per_wave))
