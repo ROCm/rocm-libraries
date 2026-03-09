@@ -295,7 +295,7 @@ int main(int argc, char* argv[])
         std::transform(arg.begin(), arg.end(), arg.begin(), ::tolower);
 
         // Handle response file (starts with @)
-        if(arg.starts_with('@'))
+        if(arg.find('@') == 0)
         {
             std::string response_file = std::string(argv[i]).substr(1);
             std::ifstream file(response_file);
@@ -308,7 +308,7 @@ int main(int argc, char* argv[])
             std::string line;
             while(std::getline(file, line))
             {
-                if(!line.empty() && !line.starts_with('#'))
+                if(!line.empty() && (line.find('#') != 0))
                 {
                     sourceFiles.emplace_back(line);
                 }
