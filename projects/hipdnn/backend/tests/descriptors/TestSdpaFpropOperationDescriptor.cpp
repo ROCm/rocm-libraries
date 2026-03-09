@@ -16,6 +16,8 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 
@@ -26,6 +28,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 
 class TestSdpaFpropOperationDescriptor : public ::testing::Test
 {
@@ -122,34 +125,42 @@ protected:
     void SetUp() override
     {
         _wrapper = createDescriptor<SdpaFpropOperationDescriptor>();
-        _qDesc = createFinalizedTensor(40, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-        _kDesc = createFinalizedTensor(41, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-        _vDesc = createFinalizedTensor(42, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-        _oDesc = createFinalizedTensor(43, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-        _attnMaskDesc = createFinalizedTensor(5);
-        _scaleDesc = createFinalizedTensor(6);
-        _seqLenQDesc = createFinalizedTensor(7);
-        _seqLenKvDesc = createFinalizedTensor(8);
-        _seedDesc = createFinalizedTensor(9);
-        _offsetDesc = createFinalizedTensor(10);
-        _dropoutMaskDesc = createFinalizedTensor(11);
-        _dropoutScaleDesc = createFinalizedTensor(12);
-        _pageTableKDesc = createFinalizedTensor(13);
-        _pageTableVDesc = createFinalizedTensor(14);
-        _blockMaskDesc = createFinalizedTensor(15);
-        _sinkTokenDesc = createFinalizedTensor(16);
-        _descaleQDesc = createFinalizedTensor(17);
-        _descaleKDesc = createFinalizedTensor(18);
-        _descaleVDesc = createFinalizedTensor(19);
-        _descaleSDesc = createFinalizedTensor(20);
-        _scaleSDesc = createFinalizedTensor(21);
-        _scaleODesc = createFinalizedTensor(22);
-        _statsDesc = createFinalizedTensor(23);
-        _maxDesc = createFinalizedTensor(24);
-        _sumExpDesc = createFinalizedTensor(25);
-        _rngDumpDesc = createFinalizedTensor(26);
-        _amaxSDesc = createFinalizedTensor(27);
-        _amaxODesc = createFinalizedTensor(28);
+        _qDesc = createFinalizedTensor(K_SDPA_TENSOR_Q_UID,
+                                       hipdnn_tests::toVec(K_SDPA_TENSOR_Q_DIMS),
+                                       hipdnn_tests::toVec(K_SDPA_TENSOR_Q_STRIDES));
+        _kDesc = createFinalizedTensor(K_SDPA_TENSOR_K_UID,
+                                       hipdnn_tests::toVec(K_SDPA_TENSOR_K_DIMS),
+                                       hipdnn_tests::toVec(K_SDPA_TENSOR_K_STRIDES));
+        _vDesc = createFinalizedTensor(K_SDPA_TENSOR_V_UID,
+                                       hipdnn_tests::toVec(K_SDPA_TENSOR_V_DIMS),
+                                       hipdnn_tests::toVec(K_SDPA_TENSOR_V_STRIDES));
+        _oDesc = createFinalizedTensor(K_SDPA_TENSOR_O_UID,
+                                       hipdnn_tests::toVec(K_SDPA_TENSOR_O_DIMS),
+                                       hipdnn_tests::toVec(K_SDPA_TENSOR_O_STRIDES));
+        _attnMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_ATTN_MASK_UID);
+        _scaleDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_UID);
+        _seqLenQDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_Q_UID);
+        _seqLenKvDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+        _seedDesc = createFinalizedTensor(K_SDPA_TENSOR_SEED_UID);
+        _offsetDesc = createFinalizedTensor(K_SDPA_TENSOR_OFFSET_UID);
+        _dropoutMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_MASK_UID);
+        _dropoutScaleDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+        _pageTableKDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+        _pageTableVDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+        _blockMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_BLOCK_MASK_UID);
+        _sinkTokenDesc = createFinalizedTensor(K_SDPA_TENSOR_SINK_TOKEN_UID);
+        _descaleQDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_Q_UID);
+        _descaleKDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_K_UID);
+        _descaleVDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_V_UID);
+        _descaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_S_UID);
+        _scaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_S_UID);
+        _scaleODesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_O_UID);
+        _statsDesc = createFinalizedTensor(K_SDPA_TENSOR_STATS_UID);
+        _maxDesc = createFinalizedTensor(K_SDPA_TENSOR_MAX_UID);
+        _sumExpDesc = createFinalizedTensor(K_SDPA_TENSOR_SUM_EXP_UID);
+        _rngDumpDesc = createFinalizedTensor(K_SDPA_TENSOR_RNG_DUMP_UID);
+        _amaxSDesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_S_UID);
+        _amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -248,7 +259,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorQ)
         HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_qDesc));
 
     // Verify UID extracted via getData()
-    ASSERT_EQ(desc->getData().q_tensor_uid, 40);
+    ASSERT_EQ(desc->getData().q_tensor_uid, K_SDPA_TENSOR_Q_UID);
     ASSERT_NE(desc->getQDesc(), nullptr);
 }
 
@@ -258,7 +269,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorK)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_kDesc));
 
-    ASSERT_EQ(desc->getData().k_tensor_uid, 41);
+    ASSERT_EQ(desc->getData().k_tensor_uid, K_SDPA_TENSOR_K_UID);
     ASSERT_NE(desc->getKDesc(), nullptr);
 }
 
@@ -268,7 +279,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorV)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_vDesc));
 
-    ASSERT_EQ(desc->getData().v_tensor_uid, 42);
+    ASSERT_EQ(desc->getData().v_tensor_uid, K_SDPA_TENSOR_V_UID);
     ASSERT_NE(desc->getVDesc(), nullptr);
 }
 
@@ -278,7 +289,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorO)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_oDesc));
 
-    ASSERT_EQ(desc->getData().o_tensor_uid, 43);
+    ASSERT_EQ(desc->getData().o_tensor_uid, K_SDPA_TENSOR_O_UID);
     ASSERT_NE(desc->getODesc(), nullptr);
 }
 
@@ -290,7 +301,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorAttnMask)
                                        1,
                                        &_attnMaskDesc));
 
-    ASSERT_EQ(desc->getData().attn_mask_tensor_uid, 5);
+    ASSERT_EQ(desc->getData().attn_mask_tensor_uid, K_SDPA_TENSOR_ATTN_MASK_UID);
     ASSERT_NE(desc->getAttnMaskDesc(), nullptr);
 }
 
@@ -302,7 +313,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorScale)
                                        1,
                                        &_scaleDesc));
 
-    ASSERT_EQ(desc->getData().scale_tensor_uid, 6);
+    ASSERT_EQ(desc->getData().scale_tensor_uid, K_SDPA_TENSOR_SCALE_UID);
     ASSERT_NE(desc->getScaleDesc(), nullptr);
 }
 
@@ -314,7 +325,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorSeqLenQ)
                                        1,
                                        &_seqLenQDesc));
 
-    ASSERT_EQ(desc->getData().seq_len_q_tensor_uid, 7);
+    ASSERT_EQ(desc->getData().seq_len_q_tensor_uid, K_SDPA_TENSOR_SEQ_LEN_Q_UID);
     ASSERT_NE(desc->getSeqLenQDesc(), nullptr);
 }
 
@@ -326,7 +337,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorSeqLenKv)
                                        1,
                                        &_seqLenKvDesc));
 
-    ASSERT_EQ(desc->getData().seq_len_kv_tensor_uid, 8);
+    ASSERT_EQ(desc->getData().seq_len_kv_tensor_uid, K_SDPA_TENSOR_SEQ_LEN_KV_UID);
     ASSERT_NE(desc->getSeqLenKvDesc(), nullptr);
 }
 
@@ -336,7 +347,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorSeed)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_seedDesc));
 
-    ASSERT_EQ(desc->getData().seed_tensor_uid, 9);
+    ASSERT_EQ(desc->getData().seed_tensor_uid, K_SDPA_TENSOR_SEED_UID);
     ASSERT_NE(desc->getSeedDesc(), nullptr);
 }
 
@@ -348,7 +359,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorOffset)
                                        1,
                                        &_offsetDesc));
 
-    ASSERT_EQ(desc->getData().offset_tensor_uid, 10);
+    ASSERT_EQ(desc->getData().offset_tensor_uid, K_SDPA_TENSOR_OFFSET_UID);
     ASSERT_NE(desc->getOffsetDesc(), nullptr);
 }
 
@@ -360,7 +371,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorDropoutMask)
                                        1,
                                        &_dropoutMaskDesc));
 
-    ASSERT_EQ(desc->getData().dropout_mask_tensor_uid, 11);
+    ASSERT_EQ(desc->getData().dropout_mask_tensor_uid, K_SDPA_TENSOR_DROPOUT_MASK_UID);
     ASSERT_NE(desc->getDropoutMaskDesc(), nullptr);
 }
 
@@ -372,7 +383,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorDropoutScale)
                                        1,
                                        &_dropoutScaleDesc));
 
-    ASSERT_EQ(desc->getData().dropout_scale_tensor_uid, 12);
+    ASSERT_EQ(desc->getData().dropout_scale_tensor_uid, K_SDPA_TENSOR_DROPOUT_SCALE_UID);
     ASSERT_NE(desc->getDropoutScaleDesc(), nullptr);
 }
 
@@ -384,7 +395,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorPageTableK)
                                        1,
                                        &_pageTableKDesc));
 
-    ASSERT_EQ(desc->getData().page_table_k_tensor_uid, 13);
+    ASSERT_EQ(desc->getData().page_table_k_tensor_uid, K_SDPA_TENSOR_PAGE_TABLE_K_UID);
     ASSERT_NE(desc->getPageTableKDesc(), nullptr);
 }
 
@@ -396,7 +407,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorPageTableV)
                                        1,
                                        &_pageTableVDesc));
 
-    ASSERT_EQ(desc->getData().page_table_v_tensor_uid, 14);
+    ASSERT_EQ(desc->getData().page_table_v_tensor_uid, K_SDPA_TENSOR_PAGE_TABLE_V_UID);
     ASSERT_NE(desc->getPageTableVDesc(), nullptr);
 }
 
@@ -408,7 +419,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorBlockMask)
                                        1,
                                        &_blockMaskDesc));
 
-    ASSERT_EQ(desc->getData().block_mask_tensor_uid, 15);
+    ASSERT_EQ(desc->getData().block_mask_tensor_uid, K_SDPA_TENSOR_BLOCK_MASK_UID);
     ASSERT_NE(desc->getBlockMaskDesc(), nullptr);
 }
 
@@ -420,7 +431,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorSinkToken)
                                        1,
                                        &_sinkTokenDesc));
 
-    ASSERT_EQ(desc->getData().sink_token_tensor_uid, 16);
+    ASSERT_EQ(desc->getData().sink_token_tensor_uid, K_SDPA_TENSOR_SINK_TOKEN_UID);
     ASSERT_NE(desc->getSinkTokenDesc(), nullptr);
 }
 
@@ -432,7 +443,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorDescaleQ)
                                        1,
                                        &_descaleQDesc));
 
-    ASSERT_EQ(desc->getData().descale_q_tensor_uid, 17);
+    ASSERT_EQ(desc->getData().descale_q_tensor_uid, K_SDPA_TENSOR_DESCALE_Q_UID);
     ASSERT_NE(desc->getDescaleQDesc(), nullptr);
 }
 
@@ -444,7 +455,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorDescaleK)
                                        1,
                                        &_descaleKDesc));
 
-    ASSERT_EQ(desc->getData().descale_k_tensor_uid, 18);
+    ASSERT_EQ(desc->getData().descale_k_tensor_uid, K_SDPA_TENSOR_DESCALE_K_UID);
     ASSERT_NE(desc->getDescaleKDesc(), nullptr);
 }
 
@@ -456,7 +467,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorDescaleV)
                                        1,
                                        &_descaleVDesc));
 
-    ASSERT_EQ(desc->getData().descale_v_tensor_uid, 19);
+    ASSERT_EQ(desc->getData().descale_v_tensor_uid, K_SDPA_TENSOR_DESCALE_V_UID);
     ASSERT_NE(desc->getDescaleVDesc(), nullptr);
 }
 
@@ -468,7 +479,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorDescaleS)
                                        1,
                                        &_descaleSDesc));
 
-    ASSERT_EQ(desc->getData().descale_s_tensor_uid, 20);
+    ASSERT_EQ(desc->getData().descale_s_tensor_uid, K_SDPA_TENSOR_DESCALE_S_UID);
     ASSERT_NE(desc->getDescaleSDesc(), nullptr);
 }
 
@@ -480,7 +491,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorScaleS)
                                        1,
                                        &_scaleSDesc));
 
-    ASSERT_EQ(desc->getData().scale_s_tensor_uid, 21);
+    ASSERT_EQ(desc->getData().scale_s_tensor_uid, K_SDPA_TENSOR_SCALE_S_UID);
     ASSERT_NE(desc->getScaleSDesc(), nullptr);
 }
 
@@ -492,7 +503,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorScaleO)
                                        1,
                                        &_scaleODesc));
 
-    ASSERT_EQ(desc->getData().scale_o_tensor_uid, 22);
+    ASSERT_EQ(desc->getData().scale_o_tensor_uid, K_SDPA_TENSOR_SCALE_O_UID);
     ASSERT_NE(desc->getScaleODesc(), nullptr);
 }
 
@@ -504,7 +515,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorStats)
                                        1,
                                        &_statsDesc));
 
-    ASSERT_EQ(desc->getData().stats_tensor_uid, 23);
+    ASSERT_EQ(desc->getData().stats_tensor_uid, K_SDPA_TENSOR_STATS_UID);
     ASSERT_NE(desc->getStatsDesc(), nullptr);
 }
 
@@ -514,7 +525,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorMax)
     ASSERT_NO_THROW(desc->setAttribute(
         HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_maxDesc));
 
-    ASSERT_EQ(desc->getData().max_tensor_uid, 24);
+    ASSERT_EQ(desc->getData().max_tensor_uid, K_SDPA_TENSOR_MAX_UID);
     ASSERT_NE(desc->getMaxDesc(), nullptr);
 }
 
@@ -526,7 +537,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorSumExp)
                                        1,
                                        &_sumExpDesc));
 
-    ASSERT_EQ(desc->getData().sum_exp_tensor_uid, 25);
+    ASSERT_EQ(desc->getData().sum_exp_tensor_uid, K_SDPA_TENSOR_SUM_EXP_UID);
     ASSERT_NE(desc->getSumExpDesc(), nullptr);
 }
 
@@ -538,7 +549,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorRngDump)
                                        1,
                                        &_rngDumpDesc));
 
-    ASSERT_EQ(desc->getData().rng_dump_tensor_uid, 26);
+    ASSERT_EQ(desc->getData().rng_dump_tensor_uid, K_SDPA_TENSOR_RNG_DUMP_UID);
     ASSERT_NE(desc->getRngDumpDesc(), nullptr);
 }
 
@@ -550,7 +561,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorAmaxS)
                                        1,
                                        &_amaxSDesc));
 
-    ASSERT_EQ(desc->getData().amax_s_tensor_uid, 27);
+    ASSERT_EQ(desc->getData().amax_s_tensor_uid, K_SDPA_TENSOR_AMAX_S_UID);
     ASSERT_NE(desc->getAmaxSDesc(), nullptr);
 }
 
@@ -562,7 +573,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, SetTensorDescriptorAmaxO)
                                        1,
                                        &_amaxODesc));
 
-    ASSERT_EQ(desc->getData().amax_o_tensor_uid, 28);
+    ASSERT_EQ(desc->getData().amax_o_tensor_uid, K_SDPA_TENSOR_AMAX_O_UID);
     ASSERT_NE(desc->getAmaxODesc(), nullptr);
 }
 
@@ -1395,34 +1406,34 @@ TEST_F(TestSdpaFpropOperationDescriptor, FinalizePreservesTensorReferences)
     ASSERT_NE(desc->getAmaxODesc(), nullptr);
 
     // Verify UIDs match
-    ASSERT_EQ(desc->getQDesc()->getData().uid, 40);
-    ASSERT_EQ(desc->getKDesc()->getData().uid, 41);
-    ASSERT_EQ(desc->getVDesc()->getData().uid, 42);
-    ASSERT_EQ(desc->getODesc()->getData().uid, 43);
-    ASSERT_EQ(desc->getAttnMaskDesc()->getData().uid, 5);
-    ASSERT_EQ(desc->getScaleDesc()->getData().uid, 6);
-    ASSERT_EQ(desc->getSeqLenQDesc()->getData().uid, 7);
-    ASSERT_EQ(desc->getSeqLenKvDesc()->getData().uid, 8);
-    ASSERT_EQ(desc->getSeedDesc()->getData().uid, 9);
-    ASSERT_EQ(desc->getOffsetDesc()->getData().uid, 10);
-    ASSERT_EQ(desc->getDropoutMaskDesc()->getData().uid, 11);
-    ASSERT_EQ(desc->getDropoutScaleDesc()->getData().uid, 12);
-    ASSERT_EQ(desc->getPageTableKDesc()->getData().uid, 13);
-    ASSERT_EQ(desc->getPageTableVDesc()->getData().uid, 14);
-    ASSERT_EQ(desc->getBlockMaskDesc()->getData().uid, 15);
-    ASSERT_EQ(desc->getSinkTokenDesc()->getData().uid, 16);
-    ASSERT_EQ(desc->getDescaleQDesc()->getData().uid, 17);
-    ASSERT_EQ(desc->getDescaleKDesc()->getData().uid, 18);
-    ASSERT_EQ(desc->getDescaleVDesc()->getData().uid, 19);
-    ASSERT_EQ(desc->getDescaleSDesc()->getData().uid, 20);
-    ASSERT_EQ(desc->getScaleSDesc()->getData().uid, 21);
-    ASSERT_EQ(desc->getScaleODesc()->getData().uid, 22);
-    ASSERT_EQ(desc->getStatsDesc()->getData().uid, 23);
-    ASSERT_EQ(desc->getMaxDesc()->getData().uid, 24);
-    ASSERT_EQ(desc->getSumExpDesc()->getData().uid, 25);
-    ASSERT_EQ(desc->getRngDumpDesc()->getData().uid, 26);
-    ASSERT_EQ(desc->getAmaxSDesc()->getData().uid, 27);
-    ASSERT_EQ(desc->getAmaxODesc()->getData().uid, 28);
+    ASSERT_EQ(desc->getQDesc()->getData().uid, K_SDPA_TENSOR_Q_UID);
+    ASSERT_EQ(desc->getKDesc()->getData().uid, K_SDPA_TENSOR_K_UID);
+    ASSERT_EQ(desc->getVDesc()->getData().uid, K_SDPA_TENSOR_V_UID);
+    ASSERT_EQ(desc->getODesc()->getData().uid, K_SDPA_TENSOR_O_UID);
+    ASSERT_EQ(desc->getAttnMaskDesc()->getData().uid, K_SDPA_TENSOR_ATTN_MASK_UID);
+    ASSERT_EQ(desc->getScaleDesc()->getData().uid, K_SDPA_TENSOR_SCALE_UID);
+    ASSERT_EQ(desc->getSeqLenQDesc()->getData().uid, K_SDPA_TENSOR_SEQ_LEN_Q_UID);
+    ASSERT_EQ(desc->getSeqLenKvDesc()->getData().uid, K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+    ASSERT_EQ(desc->getSeedDesc()->getData().uid, K_SDPA_TENSOR_SEED_UID);
+    ASSERT_EQ(desc->getOffsetDesc()->getData().uid, K_SDPA_TENSOR_OFFSET_UID);
+    ASSERT_EQ(desc->getDropoutMaskDesc()->getData().uid, K_SDPA_TENSOR_DROPOUT_MASK_UID);
+    ASSERT_EQ(desc->getDropoutScaleDesc()->getData().uid, K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+    ASSERT_EQ(desc->getPageTableKDesc()->getData().uid, K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+    ASSERT_EQ(desc->getPageTableVDesc()->getData().uid, K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+    ASSERT_EQ(desc->getBlockMaskDesc()->getData().uid, K_SDPA_TENSOR_BLOCK_MASK_UID);
+    ASSERT_EQ(desc->getSinkTokenDesc()->getData().uid, K_SDPA_TENSOR_SINK_TOKEN_UID);
+    ASSERT_EQ(desc->getDescaleQDesc()->getData().uid, K_SDPA_TENSOR_DESCALE_Q_UID);
+    ASSERT_EQ(desc->getDescaleKDesc()->getData().uid, K_SDPA_TENSOR_DESCALE_K_UID);
+    ASSERT_EQ(desc->getDescaleVDesc()->getData().uid, K_SDPA_TENSOR_DESCALE_V_UID);
+    ASSERT_EQ(desc->getDescaleSDesc()->getData().uid, K_SDPA_TENSOR_DESCALE_S_UID);
+    ASSERT_EQ(desc->getScaleSDesc()->getData().uid, K_SDPA_TENSOR_SCALE_S_UID);
+    ASSERT_EQ(desc->getScaleODesc()->getData().uid, K_SDPA_TENSOR_SCALE_O_UID);
+    ASSERT_EQ(desc->getStatsDesc()->getData().uid, K_SDPA_TENSOR_STATS_UID);
+    ASSERT_EQ(desc->getMaxDesc()->getData().uid, K_SDPA_TENSOR_MAX_UID);
+    ASSERT_EQ(desc->getSumExpDesc()->getData().uid, K_SDPA_TENSOR_SUM_EXP_UID);
+    ASSERT_EQ(desc->getRngDumpDesc()->getData().uid, K_SDPA_TENSOR_RNG_DUMP_UID);
+    ASSERT_EQ(desc->getAmaxSDesc()->getData().uid, K_SDPA_TENSOR_AMAX_S_UID);
+    ASSERT_EQ(desc->getAmaxODesc()->getData().uid, K_SDPA_TENSOR_AMAX_O_UID);
 }
 
 // =============================================================================
@@ -1436,34 +1447,54 @@ TEST_F(TestSdpaFpropOperationDescriptor, ToStringContainsExpectedInfo)
 
     std::string str = desc->toString();
     ASSERT_NE(str.find("SdpaFpropOperationDescriptor"), std::string::npos);
-    ASSERT_NE(str.find("q_uid=40"), std::string::npos);
-    ASSERT_NE(str.find("k_uid=41"), std::string::npos);
-    ASSERT_NE(str.find("v_uid=42"), std::string::npos);
-    ASSERT_NE(str.find("o_uid=43"), std::string::npos);
-    ASSERT_NE(str.find("attn_mask_uid=5"), std::string::npos);
-    ASSERT_NE(str.find("scale_uid=6"), std::string::npos);
-    ASSERT_NE(str.find("seq_len_q_uid=7"), std::string::npos);
-    ASSERT_NE(str.find("seq_len_kv_uid=8"), std::string::npos);
-    ASSERT_NE(str.find("seed_uid=9"), std::string::npos);
-    ASSERT_NE(str.find("offset_uid=10"), std::string::npos);
-    ASSERT_NE(str.find("dropout_mask_uid=11"), std::string::npos);
-    ASSERT_NE(str.find("dropout_scale_uid=12"), std::string::npos);
-    ASSERT_NE(str.find("page_table_k_uid=13"), std::string::npos);
-    ASSERT_NE(str.find("page_table_v_uid=14"), std::string::npos);
-    ASSERT_NE(str.find("block_mask_uid=15"), std::string::npos);
-    ASSERT_NE(str.find("sink_token_uid=16"), std::string::npos);
-    ASSERT_NE(str.find("descale_q_uid=17"), std::string::npos);
-    ASSERT_NE(str.find("descale_k_uid=18"), std::string::npos);
-    ASSERT_NE(str.find("descale_v_uid=19"), std::string::npos);
-    ASSERT_NE(str.find("descale_s_uid=20"), std::string::npos);
-    ASSERT_NE(str.find("scale_s_uid=21"), std::string::npos);
-    ASSERT_NE(str.find("scale_o_uid=22"), std::string::npos);
-    ASSERT_NE(str.find("stats_uid=23"), std::string::npos);
-    ASSERT_NE(str.find("max_uid=24"), std::string::npos);
-    ASSERT_NE(str.find("sum_exp_uid=25"), std::string::npos);
-    ASSERT_NE(str.find("rng_dump_uid=26"), std::string::npos);
-    ASSERT_NE(str.find("amax_s_uid=27"), std::string::npos);
-    ASSERT_NE(str.find("amax_o_uid=28"), std::string::npos);
+    ASSERT_NE(str.find("q_uid=" + std::to_string(K_SDPA_TENSOR_Q_UID)), std::string::npos);
+    ASSERT_NE(str.find("k_uid=" + std::to_string(K_SDPA_TENSOR_K_UID)), std::string::npos);
+    ASSERT_NE(str.find("v_uid=" + std::to_string(K_SDPA_TENSOR_V_UID)), std::string::npos);
+    ASSERT_NE(str.find("o_uid=" + std::to_string(K_SDPA_TENSOR_O_UID)), std::string::npos);
+    ASSERT_NE(str.find("attn_mask_uid=" + std::to_string(K_SDPA_TENSOR_ATTN_MASK_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("scale_uid=" + std::to_string(K_SDPA_TENSOR_SCALE_UID)), std::string::npos);
+    ASSERT_NE(str.find("seq_len_q_uid=" + std::to_string(K_SDPA_TENSOR_SEQ_LEN_Q_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("seq_len_kv_uid=" + std::to_string(K_SDPA_TENSOR_SEQ_LEN_KV_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("seed_uid=" + std::to_string(K_SDPA_TENSOR_SEED_UID)), std::string::npos);
+    ASSERT_NE(str.find("offset_uid=" + std::to_string(K_SDPA_TENSOR_OFFSET_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("dropout_mask_uid=" + std::to_string(K_SDPA_TENSOR_DROPOUT_MASK_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("dropout_scale_uid=" + std::to_string(K_SDPA_TENSOR_DROPOUT_SCALE_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("page_table_k_uid=" + std::to_string(K_SDPA_TENSOR_PAGE_TABLE_K_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("page_table_v_uid=" + std::to_string(K_SDPA_TENSOR_PAGE_TABLE_V_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("block_mask_uid=" + std::to_string(K_SDPA_TENSOR_BLOCK_MASK_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("sink_token_uid=" + std::to_string(K_SDPA_TENSOR_SINK_TOKEN_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("descale_q_uid=" + std::to_string(K_SDPA_TENSOR_DESCALE_Q_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("descale_k_uid=" + std::to_string(K_SDPA_TENSOR_DESCALE_K_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("descale_v_uid=" + std::to_string(K_SDPA_TENSOR_DESCALE_V_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("descale_s_uid=" + std::to_string(K_SDPA_TENSOR_DESCALE_S_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("scale_s_uid=" + std::to_string(K_SDPA_TENSOR_SCALE_S_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("scale_o_uid=" + std::to_string(K_SDPA_TENSOR_SCALE_O_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("stats_uid=" + std::to_string(K_SDPA_TENSOR_STATS_UID)), std::string::npos);
+    ASSERT_NE(str.find("max_uid=" + std::to_string(K_SDPA_TENSOR_MAX_UID)), std::string::npos);
+    ASSERT_NE(str.find("sum_exp_uid=" + std::to_string(K_SDPA_TENSOR_SUM_EXP_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("rng_dump_uid=" + std::to_string(K_SDPA_TENSOR_RNG_DUMP_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("amax_s_uid=" + std::to_string(K_SDPA_TENSOR_AMAX_S_UID)),
+              std::string::npos);
+    ASSERT_NE(str.find("amax_o_uid=" + std::to_string(K_SDPA_TENSOR_AMAX_O_UID)),
+              std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -1478,34 +1509,34 @@ TEST_F(TestSdpaFpropOperationDescriptor, GetTensorDescriptorsReturnsAllTensors)
 
     auto tensors = desc->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 28);
-    ASSERT_EQ(tensors[0]->getData().uid, 40);
-    ASSERT_EQ(tensors[1]->getData().uid, 41);
-    ASSERT_EQ(tensors[2]->getData().uid, 42);
-    ASSERT_EQ(tensors[3]->getData().uid, 43);
-    ASSERT_EQ(tensors[4]->getData().uid, 5);
-    ASSERT_EQ(tensors[5]->getData().uid, 6);
-    ASSERT_EQ(tensors[6]->getData().uid, 7);
-    ASSERT_EQ(tensors[7]->getData().uid, 8);
-    ASSERT_EQ(tensors[8]->getData().uid, 9);
-    ASSERT_EQ(tensors[9]->getData().uid, 10);
-    ASSERT_EQ(tensors[10]->getData().uid, 11);
-    ASSERT_EQ(tensors[11]->getData().uid, 12);
-    ASSERT_EQ(tensors[12]->getData().uid, 13);
-    ASSERT_EQ(tensors[13]->getData().uid, 14);
-    ASSERT_EQ(tensors[14]->getData().uid, 15);
-    ASSERT_EQ(tensors[15]->getData().uid, 16);
-    ASSERT_EQ(tensors[16]->getData().uid, 17);
-    ASSERT_EQ(tensors[17]->getData().uid, 18);
-    ASSERT_EQ(tensors[18]->getData().uid, 19);
-    ASSERT_EQ(tensors[19]->getData().uid, 20);
-    ASSERT_EQ(tensors[20]->getData().uid, 21);
-    ASSERT_EQ(tensors[21]->getData().uid, 22);
-    ASSERT_EQ(tensors[22]->getData().uid, 23);
-    ASSERT_EQ(tensors[23]->getData().uid, 24);
-    ASSERT_EQ(tensors[24]->getData().uid, 25);
-    ASSERT_EQ(tensors[25]->getData().uid, 26);
-    ASSERT_EQ(tensors[26]->getData().uid, 27);
-    ASSERT_EQ(tensors[27]->getData().uid, 28);
+    ASSERT_EQ(tensors[0]->getData().uid, K_SDPA_TENSOR_Q_UID);
+    ASSERT_EQ(tensors[1]->getData().uid, K_SDPA_TENSOR_K_UID);
+    ASSERT_EQ(tensors[2]->getData().uid, K_SDPA_TENSOR_V_UID);
+    ASSERT_EQ(tensors[3]->getData().uid, K_SDPA_TENSOR_O_UID);
+    ASSERT_EQ(tensors[4]->getData().uid, K_SDPA_TENSOR_ATTN_MASK_UID);
+    ASSERT_EQ(tensors[5]->getData().uid, K_SDPA_TENSOR_SCALE_UID);
+    ASSERT_EQ(tensors[6]->getData().uid, K_SDPA_TENSOR_SEQ_LEN_Q_UID);
+    ASSERT_EQ(tensors[7]->getData().uid, K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+    ASSERT_EQ(tensors[8]->getData().uid, K_SDPA_TENSOR_SEED_UID);
+    ASSERT_EQ(tensors[9]->getData().uid, K_SDPA_TENSOR_OFFSET_UID);
+    ASSERT_EQ(tensors[10]->getData().uid, K_SDPA_TENSOR_DROPOUT_MASK_UID);
+    ASSERT_EQ(tensors[11]->getData().uid, K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+    ASSERT_EQ(tensors[12]->getData().uid, K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+    ASSERT_EQ(tensors[13]->getData().uid, K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+    ASSERT_EQ(tensors[14]->getData().uid, K_SDPA_TENSOR_BLOCK_MASK_UID);
+    ASSERT_EQ(tensors[15]->getData().uid, K_SDPA_TENSOR_SINK_TOKEN_UID);
+    ASSERT_EQ(tensors[16]->getData().uid, K_SDPA_TENSOR_DESCALE_Q_UID);
+    ASSERT_EQ(tensors[17]->getData().uid, K_SDPA_TENSOR_DESCALE_K_UID);
+    ASSERT_EQ(tensors[18]->getData().uid, K_SDPA_TENSOR_DESCALE_V_UID);
+    ASSERT_EQ(tensors[19]->getData().uid, K_SDPA_TENSOR_DESCALE_S_UID);
+    ASSERT_EQ(tensors[20]->getData().uid, K_SDPA_TENSOR_SCALE_S_UID);
+    ASSERT_EQ(tensors[21]->getData().uid, K_SDPA_TENSOR_SCALE_O_UID);
+    ASSERT_EQ(tensors[22]->getData().uid, K_SDPA_TENSOR_STATS_UID);
+    ASSERT_EQ(tensors[23]->getData().uid, K_SDPA_TENSOR_MAX_UID);
+    ASSERT_EQ(tensors[24]->getData().uid, K_SDPA_TENSOR_SUM_EXP_UID);
+    ASSERT_EQ(tensors[25]->getData().uid, K_SDPA_TENSOR_RNG_DUMP_UID);
+    ASSERT_EQ(tensors[26]->getData().uid, K_SDPA_TENSOR_AMAX_S_UID);
+    ASSERT_EQ(tensors[27]->getData().uid, K_SDPA_TENSOR_AMAX_O_UID);
 }
 
 TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -1525,34 +1556,34 @@ TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeProducesCorrectNodeT)
 
     auto* attrs = node->attributes.AsSdpaAttributes();
     ASSERT_NE(attrs, nullptr);
-    ASSERT_EQ(attrs->q_tensor_uid, 40);
-    ASSERT_EQ(attrs->k_tensor_uid, 41);
-    ASSERT_EQ(attrs->v_tensor_uid, 42);
-    ASSERT_EQ(attrs->o_tensor_uid, 43);
-    ASSERT_EQ(attrs->attn_mask_tensor_uid, 5);
-    ASSERT_EQ(attrs->scale_tensor_uid, 6);
-    ASSERT_EQ(attrs->seq_len_q_tensor_uid, 7);
-    ASSERT_EQ(attrs->seq_len_kv_tensor_uid, 8);
-    ASSERT_EQ(attrs->seed_tensor_uid, 9);
-    ASSERT_EQ(attrs->offset_tensor_uid, 10);
-    ASSERT_EQ(attrs->dropout_mask_tensor_uid, 11);
-    ASSERT_EQ(attrs->dropout_scale_tensor_uid, 12);
-    ASSERT_EQ(attrs->page_table_k_tensor_uid, 13);
-    ASSERT_EQ(attrs->page_table_v_tensor_uid, 14);
-    ASSERT_EQ(attrs->block_mask_tensor_uid, 15);
-    ASSERT_EQ(attrs->sink_token_tensor_uid, 16);
-    ASSERT_EQ(attrs->descale_q_tensor_uid, 17);
-    ASSERT_EQ(attrs->descale_k_tensor_uid, 18);
-    ASSERT_EQ(attrs->descale_v_tensor_uid, 19);
-    ASSERT_EQ(attrs->descale_s_tensor_uid, 20);
-    ASSERT_EQ(attrs->scale_s_tensor_uid, 21);
-    ASSERT_EQ(attrs->scale_o_tensor_uid, 22);
-    ASSERT_EQ(attrs->stats_tensor_uid, 23);
-    ASSERT_EQ(attrs->max_tensor_uid, 24);
-    ASSERT_EQ(attrs->sum_exp_tensor_uid, 25);
-    ASSERT_EQ(attrs->rng_dump_tensor_uid, 26);
-    ASSERT_EQ(attrs->amax_s_tensor_uid, 27);
-    ASSERT_EQ(attrs->amax_o_tensor_uid, 28);
+    ASSERT_EQ(attrs->q_tensor_uid, K_SDPA_TENSOR_Q_UID);
+    ASSERT_EQ(attrs->k_tensor_uid, K_SDPA_TENSOR_K_UID);
+    ASSERT_EQ(attrs->v_tensor_uid, K_SDPA_TENSOR_V_UID);
+    ASSERT_EQ(attrs->o_tensor_uid, K_SDPA_TENSOR_O_UID);
+    ASSERT_EQ(attrs->attn_mask_tensor_uid, K_SDPA_TENSOR_ATTN_MASK_UID);
+    ASSERT_EQ(attrs->scale_tensor_uid, K_SDPA_TENSOR_SCALE_UID);
+    ASSERT_EQ(attrs->seq_len_q_tensor_uid, K_SDPA_TENSOR_SEQ_LEN_Q_UID);
+    ASSERT_EQ(attrs->seq_len_kv_tensor_uid, K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+    ASSERT_EQ(attrs->seed_tensor_uid, K_SDPA_TENSOR_SEED_UID);
+    ASSERT_EQ(attrs->offset_tensor_uid, K_SDPA_TENSOR_OFFSET_UID);
+    ASSERT_EQ(attrs->dropout_mask_tensor_uid, K_SDPA_TENSOR_DROPOUT_MASK_UID);
+    ASSERT_EQ(attrs->dropout_scale_tensor_uid, K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+    ASSERT_EQ(attrs->page_table_k_tensor_uid, K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+    ASSERT_EQ(attrs->page_table_v_tensor_uid, K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+    ASSERT_EQ(attrs->block_mask_tensor_uid, K_SDPA_TENSOR_BLOCK_MASK_UID);
+    ASSERT_EQ(attrs->sink_token_tensor_uid, K_SDPA_TENSOR_SINK_TOKEN_UID);
+    ASSERT_EQ(attrs->descale_q_tensor_uid, K_SDPA_TENSOR_DESCALE_Q_UID);
+    ASSERT_EQ(attrs->descale_k_tensor_uid, K_SDPA_TENSOR_DESCALE_K_UID);
+    ASSERT_EQ(attrs->descale_v_tensor_uid, K_SDPA_TENSOR_DESCALE_V_UID);
+    ASSERT_EQ(attrs->descale_s_tensor_uid, K_SDPA_TENSOR_DESCALE_S_UID);
+    ASSERT_EQ(attrs->scale_s_tensor_uid, K_SDPA_TENSOR_SCALE_S_UID);
+    ASSERT_EQ(attrs->scale_o_tensor_uid, K_SDPA_TENSOR_SCALE_O_UID);
+    ASSERT_EQ(attrs->stats_tensor_uid, K_SDPA_TENSOR_STATS_UID);
+    ASSERT_EQ(attrs->max_tensor_uid, K_SDPA_TENSOR_MAX_UID);
+    ASSERT_EQ(attrs->sum_exp_tensor_uid, K_SDPA_TENSOR_SUM_EXP_UID);
+    ASSERT_EQ(attrs->rng_dump_tensor_uid, K_SDPA_TENSOR_RNG_DUMP_UID);
+    ASSERT_EQ(attrs->amax_s_tensor_uid, K_SDPA_TENSOR_AMAX_S_UID);
+    ASSERT_EQ(attrs->amax_o_tensor_uid, K_SDPA_TENSOR_AMAX_O_UID);
 }
 
 TEST_F(TestSdpaFpropOperationDescriptor, BuildNodeWithHalfComputeType)
@@ -1620,7 +1651,7 @@ TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)
     // Verify the returned interface is the same underlying object
     auto tensors = graphOp->getTensorDescriptors();
     ASSERT_EQ(tensors.size(), 28);
-    ASSERT_EQ(tensors[0]->getData().uid, 40);
+    ASSERT_EQ(tensors[0]->getData().uid, K_SDPA_TENSOR_Q_UID);
 }
 
 TEST_F(TestSdpaFpropOperationDescriptor, TryAsInterfaceReturnsNullForWrongType)

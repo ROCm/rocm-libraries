@@ -16,6 +16,7 @@
 #include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/SdpaFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
@@ -26,6 +27,7 @@
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
 using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
 namespace
@@ -165,9 +167,61 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     return wrapper;
 }
 
+inline std::unique_ptr<HipdnnBackendDescriptor>
+    createFinalizedSdpaFpropOpRequiredOnly(HipdnnBackendDescriptor* qDesc,
+                                           HipdnnBackendDescriptor* kDesc,
+                                           HipdnnBackendDescriptor* vDesc,
+                                           HipdnnBackendDescriptor* oDesc,
+                                           hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
+{
+    auto wrapper = createDescriptor<SdpaFpropOperationDescriptor>();
+    auto desc = wrapper->asDescriptor<SdpaFpropOperationDescriptor>();
+
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &qDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_K_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &kDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_V_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &vDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_SDPA_FPROP_O_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &oDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_FPROP_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+
+    desc->finalize();
+    return wrapper;
+}
+
 class TestGraphDescriptorSdpaFprop : public ::testing::Test
 {
 public:
+    static const TensorAttributesT* findTensorByUid(const GraphT& graphT, int64_t uid)
+    {
+        for(const auto& tensor : graphT.tensors)
+        {
+            if(tensor->uid == uid)
+            {
+                return tensor.get();
+            }
+        }
+        return nullptr;
+    }
+
+    static void verifyTensor(const TensorAttributesT* tensor,
+                             int64_t expectedUid,
+                             const std::vector<int64_t>& expectedDims,
+                             const std::vector<int64_t>& expectedStrides,
+                             DataType expectedDataType,
+                             bool expectedVirtual = false)
+    {
+        ASSERT_NE(tensor, nullptr) << "Tensor with UID " << expectedUid << " not found";
+        EXPECT_EQ(tensor->uid, expectedUid);
+        EXPECT_EQ(tensor->dims, expectedDims);
+        EXPECT_EQ(tensor->strides, expectedStrides);
+        EXPECT_EQ(tensor->data_type, expectedDataType);
+        EXPECT_EQ(tensor->virtual_, expectedVirtual);
+    }
+
     std::shared_ptr<GraphDescriptor> getDescriptor() const
     {
         return _wrapper->asDescriptor<GraphDescriptor>();
@@ -197,34 +251,38 @@ protected:
 
 TEST_F(TestGraphDescriptorSdpaFprop, BuildFromSingleOperation)
 {
-    auto qDesc = createFinalizedTensor(40, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-    auto kDesc = createFinalizedTensor(41, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-    auto vDesc = createFinalizedTensor(42, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-    auto oDesc = createFinalizedTensor(43, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-    auto attnMaskDesc = createFinalizedTensor(5);
-    auto scaleDesc = createFinalizedTensor(6);
-    auto seqLenQDesc = createFinalizedTensor(7);
-    auto seqLenKvDesc = createFinalizedTensor(8);
-    auto seedDesc = createFinalizedTensor(9);
-    auto offsetDesc = createFinalizedTensor(10);
-    auto dropoutMaskDesc = createFinalizedTensor(11);
-    auto dropoutScaleDesc = createFinalizedTensor(12);
-    auto pageTableKDesc = createFinalizedTensor(13);
-    auto pageTableVDesc = createFinalizedTensor(14);
-    auto blockMaskDesc = createFinalizedTensor(15);
-    auto sinkTokenDesc = createFinalizedTensor(16);
-    auto descaleQDesc = createFinalizedTensor(17);
-    auto descaleKDesc = createFinalizedTensor(18);
-    auto descaleVDesc = createFinalizedTensor(19);
-    auto descaleSDesc = createFinalizedTensor(20);
-    auto scaleSDesc = createFinalizedTensor(21);
-    auto scaleODesc = createFinalizedTensor(22);
-    auto statsDesc = createFinalizedTensor(23);
-    auto maxDesc = createFinalizedTensor(24);
-    auto sumExpDesc = createFinalizedTensor(25);
-    auto rngDumpDesc = createFinalizedTensor(26);
-    auto amaxSDesc = createFinalizedTensor(27);
-    auto amaxODesc = createFinalizedTensor(28);
+    auto qDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
+    auto kDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
+    auto vDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
+    auto oDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
+    auto attnMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_ATTN_MASK_UID);
+    auto scaleDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_UID);
+    auto seqLenQDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_Q_UID);
+    auto seqLenKvDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+    auto seedDesc = createFinalizedTensor(K_SDPA_TENSOR_SEED_UID);
+    auto offsetDesc = createFinalizedTensor(K_SDPA_TENSOR_OFFSET_UID);
+    auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_MASK_UID);
+    auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+    auto pageTableKDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+    auto pageTableVDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+    auto blockMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_BLOCK_MASK_UID);
+    auto sinkTokenDesc = createFinalizedTensor(K_SDPA_TENSOR_SINK_TOKEN_UID);
+    auto descaleQDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_Q_UID);
+    auto descaleKDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_K_UID);
+    auto descaleVDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_V_UID);
+    auto descaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_S_UID);
+    auto scaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_S_UID);
+    auto scaleODesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_O_UID);
+    auto statsDesc = createFinalizedTensor(K_SDPA_TENSOR_STATS_UID);
+    auto maxDesc = createFinalizedTensor(K_SDPA_TENSOR_MAX_UID);
+    auto sumExpDesc = createFinalizedTensor(K_SDPA_TENSOR_SUM_EXP_UID);
+    auto rngDumpDesc = createFinalizedTensor(K_SDPA_TENSOR_RNG_DUMP_UID);
+    auto amaxSDesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_S_UID);
+    auto amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
     auto opDesc = createFinalizedSdpaFpropOp(qDesc.get(),
                                              kDesc.get(),
                                              vDesc.get(),
@@ -283,66 +341,101 @@ TEST_F(TestGraphDescriptorSdpaFprop, BuildFromSingleOperation)
     ASSERT_NE(attrs, nullptr);
 
     // Verify tensor UID references
-    EXPECT_EQ(attrs->q_tensor_uid, 40);
-    EXPECT_EQ(attrs->k_tensor_uid, 41);
-    EXPECT_EQ(attrs->v_tensor_uid, 42);
-    EXPECT_EQ(attrs->o_tensor_uid, 43);
-    EXPECT_EQ(attrs->attn_mask_tensor_uid, 5);
-    EXPECT_EQ(attrs->scale_tensor_uid, 6);
-    EXPECT_EQ(attrs->seq_len_q_tensor_uid, 7);
-    EXPECT_EQ(attrs->seq_len_kv_tensor_uid, 8);
-    EXPECT_EQ(attrs->seed_tensor_uid, 9);
-    EXPECT_EQ(attrs->offset_tensor_uid, 10);
-    EXPECT_EQ(attrs->dropout_mask_tensor_uid, 11);
-    EXPECT_EQ(attrs->dropout_scale_tensor_uid, 12);
-    EXPECT_EQ(attrs->page_table_k_tensor_uid, 13);
-    EXPECT_EQ(attrs->page_table_v_tensor_uid, 14);
-    EXPECT_EQ(attrs->block_mask_tensor_uid, 15);
-    EXPECT_EQ(attrs->sink_token_tensor_uid, 16);
-    EXPECT_EQ(attrs->descale_q_tensor_uid, 17);
-    EXPECT_EQ(attrs->descale_k_tensor_uid, 18);
-    EXPECT_EQ(attrs->descale_v_tensor_uid, 19);
-    EXPECT_EQ(attrs->descale_s_tensor_uid, 20);
-    EXPECT_EQ(attrs->scale_s_tensor_uid, 21);
-    EXPECT_EQ(attrs->scale_o_tensor_uid, 22);
-    EXPECT_EQ(attrs->stats_tensor_uid, 23);
-    EXPECT_EQ(attrs->max_tensor_uid, 24);
-    EXPECT_EQ(attrs->sum_exp_tensor_uid, 25);
-    EXPECT_EQ(attrs->rng_dump_tensor_uid, 26);
-    EXPECT_EQ(attrs->amax_s_tensor_uid, 27);
-    EXPECT_EQ(attrs->amax_o_tensor_uid, 28);
+    EXPECT_EQ(attrs->q_tensor_uid, K_SDPA_TENSOR_Q_UID);
+    EXPECT_EQ(attrs->k_tensor_uid, K_SDPA_TENSOR_K_UID);
+    EXPECT_EQ(attrs->v_tensor_uid, K_SDPA_TENSOR_V_UID);
+    EXPECT_EQ(attrs->o_tensor_uid, K_SDPA_TENSOR_O_UID);
+    EXPECT_EQ(attrs->attn_mask_tensor_uid, K_SDPA_TENSOR_ATTN_MASK_UID);
+    EXPECT_EQ(attrs->scale_tensor_uid, K_SDPA_TENSOR_SCALE_UID);
+    EXPECT_EQ(attrs->seq_len_q_tensor_uid, K_SDPA_TENSOR_SEQ_LEN_Q_UID);
+    EXPECT_EQ(attrs->seq_len_kv_tensor_uid, K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+    EXPECT_EQ(attrs->seed_tensor_uid, K_SDPA_TENSOR_SEED_UID);
+    EXPECT_EQ(attrs->offset_tensor_uid, K_SDPA_TENSOR_OFFSET_UID);
+    EXPECT_EQ(attrs->dropout_mask_tensor_uid, K_SDPA_TENSOR_DROPOUT_MASK_UID);
+    EXPECT_EQ(attrs->dropout_scale_tensor_uid, K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+    EXPECT_EQ(attrs->page_table_k_tensor_uid, K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+    EXPECT_EQ(attrs->page_table_v_tensor_uid, K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+    EXPECT_EQ(attrs->block_mask_tensor_uid, K_SDPA_TENSOR_BLOCK_MASK_UID);
+    EXPECT_EQ(attrs->sink_token_tensor_uid, K_SDPA_TENSOR_SINK_TOKEN_UID);
+    EXPECT_EQ(attrs->descale_q_tensor_uid, K_SDPA_TENSOR_DESCALE_Q_UID);
+    EXPECT_EQ(attrs->descale_k_tensor_uid, K_SDPA_TENSOR_DESCALE_K_UID);
+    EXPECT_EQ(attrs->descale_v_tensor_uid, K_SDPA_TENSOR_DESCALE_V_UID);
+    EXPECT_EQ(attrs->descale_s_tensor_uid, K_SDPA_TENSOR_DESCALE_S_UID);
+    EXPECT_EQ(attrs->scale_s_tensor_uid, K_SDPA_TENSOR_SCALE_S_UID);
+    EXPECT_EQ(attrs->scale_o_tensor_uid, K_SDPA_TENSOR_SCALE_O_UID);
+    EXPECT_EQ(attrs->stats_tensor_uid, K_SDPA_TENSOR_STATS_UID);
+    EXPECT_EQ(attrs->max_tensor_uid, K_SDPA_TENSOR_MAX_UID);
+    EXPECT_EQ(attrs->sum_exp_tensor_uid, K_SDPA_TENSOR_SUM_EXP_UID);
+    EXPECT_EQ(attrs->rng_dump_tensor_uid, K_SDPA_TENSOR_RNG_DUMP_UID);
+    EXPECT_EQ(attrs->amax_s_tensor_uid, K_SDPA_TENSOR_AMAX_S_UID);
+    EXPECT_EQ(attrs->amax_o_tensor_uid, K_SDPA_TENSOR_AMAX_O_UID);
+
+    // Verify tensor attributes survive serialization (dims, strides, data_type, virtual)
+    verifyTensor(findTensorByUid(*graphT, K_SDPA_TENSOR_Q_UID),
+                 K_SDPA_TENSOR_Q_UID,
+                 toVec(K_SDPA_TENSOR_Q_DIMS),
+                 toVec(K_SDPA_TENSOR_Q_STRIDES),
+                 DataType::FLOAT);
+    verifyTensor(findTensorByUid(*graphT, K_SDPA_TENSOR_K_UID),
+                 K_SDPA_TENSOR_K_UID,
+                 toVec(K_SDPA_TENSOR_K_DIMS),
+                 toVec(K_SDPA_TENSOR_K_STRIDES),
+                 DataType::FLOAT);
+    verifyTensor(findTensorByUid(*graphT, K_SDPA_TENSOR_V_UID),
+                 K_SDPA_TENSOR_V_UID,
+                 toVec(K_SDPA_TENSOR_V_DIMS),
+                 toVec(K_SDPA_TENSOR_V_STRIDES),
+                 DataType::FLOAT);
+    verifyTensor(findTensorByUid(*graphT, K_SDPA_TENSOR_O_UID),
+                 K_SDPA_TENSOR_O_UID,
+                 toVec(K_SDPA_TENSOR_O_DIMS),
+                 toVec(K_SDPA_TENSOR_O_STRIDES),
+                 DataType::FLOAT);
+
+    // Verify scalar/enum SDPA attributes survive serialization
+    EXPECT_EQ(attrs->diagonal_alignment, DiagonalAlignment::TOP_LEFT);
+    EXPECT_EQ(attrs->mma_core_mode, DataType::UNSET);
+    EXPECT_EQ(attrs->implementation, AttentionImplementation::AUTO);
+    EXPECT_EQ(attrs->alibi_mask, false);
+    EXPECT_EQ(attrs->padding_mask, false);
+    EXPECT_EQ(attrs->causal_mask, false);
+    EXPECT_EQ(attrs->causal_mask_bottom_right, false);
 }
 
 TEST_F(TestGraphDescriptorSdpaFprop, ComputeDataTypePreserved)
 {
-    auto qDesc = createFinalizedTensor(40, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-    auto kDesc = createFinalizedTensor(41, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-    auto vDesc = createFinalizedTensor(42, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-    auto oDesc = createFinalizedTensor(43, {2, 4, 128, 64}, {32768, 8192, 64, 1});
-    auto attnMaskDesc = createFinalizedTensor(5);
-    auto scaleDesc = createFinalizedTensor(6);
-    auto seqLenQDesc = createFinalizedTensor(7);
-    auto seqLenKvDesc = createFinalizedTensor(8);
-    auto seedDesc = createFinalizedTensor(9);
-    auto offsetDesc = createFinalizedTensor(10);
-    auto dropoutMaskDesc = createFinalizedTensor(11);
-    auto dropoutScaleDesc = createFinalizedTensor(12);
-    auto pageTableKDesc = createFinalizedTensor(13);
-    auto pageTableVDesc = createFinalizedTensor(14);
-    auto blockMaskDesc = createFinalizedTensor(15);
-    auto sinkTokenDesc = createFinalizedTensor(16);
-    auto descaleQDesc = createFinalizedTensor(17);
-    auto descaleKDesc = createFinalizedTensor(18);
-    auto descaleVDesc = createFinalizedTensor(19);
-    auto descaleSDesc = createFinalizedTensor(20);
-    auto scaleSDesc = createFinalizedTensor(21);
-    auto scaleODesc = createFinalizedTensor(22);
-    auto statsDesc = createFinalizedTensor(23);
-    auto maxDesc = createFinalizedTensor(24);
-    auto sumExpDesc = createFinalizedTensor(25);
-    auto rngDumpDesc = createFinalizedTensor(26);
-    auto amaxSDesc = createFinalizedTensor(27);
-    auto amaxODesc = createFinalizedTensor(28);
+    auto qDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
+    auto kDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
+    auto vDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
+    auto oDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
+    auto attnMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_ATTN_MASK_UID);
+    auto scaleDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_UID);
+    auto seqLenQDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_Q_UID);
+    auto seqLenKvDesc = createFinalizedTensor(K_SDPA_TENSOR_SEQ_LEN_KV_UID);
+    auto seedDesc = createFinalizedTensor(K_SDPA_TENSOR_SEED_UID);
+    auto offsetDesc = createFinalizedTensor(K_SDPA_TENSOR_OFFSET_UID);
+    auto dropoutMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_MASK_UID);
+    auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+    auto pageTableKDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_K_UID);
+    auto pageTableVDesc = createFinalizedTensor(K_SDPA_TENSOR_PAGE_TABLE_V_UID);
+    auto blockMaskDesc = createFinalizedTensor(K_SDPA_TENSOR_BLOCK_MASK_UID);
+    auto sinkTokenDesc = createFinalizedTensor(K_SDPA_TENSOR_SINK_TOKEN_UID);
+    auto descaleQDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_Q_UID);
+    auto descaleKDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_K_UID);
+    auto descaleVDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_V_UID);
+    auto descaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_DESCALE_S_UID);
+    auto scaleSDesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_S_UID);
+    auto scaleODesc = createFinalizedTensor(K_SDPA_TENSOR_SCALE_O_UID);
+    auto statsDesc = createFinalizedTensor(K_SDPA_TENSOR_STATS_UID);
+    auto maxDesc = createFinalizedTensor(K_SDPA_TENSOR_MAX_UID);
+    auto sumExpDesc = createFinalizedTensor(K_SDPA_TENSOR_SUM_EXP_UID);
+    auto rngDumpDesc = createFinalizedTensor(K_SDPA_TENSOR_RNG_DUMP_UID);
+    auto amaxSDesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_S_UID);
+    auto amaxODesc = createFinalizedTensor(K_SDPA_TENSOR_AMAX_O_UID);
     auto opDesc = createFinalizedSdpaFpropOp(qDesc.get(),
                                              kDesc.get(),
                                              vDesc.get(),
@@ -386,6 +479,96 @@ TEST_F(TestGraphDescriptorSdpaFprop, ComputeDataTypePreserved)
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
+}
+
+TEST_F(TestGraphDescriptorSdpaFprop, BuildFromRequiredTensorsOnly)
+{
+    auto qDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_Q_UID, toVec(K_SDPA_TENSOR_Q_DIMS), toVec(K_SDPA_TENSOR_Q_STRIDES));
+    auto kDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_K_UID, toVec(K_SDPA_TENSOR_K_DIMS), toVec(K_SDPA_TENSOR_K_STRIDES));
+    auto vDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_V_UID, toVec(K_SDPA_TENSOR_V_DIMS), toVec(K_SDPA_TENSOR_V_STRIDES));
+    auto oDesc = createFinalizedTensor(
+        K_SDPA_TENSOR_O_UID, toVec(K_SDPA_TENSOR_O_DIMS), toVec(K_SDPA_TENSOR_O_STRIDES));
+
+    auto opDesc = createFinalizedSdpaFpropOpRequiredOnly(
+        qDesc.get(), kDesc.get(), vDesc.get(), oDesc.get());
+
+    auto desc = getDescriptor();
+    setHandle();
+
+    std::array<HipdnnBackendDescriptor*, 1> ops = {opDesc.get()};
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, ops.data()));
+    ASSERT_NO_THROW(desc->finalize());
+
+    auto serialized = desc->getSerializedGraph();
+    ASSERT_NE(serialized.ptr, nullptr);
+    ASSERT_GT(serialized.size, 0UL);
+
+    flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+    ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
+
+    auto graph = GetGraph(serialized.ptr);
+    auto graphT = graph->UnPack();
+
+    // Only 4 required tensors should be present
+    ASSERT_EQ(graphT->nodes.size(), 1);
+    ASSERT_EQ(graphT->tensors.size(), 4);
+
+    // Verify tensor attributes
+    verifyTensor(findTensorByUid(*graphT, K_SDPA_TENSOR_Q_UID),
+                 K_SDPA_TENSOR_Q_UID,
+                 toVec(K_SDPA_TENSOR_Q_DIMS),
+                 toVec(K_SDPA_TENSOR_Q_STRIDES),
+                 DataType::FLOAT);
+    verifyTensor(findTensorByUid(*graphT, K_SDPA_TENSOR_K_UID),
+                 K_SDPA_TENSOR_K_UID,
+                 toVec(K_SDPA_TENSOR_K_DIMS),
+                 toVec(K_SDPA_TENSOR_K_STRIDES),
+                 DataType::FLOAT);
+    verifyTensor(findTensorByUid(*graphT, K_SDPA_TENSOR_V_UID),
+                 K_SDPA_TENSOR_V_UID,
+                 toVec(K_SDPA_TENSOR_V_DIMS),
+                 toVec(K_SDPA_TENSOR_V_STRIDES),
+                 DataType::FLOAT);
+    verifyTensor(findTensorByUid(*graphT, K_SDPA_TENSOR_O_UID),
+                 K_SDPA_TENSOR_O_UID,
+                 toVec(K_SDPA_TENSOR_O_DIMS),
+                 toVec(K_SDPA_TENSOR_O_STRIDES),
+                 DataType::FLOAT);
+
+    // Verify node attributes
+    ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::SdpaAttributes);
+    auto* attrs = graphT->nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    EXPECT_EQ(attrs->q_tensor_uid, K_SDPA_TENSOR_Q_UID);
+    EXPECT_EQ(attrs->k_tensor_uid, K_SDPA_TENSOR_K_UID);
+    EXPECT_EQ(attrs->v_tensor_uid, K_SDPA_TENSOR_V_UID);
+    EXPECT_EQ(attrs->o_tensor_uid, K_SDPA_TENSOR_O_UID);
+
+    // Optional tensor UIDs should not be set
+    EXPECT_FALSE(attrs->attn_mask_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->scale_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->seq_len_q_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->seq_len_kv_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->seed_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->offset_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->dropout_mask_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->dropout_scale_tensor_uid.has_value());
+
+    // Verify default scalar/enum values
+    EXPECT_EQ(attrs->diagonal_alignment, DiagonalAlignment::TOP_LEFT);
+    EXPECT_EQ(attrs->mma_core_mode, DataType::UNSET);
+    EXPECT_EQ(attrs->implementation, AttentionImplementation::AUTO);
+    EXPECT_EQ(attrs->alibi_mask, false);
+    EXPECT_EQ(attrs->padding_mask, false);
+    EXPECT_EQ(attrs->causal_mask, false);
+    EXPECT_EQ(attrs->causal_mask_bottom_right, false);
+
+    EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
 }
 
 } // namespace
