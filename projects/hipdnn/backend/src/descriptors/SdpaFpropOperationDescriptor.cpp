@@ -271,11 +271,11 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                     "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT:
-        setOptionalBool(_data.generate_stats,
-                        attributeType,
-                        elementCount,
-                        arrayOfElements,
-                        "SdpaFpropOperationDescriptor::setAttribute()");
+        setOptionalScalar<HIPDNN_TYPE_BOOLEAN>(_data.generate_stats,
+                                               attributeType,
+                                               elementCount,
+                                               arrayOfElements,
+                                               "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT:
         setScalar(_data.alibi_mask,
@@ -310,39 +310,39 @@ void SdpaFpropOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                   "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT:
-        setOptionalFloat(_data.dropout_probability,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::setAttribute()");
+        setOptionalScalar<HIPDNN_TYPE_FLOAT>(_data.dropout_probability,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT:
-        setOptionalFloat(_data.attn_scale_value,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::setAttribute()");
+        setOptionalScalar<HIPDNN_TYPE_FLOAT>(_data.attn_scale_value,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT:
-        setOptionalInt64(_data.left_bound,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::setAttribute()");
+        setOptionalScalar<HIPDNN_TYPE_INT64>(_data.left_bound,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT:
-        setOptionalInt64(_data.right_bound,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::setAttribute()");
+        setOptionalScalar<HIPDNN_TYPE_INT64>(_data.right_bound,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT:
-        setOptionalInt32(_data.max_seq_len_kv,
-                         attributeType,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::setAttribute()");
+        setOptionalScalar<HIPDNN_TYPE_INT32>(_data.max_seq_len_kv,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
         hipdnn_backend::setDiagonalAlignment(_data.diagonal_alignment,
@@ -620,12 +620,12 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                     "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_GENERATE_STATS_EXT:
-        getOptionalBool(_data.generate_stats,
-                        attributeType,
-                        requestedElementCount,
-                        elementCount,
-                        arrayOfElements,
-                        "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalScalar<HIPDNN_TYPE_BOOLEAN>(_data.generate_stats,
+                                               attributeType,
+                                               requestedElementCount,
+                                               elementCount,
+                                               arrayOfElements,
+                                               "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_ALIBI_MASK_EXT:
         getScalar(_data.alibi_mask,
@@ -664,44 +664,44 @@ void SdpaFpropOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                   "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_DROPOUT_PROBABILITY_EXT:
-        getOptionalFloat(_data.dropout_probability,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalScalar<HIPDNN_TYPE_FLOAT>(_data.dropout_probability,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_ATTN_SCALE_VALUE_EXT:
-        getOptionalFloat(_data.attn_scale_value,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalScalar<HIPDNN_TYPE_FLOAT>(_data.attn_scale_value,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_LEFT_BOUND_EXT:
-        getOptionalInt64(_data.left_bound,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalScalar<HIPDNN_TYPE_INT64>(_data.left_bound,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_RIGHT_BOUND_EXT:
-        getOptionalInt64(_data.right_bound,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalScalar<HIPDNN_TYPE_INT64>(_data.right_bound,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_MAX_SEQ_LEN_KV_EXT:
-        getOptionalInt32(_data.max_seq_len_kv,
-                         attributeType,
-                         requestedElementCount,
-                         elementCount,
-                         arrayOfElements,
-                         "SdpaFpropOperationDescriptor::getAttribute()");
+        getOptionalScalar<HIPDNN_TYPE_INT32>(_data.max_seq_len_kv,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "SdpaFpropOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_SDPA_FPROP_DIAGONAL_ALIGNMENT_EXT:
         hipdnn_backend::getDiagonalAlignment(_data.diagonal_alignment,

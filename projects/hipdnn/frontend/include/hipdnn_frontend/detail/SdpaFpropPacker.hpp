@@ -27,18 +27,6 @@ inline Error createSdpaFpropOperation(
                 "Failed to create SDPA fprop operation descriptor"};
     }
 
-    // Helper lambda: set a tensor ref only if the tensor is present (non-null)
-    auto optionalTensor = [&](hipdnnBackendAttributeName_t attr,
-                              const std::shared_ptr<graph::TensorAttributes>& tensor,
-                              const std::string& name) -> Error {
-        if(tensor)
-        {
-            HIPDNN_CHECK_ERROR(
-                ensureAndSetTensorRef(opDesc.get(), attr, tensor, tensorDescs, name));
-        }
-        return {};
-    };
-
     // Required tensors
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
                                              HIPDNN_ATTR_OPERATION_SDPA_FPROP_Q_EXT,
@@ -62,73 +50,135 @@ inline Error createSdpaFpropOperation(
                                              "SDPA fprop O"));
 
     // Optional input tensors
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT,
-                                      attributes.get_attn_mask(),
-                                      "SDPA fprop ATTN_MASK"));
-    HIPDNN_CHECK_ERROR(optionalTensor(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT, attributes.get_scale(), "SDPA fprop SCALE"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT,
-                                      attributes.get_seq_len_q(),
-                                      "SDPA fprop SEQ_LEN_Q"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT,
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_ATTN_MASK_EXT,
+                                                     attributes.get_attn_mask(),
+                                                     tensorDescs,
+                                                     "SDPA fprop ATTN_MASK"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_EXT,
+                                                     attributes.get_scale(),
+                                                     tensorDescs,
+                                                     "SDPA fprop SCALE"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_Q_EXT,
+                                                     attributes.get_seq_len_q(),
+                                                     tensorDescs,
+                                                     "SDPA fprop SEQ_LEN_Q"));
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEQ_LEN_KV_EXT,
                                       attributes.get_seq_len_kv(),
+                                      tensorDescs,
                                       "SDPA fprop SEQ_LEN_KV"));
-    HIPDNN_CHECK_ERROR(optionalTensor(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT, attributes.get_seed(), "SDPA fprop SEED"));
-    HIPDNN_CHECK_ERROR(optionalTensor(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT, attributes.get_offset(), "SDPA fprop OFFSET"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT,
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_SEED_EXT,
+                                                     attributes.get_seed(),
+                                                     tensorDescs,
+                                                     "SDPA fprop SEED"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_OFFSET_EXT,
+                                                     attributes.get_offset(),
+                                                     tensorDescs,
+                                                     "SDPA fprop OFFSET"));
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_MASK_EXT,
                                       attributes.get_dropout_mask(),
+                                      tensorDescs,
                                       "SDPA fprop DROPOUT_MASK"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT,
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_DROPOUT_SCALE_EXT,
                                       attributes.get_dropout_scale(),
+                                      tensorDescs,
                                       "SDPA fprop DROPOUT_SCALE"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT,
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_K_EXT,
                                       attributes.get_page_table_k(),
+                                      tensorDescs,
                                       "SDPA fprop PAGE_TABLE_K"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT,
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_PAGE_TABLE_V_EXT,
                                       attributes.get_page_table_v(),
+                                      tensorDescs,
                                       "SDPA fprop PAGE_TABLE_V"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT,
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_BLOCK_MASK_EXT,
                                       attributes.get_block_mask(),
+                                      tensorDescs,
                                       "SDPA fprop BLOCK_MASK"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT,
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_SDPA_FPROP_SINK_TOKEN_EXT,
                                       attributes.get_sink_token(),
+                                      tensorDescs,
                                       "SDPA fprop SINK_TOKEN"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT,
-                                      attributes.get_descale_q(),
-                                      "SDPA fprop DESCALE_Q"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT,
-                                      attributes.get_descale_k(),
-                                      "SDPA fprop DESCALE_K"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT,
-                                      attributes.get_descale_v(),
-                                      "SDPA fprop DESCALE_V"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT,
-                                      attributes.get_descale_s(),
-                                      "SDPA fprop DESCALE_S"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT,
-                                      attributes.get_scale_s(),
-                                      "SDPA fprop SCALE_S"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT,
-                                      attributes.get_scale_o(),
-                                      "SDPA fprop SCALE_O"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_Q_EXT,
+                                                     attributes.get_descale_q(),
+                                                     tensorDescs,
+                                                     "SDPA fprop DESCALE_Q"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_K_EXT,
+                                                     attributes.get_descale_k(),
+                                                     tensorDescs,
+                                                     "SDPA fprop DESCALE_K"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_V_EXT,
+                                                     attributes.get_descale_v(),
+                                                     tensorDescs,
+                                                     "SDPA fprop DESCALE_V"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_DESCALE_S_EXT,
+                                                     attributes.get_descale_s(),
+                                                     tensorDescs,
+                                                     "SDPA fprop DESCALE_S"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_S_EXT,
+                                                     attributes.get_scale_s(),
+                                                     tensorDescs,
+                                                     "SDPA fprop SCALE_S"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_SCALE_O_EXT,
+                                                     attributes.get_scale_o(),
+                                                     tensorDescs,
+                                                     "SDPA fprop SCALE_O"));
 
     // Optional output tensors
-    HIPDNN_CHECK_ERROR(optionalTensor(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT, attributes.get_stats(), "SDPA fprop STATS"));
-    HIPDNN_CHECK_ERROR(optionalTensor(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT, attributes.get_max(), "SDPA fprop MAX"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT,
-                                      attributes.get_sum_exp(),
-                                      "SDPA fprop SUM_EXP"));
-    HIPDNN_CHECK_ERROR(optionalTensor(HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT,
-                                      attributes.get_rng_dump(),
-                                      "SDPA fprop RNG_DUMP"));
-    HIPDNN_CHECK_ERROR(optionalTensor(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT, attributes.get_amax_s(), "SDPA fprop AMAX_S"));
-    HIPDNN_CHECK_ERROR(optionalTensor(
-        HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT, attributes.get_amax_o(), "SDPA fprop AMAX_O"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_STATS_EXT,
+                                                     attributes.get_stats(),
+                                                     tensorDescs,
+                                                     "SDPA fprop STATS"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_MAX_EXT,
+                                                     attributes.get_max(),
+                                                     tensorDescs,
+                                                     "SDPA fprop MAX"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_SUM_EXP_EXT,
+                                                     attributes.get_sum_exp(),
+                                                     tensorDescs,
+                                                     "SDPA fprop SUM_EXP"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_RNG_DUMP_EXT,
+                                                     attributes.get_rng_dump(),
+                                                     tensorDescs,
+                                                     "SDPA fprop RNG_DUMP"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_S_EXT,
+                                                     attributes.get_amax_s(),
+                                                     tensorDescs,
+                                                     "SDPA fprop AMAX_S"));
+    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
+                                                     HIPDNN_ATTR_OPERATION_SDPA_FPROP_AMAX_O_EXT,
+                                                     attributes.get_amax_o(),
+                                                     tensorDescs,
+                                                     "SDPA fprop AMAX_O"));
 
     // Set boolean scalar parameters
     if(attributes.generate_stats.has_value())
