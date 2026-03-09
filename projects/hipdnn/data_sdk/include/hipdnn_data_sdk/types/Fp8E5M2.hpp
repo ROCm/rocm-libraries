@@ -242,10 +242,14 @@ inline float fp8_e5m2_bits_to_float(uint8_t bits) noexcept
 } // namespace detail
 
 /**
- * @brief Custom FP8 E5M2 type for hipDNN
+ * @brief Custom storage-only FP8 E5M2 type for hipDNN
  *
  * This type provides a portable FP8 E5M2 (1 sign, 5 exponent, 2 mantissa) implementation
  * that does not require the __HIPCC__ macro. Uses OCP E5M2 format.
+ *
+ * This is a STORAGE-ONLY type intended for data representation and conversion,
+ * not direct computation. Arithmetic operations and comparisons are
+ * intentionally not provided. For computation, explicitly convert to float.
  *
  * Binary layout: 1 sign bit, 5 exponent bits, 2 mantissa bits
  * Range: +/- 57344 (max normal value)
@@ -329,83 +333,6 @@ struct fp8_e5m2
         return *this;
     }
 
-    // Arithmetic operators (compute in float, return fp8_e5m2)
-    friend fp8_e5m2 operator+(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return fp8_e5m2(static_cast<float>(a) + static_cast<float>(b));
-    }
-
-    friend fp8_e5m2 operator-(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return fp8_e5m2(static_cast<float>(a) - static_cast<float>(b));
-    }
-
-    friend fp8_e5m2 operator*(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return fp8_e5m2(static_cast<float>(a) * static_cast<float>(b));
-    }
-
-    friend fp8_e5m2 operator/(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return fp8_e5m2(static_cast<float>(a) / static_cast<float>(b));
-    }
-
-    // Compound assignment operators
-    fp8_e5m2& operator+=(fp8_e5m2 other) noexcept
-    {
-        *this = *this + other;
-        return *this;
-    }
-
-    fp8_e5m2& operator-=(fp8_e5m2 other) noexcept
-    {
-        *this = *this - other;
-        return *this;
-    }
-
-    fp8_e5m2& operator*=(fp8_e5m2 other) noexcept
-    {
-        *this = *this * other;
-        return *this;
-    }
-
-    fp8_e5m2& operator/=(fp8_e5m2 other) noexcept
-    {
-        *this = *this / other;
-        return *this;
-    }
-
-    // Comparison operators (compare via float conversion)
-    friend bool operator==(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) == static_cast<float>(b);
-    }
-
-    friend bool operator!=(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) != static_cast<float>(b);
-    }
-
-    friend bool operator<(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) < static_cast<float>(b);
-    }
-
-    friend bool operator>(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) > static_cast<float>(b);
-    }
-
-    friend bool operator<=(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) <= static_cast<float>(b);
-    }
-
-    friend bool operator>=(fp8_e5m2 a, fp8_e5m2 b) noexcept
-    {
-        return static_cast<float>(a) >= static_cast<float>(b);
-    }
-
     // Stream output
     friend std::ostream& operator<<(std::ostream& os, fp8_e5m2 val)
     {
@@ -420,7 +347,7 @@ static_assert(std::is_standard_layout_v<fp8_e5m2>, "fp8_e5m2 must be standard la
 
 // User-defined literal
 // NOLINTNEXTLINE(readability-identifier-naming)
-inline fp8_e5m2 operator""_bfp8(long double val)
+inline fp8_e5m2 operator""_e5m2(long double val)
 {
     return fp8_e5m2(static_cast<float>(val));
 }
@@ -429,18 +356,8 @@ inline fp8_e5m2 operator""_bfp8(long double val)
 // Math functions for fp8_e5m2 (in hipdnn_data_sdk::types namespace)
 // ============================================================================
 // These are defined in our namespace to enable ADL (Argument Dependent Lookup).
-// Use unqualified calls like: fabs(x), isnan(x), etc.
+// Use unqualified calls like: isnan(x), isinf(x), etc.
 // ============================================================================
-
-inline fp8_e5m2 abs(fp8_e5m2 x)
-{
-    return fp8_e5m2::from_bits(x.data & detail::FP8_E5M2_ABS_MASK);
-}
-
-inline fp8_e5m2 fabs(fp8_e5m2 x)
-{
-    return fp8_e5m2::from_bits(x.data & detail::FP8_E5M2_ABS_MASK);
-}
 
 inline bool isnan(fp8_e5m2 x)
 {
@@ -463,74 +380,6 @@ inline bool signbit(fp8_e5m2 x)
 inline bool isfinite(fp8_e5m2 x)
 {
     return !isnan(x) && !isinf(x);
-}
-
-inline fp8_e5m2 max(fp8_e5m2 a, fp8_e5m2 b)
-{
-    if(isnan(a))
-    {
-        return isnan(b) ? fp8_e5m2::from_bits(detail::FP8_E5M2_QNAN) : b;
-    }
-    if(isnan(b))
-    {
-        return a;
-    }
-    return a > b ? a : b;
-}
-
-inline fp8_e5m2 min(fp8_e5m2 a, fp8_e5m2 b)
-{
-    if(isnan(a))
-    {
-        return isnan(b) ? fp8_e5m2::from_bits(detail::FP8_E5M2_QNAN) : b;
-    }
-    if(isnan(b))
-    {
-        return a;
-    }
-    return a < b ? a : b;
-}
-
-// Rounding functions
-inline fp8_e5m2 floor(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::floor(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 ceil(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::ceil(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 round(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::round(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 trunc(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::trunc(static_cast<float>(x)));
-}
-
-// Math functions (compute in float)
-inline fp8_e5m2 exp(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::exp(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 log(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::log(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 sqrt(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::sqrt(static_cast<float>(x)));
-}
-
-inline fp8_e5m2 tanh(fp8_e5m2 x)
-{
-    return fp8_e5m2(std::tanh(static_cast<float>(x)));
 }
 
 } // namespace hipdnn_data_sdk::types

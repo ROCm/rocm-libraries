@@ -33,8 +33,24 @@ add_executable(
     descriptors/TestGraphDescriptor.cpp
     descriptors/TestTensorDescriptor.cpp
     descriptors/TestConvolutionFwdOperationDescriptor.cpp
+    descriptors/TestConvolutionWrwOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorConvolutionWrw.cpp
+    descriptors/TestBatchnormInferenceOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBatchnormInference.cpp
+    descriptors/TestKnobSettingDescriptor.cpp
+    descriptors/TestBatchnormBackwardOperationDescriptor.cpp
+    descriptors/TestConvolutionBwdOperationDescriptor.cpp
+    descriptors/TestMatmulOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorMatmul.cpp
+    descriptors/TestGraphDescriptorBatchnormBackward.cpp
+    descriptors/TestGraphDescriptorConvolutionBwd.cpp
+    descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorBatchnormInferenceVarianceExt.cpp
     descriptors/TestGraphDescriptorOps.cpp
+    descriptors/TestPointwiseOperationDescriptor.cpp
+    descriptors/TestGraphDescriptorPointwise.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
+    descriptors/TestDataTypeConversion.cpp
     descriptors/TestVariantPackDescriptor.cpp
     main.cpp
     TestEnginePluginResourceManager.cpp
@@ -44,9 +60,11 @@ add_executable(
     TestHandle.cpp
     TestHelpers.cpp
     TestBackendLogger.cpp
+    TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestPlugin.cpp
     TestSharedLibrary.cpp
+    TestVersion.cpp
     utilities/TestEngineOrdering.cpp
 )
 

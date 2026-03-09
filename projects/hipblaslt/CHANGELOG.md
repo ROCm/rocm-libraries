@@ -8,11 +8,19 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 * Support for AMD SMI.
 
+### Changed
+
+* Migrate `HIPBLASLT_ENABLE_LLVM` to `HIPBLASLT_ENABLE_YAML` and synchronize with tensilelite's build library format.
+
 ### Deprecation
 
 * ROCm SMI is deprecated and dependencies are removed.
 
 ## hipBLASLt 1.2.1 for ROCm 7.2.1
+
+### Added
+
+* Complex datatype support for gfx942 and gfx950.
 
 ### Resolved issues
 

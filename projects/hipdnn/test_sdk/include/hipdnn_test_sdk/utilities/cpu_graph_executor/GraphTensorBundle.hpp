@@ -64,6 +64,32 @@ struct GraphTensorBundle
         return variantPack;
     }
 
+    hipdnn_data_sdk::utilities::ITensor& getTensor(int64_t uid)
+    {
+        auto it = tensors.find(uid);
+        if(it == tensors.end())
+        {
+            throw std::runtime_error(
+                "GraphTensorBundle: tensor with uid " + std::to_string(uid)
+                + " not found. The tensor may be marked as virtual in the graph"
+                  " (virtual tensors are skipped during bundle construction).");
+        }
+        return *it->second;
+    }
+
+    const hipdnn_data_sdk::utilities::ITensor& getTensor(int64_t uid) const
+    {
+        auto it = tensors.find(uid);
+        if(it == tensors.end())
+        {
+            throw std::runtime_error(
+                "GraphTensorBundle: tensor with uid " + std::to_string(uid)
+                + " not found. The tensor may be marked as virtual in the graph"
+                  " (virtual tensors are skipped during bundle construction).");
+        }
+        return *it->second;
+    }
+
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;
 };
 
