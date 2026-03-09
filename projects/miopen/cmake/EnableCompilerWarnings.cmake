@@ -66,6 +66,7 @@ set(__clang_cxx_compile_options
     -Wno-shorten-64-to-32
     -Wno-sign-conversion
     -Wno-unknown-warning-option
+    -Wno-unused-command-line-argument
     -Wno-weak-vtables
     -Wno-covered-switch-default
     -Wno-unsafe-buffer-usage
@@ -100,8 +101,7 @@ set(__clang_cxx_compile_options
     -Wno-enum-constexpr-conversion
     -Wno-missing-noreturn
     -Wno-tautological-constant-out-of-range-compare
-    -Wno-nrvo
-    -Wno-c++20-extensions)
+    -Wno-nrvo)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options
         -Wno-unique-object-duplication
