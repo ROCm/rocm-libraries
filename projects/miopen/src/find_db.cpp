@@ -127,72 +127,78 @@ template <class TDb>
 fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
                                                    const std::string& path_suffix)
 {
-    const std::string ext = ".fdb.txt";
-    const auto root_path  = GetSystemDbPath();
-    const auto base_name  = handle.GetDbBasename();
-    const auto suffix = GetSystemFindDbSuffix() + (path_suffix.empty() ? "" : ('.' + path_suffix));
-    auto file_path    = root_path / (base_name + "." + suffix + ext);
-    if(fs::exists(file_path))
-    {
-        MIOPEN_LOG_I2("Found exact find database file: " << file_path);
-        return file_path;
-    }
-
-    MIOPEN_LOG_I2("inexact find database search");
-    if(!fs::is_directory(root_path))
-    {
-        MIOPEN_LOG_I("Database directory does not exist");
-        file_path = fs::path{};
-        return file_path;
-    }
-
-    MIOPEN_LOG_I2("Iterating over find db directory " << root_path);
-    std::vector<fs::path> all_files;
-    std::vector<fs::path> contents;
-    std::copy(
-        fs::directory_iterator(root_path), fs::directory_iterator(), std::back_inserter(contents));
-    for(auto const& filepath : contents)
-    {
-        if(fs::is_regular_file(filepath) && filepath.extension() == path_suffix + ".fdb.txt")
-            all_files.push_back(filepath);
-    }
-
-    const auto db_id        = handle.GetTargetProperties().DbId();
-    const int real_cu_count = handle.GetMaxComputeUnits();
-    int closest_cu          = std::numeric_limits<int>::max();
-
-    for(const auto& entry : all_files)
-    {
-        const auto fname = entry.stem().string();
-        MIOPEN_LOG_I("Checking find db file: " << fname);
-        // Check for alternate back end same ASIC
-        if(fname.starts_with(base_name))
+    static const fs::path installed_path = [&] {
+        const std::string ext = ".fdb.txt";
+        const auto root_path  = GetSystemDbPath();
+        const auto base_name  = handle.GetDbBasename();
+        const auto suffix =
+            GetSystemFindDbSuffix() + (path_suffix.empty() ? "" : ('.' + path_suffix));
+        auto file_path = root_path / (base_name + "." + suffix + ext);
+        if(fs::exists(file_path))
         {
-            file_path = entry;
+            MIOPEN_LOG_I2("Found exact find database file: " << file_path);
             return file_path;
         }
-        if(db_id.empty() || !miopen::StartsWith(db_id, "gfx") || real_cu_count == 0)
+
+        MIOPEN_LOG_I2("inexact find database search");
+        if(!fs::is_directory(root_path))
         {
+            MIOPEN_LOG_I("Database directory does not exist");
             file_path = fs::path{};
-            return file_path; // empty
+            return file_path;
         }
-        // Check for alternate ASIC any back end
-        if(fname.starts_with(db_id))
+
+        MIOPEN_LOG_I2("Iterating over find db directory " << root_path);
+        std::vector<fs::path> all_files;
+        std::vector<fs::path> contents;
+        std::copy(fs::directory_iterator(root_path),
+                  fs::directory_iterator(),
+                  std::back_inserter(contents));
+        for(auto const& filepath : contents)
         {
-            const auto pos = fname.find('_');
-            int cur_count  = -1;
-            if(pos != std::string::npos)
-                cur_count = std::stoi(fname.substr(pos + 1));
-            else
-                cur_count = std::stoi(fname.substr(db_id.length()), nullptr, 16);
-            if(abs(cur_count - real_cu_count) < (closest_cu))
+            if(fs::is_regular_file(filepath) && filepath.extension() == path_suffix + ".fdb.txt")
+                all_files.push_back(filepath);
+        }
+
+        const auto db_id        = handle.GetTargetProperties().DbId();
+        const int real_cu_count = handle.GetMaxComputeUnits();
+        int closest_cu          = std::numeric_limits<int>::max();
+
+        for(const auto& entry : all_files)
+        {
+            const auto fname = entry.stem().string();
+            MIOPEN_LOG_I("Checking find db file: " << fname);
+            // Check for alternate back end same ASIC
+            if(fname.starts_with(base_name))
             {
-                file_path  = entry;
-                closest_cu = abs(cur_count - real_cu_count);
+                file_path = entry;
+                return file_path;
+            }
+            if(db_id.empty() || !miopen::StartsWith(db_id, "gfx") || real_cu_count == 0)
+            {
+                file_path = fs::path{};
+                return file_path; // empty
+            }
+            // Check for alternate ASIC any back end
+            if(fname.starts_with(db_id))
+            {
+                const auto pos = fname.find('_');
+                int cur_count  = -1;
+                if(pos != std::string::npos)
+                    cur_count = std::stoi(fname.substr(pos + 1));
+                else
+                    cur_count = std::stoi(fname.substr(db_id.length()), nullptr, 16);
+                if(abs(cur_count - real_cu_count) < (closest_cu))
+                {
+                    file_path  = entry;
+                    closest_cu = abs(cur_count - real_cu_count);
+                }
             }
         }
-    }
-    return file_path;
+        return file_path;
+    }();
+
+    return installed_path;
 }
 #endif
 template <class TDb>
