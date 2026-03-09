@@ -1072,9 +1072,10 @@ static std::size_t cutOffBatch_2 = 5;
 // Partial pass is currently restricted to large enough batch sizes,
 // unite stride, interleaved FFTs.
 auto check_pp_restrictions = [](const NodeMetaData& nodeData, const bool& cutOffBatch) -> bool {
-    size_t checkDist = product(nodeData.length.begin(), nodeData.length.end());
+    size_t checkiDist = product(nodeData.length.begin(), nodeData.length.end());
+    size_t checkoDist = product(nodeData.outputLength.begin(), nodeData.outputLength.end());
 
-    bool distCondition      = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);
+    bool distCondition      = (nodeData.iDist == checkiDist && nodeData.oDist == checkoDist);
     bool strideCondition    = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
                             && (nodeData.outStride.size() && nodeData.outStride[0]) == 1);
     bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar)
