@@ -102,10 +102,11 @@ set(__clang_cxx_compile_options
     -Wno-documentation
     -Wno-deprecated-builtins
     -Wno-enum-constexpr-conversion
-    -Wno-unused-value
+    -Wunused-value
     -Wno-unused-parameter
     -Wno-missing-noreturn
     -Wno-tautological-constant-out-of-range-compare
+    -Wno-nrvo
     -Wno-c++20-extensions)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "19")
     list(APPEND __clang_cxx_compile_options

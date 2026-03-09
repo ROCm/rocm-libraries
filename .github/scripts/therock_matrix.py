@@ -7,6 +7,7 @@ import os
 subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
     "projects/hipblaslt": "blas",
@@ -48,7 +49,7 @@ project_map = {
     "miopen": {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPEN=ON",
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
         "projects_to_test": ["miopen", "miopen_plugin"],
@@ -56,10 +57,6 @@ project_map = {
     "fft": {
         "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "projects_to_test": ["hipfft", "rocfft"],
-    },
-    "rocwmma": {
-        "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
-        "projects_to_test": ["rocwmma"],
     },
 }
 
@@ -78,11 +75,10 @@ additional_options = {
         "projects_to_test": ["rocsolver", "hipsolver"],
         "project_to_add": "blas",
     },
-    # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
     "hipdnn": {
         "cmake_options": [
-            "-DTHEROCK_ENABLE_HIPBLASLT_PLUGIN=ON",
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
@@ -90,24 +86,29 @@ additional_options = {
             "hipdnn",
             "hipdnn_install",
             "hipdnn-samples",
-            "miopen_plugin",
-            "hipblaslt_plugin",
+            "miopenprovider",
+            "hipblasltprovider",
         ],
         "project_to_add": "miopen",
     },
     "miopen-provider": {
         "cmake_options": [
-            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
         ],
-        "projects_to_test": ["miopen_plugin"],
+        "projects_to_test": ["miopenprovider"],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {
         "cmake_options": [
-            "-DTHEROCK_ENABLE_HIPBLASLT_PLUGIN=ON",
+            "-DTHEROCK_ENABLE_HIPBLASLTPROVIDER=ON",
         ],
-        "projects_to_test": ["hipblaslt_plugin"],
+        "projects_to_test": ["hipblasltprovider"],
+        "project_to_add": "blas",
+    },
+    "rocwmma": {
+        "cmake_options": ["-DTHEROCK_ENABLE_ROCWMMA=ON"],
+        "projects_to_test": ["rocwmma"],
         "project_to_add": "blas",
     },
 }

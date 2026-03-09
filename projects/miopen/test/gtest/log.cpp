@@ -23,6 +23,9 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <cstdio>
+#include <cstdlib>
+
 #include "log.hpp"
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
@@ -109,7 +112,18 @@ struct Tensor
         clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
         data = clCreateBuffer(ctx, CL_MEM_READ_WRITE, data_size, nullptr, nullptr);
 #elif MIOPEN_BACKEND_HIP
-        EXPECT_EQ(hipMalloc(&data, data_size), hipSuccess);
+        // ASSERT_* cannot be used in constructors (generates illegal
+        // return-void). Use hard abort on allocation failure instead.
+        auto err = hipMalloc(&data, data_size);
+        if(err != hipSuccess)
+        {
+            fprintf(stderr,
+                    "hipMalloc failed: %s at %s:%d\n",
+                    hipGetErrorString(err),
+                    __FILE__,
+                    __LINE__);
+            abort();
+        }
 #endif
     }
 
@@ -119,7 +133,7 @@ struct Tensor
 #if MIOPEN_BACKEND_OPENCL
         clReleaseMemObject(data);
 #elif MIOPEN_BACKEND_HIP
-        hipFree(data);
+        (void)hipFree(data);
 #endif
     }
 };
@@ -345,7 +359,7 @@ void TestLogBufferOn()
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "5"); // miopen::LoggingLevel::Info
     // test log dump after error
-    miopen::ClearBufferLog();
+    miopen::ClearLogBuffer();
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");
     MIOPEN_LOG_I2("info2");
@@ -362,18 +376,14 @@ void TestLogBufferOn()
             case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
             case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
             case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-            case 3:
-                ASSERT_FALSE(isSubStr(line, "trace"));
-                ASSERT_TRUE(isSubStr(line, "error"));
-                break;
+            case 3: ASSERT_TRUE(isSubStr(line, "error")); break;
+            case 4: ASSERT_TRUE(isSubStr(line, "")); break;
             }
             line_i++;
         }
     }
-    fs::remove(filename);
 
     // test log dump after throw
-    miopen::ClearBufferLog();
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");
     MIOPEN_LOG_I2("info2");
@@ -391,15 +401,45 @@ void TestLogBufferOn()
             case 0: ASSERT_TRUE(isSubStr(line, "warn")); break;
             case 1: ASSERT_TRUE(isSubStr(line, "info")); break;
             case 2: ASSERT_TRUE(isSubStr(line, "info2")); break;
-            case 3: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            case 3: ASSERT_TRUE(isSubStr(line, "error")); break;
+            case 4: ASSERT_TRUE(isSubStr(line, "")); break;
+            case 5: ASSERT_TRUE(isSubStr(line, "warn")); break;
+            case 6: ASSERT_TRUE(isSubStr(line, "info")); break;
+            case 7: ASSERT_TRUE(isSubStr(line, "info2")); break;
+            case 8: ASSERT_TRUE(isSubStr(line, "throw")); break;
+            case 9: ASSERT_TRUE(isSubStr(line, "")); break;
             }
             line_i++;
         }
+        ASSERT_TRUE(line_i == 10);
     }
     fs::remove(filename);
 }
 
-void TestLogBufferOff()
+void TestLogBufferEnvDisabled()
+{
+    auto filename =
+        fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
+
+    fs::remove(filename);
+
+    ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
+                                                 "5"); // miopen::LoggingLevel::Info
+    ScopedEnvironment<std::string> log_buffer_off_env(MIOPEN_LOG_BUFFER_SIZE,
+                                                      "0"); // disable logging
+
+    miopen::ClearLogBuffer();
+    // log messages
+    MIOPEN_LOG_W("warn");
+    MIOPEN_LOG_I("info");
+    MIOPEN_LOG_I2("info2");
+    MIOPEN_LOG_T("trace");
+    // test log dump after error
+    MIOPEN_LOG_E("error");
+    ASSERT_FALSE(fs::exists(filename));
+}
+
+void TestLogBufferOffAtHighLevel()
 {
     auto filename =
         fs::temp_directory_path() / ("miopen_error_" + std::to_string(getpid()) + ".log");
@@ -409,7 +449,7 @@ void TestLogBufferOff()
     ScopedEnvironment<std::string> log_level_env(MIOPEN_LOG_LEVEL,
                                                  "6"); // miopen::LoggingLevel::Info2
 
-    miopen::ClearBufferLog();
+    miopen::ClearLogBuffer();
     // log messages
     MIOPEN_LOG_W("warn");
     MIOPEN_LOG_I("info");

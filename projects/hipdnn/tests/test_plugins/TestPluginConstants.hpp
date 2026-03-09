@@ -105,4 +105,11 @@ inline const std::string& testKnobConstraintValidationPluginPath()
         = getPluginPath(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME);
     return s_testKnobConstraintValidationPluginPath;
 }
+
+inline const std::string& testIncompatibleVersionPluginPath()
+{
+    static const std::string s_testIncompatibleVersionPluginPath
+        = getPluginPath(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME);
+    return s_testIncompatibleVersionPluginPath;
+}
 } // namespace hipdnn_tests::plugin_constants
