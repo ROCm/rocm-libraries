@@ -83,8 +83,12 @@
 
 static inline std::string getIncludeDirArg(const std::string &binary_name) {
     auto binary_path = std::filesystem::canonical(binary_name).parent_path();
-    auto include_path = std::filesystem::canonical(binary_path.string() + "/../include");
-    return "-I" + include_path.string();
+    try {
+        auto include_path = std::filesystem::canonical(binary_path.string() + "/../include");
+        return "-I" + include_path.string();
+    } catch(const std::filesystem::filesystem_error&) {
+        return "";
+    }
 }
 
 // Get ROCM installation path from environment or use default
