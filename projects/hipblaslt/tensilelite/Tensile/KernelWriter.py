@@ -5204,7 +5204,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         unitA = 4 // (bpeGRA * asem)
       if ((not tluB) and (bpeGRB * asem < 4) and grvwb > 1):
         unitB = 4 // (bpeGRB * asem)
-      self.states.tailloopInNllmaxUnit = max(unitA, unitB)
+      self.states.tailloopInNllmaxUnit = int(max(unitA, unitB))
 
     # Only assembly supports scheduling
     if kernel["KernelLanguage"] == "Assembly":
