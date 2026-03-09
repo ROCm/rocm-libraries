@@ -4127,13 +4127,6 @@ class Solution(collections.abc.Mapping):
       # TODO: support ONLL if necessary
       state["OptNoLoadLoop"] = 0
 
-    # MX feature requires scale data (MXSA/MXSB) to be loaded in NLL as well
-    # ONLL assumes no new data needs to be loaded, which is incorrect for MX
-    # Disable ONLL for MXBlock kernels
-    # TODO: check if this is correct
-    if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and state["OptNoLoadLoop"]:
-      state["OptNoLoadLoop"] = 0
-
     # if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
     #   if state["ProblemType"]["SupportUserArgs"] and state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
     #     reject(state, printRejectionReason, "Currently SupportUserArgs does not support GSU > 1.")

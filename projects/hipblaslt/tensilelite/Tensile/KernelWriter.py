@@ -36,7 +36,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64
+  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, Instruction
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
 
@@ -1026,6 +1026,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numPackedB = 0
       numPackedM = 0
       pointerLWCodeInserted = False
+      PointerLRCodeItems = pointerLRCode.flatitems()
+      lenPointerLRCode = 0
+      # count number of PointerLRCode (excluding comment)
+      for item in PointerLRCodeItems:
+        if isinstance(item, Instruction):
+          lenPointerLRCode += 1
       #####
       # Prepare localReadCode
       ####
@@ -1641,7 +1647,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
             (not pointerLWCodeInserted)):
           iterCode.add(pointerLWCode)
           pointerLWCodeInserted = True
-        if i == numMfmaPerIter - 1:
+        # schedule PointerLRCode into multiple MFMA (only v operation case (means excludes IncLdsBufSwitch))
+        if lenPointerLRCode > 2 and not self.states.IncLdsBufSwitch:
+          if len(localReadItemsThisLoop) == 0:
+            if i >= numMfmaPerIter - lenPointerLRCode:
+              while PointerLRCodeItems:
+                item = PointerLRCodeItems.pop(0)
+                iterCode.add(item)
+                if isinstance(item, Instruction):
+                  break
+            if i == numMfmaPerIter - 1:
+              while PointerLRCodeItems:
+                iterCode.add(PointerLRCodeItems.pop(0))
+        elif i == numMfmaPerIter - 1:
           iterCode.add(pointerLRCode)
 
         ####
