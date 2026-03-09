@@ -154,6 +154,21 @@ template <typename T>
                   "Failed to get " + errorContext + " Backend error: " + backendErrMsg.data()});
     }
 
+    if(actualCount < 0 || actualCount > count)
+    {
+        for(int64_t i = 0; i < count; ++i)
+        {
+            if(rawDescs[static_cast<size_t>(i)] != nullptr)
+            {
+                hipdnnBackend()->backendDestroyDescriptor(rawDescs[static_cast<size_t>(i)]);
+            }
+        }
+        return std::make_pair(
+            std::vector<ScopedHipdnnBackendDescriptor>{},
+            Error{ErrorCode::HIPDNN_BACKEND_ERROR,
+                  "Unexpected element count from backendGetAttribute for " + errorContext});
+    }
+
     // Wrap each in RAII
     std::vector<ScopedHipdnnBackendDescriptor> result;
     result.reserve(static_cast<size_t>(actualCount));

@@ -4,6 +4,7 @@
 #include "DescriptorTestUtils.hpp"
 #include "GraphTestUtils.hpp"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/ConvolutionFwdOperationDescriptor.hpp"
@@ -1586,6 +1587,14 @@ TEST_F(TestGraphDescriptorOps, GetAttributeReturnsOperations)
                                        returnedOps.data()));
     EXPECT_EQ(elementCount, 1);
     ASSERT_NE(returnedOps[0], nullptr);
+
+    // Verify the returned operation is a conv forward operation
+    int64_t opTypeCount = 0;
+    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    ASSERT_NO_THROW(returnedOps[0]->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType));
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+
     auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
     EXPECT_TRUE(returnedOp0->isFinalized());
 }
@@ -1754,6 +1763,14 @@ TEST_F(TestGraphDescriptorOps, OperationsPreservedAfterFinalize)
                                        returnedOps.data()));
     EXPECT_EQ(elementCount, 1);
     ASSERT_NE(returnedOps[0], nullptr);
+
+    // Verify the returned operation is a conv forward operation
+    int64_t opTypeCount = 0;
+    hipdnnOperationType_t opType = HIPDNN_OPERATION_TYPE_NOT_SET;
+    ASSERT_NO_THROW(returnedOps[0]->getAttribute(
+        HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType));
+    EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
+
     auto returnedOp0 = std::unique_ptr<HipdnnBackendDescriptor>(returnedOps[0]);
     EXPECT_TRUE(returnedOp0->isFinalized());
 }

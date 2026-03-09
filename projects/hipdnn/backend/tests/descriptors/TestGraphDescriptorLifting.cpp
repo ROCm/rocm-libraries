@@ -118,6 +118,17 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvFpropNode)
     auto graphT = GetGraph(serialized.ptr)->UnPack();
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
+    ASSERT_EQ(graphT->tensors.size(), 3);
+
+    const auto* convAttrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
+    ASSERT_NE(convAttrs, nullptr);
+    EXPECT_EQ(convAttrs->x_tensor_uid, K_TENSOR_X_UID);
+    EXPECT_EQ(convAttrs->w_tensor_uid, K_TENSOR_W_UID);
+    EXPECT_EQ(convAttrs->y_tensor_uid, K_TENSOR_Y_UID);
+    EXPECT_EQ(convAttrs->pre_padding, toVec(K_CONV_PADDING));
+    EXPECT_EQ(convAttrs->post_padding, toVec(K_CONV_PADDING));
+    EXPECT_EQ(convAttrs->stride, toVec(K_CONV_STRIDE));
+    EXPECT_EQ(convAttrs->dilation, toVec(K_CONV_DILATION));
 }
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesMultipleNodes)
@@ -141,6 +152,21 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesMultipleNodes)
     auto serialized = liftedGraph->getSerializedGraph();
     auto graphT = GetGraph(serialized.ptr)->UnPack();
     ASSERT_EQ(graphT->nodes.size(), 2);
+    ASSERT_EQ(graphT->tensors.size(), 6);
+    ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
+    ASSERT_EQ(graphT->nodes[1]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
+
+    const auto* conv1Attrs = graphT->nodes[0]->attributes.AsConvolutionFwdAttributes();
+    ASSERT_NE(conv1Attrs, nullptr);
+    EXPECT_EQ(conv1Attrs->x_tensor_uid, K_TENSOR_X_UID);
+    EXPECT_EQ(conv1Attrs->w_tensor_uid, K_TENSOR_W_UID);
+    EXPECT_EQ(conv1Attrs->y_tensor_uid, K_TENSOR_Y_UID);
+
+    const auto* conv2Attrs = graphT->nodes[1]->attributes.AsConvolutionFwdAttributes();
+    ASSERT_NE(conv2Attrs, nullptr);
+    EXPECT_EQ(conv2Attrs->x_tensor_uid, K_TENSOR_X2_UID);
+    EXPECT_EQ(conv2Attrs->w_tensor_uid, K_TENSOR_W2_UID);
+    EXPECT_EQ(conv2Attrs->y_tensor_uid, K_TENSOR_Y2_UID);
 }
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesTensorData)
@@ -171,6 +197,36 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesTensorData)
     EXPECT_EQ(xTensor->data_type, DataType::FLOAT);
     EXPECT_EQ(xTensor->dims, toVec(K_TENSOR_X_DIMS));
     EXPECT_EQ(xTensor->strides, toVec(K_TENSOR_X_STRIDES));
+
+    // Find the W tensor by UID and verify its attributes
+    const hipdnn_data_sdk::data_objects::TensorAttributesT* wTensor = nullptr;
+    for(const auto& tensor : graphT->tensors)
+    {
+        if(tensor->uid == K_TENSOR_W_UID)
+        {
+            wTensor = tensor.get();
+            break;
+        }
+    }
+    ASSERT_NE(wTensor, nullptr);
+    EXPECT_EQ(wTensor->data_type, DataType::FLOAT);
+    EXPECT_EQ(wTensor->dims, toVec(K_TENSOR_W_DIMS));
+    EXPECT_EQ(wTensor->strides, toVec(K_TENSOR_W_STRIDES));
+
+    // Find the Y tensor by UID and verify its attributes
+    const hipdnn_data_sdk::data_objects::TensorAttributesT* yTensor = nullptr;
+    for(const auto& tensor : graphT->tensors)
+    {
+        if(tensor->uid == K_TENSOR_Y_UID)
+        {
+            yTensor = tensor.get();
+            break;
+        }
+    }
+    ASSERT_NE(yTensor, nullptr);
+    EXPECT_EQ(yTensor->data_type, DataType::FLOAT);
+    EXPECT_EQ(yTensor->dims, toVec(K_TENSOR_Y_DIMS));
+    EXPECT_EQ(yTensor->strides, toVec(K_TENSOR_Y_STRIDES));
 }
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesGraphLevelAttributes)
@@ -272,9 +328,10 @@ TEST_F(TestGraphDescriptorLifting, DeserializePreservesNodeTensorUids)
     {
         tensorUids.insert(tensor->uid);
     }
-    EXPECT_TRUE(tensorUids.count(K_TENSOR_X_UID) > 0);
-    EXPECT_TRUE(tensorUids.count(K_TENSOR_W_UID) > 0);
-    EXPECT_TRUE(tensorUids.count(K_TENSOR_Y_UID) > 0);
+    EXPECT_EQ(tensorUids.count(K_TENSOR_X_UID), 1u);
+    EXPECT_EQ(tensorUids.count(K_TENSOR_W_UID), 1u);
+    EXPECT_EQ(tensorUids.count(K_TENSOR_Y_UID), 1u);
+    EXPECT_EQ(tensorUids.size(), 3u);
 }
 
 TEST_F(TestGraphDescriptorLifting, DeserializePreservesConvolutionParameters)
@@ -443,6 +500,13 @@ TEST_F(TestGraphDescriptorLifting, DoubleRoundTrip)
     // Verify the serialized graph still has 1 node
     auto graphT = GetGraph(serialized2.ptr)->UnPack();
     EXPECT_EQ(graphT->nodes.size(), 1);
+    ASSERT_EQ(graphT->tensors.size(), 3);
+    ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
+
+    // Verify graph-level data types from the serialized buffer
+    EXPECT_EQ(graphT->compute_data_type, DataType::HALF);
+    EXPECT_EQ(graphT->intermediate_data_type, DataType::BFLOAT16);
+    EXPECT_EQ(graphT->io_data_type, DataType::FLOAT);
 }
 
 // =============================================================================
@@ -547,6 +611,20 @@ TEST_F(TestGraphDescriptorLifting, FlatBufferFlowFinalizePreservesSerialization)
     auto graphT = GetGraph(serialized.ptr)->UnPack();
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
+    ASSERT_EQ(graphT->nodes[0]->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
+
+    // Spot-check tensor dims
+    const TensorAttributesT* xTensor = nullptr;
+    for(const auto& tensor : graphT->tensors)
+    {
+        if(tensor->uid == K_TENSOR_X_UID)
+        {
+            xTensor = tensor.get();
+            break;
+        }
+    }
+    ASSERT_NE(xTensor, nullptr);
+    EXPECT_EQ(xTensor->dims, toVec(K_TENSOR_X_DIMS));
 }
 
 // =============================================================================
@@ -676,6 +754,18 @@ TEST_F(TestGraphDescriptorLifting, GetAttributeRequestedCountTooSmallOnCApiFlow)
                                                        1,
                                                        &elementCount,
                                                        returnedOps.data()),
+                               HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestGraphDescriptorLifting, DeserializeCorruptedBufferThrows)
+{
+    // Pass garbage bytes to deserializeGraph(). The FlatBuffer verifier
+    // should reject the buffer and throw HIPDNN_STATUS_BAD_PARAM.
+    std::vector<uint8_t> garbage = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
+
+    auto graphWrapper = createDescriptor<GraphDescriptor>();
+    auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
+    ASSERT_THROW_HIPDNN_STATUS(graphDesc->deserializeGraph(garbage.data(), garbage.size()),
                                HIPDNN_STATUS_BAD_PARAM);
 }
 

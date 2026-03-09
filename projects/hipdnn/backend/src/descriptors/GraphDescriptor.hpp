@@ -30,6 +30,9 @@ private:
     // These paths are mutually exclusive: once one path is active, attempting to use the other
     // throws HIPDNN_STATUS_NOT_SUPPORTED. This prevents subtle bugs from mixing deserialized
     // state with C-API-provided operations.
+    // getOperations() assumes single-threaded access (feature-flag guarded).
+    // getOperations() does not require finalization, to support the deserialization
+    // lifting path for unfinalized descriptors.
 
     hipdnnHandle_t _handle = nullptr;
 

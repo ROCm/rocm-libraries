@@ -42,3 +42,24 @@ constexpr std::array<int64_t, 4> K_TENSOR_Y2_DIMS = {1, 128, 32, 32};
 constexpr std::array<int64_t, 4> K_TENSOR_Y2_STRIDES = {131072, 1024, 32, 1};
 
 } // namespace hipdnn_tests::constants
+
+namespace hipdnn_tests::constants::integration
+{
+constexpr int64_t K_TENSOR_X_UID = 10;
+constexpr int64_t K_TENSOR_W_UID = 20;
+constexpr int64_t K_TENSOR_Y_UID = 30;
+
+constexpr std::array<int64_t, 4> K_TENSOR_X_DIMS = {2, 3, 14, 14};
+constexpr std::array<int64_t, 4> K_TENSOR_X_STRIDES = {588, 196, 14, 1};
+constexpr std::array<int64_t, 4> K_TENSOR_W_DIMS = {8, 3, 3, 3};
+constexpr std::array<int64_t, 4> K_TENSOR_W_STRIDES = {27, 9, 3, 1};
+
+// Expected Y dims for stride={2,2}, padding={1,1}, dilation={1,1}, X={2,3,14,14}, W={8,3,3,3}
+constexpr std::array<int64_t, 4> K_TENSOR_Y_DIMS = {2, 8, 7, 7};
+constexpr std::array<int64_t, 4> K_TENSOR_Y_STRIDES = {392, 49, 7, 1};
+
+constexpr std::array<int64_t, 2> K_CONV_PRE_PADDING = {1, 1};
+constexpr std::array<int64_t, 2> K_CONV_POST_PADDING = {1, 1};
+constexpr std::array<int64_t, 2> K_CONV_STRIDE = {2, 2};
+constexpr std::array<int64_t, 2> K_CONV_DILATION = {1, 1};
+} // namespace hipdnn_tests::constants::integration

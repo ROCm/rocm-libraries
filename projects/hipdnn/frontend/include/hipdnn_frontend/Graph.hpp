@@ -1184,7 +1184,7 @@ public:
         _sub_nodes.clear();
         HIPDNN_CHECK_ERROR(detail::unpackGraphDescriptor(
             graphDesc, _sub_nodes, graph_attributes, _preferredEngineId));
-        return {ErrorCode::OK, ""};
+        return {};
     }
 
     /// Deserialize from binary via backend C-API descriptor path.
@@ -1208,7 +1208,7 @@ public:
 
         _graphDesc = std::move(graphDesc);
 
-        return {ErrorCode::OK, ""};
+        return {};
     }
 
     /**

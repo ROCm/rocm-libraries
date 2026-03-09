@@ -51,6 +51,7 @@ TEST_F(TestTensorDescriptorFromFlatBuffer, CreatesValidFinalizedDescriptor)
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_TENSOR_DESCRIPTOR);
+    EXPECT_EQ(desc->getData().uid, K_TENSOR_X_UID);
 }
 
 TEST_F(TestTensorDescriptorFromFlatBuffer, PopulatesAllFieldsCorrectly)
@@ -257,6 +258,7 @@ TEST_F(TestConvolutionFwdOperationFromNode, CreatesValidFinalizedDescriptor)
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
     ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
+    EXPECT_EQ(desc->getData().x_tensor_uid, K_TENSOR_X_UID);
 }
 
 TEST_F(TestConvolutionFwdOperationFromNode, NodeFactoryDelegatesCorrectly)

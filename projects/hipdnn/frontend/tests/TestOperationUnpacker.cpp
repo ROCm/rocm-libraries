@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <string>
+
 #include <hipdnn_frontend/detail/OperationUnpacker.hpp>
 #include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
@@ -59,6 +61,8 @@ TEST(TestOperationUnpacker, DefaultUnpackFromDescriptorIncludesNodeName)
     std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
 
     auto err = node.unpack_from_descriptor(nullptr, tensorMap);
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(err.get_message().find("FakeNodeNoUnpack") != std::string::npos);
 }
 
@@ -103,7 +107,7 @@ TEST_F(TestQueryOperationType, QueryReturnsConvForwardType)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     auto [result, err] = queryOperationType(desc);
-    EXPECT_TRUE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::OK);
     EXPECT_EQ(result, HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD);
 }
 
@@ -119,6 +123,7 @@ TEST_F(TestQueryOperationType, ReturnsErrorWhenQueryFails)
     auto [result, err] = queryOperationType(desc);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_FALSE(err.get_message().empty());
     EXPECT_EQ(result, HIPDNN_OPERATION_TYPE_NOT_SET);
 }
 
@@ -143,7 +148,7 @@ TEST_F(TestQueryOperationType, PassesThroughUnknownOperationType)
 
     hipdnnBackendDescriptor_t desc = nullptr;
     auto [result, err] = queryOperationType(desc);
-    EXPECT_TRUE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::OK);
     EXPECT_EQ(result, unknownType);
 }
 
@@ -215,6 +220,8 @@ TEST_F(TestUnpackOperation, FailsForUnsupportedOperationType)
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(err.get_message().find("Unsupported operation type") != std::string::npos);
+    EXPECT_TRUE(err.get_message().find("999") != std::string::npos)
+        << "Error should include the unsupported type id, got: " << err.get_message();
 }
 
 TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
@@ -254,6 +261,7 @@ TEST_F(TestUnpackOperation, FailsImmediatelyOnUnpackError)
     EXPECT_EQ(node, nullptr);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_FALSE(err.get_message().empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +272,7 @@ TEST(TestCreateNodeForType, CreatesConvFpropNode)
 {
     GraphAttributes graphAttrs;
     auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_CONVOLUTION_FORWARD, graphAttrs);
-    EXPECT_TRUE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
     auto convNode = std::dynamic_pointer_cast<ConvolutionFpropNode>(node);
     EXPECT_NE(convNode, nullptr);
@@ -278,4 +286,8 @@ TEST(TestCreateNodeForType, ReturnsErrorForUnsupportedType)
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_EQ(node, nullptr);
     EXPECT_TRUE(err.get_message().find("Unsupported operation type") != std::string::npos);
+    EXPECT_TRUE(err.get_message().find(
+                    std::to_string(static_cast<int>(HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE)))
+                != std::string::npos)
+        << "Error should include the unsupported type id, got: " << err.get_message();
 }
