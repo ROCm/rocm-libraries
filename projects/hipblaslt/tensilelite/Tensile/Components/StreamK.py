@@ -124,7 +124,11 @@ class StreamK(Component):
         # Always reset pointers to handle odd-exit case which moves LRO to the upper bank
         if kernel["PrefetchGlobalRead"]: # not self.prefetchAcrossPersistent
             module.add(writer.localReadResetOffsets(kernel, tPA))
+            if kernel["ProblemType"]["MXBlockA"]:
+              module.add(writer.localReadResetOffsets(kernel, tPA["MX"]))
             module.add(writer.localReadResetOffsets(kernel, tPB))
+            if kernel["ProblemType"]["MXBlockB"]:
+              module.add(writer.localReadResetOffsets(kernel, tPB["MX"]))
 
         module.addComment0("StreamK calculate tile idx and map to WG")
 

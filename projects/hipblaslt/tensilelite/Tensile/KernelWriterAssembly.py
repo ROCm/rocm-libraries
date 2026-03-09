@@ -1156,9 +1156,17 @@ class KernelWriterAssembly(KernelWriter):
       if self.states.a.numVgprLocalReadAddr > 0:
         module.add(RegSet("v", "vgprLocalReadAddrOrigA", \
             self.states.a.startVgprLocalReadAddrOrig))
+      if kernel["ProblemType"]["MXBlockA"]:
+        if self.states.mxsa.numVgprLocalReadAddr > 0:
+          module.add(RegSet("v", "vgprLocalReadAddrOrigMXSA", \
+              self.states.mxsa.startVgprLocalReadAddrOrig))
       if self.states.b.numVgprLocalReadAddr > 0:
         module.add(RegSet("v", "vgprLocalReadAddrOrigB", \
             self.states.b.startVgprLocalReadAddrOrig))
+      if kernel["ProblemType"]["MXBlockB"]:
+        if self.states.mxsb.numVgprLocalReadAddr > 0:
+          module.add(RegSet("v", "vgprLocalReadAddrOrigMXSB", \
+              self.states.mxsb.startVgprLocalReadAddrOrig))
     if self.states.m.numVgprLocalReadAddr > 0:
       module.add(RegSet("v", "vgprLocalReadAddrMetadata", \
           self.states.m.startVgprLocalReadAddr))

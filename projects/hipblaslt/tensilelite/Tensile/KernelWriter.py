@@ -5919,8 +5919,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Need backup for the first LocalReadAddr only (others will be calculated from the first one)
       self.states.a.startVgprLocalReadAddrOrig = vgprIdx
       vgprIdx += 1 if self.states.a.numVgprLocalReadAddr > 0 else 0
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.states.mxsa.startVgprLocalReadAddrOrig = vgprIdx
+        vgprIdx += 1 if self.states.mxsa.numVgprLocalReadAddr > 0 else 0
       self.states.b.startVgprLocalReadAddrOrig = vgprIdx
       vgprIdx += 1 if self.states.b.numVgprLocalReadAddr > 0 else 0
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.states.mxsb.startVgprLocalReadAddrOrig = vgprIdx
+        vgprIdx += 1 if self.states.mxsb.numVgprLocalReadAddr > 0 else 0
 
     # ----------------------------
     # TODO: alignment hack, figure out a better solution
