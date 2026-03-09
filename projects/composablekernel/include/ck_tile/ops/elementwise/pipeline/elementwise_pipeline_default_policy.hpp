@@ -27,7 +27,7 @@ struct ElementWiseDefaultPolicy
     }
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
-    {        
+    {
         return "ElementWiseDefaultPolicy";
     }
 };
