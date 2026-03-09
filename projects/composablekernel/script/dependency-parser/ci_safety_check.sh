@@ -15,15 +15,18 @@
 #   FORCE_CI - Set to "true" for nightly/scheduled builds
 #   BRANCH_NAME - Git branch name
 #   GIT_PREVIOUS_COMMIT, GIT_COMMIT - For detecting changes
+#   CHANGE_TARGET - Base branch for PR builds (set by Jenkins)
 #
 # Manual override (set by developer/admin if needed):
 #   DISABLE_SMART_BUILD - Set to "true" to force full build
+#   BASE_BRANCH - Override base branch (default: "develop")
 
 set -e
 
 # Configuration
 FORCE_FULL_BUILD=false
 REASON=""
+BASE_BRANCH="${CHANGE_TARGET:-${BASE_BRANCH:-develop}}"
 
 # 1. Check if this is a nightly/scheduled build
 # Existing Jenkins infrastructure sets FORCE_CI=true for cron-triggered builds
@@ -40,11 +43,16 @@ if [ "$DISABLE_SMART_BUILD" = "true" ]; then
 fi
 
 # 3. Force full build if CMakeLists.txt or cmake/ configuration changed
-if [ -n "$GIT_PREVIOUS_COMMIT" ] && [ -n "$GIT_COMMIT" ]; then
+# For PR builds, always compare against base branch (not incremental commits)
+if [ -n "$CHANGE_ID" ]; then
+    # This is a PR build - compare entire PR against base branch
+    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
+elif [ -n "$GIT_PREVIOUS_COMMIT" ] && [ -n "$GIT_COMMIT" ]; then
+    # Regular branch build - compare consecutive commits
     CHANGED_FILES=$(git diff --name-only $GIT_PREVIOUS_COMMIT..$GIT_COMMIT 2>/dev/null || echo "")
 else
-    # Fallback to comparing with develop
-    CHANGED_FILES=$(git diff --name-only origin/develop...HEAD 2>/dev/null || echo "")
+    # Fallback to comparing with base branch
+    CHANGED_FILES=$(git diff --name-only origin/${BASE_BRANCH}...HEAD 2>/dev/null || echo "")
 fi
 
 if echo "$CHANGED_FILES" | grep -qE "(CMakeLists\.txt|cmake/.*\.cmake)"; then
@@ -76,6 +84,8 @@ echo "Smart Build Safety Check"
 echo "========================================="
 echo "FORCE_CI: ${FORCE_CI:-false}"
 echo "BRANCH_NAME: ${BRANCH_NAME:-unknown}"
+echo "BASE_BRANCH: ${BASE_BRANCH}"
+echo "CHANGE_ID: ${CHANGE_ID:-<not a PR>}"
 echo "DISABLE_SMART_BUILD: ${DISABLE_SMART_BUILD:-false}"
 echo "-----------------------------------------"
 
