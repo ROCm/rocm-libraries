@@ -1,2 +1,0 @@
-// Insert into backend/include/HipdnnBackendDescriptorType.h
-    HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR,
