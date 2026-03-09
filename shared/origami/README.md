@@ -292,19 +292,20 @@ Run a specific C++ test by name:
 Run only Python tests (from `shared/origami/python`):
 
 ```bash
-PYTHONPATH=src:$PYTHONPATH python -m pytest tests/ -v
+pip install -e .
+python -m pytest tests/ -v
 ```
 
 Run Python tests excluding slow tests:
 
 ```bash
-PYTHONPATH=src:$PYTHONPATH python -m pytest tests/ -m "not slow"
+python -m pytest tests/ -m "not slow"
 ```
 
 Run selector tests (requires torch):
 
 ```bash
-PYTHONPATH=src:$PYTHONPATH python -m pytest tests/test_selector.py -v
+python -m pytest tests/test_selector.py -v
 ```
 
 ## Contribute
