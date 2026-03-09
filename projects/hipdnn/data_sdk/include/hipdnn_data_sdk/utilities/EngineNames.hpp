@@ -106,7 +106,7 @@ struct EngineRegistrar
     EngineRegistrar(std::string_view name)
     {
         detail::getMutableEngineNames().insert(name);
-        auto id = engineNameToId(name.data());
+        auto id = engineNameToId(name);
         detail::getMutableEngineIdToNameMap()[id] = name;
 
         // Check for collisions
