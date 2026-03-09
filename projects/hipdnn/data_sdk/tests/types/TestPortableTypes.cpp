@@ -83,7 +83,6 @@ struct PortableTypeTraits<half>
 template <>
 struct PortableTypeTraits<fp8_e4m3>
 {
-    static constexpr float tolerance = 0.2f;
     static constexpr bool has_infinity = false;
     static constexpr uint8_t one_bits = 0x38;
     static constexpr uint8_t neg_one_bits = 0xB8;
@@ -106,7 +105,6 @@ struct PortableTypeTraits<fp8_e4m3>
 template <>
 struct PortableTypeTraits<fp8_e5m2>
 {
-    static constexpr float tolerance = 0.5f;
     static constexpr bool has_infinity = true;
     static constexpr uint8_t one_bits = 0x3C;
     static constexpr uint8_t neg_one_bits = 0xBC;
@@ -130,7 +128,6 @@ struct PortableTypeTraits<fp8_e5m2>
 template <>
 struct PortableTypeTraits<fp8_e8m0>
 {
-    static constexpr float tolerance = 0.01f;
     static constexpr bool has_infinity = false;
     static constexpr uint8_t one_bits = 0x7F; // 2^0 = 1.0
     static constexpr uint8_t nan_bits = 0xFF;
@@ -149,12 +146,25 @@ struct PortableTypeTraits<fp8_e8m0>
 // NOLINTEND(readability-identifier-naming)
 
 // ============================================================================
-// Test Fixture (bfloat16, half, fp8_e4m3, fp8_e5m2)
+// Test Fixture (bfloat16, half, fp8_e4m3, fp8_e5m2, fp8_e8m0)
 // Common tests for all portable float types
 // ============================================================================
 
 template <typename T>
 class PortableFloatTypes : public ::testing::Test
+{
+};
+
+using PortableTypes = ::testing::Types<bfloat16, half, fp8_e4m3, fp8_e5m2, fp8_e8m0>;
+TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
+
+// ============================================================================
+// Math Float Types Fixture (bfloat16, half)
+// Full arithmetic operations and math functions
+// ============================================================================
+
+template <typename T>
+class MathFloatTypes : public ::testing::Test
 {
 protected:
     using Traits = PortableTypeTraits<T>;
@@ -168,19 +178,6 @@ protected:
     {
         return nearEqual(static_cast<float>(a), static_cast<float>(b), tol);
     }
-};
-
-using PortableTypes = ::testing::Types<bfloat16, half, fp8_e4m3, fp8_e5m2, fp8_e8m0>;
-TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
-
-// ============================================================================
-// Math Float Types Fixture (bfloat16, half)
-// Full arithmetic operations and math functions
-// ============================================================================
-
-template <typename T>
-class MathFloatTypes : public PortableFloatTypes<T>
-{
 };
 
 using MathTypes = ::testing::Types<bfloat16, half>;
@@ -220,16 +217,16 @@ TYPED_TEST(PortableFloatTypes, ConstructFromFloat)
     using T = TypeParam;
 
     T a(1.0f);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 1.0f));
+    EXPECT_EQ(static_cast<float>(a), 1.0f);
 
     // fp8_e8m0 zero/negative behavior tested in type-specific tests
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
     {
         T b(0.0f);
-        EXPECT_TRUE(this->nearEqual(static_cast<float>(b), 0.0f));
+        EXPECT_EQ(static_cast<float>(b), 0.0f);
 
         T c(-2.0f);
-        EXPECT_TRUE(this->nearEqual(static_cast<float>(c), -2.0f));
+        EXPECT_EQ(static_cast<float>(c), -2.0f);
     }
 }
 
@@ -238,10 +235,10 @@ TYPED_TEST(PortableFloatTypes, ConstructFromDouble)
     using T = TypeParam;
 
     T a(1.0);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 1.0f));
+    EXPECT_EQ(static_cast<float>(a), 1.0f);
 
     T b(2.0);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(b), 2.0f));
+    EXPECT_EQ(static_cast<float>(b), 2.0f);
 }
 
 TYPED_TEST(PortableFloatTypes, ConstructFromIntegral)
@@ -249,16 +246,16 @@ TYPED_TEST(PortableFloatTypes, ConstructFromIntegral)
     using T = TypeParam;
 
     T a(4);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(a), 4.0f));
+    EXPECT_EQ(static_cast<float>(a), 4.0f);
 
     // fp8_e8m0 zero/negative behavior tested in type-specific tests
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
     {
         T b(-8);
-        EXPECT_TRUE(this->nearEqual(static_cast<float>(b), -8.0f));
+        EXPECT_EQ(static_cast<float>(b), -8.0f);
 
         T c(0u);
-        EXPECT_TRUE(this->nearEqual(static_cast<float>(c), 0.0f));
+        EXPECT_EQ(static_cast<float>(c), 0.0f);
     }
 }
 
@@ -268,7 +265,7 @@ TYPED_TEST(PortableFloatTypes, FromBits)
     using Traits = PortableTypeTraits<T>;
 
     T one = Traits::from_bits(Traits::one_bits);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(one), 1.0f));
+    EXPECT_EQ(static_cast<float>(one), 1.0f);
 
     // fp8_e8m0 zero_bits = 2^-127 (min), tested in type-specific tests
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
@@ -303,14 +300,14 @@ TYPED_TEST(PortableFloatTypes, ExplicitConversionToFloat)
     // Use 2.0f which is exact for all types including fp8_e8m0 (power of 2)
     T a(2.0f);
     auto f = static_cast<float>(a);
-    EXPECT_TRUE(this->nearEqual(f, 2.0f));
+    EXPECT_EQ(f, 2.0f);
 
     // 1.5f is not exact for fp8_e8m0 (only powers of 2)
     if constexpr(!std::is_same_v<T, fp8_e8m0>)
     {
         T b(1.5f);
         auto g = static_cast<float>(b);
-        EXPECT_TRUE(this->nearEqual(g, 1.5f));
+        EXPECT_EQ(g, 1.5f);
     }
 }
 
@@ -320,7 +317,7 @@ TYPED_TEST(PortableFloatTypes, ExplicitConversionToDouble)
 
     T a(2.0f);
     auto d = static_cast<double>(a);
-    EXPECT_TRUE(this->nearEqual(static_cast<float>(d), 2.0f));
+    EXPECT_EQ(d, 2.0);
 }
 
 // ============================================================================
@@ -376,11 +373,11 @@ TYPED_TEST(PortableFloatTypes, UnaryNegation)
     {
         T a(4.0f);
         T b = -a;
-        EXPECT_TRUE(this->nearEqual(static_cast<float>(b), -4.0f));
+        EXPECT_EQ(static_cast<float>(b), -4.0f);
 
         T c(-2.0f);
         T d = -c;
-        EXPECT_TRUE(this->nearEqual(static_cast<float>(d), 2.0f));
+        EXPECT_EQ(static_cast<float>(d), 2.0f);
     }
 }
 
@@ -737,7 +734,7 @@ TYPED_TEST(PortableFloatTypes, StreamOutput)
     std::ostringstream oss;
     oss << a;
     float parsed = std::stof(oss.str());
-    EXPECT_TRUE(this->nearEqual(parsed, 2.0f));
+    EXPECT_EQ(parsed, 2.0f);
 }
 
 // ============================================================================
