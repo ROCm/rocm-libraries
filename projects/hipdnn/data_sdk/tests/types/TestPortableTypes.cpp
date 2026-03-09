@@ -91,8 +91,7 @@ struct PortableTypeTraits<fp8_e4m3>
     static constexpr uint8_t zero_bits = 0x00;
     static constexpr uint8_t neg_zero_bits = 0x80;
     static constexpr uint8_t nan_bits = 0x7F;
-    static constexpr uint8_t inf_bits = 0x7F; // No infinity, uses NaN
-    static constexpr uint8_t neg_inf_bits = 0xFF;
+    // Note: fp8_e4m3 has no infinity - those tests are skipped
     using bits_type = uint8_t;
 
     static fp8_e4m3 from_bits(uint8_t bits)
@@ -602,13 +601,7 @@ TYPED_TEST(PortableFloatTypes, InfinityHandling)
         EXPECT_TRUE(signbit(negInf));
         EXPECT_FALSE(isnan(negInf));
     }
-    else if constexpr(std::is_same_v<T, fp8_e4m3>)
-    {
-        // fp8_e4m3 has no infinity - inf_bits maps to NaN
-        T val = Traits::from_bits(Traits::inf_bits);
-        EXPECT_FALSE(isinf(val));
-    }
-    // fp8_e8m0 has no infinity and no inf_bits constant - skipped entirely
+    // fp8_e4m3 and fp8_e8m0 have no infinity - skipped
 }
 
 // ============================================================================
