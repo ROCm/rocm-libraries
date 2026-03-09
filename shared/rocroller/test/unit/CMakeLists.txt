@@ -74,6 +74,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMFusion.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMJammedTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMLargeMacroTileTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMPretileTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMStreamKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMSwizzleScaledTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GEMMTest.cpp"

@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "../../../shared/array_predicate.h"
+#include "data_layout.h"
 #include "function_pool.h"
 #include "load_store_ops.h"
 #include "rocfft_mpi.h"
@@ -65,73 +66,33 @@ static inline bool IsPow(size_t u)
 
 struct rocfft_brick_t
 {
-    // all vectors here are column-major, with same length as FFT
-    // dimension + 1 (for batch dimension)
-    rocfft_brick_t(const size_t*            field_lower,
-                   const size_t*            field_upper,
-                   const size_t*            brick_stride,
-                   size_t                   dim,
-                   const rocfft_location_t& location)
-        : lower(field_lower, field_lower + dim)
-        , upper(field_upper, field_upper + dim)
-        , stride(brick_stride, brick_stride + dim)
+    // no default constructor
+    rocfft_brick_t() = delete;
+    // default move and copy constructors
+    rocfft_brick_t(const rocfft_brick_t&) = default;
+    rocfft_brick_t& operator=(const rocfft_brick_t&) = default;
+    rocfft_brick_t(rocfft_brick_t&&)                 = default;
+    rocfft_brick_t& operator=(rocfft_brick_t&&) = default;
+
+    // all vectors here are column-major, with same size as FFT
+    // rank + 1 (batch axis last)
+    rocfft_brick_t(const std::vector<size_t>& field_lower,
+                   const std::vector<size_t>& field_upper,
+                   const std::vector<size_t>& brick_stride,
+                   const rocfft_location_t&   location)
+        : layout(field_lower, field_upper, brick_stride)
         , location(location)
     {
     }
-    rocfft_brick_t()                      = default;
-    rocfft_brick_t(const rocfft_brick_t&) = default;
-    rocfft_brick_t& operator=(const rocfft_brick_t&) = default;
 
-    // inclusive lower bound of brick
-    std::vector<size_t> lower;
-    // exclusive upper bound of brick
-    std::vector<size_t> upper;
-    // stride of brick in memory
-    std::vector<size_t> stride;
-
+    // Data layout of the brick
+    data_layout_t layout;
     // Location of the brick
     rocfft_location_t location;
 
-    // Compute the length of this brick
-    std::vector<size_t> length() const
-    {
-        std::vector<size_t> ret;
-        for(size_t i = 0; i < lower.size(); ++i)
-            ret.push_back(upper[i] > lower[i] ? upper[i] - lower[i] : 0);
-        return ret;
-    }
-
-    // Functions and operators
-
-    // check if brick is empty
-    bool empty() const;
-    // return intersection of *this and another brick.  note that
-    // strides and device are not set on the returned brick, as this
-    // method can't know if the caller wants to look at the result in
-    // *this or in other.
-    rocfft_brick_t intersect(const rocfft_brick_t& other) const;
-
-    // test whether this brick covers same coordinates as another
-    // brick.  strides are not considered.
-    bool equal_coords(const rocfft_brick_t& other) const;
-
-    // compute the number of elements in this brick
-    size_t count_elems() const;
-    bool   is_contiguous() const;
-    // Return strides for this brick, if it were transposed to be
-    // contiguous.
-    std::vector<size_t> contiguous_strides() const;
-
-    // return true if this brick is contiguous in the specified field
-    bool is_contiguous_in_field(const std::vector<size_t>& field_length) const;
-
-    // compute offset of this brick, given the field's stride
-    size_t offset_in_field(const std::vector<size_t>& fieldStride) const;
-
     bool operator==(const rocfft_brick_t& other) const
     {
-        return lower == other.lower && upper == other.upper && stride == other.stride
-               && location == other.location;
+        return layout == other.layout && location == other.location;
     }
 
     std::string str() const;
@@ -140,6 +101,28 @@ struct rocfft_brick_t
 struct rocfft_field_t
 {
     std::vector<rocfft_brick_t> bricks;
+
+    /**
+     * @return the minimal full (i.e., non-partial) data layout that logically includes
+     * all bricks' partial layouts. The returned layout is set with contiguous in-buffer
+     * strides.
+     * 
+     * @throw An `std::logic_error` is thrown if the field has no brick or some
+     * dimensionally inconsistent bricks. 
+     */
+    data_layout_t get_full_data_range() const;
+
+    /**
+     * @brief Finalize all the field's bricks, i.e., sort them by increasing rank (stable
+     * sort) and set the `is_partial` flags for all axes of their layouts.
+     */
+    void finalize();
+
+    /**
+     * @return true iff all parts of the field's full range of logical indices are covered
+     * once and only once by the field's bricks.
+     */
+    bool has_valid_tessellation() const;
 };
 
 struct rocfft_plan_description_t
@@ -147,11 +130,8 @@ struct rocfft_plan_description_t
     rocfft_array_type inArrayType  = rocfft_array_type_unset;
     rocfft_array_type outArrayType = rocfft_array_type_unset;
 
-    std::vector<size_t> inStrides;
-    std::vector<size_t> outStrides;
-
-    size_t inDist  = 0;
-    size_t outDist = 0;
+    data_layout_t input_layout;
+    data_layout_t output_layout;
 
     std::array<size_t, 2> inOffset  = {0, 0};
     std::array<size_t, 2> outOffset = {0, 0};
@@ -173,22 +153,68 @@ struct rocfft_plan_description_t
     rocfft_plan_description_t()  = default;
     ~rocfft_plan_description_t() = default;
 
-    // A plan description is created in a vacuum and does not know what
-    // type of transform it will be for.  Once that's known, we can
-    // initialize default values for in/out type, stride, dist if they're
-    // unspecified.
-    void init_defaults(rocfft_transform_type      transformType,
-                       rocfft_result_placement    placement,
-                       const std::vector<size_t>& lengths,
-                       const std::vector<size_t>& outputLengths);
+    /**
+     * @return The number of length dimensions.
+     */
+    size_t rank() const;
+    /**
+     * @return The batch size.
+     */
+    size_t batch() const;
 
     // Get the local communication rank
     int get_local_comm_rank() const;
     // Get number of ranks in the local communicator
     int get_local_comm_size() const;
-    // returns the current rocfft_location_t (process rank + current device ID)
+    // Returns the current rocfft_location_t (process rank + current device ID)
     // seen by this object
     rocfft_location_t get_current_location() const;
+
+    /**
+     * @brief Finalize the plan description by
+     * 
+     * - assigning default values for structure members that have not been explicitly set yet;
+     * 
+     * - gathering all the fields' bricks on all processes involved in the description's
+     *   communicator, if any;
+     * 
+     * - finalizing bricks for all member fields (see `rocfft_field_t::finalize()`);
+     * 
+     * - removing trivial unit-span axes from all layouts (including bricks' if any)
+     * and sorting length axes by increasing strides if that can be done consistently
+     * across all of them.
+     * 
+     * The description is also validated w.r.t. the following criteria:
+     * 
+     * - the number of user-defined strides matches the rank of the planned transform;
+     * 
+     * - I/O fields are dimensionally consistent with the planned transform, cover the
+     *   expected full ranges of logical indices and have valid tessellations;
+     * 
+     * - Input and output fields are both set for multi-process usage;
+     * 
+     * - I/O array types are not planar if the corresponding field(s) are set;
+     * 
+     * - I/O array types are consistent with the expected data types;
+     * 
+     * - I/O array types are consistent for in-place transforms (if requested);
+     *
+     * 
+     * @param[in] dft_type user-provided type of transform for the owning plan.
+     * @param[in] placement user-provided placement of transform results for the owning plan.
+     * @param[in] user_lengths user-provided lengths of the transform for the owning plan.
+     * @param[in] len_rank user-provided number of length dimensions for the owning plan.
+     * @param[in] number_of_transforms user-provided batch size for the owning plan.
+     * @return A `rocfft_status` value is returned, which should be escalated back to the user
+     * as is if different from `rocfft_status_success`. An `std::runtime_error` with
+     * insightful information (for logging purposes) is thrown instead if no dedicated error
+     * code exists yet.
+     */
+    rocfft_status finalize_and_validate_for(rocfft_transform_type   dft_type,
+                                            rocfft_result_placement placement,
+                                            const size_t*           user_lengths,
+                                            const size_t            len_rank,
+                                            const size_t            number_of_transforms);
 
     // Count the number of pointers required for either input or output
     // - planar data requires two pointers, real + complex require one.
@@ -214,18 +240,18 @@ struct rocfft_plan_description_t
     // returns true if a field has bricks such that any rank has
     // bricks on more than one device
     static bool multiple_devices_in_rank(const rocfft_field_t& field);
+
+private:
+#ifdef ROCFFT_MPI_ENABLE
+    // Communicate bricks on all ranks to all other ranks
+    rocfft_status allgather_brick_params_mpi();
+    rocfft_status allgather_brick_params_lus_mpi(rocfft_field_t& field,
+                                                 const size_t    global_brick_length);
+#endif
 };
 
 struct rocfft_plan_t
 {
-    size_t rank = 0;
-    // input lengths
-    std::vector<size_t> lengths;
-    // output lengths, which differ from input lengths for real-complex
-    // transforms
-    std::vector<size_t> outputLengths;
-    size_t              batch = 1;
-
     rocfft_result_placement placement     = rocfft_placement_inplace;
     rocfft_transform_type   transformType = rocfft_transform_type_complex_forward;
     rocfft_precision        precision     = rocfft_precision_single;
@@ -233,20 +259,6 @@ struct rocfft_plan_t
     rocfft_plan_description_t desc;
 
     rocfft_plan_t() = default;
-
-    // Users can provide lengths+strides in any order, but we'll
-    // construct the most sensible plans if they're in row-major order.
-    // Sort the FFT dimensions.
-    //
-    // This should be done when the plan parameters are known, but
-    // before we start creating any child nodes from the root plan.
-    void sort();
-
-    static bool is_contiguous(const std::vector<size_t>& length,
-                              const std::vector<size_t>& stride,
-                              size_t                     dist);
-    bool        is_contiguous_input();
-    bool        is_contiguous_output();
 
     // Add a multi-plan item for execution.  Returns the index of the
     // new item in the overall multi-GPU plan.  Also provide a
@@ -284,23 +296,23 @@ struct rocfft_plan_t
     // log field layout at plan level
     static void LogFields(const char* description, const std::vector<rocfft_field_t>& fields);
 
-    // throw exception if input/output fields are not valid (e.g. they
-    // don't cover the whole index space, or bricks overlap)
-    void ValidateFields() const;
-
     // During plan creation, InternalTempBuffer remembers how much
     // space will be needed but doesn't allocate.  Allocate the buffers
     // after the space requirements are finalized.
     void AllocateInternalTempBuffers();
+
+    /**
+     * @return The lengths provided by the user at creation of this object
+     * @note Trivial unit-length dimensions are erased at plan creation,
+     * therefore *NOT* returned by this function.
+     */
+    std::vector<size_t> get_user_facing_lengths() const;
 
 private:
     // Multi-node or multi-GPU plan is built up from a vector of plan
     // items.  Items can launch kernels on a device, or move
     // data between devices.
     std::vector<std::unique_ptr<MultiPlanItem>> multiPlan;
-
-    // Communicate bricks on all ranks to all other ranks
-    rocfft_status allgather_brick_params_mpi(rocfft_plan& plan);
 
     // Adjacency list describing dependencies between multiPlan items.
     // Size of this vector == multiPlan.size().
@@ -331,8 +343,7 @@ private:
                                             const std::vector<rocfft_brick_t>& bricks,
                                             rocfft_precision                   precision,
                                             rocfft_array_type                  arrayType,
-                                            const std::vector<size_t>&         field_length,
-                                            const std::vector<size_t>&         field_stride,
+                                            const data_layout_t&               gathering_layout,
                                             BufferPtr                          output,
                                             const std::vector<size_t>&         antecedents,
                                             size_t                             elem_size);
@@ -342,8 +353,7 @@ private:
                                              BufferPtr                          input,
                                              rocfft_precision                   precision,
                                              rocfft_array_type                  arrayType,
-                                             const std::vector<size_t>&         field_length,
-                                             const std::vector<size_t>&         field_stride,
+                                             const data_layout_t&               layout_to_scatter,
                                              const std::vector<rocfft_brick_t>& bricks,
                                              const std::vector<size_t>&         antecedents,
                                              size_t                             elem_size);

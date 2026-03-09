@@ -54,7 +54,8 @@ public:
                 ());
     MOCK_METHOD(const char*, getErrorString, (hipdnnStatus_t status), ());
     MOCK_METHOD(void, getLastErrorString, (char* message, size_t max_size), ());
-    MOCK_METHOD(hipdnnStatus_t, versionExt, (const char** version), ());
+    MOCK_METHOD(hipdnn_data_sdk::utilities::Version, version, ());
+    MOCK_METHOD(const char*, versionString, ());
     MOCK_METHOD(hipdnnStatus_t,
                 backendCreateAndDeserializeGraphExt,
                 (hipdnnBackendDescriptor_t * descriptor,
