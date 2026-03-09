@@ -15,6 +15,26 @@ namespace DGen
 {
 
     /**
+     * @brief Round up a value to the next multiple of a given number
+     */
+    inline size_t roundUp(size_t value, size_t multiple)
+    {
+        return ((value + multiple - 1) / multiple) * multiple;
+    }
+
+    /**
+     * @brief Compute the output size of preSwizzleScalesGFX950 after padding
+     *
+     * @param numRows The number of rows (may not be a multiple of 32)
+     * @param numCols The number of columns (may not be a multiple of 8)
+     * @return The total number of elements in the padded output
+     */
+    inline size_t preSwizzleScalesGFX950PaddedSize(size_t numRows, size_t numCols)
+    {
+        return roundUp(numRows, 32) * roundUp(numCols, 8);
+    }
+
+    /**
      * @brief Helper to compute product of elements in a range
      */
     template <typename T>
@@ -399,32 +419,39 @@ namespace DGen
             throw std::runtime_error(msg.str());
         }
 
-        if(numRows % 32 != 0)
-        {
-            std::ostringstream msg;
-            msg << "preSwizzleAITER: numRows must be a multiple of 32, got " << numRows;
-            throw std::runtime_error(msg.str());
-        }
+        // Pad rows to multiple of 32 and cols to multiple of 8 if needed
+        size_t paddedRows = roundUp(numRows, 32);
+        size_t paddedCols = roundUp(numCols, 8);
 
-        if(numCols % 8 != 0)
+        // Create padded input if dimensions are not already aligned
+        std::vector<T> const* inputPtr = &input;
+        std::vector<T>        paddedInput;
+        if(paddedRows != numRows || paddedCols != numCols)
         {
-            std::ostringstream msg;
-            msg << "preSwizzleAITER: numCols must be a multiple of 8, got " << numCols;
-            throw std::runtime_error(msg.str());
+            paddedInput.resize(paddedRows * paddedCols, T{});
+            // Copy each row of original data into the padded buffer (row-major layout)
+            for(size_t r = 0; r < numRows; ++r)
+            {
+                std::copy(input.begin() + r * numCols,
+                          input.begin() + r * numCols + numCols,
+                          paddedInput.begin() + r * paddedCols);
+            }
+            inputPtr = &paddedInput;
         }
 
         // AITER shuffle algorithm using shuffleDims:
-        // view as (numRows // 32, 2, 16, numCols // 8, 2, 4)
+        // view as (paddedRows // 32, 2, 16, paddedCols // 8, 2, 4)
         // permute (0, 3, 5, 2, 4, 1)
-        // view as (numRows, numCols)
+        // view as (paddedRows, paddedCols)
 
         // 6D view of the 2D row-major input
-        std::vector<size_t> srcSizes = {numRows / 32, 2, 16, numCols / 8, 2, 4};
+        std::vector<size_t> srcSizes = {paddedRows / 32, 2, 16, paddedCols / 8, 2, 4};
 
         // Row-major strides for the 6D view:
         // row = d0*32 + d1*16 + d2, col = d3*8 + d4*4 + d5
-        // linear = row*numCols + col
-        std::vector<size_t> srcStrides = {32 * numCols, 16 * numCols, numCols, 8, 4, 1};
+        // linear = row*paddedCols + col
+        std::vector<size_t> srcStrides
+            = {32 * paddedCols, 16 * paddedCols, paddedCols, 8, 4, 1};
 
         // Dimension order derived from inverse of permute(0, 3, 5, 2, 4, 1).
         // The inverse permutation is {0, 5, 3, 1, 4, 2}.
@@ -433,7 +460,7 @@ namespace DGen
         std::vector<size_t> dimOrder = {1, 4, 2, 5, 3, 0};
         auto                dstStrides = computeShuffledStrides(srcSizes, dimOrder);
 
-        return shuffleDims(input, srcSizes, dstStrides, srcStrides);
+        return shuffleDims(*inputPtr, srcSizes, dstStrides, srcStrides);
     }
 
 } // namespace DGen
