@@ -368,7 +368,7 @@ private:
         }
     };
 
-    bool test_passed = true;
+    bool test_passed{true};
     std::unordered_map<std::string, TVerify> failure_errors{};
     ErrorAnalysisInfo info{};
 

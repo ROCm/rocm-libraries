@@ -96,7 +96,7 @@ struct TensorOpsCommonNew
     : public test::adaptive::AdaptiveTest<T, TVerify, UUT, REF, ATF, VER, CheckNumericProperties>,
       public testing::TestWithParam<TestCase>
 {
-private:
+public:
     tensor<T> tensorA;
     tensor<T> tensorB;
     tensor<T> tensorC;
@@ -109,6 +109,7 @@ private:
     // std::vector<T> naiveGPUData;
     std::vector<T> naiveCPUData{};
 
+private:
     constexpr const void* GetUUTDataDev()
     {
         if constexpr(UUT == test::adaptive::UnitUnderTest::naiveGPU)
