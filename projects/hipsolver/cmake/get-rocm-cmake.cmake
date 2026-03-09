@@ -18,9 +18,8 @@ if(NOT ROCmCMakeBuildTools_FOUND)
       rocm-cmake
       GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
       GIT_TAG        ${rocm_cmake_tag}
-      SOURCE_SUBDIR "DISABLE ADDING TO BUILD" # We don't really want to consume the build and test targets of ROCm CMake.
     )
-    FetchContent_MakeAvailable(rocm-cmake)
+    FetchContent_Populate(rocm-cmake)
     list(APPEND CMAKE_MODULE_PATH "${rocm-cmake_SOURCE_DIR}/share/rocmcmakebuildtools/cmake")
     find_package(ROCmCMakeBuildTools REQUIRED)
   endif()
