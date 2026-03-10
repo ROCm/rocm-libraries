@@ -104,7 +104,10 @@ def sendFailureNotifications() {
     def combinedPattern = failurePatterns.collect { it.pattern }.join('|')
     echo "Checking for failure patterns..."
     def grepOutput = sh(
-        script: "wget -q --no-check-certificate -O - ${BUILD_URL}consoleText | grep -E -B 2 -A 2 '${combinedPattern}' || true",
+        script: """
+            set +x
+            wget -q --no-check-certificate -O - ${BUILD_URL}consoleText | grep -E -B 2 -A 2 '${combinedPattern}' || true
+        """,
         returnStdout: true
     ).trim()
 
