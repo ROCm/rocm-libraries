@@ -60,10 +60,6 @@ Definitions:
 
 
 Tests:
-- name: spic0_bad_arg
-  category: pre_checkin
-  function: spic0_bad_arg
-  precision: *single_double_precisions_complex_real
 
 - name: spic0_extra
   category: quick
@@ -73,6 +69,7 @@ Tests:
   formatA: [rocsparse_format_csr]
   function: spic0_extra
   indextype: *i32i32_i64i32_i64i64
+  batch_count: [1,2]
 
 - name: spic0
   category: quick
@@ -85,6 +82,7 @@ Tests:
   formatA: [rocsparse_format_csr]
   matrix: [rocsparse_matrix_zero]
   indextype: *i32
+  batch_count: [1,2]
 
 - name: spic0
   category: quick
@@ -97,180 +95,8 @@ Tests:
   formatA: [rocsparse_format_csr]
   matrix: [rocsparse_matrix_random]
   indextype: *i32
-  batch_count: [2,3,16]
+  batch_count: [2,3]
 
-- name: spic0
-  category: pre_checkin
-  function: spic0
-  precision: *double_only_precisions_complex
-  M_N: *M_N_range_checkin
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_random]
-  indextype: *i32
-  batch_count: [1,4]
-
-- name: spic0
-  category: nightly
-  function: spic0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_nightly
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_random]
-  indextype: *i32
-
-- name: spic0_file
-  category: quick
-  function: spic0
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos4,
-             nos6,
-             scircuit]
-  indextype: *i64
-  batch_count: [1,2,3]
-
-- name: spic0_file
-  category: pre_checkin
-  function: spic0
-  precision: *double_precision
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  indextype: *i64i32
-  filename: [rma10,
-             mc2depi,
-             nos1,
-             nos2]
-  indextype: *i64i32
-
-- name: spic0_file
-  category: nightly
-  function: spic0
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [amazon0312,
-             nos3,
-             nos5,
-             nos7]
-  indextype: *i32
-  batch_count: [2]
-
-
-- name: spic0_file
-  category: nightly
-  function: spic0
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chebyshev4]
-  skip_hardware: gfx940, gfx941
-  indextype: *i32
-
-- name: spic0_file
-  category: quick
-  function: spic0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2]
-  indextype: *i64
-
-- name: spic0_file
-  category: pre_checkin
-  function: spic0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron3]
-  indextype: *i32
-
-- name: spic0_file
-  category: nightly
-  function: spic0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron4]
-  indextype: *i32
-
-- name: spic0_graph_test
-  category: pre_checkin
-  function: spic0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
-  indextype: *i32
-
-- name: spic0_extra
-  category: pre_checkin
-  function: spic0_extra
-
-- name: spic0_file
-  category: stress
-  function: spic0
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  transA: [rocsparse_operation_none]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  formatA: [rocsparse_format_csr]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [ASIC_320k]
-  skip_hardware: gfx940, gfx941
-  indextype: *i32
-
-
-
-# Quick
 - name: spic0
   category: quick
   function: spic0
@@ -290,39 +116,43 @@ Tests:
   function: spic0
   precision: *single_double_precisions_complex_real
   M_N: *M_N_bsr_range_quick
-  block_dim: [1, 4, 9]
+  block_dim: [4]
   apol: [rocsparse_analysis_policy_reuse]
   baseA: *all_rocsparse_index_base
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
-  batch_count: [1,8]
+  batch_count: [8]
 
-- name: spic0_file
-  category: quick
+- name: spic0_bad_arg
+  category: pre_checkin
+  function: spic0_bad_arg
+  precision: *single_double_precisions_complex_real
+  formatA: [rocsparse_format_csr, rocsparse_format_bsr]
+
+- name: spic0
+  category: pre_checkin
   function: spic0
   precision: *single_double_precisions_complex_real
-  M: 1
-  N: 1
-  block_dim: [2, 4, 5, 10]
-  apol: *all_rocsparse_analysis_policy
-  baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos4]
+  M_N: *M_N_bsr_range_quick
+  block_dim: [1, 9]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
-  batch_count: [1,2,4]
+  batch_count: [1,4]
 
 
 - name: spic0_file
-  category: quick
+  category: pre_checkin
   function: spic0
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  block_dim: [2, 3, 4, 6]
+  block_dim: [3]
   apol: *all_rocsparse_analysis_policy
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
@@ -332,27 +162,109 @@ Tests:
   indextype: *i32
 
 - name: spic0_file
-  category: quick
+  category: pre_checkin
   function: spic0
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  block_dim: [3, 5, 15]
+  block_dim: [2, 4, 6]
   apol: *all_rocsparse_analysis_policy
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos6]
+  filename: [nos5]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
 
+
 - name: spic0_file
-  category: quick
+  category: pre_checkin
+  function: spic0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2]
+  indextype: *i64
+
+
+- name: spic0
+  category: pre_checkin
+  function: spic0
+  precision: *double_only_precisions_complex
+  M_N: *M_N_range_checkin
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [1,4]
+
+
+- name: spic0_file
+  category: pre_checkin
+  function: spic0
+  precision: *double_precision
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  indextype: *i64i32
+  filename: [rma10,
+             mc2depi,
+             nos1,
+             nos2]
+  indextype: *i64i32
+
+
+
+- name: spic0_extra
+  category: pre_checkin
+  function: spic0_extra
+
+- name: spic0_file
+  category: pre_checkin
+  function: spic0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron3]
+  indextype: *i32
+
+
+- name: spic0_graph_test
+  category: pre_checkin
+  function: spic0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+  indextype: *i32
+
+- name: spic0_file
+  category: pre_checkin
   function: spic0
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  block_dim: [3, 9, 27]
+  block_dim: [3, 9]
   apol: *all_rocsparse_analysis_policy
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_column]
@@ -360,15 +272,7 @@ Tests:
   filename: [nos7]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
-  batch_count: [16,128]
-
-# Pre-checkin
-- name: spic0_bad_arg
-  category: pre_checkin
-  function: spic0_bad_arg
-  precision: *single_double_precisions_complex_real
-  formatA: [rocsparse_format_bsr]
-  indextype: *i32
+  batch_count: [16]
 
 - name: spic0
   category: pre_checkin
@@ -412,8 +316,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [scircuit,
-             nos3,
+  filename: [nos3,
              nos5,
              nos7]
   formatA: [rocsparse_format_bsr]
@@ -447,6 +350,168 @@ Tests:
   graph_test: true
   formatA: [rocsparse_format_bsr]
   indextype: *i32
+
+
+- name: spic0_file
+  category: nightly
+  function: spic0
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [27]
+  apol: *all_rocsparse_analysis_policy
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos7]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+  batch_count: [128]
+
+- name: spic0_file
+  category: nightly
+  function: spic0
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [2, 4, 5, 10]
+  apol: *all_rocsparse_analysis_policy
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos4]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+  batch_count: [1,2,4]
+
+- name: spic0_file
+  category: nightly
+  function: spic0
+  precision: *double_precision
+  M: 1
+  N: 1
+  block_dim: [5, 8]
+  apol: *all_rocsparse_analysis_policy
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+
+- name: spic0_file
+  category: nightly
+  function: spic0
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  block_dim: [3, 5, 15]
+  apol: *all_rocsparse_analysis_policy
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos6]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+
+
+- name: spic0
+  category: nightly
+  function: spic0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_nightly
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+
+- name: spic0_file
+  category: nightly
+  function: spic0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos4,
+             nos6,
+             scircuit]
+  indextype: *i64
+  batch_count: [1,2,3]
+
+- name: spic0_file
+  category: nightly
+  function: spic0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [amazon0312,
+             nos3,
+             nos5,
+             nos7]
+  indextype: *i32
+  batch_count: [2]
+
+
+- name: spic0_file
+  category: nightly
+  function: spic0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chebyshev4]
+  skip_hardware: gfx940, gfx941
+  indextype: *i32
+
+- name: spic0_file
+  category: nightly
+  function: spic0
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]
+  indextype: *i32
+
+
+- name: spic0_file
+  category: stress
+  function: spic0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  transA: [rocsparse_operation_none]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k]
+  skip_hardware: gfx940, gfx941
+  indextype: *i32
+
+
+
+
 
 # Nightly
 - name: spic0

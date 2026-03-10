@@ -613,10 +613,6 @@ namespace rocsparse_clients
     }
 }
 
-#define MARKER std::cout << "where " << __FUNCTION__ << " " << __LINE__ << std::endl
-#undef MARKER
-#define MARKER
-
 template <typename I, typename J, typename T>
 void testing_sptrsv_bad_arg(const Arguments& arg)
 {
@@ -644,11 +640,9 @@ void testing_sptrsv(const Arguments& arg)
     {
         return;
     }
-    const int64_t M = A.get_nrows();
-    MARKER;
+    const int64_t                     M = A.get_nrows();
     rocsparse_clients::dnvec_descr<T> x(M, batch_count_x, M);
     rocsparse_clients::dnvec_descr<T> y(M, batch_count, M);
-    MARKER;
 
     host_scalar<T>   halpha(arg.get_alpha<T>());
     device_scalar<T> dalpha(halpha);
@@ -661,7 +655,6 @@ void testing_sptrsv(const Arguments& arg)
     const rocsparse_fill_mode       uplo        = arg.uplo;
     const rocsparse_matrix_type     matrix_type = arg.matrix_type;
 
-    MARKER;
     CHECK_ROCSPARSE_ERROR(
         rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
     CHECK_ROCSPARSE_ERROR(
@@ -669,7 +662,6 @@ void testing_sptrsv(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
         A, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)));
 
-    MARKER;
     //
     // Create handle.
     //
@@ -678,11 +670,9 @@ void testing_sptrsv(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
     rocsparse_clients::sptrsv_descr sptrsv_descr(
         handle, batch_count, operation, alg, ttype, ttype, apol);
-    MARKER;
 
     rocsparse_clients::sptrsv_analysis(handle, sptrsv_descr, A, x, y, p_error);
 
-    MARKER;
     host_dense_vector<int64_t> host_symbolic_position(batch_count);
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
     CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_get_output(handle,
@@ -705,7 +695,6 @@ void testing_sptrsv(const Arguments& arg)
         CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         host_symbolic_position.unit_check(device_symbolic_position);
     }
-    MARKER;
 
     if(arg.unit_check)
     {
@@ -724,12 +713,9 @@ void testing_sptrsv(const Arguments& arg)
                                                 cpu_symbolic_position,
                                                 cpu_numeric_position);
 
-        MARKER;
         for(auto mode : {rocsparse_pointer_mode_host, rocsparse_pointer_mode_device})
         {
-            MARKER;
             void* alpha = (mode == rocsparse_pointer_mode_host) ? halpha : dalpha;
-            MARKER;
 
             rocsparse_clients::sptrsv_compute(handle, sptrsv_descr, A, x, y, mode, alpha, p_error);
 
@@ -758,12 +744,9 @@ void testing_sptrsv(const Arguments& arg)
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
                 host_numeric_position.unit_check(device_numeric_position);
             }
-            MARKER;
 
             cpu_symbolic_position.unit_check(host_symbolic_position);
             cpu_numeric_position.unit_check(host_numeric_position);
-
-            MARKER;
 
             if(ROCSPARSE_REPRODUCIBILITY)
             {
@@ -777,13 +760,10 @@ void testing_sptrsv(const Arguments& arg)
                 }
             }
 
-            MARKER;
             y.near_check_values(host_symbolic_position, host_numeric_position);
-            MARKER;
         }
     }
 
-    MARKER;
     if(arg.timing)
     {
         size_t buffer_size;

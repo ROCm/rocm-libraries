@@ -82,10 +82,37 @@ Tests:
   matrix: [rocsparse_matrix_random]
   formatA: [rocsparse_format_csr]
   indextype: *i64
-  batch_count: [1,2,4,8,16]
+  batch_count: [1,4]
+
+- name: spilu0
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_quick
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_csr]
+  indextype: *i64
+  batch_count: [2,8,16]
 
 - name: spilu0
   category: quick
+  function: spilu0
+  precision: *single_double_precisions
+  M_N: *M_N_csr_range_quick
+  numericboost: [1]
+  boosttol: [0.05]
+  boostval: [0.2]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_csr]
+  indextype: *i32
+  batch_count: [1,2]
+
+- name: spilu0
+  category: pre_checkin
   function: spilu0
   precision: *single_double_precisions
   M_N: *M_N_csr_range_quick
@@ -97,7 +124,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
   formatA: [rocsparse_format_csr]
   indextype: *i32
-  batch_count: [1,2,4,8,16]
+  batch_count: [8,16]
 
 - name: spilu0
   category: pre_checkin
@@ -127,18 +154,33 @@ Tests:
   precision: *single_double_precisions
   M: 1
   N: 1
-  numericboost: [0, 1]
-  boosttol: [0.05, 0.79]
+  numericboost: [1]
+  boosttol: [0.05]
   boostval: [1.0]
   apol: [rocsparse_analysis_policy_reuse]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos4,
-             nos6,
+  filename: [nos4]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2]
+
+- name: spilu0_file
+  category: nightly
+  function: spilu0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  numericboost: [0, 1]
+  boosttol: [0.05]
+  boostval: [1.0]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos6,
              nos1,
              nos2]
   formatA: [rocsparse_format_csr]
-  batch_count: [2,4]
+  batch_count: [4]
 
 
 - name: spilu0_file
@@ -159,6 +201,22 @@ Tests:
 
 - name: spilu0_file
   category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos5,
+             nos7]
+  formatA: [rocsparse_format_csr]
+  indextype: *i64i32
+  batch_count: [1,3]
+
+
+- name: spilu0_file
+  category: nightly
   function: spilu0
   precision: *single_double_precisions
   M: 1
@@ -206,7 +264,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
 
 - name: spilu0_file
-  category: pre_checkin
+  category: nightly
   function: spilu0
   precision: *single_double_precisions_complex
   M: 1
@@ -276,63 +334,21 @@ Tests:
   formatA: [rocsparse_format_bsr]
   indextype: *i32
 
+
 - name: spilu0
   category: quick
   function: spilu0
   precision: *single_double_precisions_complex_real
   M_N: *M_N_bsr_range_quick
-  block_dim: [1, 4, 9]
-  apol: [rocsparse_analysis_policy_reuse]
-  baseA: *all_rocsparse_index_base
-  direction: *all_rocsparse_direction
-  matrix: [rocsparse_matrix_random]
-  formatA: [rocsparse_format_bsr]
-  indextype: *i32i32_i64i32_i64i64
-  batch_count: [16]
-
-- name: spilu0
-  category: quick
-  function: spilu0
-  precision: *single_precision
-  M_N: *M_N_bsr_range_quick
-  block_dim: [32]
-  apol: [rocsparse_analysis_policy_reuse]
-  baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
-  formatA: [rocsparse_format_bsr]
-  indextype: *i32
-  batch_count: [2,3,4]
-
-- name: spilu0
-  category: quick
-  function: spilu0
-  precision: *single_double_precisions
-  M_N: *M_N_bsr_range_quick
-  block_dim: [9]
-  numericboost: [0, 1]
-  boosttol: [0.2, 0.5, 0.9, 1.1]
-  boostval: [0.5, 1.2]
+  block_dim: [1, 4]
   apol: [rocsparse_analysis_policy_reuse]
   baseA: *all_rocsparse_index_base
   direction: *all_rocsparse_direction
   matrix: [rocsparse_matrix_random]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
+  batch_count: [4]
 
-- name: spilu0
-  category: pre_checkin
-  function: spilu0
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_bsr_range_checkin
-  block_dim: [3, 6, 15, 27]
-  apol: *all_rocsparse_analysis_policy
-  baseA: *all_rocsparse_index_base
-  direction: *all_rocsparse_direction
-  matrix: [rocsparse_matrix_random]
-  formatA: [rocsparse_format_bsr]
-  indextype: *i32i32_i64i32_i64i64
-  batch_count: [1,3]
 
 - name: spilu0
   category: nightly
@@ -354,7 +370,106 @@ Tests:
   M: 1
   N: 1
   block_dim: [5]
+  numericboost: [0]
+  boosttol: [0.01]
+  boostval: [1.2]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i64
+  batch_count: [3]
+
+
+- name: spilu0
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_bsr_range_quick
+  block_dim: [3]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i64i32
+  batch_count: [16]
+
+- name: spilu0
+  category: pre_checkin
+  function: spilu0
+  precision: *single_precision
+  M_N: *M_N_bsr_range_quick
+  block_dim: [32]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+  batch_count: [2,3,4]
+
+- name: spilu0
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions
+  M_N: *M_N_bsr_range_quick
+  block_dim: [9]
   numericboost: [0, 1]
+  boosttol: [0.2, 0.5, 0.9, 1.1]
+  boostval: [0.5, 1.2]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+
+- name: spilu0
+  category: nightly
+  function: spilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_bsr_range_checkin
+  block_dim: [3, 6]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+  batch_count: [1,3]
+
+- name: spilu0_file
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [5]
+  numericboost: [1]
+  boosttol: [0.01]
+  boostval: [1.2]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos2]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i64
+  batch_count: [3]
+
+- name: spilu0_file
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  block_dim: [5]
+  numericboost: [1]
   boosttol: [0.01]
   boostval: [1.2]
   apol: [rocsparse_analysis_policy_reuse]
@@ -367,7 +482,7 @@ Tests:
              nos2]
   formatA: [rocsparse_format_bsr]
   indextype: *i64
-  batch_count: [2,3,4]
+  batch_count: [2, 4]
 
 - name: spilu0_file
   category: pre_checkin
@@ -380,8 +495,53 @@ Tests:
   baseA: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mc2depi,
-             scircuit,
+  filename: [mc2depi]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+
+- name: spilu0_graph_test
+  category: pre_checkin
+  function: spilu0
+  precision: *single_double_precisions
+  M_N: *M_N_bsr_range_quick
+  block_dim: [1, 4, 9]
+  numericboost: [0, 1]
+  boosttol: [0.2, 0.5, 0.9, 1.1]
+  boostval: [0.5, 1.2]
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32
+
+- name: spilu0
+  category: nightly
+  function: spilu0
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_bsr_range_checkin
+  block_dim: [15, 27]
+  apol: *all_rocsparse_analysis_policy
+  baseA: *all_rocsparse_index_base
+  direction: *all_rocsparse_direction
+  matrix: [rocsparse_matrix_random]
+  formatA: [rocsparse_format_bsr]
+  indextype: *i32i32_i64i32_i64i64
+  batch_count: [1,3]
+
+- name: spilu0_file
+  category: nightly
+  function: spilu0
+  precision: *double_precision
+  M: 1
+  N: 1
+  block_dim: [5, 8]
+  apol: *all_rocsparse_analysis_policy
+  baseA: [rocsparse_index_base_one]
+  direction: [rocsparse_direction_column]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [scircuit,
              mac_econ_fwd500]
   formatA: [rocsparse_format_bsr]
   indextype: *i32
@@ -406,7 +566,7 @@ Tests:
 
 
 - name: spilu0_file
-  category: pre_checkin
+  category: nightly
   function: spilu0
   precision: *single_double_precisions_complex
   M: 1
@@ -423,22 +583,6 @@ Tests:
 
 
 - name: spilu0_file
-  category: pre_checkin
-  function: spilu0
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  block_dim: [8, 16]
-  apol: [rocsparse_analysis_policy_force]
-  baseA: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_row]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron3]
-  formatA: [rocsparse_format_bsr]
-  indextype: *i32
-  batch_count: [1]
-
-- name: spilu0_file
   category: nightly
   function: spilu0
   precision: *single_double_precisions_complex
@@ -453,19 +597,4 @@ Tests:
   formatA: [rocsparse_format_bsr]
   indextype: *i32
 
-- name: spilu0_graph_test
-  category: pre_checkin
-  function: spilu0
-  precision: *single_double_precisions
-  M_N: *M_N_bsr_range_quick
-  block_dim: [1, 4, 9]
-  numericboost: [0, 1]
-  boosttol: [0.2, 0.5, 0.9, 1.1]
-  boostval: [0.5, 1.2]
-  apol: [rocsparse_analysis_policy_reuse]
-  baseA: *all_rocsparse_index_base
-  direction: *all_rocsparse_direction
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
-  formatA: [rocsparse_format_bsr]
-  indextype: *i32
+

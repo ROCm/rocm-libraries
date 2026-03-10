@@ -40,7 +40,6 @@ void rocsparse_clients::sptrsv_analysis(rocsparse_handle       handle,
 
     device_dense_vector<char> buffer(buffer_size);
     CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size));
-
     CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
                                            sptrsv_descr,
                                            A,
@@ -50,7 +49,9 @@ void rocsparse_clients::sptrsv_analysis(rocsparse_handle       handle,
                                            buffer_size,
                                            buffer,
                                            p_error));
-    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+    //
+    // We don't synchronize, this stage is supposed to be synchroneous.
+    //
 }
 
 void rocsparse_clients::sptrsv_compute(rocsparse_handle       handle,
