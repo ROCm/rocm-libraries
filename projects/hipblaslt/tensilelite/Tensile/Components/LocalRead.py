@@ -634,6 +634,13 @@ class LocalReadMFMA(LocalRead):
             needPack = False
         needPack |= (kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]))
         needPack |= kernel["UseF32XEmulation"]
+
+        # Metadata pack SGPR prefix: "M" when both 16-bit (A/B) and 8-bit (metadata) packing coexist
+        # Must match tPackM logic in KernelWriterAssembly.py
+        tPackM = ""
+        if (kernel["ProblemType"]["MacDataTypeA"].isHalf() or kernel["ProblemType"]["MacDataTypeA"].isBFloat16()):
+            if (writer.states.lrvwTileA > 1 or writer.states.lrvwTileB > 1) and writer.states.lrvwTileMetadata > 1:
+                tPackM = "M"
         pack     = Module("pack%s_I%s"%(tc,iui))
         packPre = Module("pack%s_I%s Pre"%(tc,iui))
 
@@ -1028,13 +1035,13 @@ class LocalReadMFMA(LocalRead):
                                                             packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), \
                                                                             src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 1, i+vIdx*numVgpr)), \
                                                                             src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 0, i+vIdx*numVgpr)), \
-                                                                            src2=sgpr("PackKForV%u"%vgprOffset), \
-                                                                            comment="1 select K=%u%u for vector=%u"%(0, 1, vgprOffset)))
+                                                                            src2=sgpr("PackKFor%sV%u"%(tPackM, elementIdx)), \
+                                                                            comment="1 select K=%u%u for vector=%u"%(0, 1, elementIdx)))
                                                             packCodeT.add(VPermB32(dst=vgpr("PackTemp"), \
                                                                             src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 3, i+vIdx*numVgpr)), \
                                                                             src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 2, i+vIdx*numVgpr)), \
-                                                                            src2=sgpr("PackKForV%u"%vgprOffset), \
-                                                                            comment="1 select K=%u%u for vector=%u"%(2, 3, vgprOffset)))
+                                                                            src2=sgpr("PackKFor%sV%u"%(tPackM, elementIdx)), \
+                                                                            comment="1 select K=%u%u for vector=%u"%(2, 3, elementIdx)))
                                                             packCodeT.add(VLShiftLeftOrB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), \
                                                                             src0=vgpr("PackTemp"), shiftHex=16, \
                                                                             src1=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), \
@@ -1048,14 +1055,14 @@ class LocalReadMFMA(LocalRead):
                                                             packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx)), \
                                                                                     src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 1, i+vIdx*numVgpr)), \
                                                                                     src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 0, i+vIdx*numVgpr)), \
-                                                                                    src2=sgpr("PackKForV%u"%vgprOffset), \
-                                                                                    comment="select K=%u%u for vector=%u"%(0, 1, vgprOffset)))
+                                                                                    src2=sgpr("PackKFor%sV%u"%(tPackM, elementIdx)), \
+                                                                                    comment="select K=%u%u for vector=%u"%(0, 1, elementIdx)))
                                                             vgprOffset += 1
                                                 elif kernel["MIInputPerThread%s"%tc] == 1:
                                                     vgprIdx_ = vgprIdx+vIdx*(numSplitMetadata+1)
-                                                    packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_)), src=destVgpr))
+                                                    packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_)), src=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 0, i+vIdx*numVgpr))))
                                                     for elementIdx in range(1, numSplitMetadata+1):
-                                                        packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_ + elementIdx)), src=destVgpr, \
+                                                        packCodeT.add(VMovB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_ + elementIdx)), src=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, 0, i+vIdx*numVgpr)), \
                                                                             comment="another VGPR storing lshr 8-bit value %d %d" %(vgprIdx, elementIdx)))
                                                         packCodeT.add(VLShiftRightB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx_+elementIdx)), \
                                                                                     shiftHex=hex(8*elementIdx), \
@@ -1069,7 +1076,7 @@ class LocalReadMFMA(LocalRead):
                                                     packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+elementIdx+vIdx*2)), \
                                                                         src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, vgprOffset*2 + 1 , i+vIdx*numVgpr)), \
                                                                         src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, vgprOffset*2, i+vIdx*numVgpr)), \
-                                                                        src2=sgpr("PackKForV%u"%elementIdx), \
+                                                                        src2=sgpr("PackKFor%sV%u"%(tPackM, elementIdx % 2)), \
                                                                         comment="select K=%u%u for vector=%u"%(vgprOffset*2+1, vgprOffset*2, elementIdx)))
                                                     vgprOffset += (1 if elementIdx % 2 == 1 else 0)
                                             elif kernel["ProblemType"]["MacDataTypeA"].isHalf() or kernel["MFMA_BF16_1K"] or kernel["ProblemType"]["MacDataTypeA"].isBFloat16():
@@ -1078,7 +1085,7 @@ class LocalReadMFMA(LocalRead):
                                                     for elementIdx in range(0, int(tP["bpe"]*kernel["MIInputPerThread%s"%tc]//writer.states.bpr)):
                                                         packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+vgprOffset)), \
                                                                             src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg+1, i+vIdx*numVgpr)), \
-                                                                            src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg, i+vIdx*numVgpr)), src2=sgpr("PackKForV%u"%vectorIdx), \
+                                                                            src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg, i+vIdx*numVgpr)), src2=sgpr("PackKFor%sV%u"%(tPackM, vectorIdx)), \
                                                                             comment="select K=%u%u for vector=%u"%(elementIdx*numElementPerReg,  elementIdx*numElementPerReg+1, vectorIdx)))
                                                         vgprOffset += 1
                                             elif kernel["ProblemType"]["MacDataTypeA"].isInt8() or kernel["ProblemType"]["MacDataTypeA"].is8bitFloat():
@@ -1091,12 +1098,12 @@ class LocalReadMFMA(LocalRead):
                                                         packCodeT.add(VPermB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx+vgprOffset)), \
                                                                             src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg+1, i+vIdx*numVgpr)), \
                                                                             src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg, i+vIdx*numVgpr)), \
-                                                                            src2=sgpr("PackKForV%u"%vectorIdx), \
+                                                                            src2=sgpr("PackKFor%sV%u"%(tPackM, vectorIdx)), \
                                                                             comment="select K=%u%u for vector=%u"%(elementIdx*4,  elementIdx*4+1, vectorIdx)))
                                                         packCodeT.add(VPermB32(dst=vgpr("PackTemp"), \
                                                                             src0=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg+3, i+vIdx*numVgpr)), \
                                                                             src1=vgpr("Valu%s_X%u_I%u_D%u+%u"%(tc, bufferIdx, iui, elementIdx*numElementPerReg+2, i+vIdx*numVgpr)), \
-                                                                            src2=sgpr("PackKForV%u"%vectorIdx), \
+                                                                            src2=sgpr("PackKFor%sV%u"%(tPackM, vectorIdx)), \
                                                                             comment="select K=%u%u for vector=%u"%(elementIdx*4+2,  elementIdx*4+3, vectorIdx)))
                                                         packCodeT.add(VLShiftLeftOrB32(dst=vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, vgprIdx + vgprOffset)),
                                                                                     src0=vgpr("PackTemp"), \
