@@ -118,7 +118,8 @@ template<bool IsMemCpy,
          typename std::enable_if<IsMemCpy, int>::type = 0>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static Alias read_item(InputIt buffer_src, Offset offset)
 {
-    return *(reinterpret_cast<Alias*>(buffer_src) + offset);
+    // Note: we must reinterpret_cast to const Alias because InputIt may be a const type.
+    return *(reinterpret_cast<const Alias*>(buffer_src) + offset);
 }
 
 template<bool IsMemCpy,

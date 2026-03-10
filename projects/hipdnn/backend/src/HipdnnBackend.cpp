@@ -550,3 +550,8 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version)
         *version = HIPDNN_BACKEND_VERSION_STRING;
     });
 }
+
+HIPDNN_BACKEND_EXPORT const char* hipdnnVersionString_ext()
+{
+    return HIPDNN_BACKEND_VERSION_STRING;
+}

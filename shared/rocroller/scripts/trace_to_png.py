@@ -6,7 +6,7 @@
 """Utility to render the output of 'trace_memory'."""
 
 import argparse
-import pathlib
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -122,7 +122,7 @@ def main():
 
     args = parser.parse_args()
 
-    trace_fname = pathlib.Path(args.filename)
+    trace_fname = Path(args.filename)
     if not trace_fname.exists():
         print(f"Trace file {trace_fname} not found.")
         return
