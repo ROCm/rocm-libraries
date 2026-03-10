@@ -16,7 +16,7 @@ It's recommended to view the output files with line wrapping OFF.
 import argparse
 import collections
 import itertools
-import pathlib
+from pathlib import Path
 
 
 def get_columns(line: str) -> dict[str, tuple[int, int]]:
@@ -32,13 +32,13 @@ def get_columns(line: str) -> dict[str, tuple[int, int]]:
 
 
 def new_name(fname, part):
-    parts = fname.split('.')
-    return parts[0] + "_" + part + '.' + '.'.join(parts[1:])
+    parts = fname.split(".")
+    return parts[0] + "_" + part + "." + ".".join(parts[1:])
 
 
 def get_part(line, all_bounds, name):
     bounds = all_bounds[name]
-    return line[bounds[0]:bounds[1]]
+    return line[bounds[0] : bounds[1]]
 
 
 def split_lines(lines: [str]) -> dict[str, [str]]:
@@ -61,10 +61,13 @@ def split_lines(lines: [str]) -> dict[str, [str]]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("fname", help="The liveness file to split.")
-    parser.add_argument("--output-dir", "-o",
-                        help="The directory to write the split files to.",
-                        default=".",
-                        type=pathlib.Path)
+    parser.add_argument(
+        "--output-dir",
+        "-o",
+        help="The directory to write the split files to.",
+        default=".",
+        type=Path,
+    )
     args = parser.parse_args()
 
     with open(args.fname) as f:
@@ -74,5 +77,5 @@ if __name__ == "__main__":
         new_file = args.output_dir / new_name(args.fname, k)
         with open(new_file, "w") as f:
             for line in v:
-                f.write(line + '\n')
+                f.write(line + "\n")
         print(f"Wrote {new_file}")

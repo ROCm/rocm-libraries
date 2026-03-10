@@ -90,10 +90,10 @@ inline launch_params get_benchmark_launch_parameters(T           kernel,
     else
     {
         // Heuristic that picks thread count that maximizes occupancy
-        const std::vector<int> thread_options = {32, 64, 128, 256, 512, 1024};
-        for(int t : thread_options)
+        hipFuncAttributes attr;
+        HIP_CHECK(hipFuncGetAttributes(&attr, (const void*)kernel));
+        for(int t = 32; t <= attr.maxThreadsPerBlock; t *= 2)
         {
-
             if(t > params.max_threads_per_block)
                 continue;
 

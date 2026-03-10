@@ -3,12 +3,10 @@
 
 @PACKAGE_INIT@
 
-# Include the SDK config file to get plugin-related variables
 include(CMakeFindDependencyMacro)
 find_dependency(hipdnn_data_sdk @HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
-find_dependency(hipdnn_backend CONFIG REQUIRED)
+find_dependency(hipdnn_backend @HIPDNN_FRONTEND_BACKEND_MIN_VERSION@ CONFIG REQUIRED)
 
-# Include the targets file
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_frontendTargets.cmake")
 
 check_required_components(hipdnn_frontend)
