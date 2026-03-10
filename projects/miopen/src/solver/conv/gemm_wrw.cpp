@@ -125,34 +125,44 @@ float GemmWrwBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
 }
 
 // function generated from MI355 2d data
-bool GemmWrw1x1_stride1::IsSlow(const ProblemDescription& problem) const
+bool GemmWrw1x1_stride1::IsSlow(const ExecutionContext& context,
+        const ProblemDescription& problem) const
 {
+    const std::string& arch = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"}
+    const bool is_mi = mi.find(arch) != mi.end();
+    const bool is_gfx11 = StartsWith(arch, "gfx11");
+    const bool is_gfx12 = StartsWith(arch, "gfx12");
+
     auto b                  = problem.GetBatchSize();
-    auto s                  = problem.GetInHeight() * problem.GetInWidth();
+    auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
     auto c                  = problem.GetInChannels() + problem.GetOutChannels();
     auto g                  = problem.GetGroupCount();
+    auto spatial_per_batch  = s / b;
     auto channels_per_group = c / g;
+    auto spatial_work_per_group = s * channels_per_group
 
-    // High batch (always problematic for WRW)
-    if(b >= 16)
-        return true;
-
-    // Moderate batch + low cpg WITH groups threshold
-    // g <= 8 prevents false positives from high-group cases
-    if(b >= 4 && channels_per_group < 320 && g <= 8)
-        return true;
-
-    // Very low cpg WITH groups threshold
-    if(channels_per_group < 64 && g <= 8)
-        return true;
-
-    // Very large spatial area
-    if(s >= 32768)
-        return true;
-
-    // Very low total channels
-    if(c <= 128)
-        return true;
+    if(is_gfx11 || is gfx12)
+    {
+        // REFINED RULE: SWPG and CPG windows
+        // Pattern: Medium-high SWPG range with moderate CPG range
+        // SWPG window [1M, 2.5M):
+        //   - Excludes small problems (swpg < 1M)
+        //   - Excludes very large problems (swpg >= 2.5M) which perform better
+        // CPG window [300, 2500):
+        //   - Includes problematic medium-to-high channel counts
+        //   - Excludes very high CPG (>= 2500) which are different workloads
+        if(1000000 <= spatial_work_per_group < 2500000)
+            if(300 <= channels_per_group < 2500)
+                return true;
+    }
+    else if(is_mi)
+    {
+        // SPB-ONLY: Batch fragmentation detection
+        // SPB < 48.0: Each batch item has < 48 pixels of spatial work
+        if(spatial_per_batch < 48.0)
+            return true;
+    }
 
     return false;
 }
@@ -170,7 +180,7 @@ bool GemmWrw1x1_stride1::IsApplicable(const ExecutionContext& context,
     const auto wei_spatial =
         dwDesc.GetLengths() | std::views::drop(2) | std::views::take(conv.GetSpatialDimension());
 
-    if(IsSlow(problem))
+    if(IsSlow(context, problem))
         return false;
 
     return miopen::all_of(wei_spatial, [](auto v) { return v == 1; }) &&
@@ -357,43 +367,43 @@ size_t GemmWrwUniversal::GetWorkspaceSize(const ExecutionContext& context,
 }
 
 // function generated from MI355 2d data
-bool GemmWrwUniversal::IsSlow(const ProblemDescription& problem) const
+bool GemmWrwUniversal::IsSlow(const ExecutionContext& context,
+        const ProblemDescription& problem) const
 {
+    const std::string& arch = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"}
+    const bool is_mi = mi.find(arch) != mi.end();
+    const bool is_gfx11 = StartsWith(arch, "gfx11");
+    const bool is_gfx12 = StartsWith(arch, "gfx12");
+
     auto b                  = problem.GetBatchSize();
-    auto s                  = problem.GetInHeight() * problem.GetInWidth();
+    auto s                  = problem.GetOutHeight() * problem.GetOutWidth();
     auto c                  = problem.GetInChannels() + problem.GetOutChannels();
     auto g                  = problem.GetGroupCount();
+    auto spatial_per_batch  = s / b;
     auto channels_per_group = c / g;
-    auto work_per_group     = (b * s * c) / g;
+    auto spatial_work_per_group = s * channels_per_group
 
-    // EXEMPTION: High work per group
-    // Saves high-work cases that perform well
-    if(work_per_group >= 250e6)
-        return false;
+    if(is_gfx11 || is gfx12)
+    {
+        // PRIMARY: Memory-bound small problem
+        // SWPG < 10k
+        // CPG < 128 is quite low (can use lower threshold since SWPG is so discriminative)
+        if(spatial_work_per_group < 10000 && channels_per_group < 128)
+            return true;
 
-    // High batch
-    if(b >= 64)
-        return true;
-
-    // Moderate-high batch with low cpg (with groups filter)
-    if(b >= 16 && channels_per_group < 320 && g <= 8)
-        return true;
-
-    // Moderate batch with low cpg (with groups filter)
-    if(b >= 4 && channels_per_group < 128 && g <= 8)
-        return true;
-
-    // Very low cpg (with groups filter)
-    if(channels_per_group < 32 && g <= 8)
-        return true;
-
-    // Very large spatial
-    if(s >= 40960)
-        return true;
-
-    // Very low channels
-    if(c <= 160)
-        return true;
+        // SECONDARY: Extreme batch fragmentation
+        // SPB < 2.0 each batch item has < 2 pixels
+        if(spatial_per_batch < 2.0)
+            return true;
+    }
+    else if(is_mi)
+    {
+        // SPB-ONLY: Batch fragmentation detection
+        // SPB < 48.0: Each batch item has < 48 pixels of spatial work
+        if(spatial_per_batch < 48.0)
+            return true;
+    }
 
     return false;
 }
@@ -405,7 +415,7 @@ bool GemmWrwUniversal::IsApplicable(const ExecutionContext& context,
     if(!GemmWrwBase::IsApplicable(context, problem))
         return false;
 
-    if(IsSlow(problem))
+    if(IsSlow(context, problem))
         return false;
 
     return !GemmWrw1x1_stride1{}.IsApplicable(context, problem) &&
