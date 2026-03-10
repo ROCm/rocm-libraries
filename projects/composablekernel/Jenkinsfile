@@ -118,7 +118,7 @@ def sendFailureNotifications() {
     ]
     
     // Get the build log.
-    def buildLog = currentBuild.rawBuild.getLog(Integer.MAX_VALUE).join('\n')
+    def buildLog = sh(script: 'wget -q --no-check-certificate -O - ' + BUILD_URL + 'consoleText', returnStdout: true)
     echo "Checking for failure patterns..."
     // Check for patterns in the log.
     def foundPatterns = []
