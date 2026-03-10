@@ -4,7 +4,11 @@
 #include "utils/ckb_conv_test_configs.hpp"
 #include "utils/ckb_conv_test_utils.hpp"
 #include "utils/conv_algorithm_type_utils.hpp"
-#include "ck_tile/host/device_prop.hpp"
+#include "ck_tile/builder/testing/conv/bwd_data_ck.hpp"
+#include "ck_tile/builder/testing/conv/reference.hpp"
+#include "testing_utils.hpp"
+
+namespace {
 
 namespace ckb = ck_tile::builder;
 namespace ckt = ck_tile::builder::test;
@@ -22,13 +26,17 @@ constexpr auto SIGNATURE =
 constexpr auto ALGORITHM = cku::ConvAlgorithm_DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle{}
                                .with_thread_block(cku::ThreadBlock_64_32x32x32)
                                .with_gemm_config(cku::GemmParams_Wmma_16x16_2x1_per_wave)
-                               .with_transfer(cku::BwdTransfer_4x8x1_4x16x1_v3)
+                               .with_transfer(cku::BwdTransfer_4x16x1_4x16x1_v3)
                                .with_bwd_data_specialization(ckb::ConvSpecialization::DEFAULT)
                                .with_prefetch_config(1, ckb::PipelineScheduler::DEFAULT)
                                .with_gridwise_gemm_pipeline(ckb::PipelineVersion::V1);
 
 using Builder  = ckb::ConvBuilder<SIGNATURE, ALGORITHM>;
 using Instance = Builder::Instance;
+
+using Reference = ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
+
+} // namespace
 
 TEST(BwdData_2DFp16_MultiD_Wmma_CShuffle_GNHWC, Create)
 {
@@ -40,4 +48,46 @@ TEST(BwdData_2DFp16_MultiD_Wmma_CShuffle_GNHWC, Create)
                             "GNHWK,GKYXC,EmptyTuple,GNHWC",
                             "PassThrough,PassThrough,PassThrough",
                             "fp16,fp16"}); // check compute types
+}
+
+TEST(BwdData_2DFp16_MultiD_Wmma_CShuffle_GNHWC, Exec)
+{
+    if(!(ck::is_gfx11_supported() || ck::is_gfx12_supported()))
+    {
+        // Note: See device_grouped_conv_bwd_data_multiple_d_wmma_cshuffle.hpp `IsSupportedArgument`
+        GTEST_SKIP() << "unsupported architecture";
+    }
+    ckt::Args<SIGNATURE> args = {
+        .lengths =
+            {
+                .batch_size      = 2,
+                .groups          = 4,
+                .input_channels  = 32,
+                .output_channels = 48,
+                .image           = {.width = 32, .height = 56},
+                .filter          = {.width = 3, .height = 3},
+            },
+        .filter_strides     = {.width = 1, .height = 1},
+        .filter_dilation    = {.width = 1, .height = 1},
+        .input_left_pad     = {.width = 0, .height = 0},
+        .input_right_pad    = {.width = 0, .height = 0},
+        .a_elementwise_op   = {},
+        .b_elementwise_op   = {},
+        .cde_elementwise_op = {},
+    };
+
+    auto inputs    = ckt::alloc_inputs(args);
+    auto outputs   = ckt::alloc_outputs(args);
+    auto reference = ckt::alloc_outputs(args);
+
+    ckt::init_inputs(args, inputs.get());
+
+    using namespace ck_tile::test;
+    auto conv = Instance{};
+    EXPECT_THAT(ckt::run(conv, args, inputs.get(), outputs.get()), SuccessfulRun());
+
+    auto ref_conv = Reference{};
+    EXPECT_THAT(ckt::run(ref_conv, args, inputs.get(), reference.get()), SuccessfulRun());
+
+    EXPECT_THAT(outputs.get(), MatchesReference(args, reference.get()));
 }
