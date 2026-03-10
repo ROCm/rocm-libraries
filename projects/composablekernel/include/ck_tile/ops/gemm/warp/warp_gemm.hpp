@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Test change for dependency parser validation
+// Test change for dependency parser validation - iteration 2
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_impl.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_attribute_mfma.hpp"
@@ -13,7 +13,7 @@
 
 namespace ck_tile {
 
-// fp32
+// fp32 warp gemm implementations
 
 using WarpGemmMfmaF32F32F32M16N16K4 = WarpGemmImpl<
     WarpGemmAttributeMfma<WarpGemmAttributeMfmaImplF32F32F32M16N16K4<WGAttrCtlEnum::Default_>>>;
