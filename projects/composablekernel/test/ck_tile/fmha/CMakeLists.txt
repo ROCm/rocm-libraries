@@ -25,12 +25,6 @@ function(add_gtest_fwd test_group)
         message(VERBOSE "${FMHA_FWD_INSTANCES} SOURCES ${sources}")
     endif()
 
-    set(sources)
-    if(TARGET ${FMHA_FWD_INSTANCES})
-        get_target_property(sources ${FMHA_FWD_INSTANCES} SOURCES)
-        message(VERBOSE "${FMHA_FWD_INSTANCES} SOURCES ${sources}")
-    endif()
-
     set(all_tests)
     foreach(type ${V_TYPES})
         set(name "${test_group}_${type}")
