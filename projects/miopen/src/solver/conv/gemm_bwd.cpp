@@ -86,7 +86,8 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     const auto& wDesc  = problem.GetWeights();
     const auto& dxDesc = problem.GetOut();
 
-    const auto prefer_point_output_shape = miopen::conv::IsBwdDataPointOutput3dStrideEqFilter(problem);
+    const auto prefer_point_output_shape =
+        miopen::conv::IsBwdDataPointOutput3dStrideEqFilter(problem);
 
     int n_SetTensor            = 0;
     int n_transpose_NCHW2CNHW  = 0;
@@ -705,14 +706,14 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
             // launch one strided-batched GEMM over N, then one batched Col2Im.
             if(group_count == 1 && spatial_dims == 3)
             {
-                auto batched_gemm_desc   = gemm_desc;
+                auto batched_gemm_desc        = gemm_desc;
                 batched_gemm_desc.batch_count = static_cast<int>(in_n);
                 batched_gemm_desc.strideA     = 0;
                 batched_gemm_desc.strideB =
                     static_cast<long long>(wei_k) * static_cast<long long>(out_spatial_size);
-                batched_gemm_desc.strideC =
-                    static_cast<long long>(in_c) * static_cast<long long>(wei_spatial_size) *
-                    static_cast<long long>(out_spatial_size);
+                batched_gemm_desc.strideC = static_cast<long long>(in_c) *
+                                            static_cast<long long>(wei_spatial_size) *
+                                            static_cast<long long>(out_spatial_size);
 
                 constexpr auto batched_backend =
 #if MIOPEN_USE_HIPBLASLT

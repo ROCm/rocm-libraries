@@ -202,8 +202,8 @@ extern "C" __global__ void Col2Im3dUBatched(FLOAT* col,
     const unsigned int end_w   = min(col_w, im_w / stride_w + 1);
 
 #if MIOPEN_USE_64BIT_INDEX
-    const uint64_t ch_offset = static_cast<uint64_t>(im_ch) * col_d * col_w * col_h * wei_d *
-                               wei_w * wei_h;
+    const uint64_t ch_offset =
+        static_cast<uint64_t>(im_ch) * col_d * col_w * col_h * wei_d * wei_w * wei_h;
 #else
     const uint32_t ch_offset = im_ch * col_d * col_w * col_h * wei_d * wei_w * wei_h;
 #endif
