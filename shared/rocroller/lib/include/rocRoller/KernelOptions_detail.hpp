@@ -10,15 +10,27 @@ namespace rocRoller
 {
     struct KernelOptionValues
     {
-        DSObserverType dsObserver = DSObserverType::DSMEMObserver;
-        LogLevel       logLevel   = LogLevel::Verbose;
+        LogLevel logLevel = LogLevel::Verbose;
 
         bool alwaysWaitAfterLoad         = false;
         bool alwaysWaitAfterStore        = false;
         bool alwaysWaitBeforeBranch      = false;
         bool alwaysWaitZeroBeforeBarrier = false;
 
-        bool preloadKernelArguments = true;
+        /**
+         * Maximum limit on the number of kernel arguments we will allow to be preloaded into
+         * SGPRs by the GPU at the beginning of the kernel. If it is set to -1, this is
+         * unlimited and we will use the maximum defined by the architecture.
+         */
+        int systemPreloadedKernelArguments = -1;
+
+        /**
+         * If enabled, kernel arguments that are not preloaded by the system will be lazily
+         * loaded as they are needed in the kernel. Note that this does not currently work well
+         * for complex kernels as we cannot efficiently overlap kernel argument loading with
+         * other memory traffic.
+         */
+        bool lazyLoadKernelArguments = false;
 
         unsigned int maxACCVGPRs      = 256;
         unsigned int maxSGPRs         = 102;
@@ -42,13 +54,6 @@ namespace rocRoller
          * added and we will return the existing one instead.
          */
         bool deduplicateArguments = true;
-
-        /**
-         * If enabled, command arguments are not necessarily added as kernel arguments.  We
-         * instead depend on the CleanArguments and other passes to add all necessary kernel
-         * arguments.
-         */
-        bool lazyAddArguments = true;
 
         /**
          * The minimum complexity of an expression before we will add a kernel argument to
@@ -87,6 +92,13 @@ namespace rocRoller
          * separated into categories.
          */
         std::optional<int> maxConcurrentControlOps;
+
+        /**
+         * Choose the LDS Memory observer to use for scheduling.
+         *
+         * Affects cycle count predictions for LDS instructions.
+         */
+        DSObserverType dsObserver = DSObserverType::DSMEMObserver;
 
         /**
          * By default, we no longer allow full integer division or modulo in

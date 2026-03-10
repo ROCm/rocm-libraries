@@ -122,6 +122,12 @@ private:
     }
 };
 
+#ifdef _WIN32
+// Suppress -Wundefined-func-template warning for Windows
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wundefined-func-template"
+#endif
+
 /// Common interface for tunable and non-tunable solvers
 template <class Context, class Problem>
 struct SolverInterface : SolverBase
@@ -230,6 +236,11 @@ struct SolverBaseTunable : SolverInterfaceTunable<Context, Problem>, TunableSolv
         return GetSolution(ctx, problem, config).invoker_factory.value();
     }
 };
+
+#ifdef _WIN32
+// Suppress -Wundefined-func-template warning for Windows
+#pragma GCC diagnostic pop
+#endif
 
 // \todo Should be removed
 template <class Context, class Problem>

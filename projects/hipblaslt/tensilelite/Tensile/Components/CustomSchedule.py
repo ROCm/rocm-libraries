@@ -40,7 +40,7 @@ from Tensile.Common.Utilities import printWarning
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Tuple
 from enum import Enum, auto
 import Tensile.Components.CMSValidator as cmsv
 from typing import Callable
@@ -55,7 +55,6 @@ class ScheduleMatchStatus(Enum):
 # Global registry for schedule functions
 _SCHEDULE_REGISTRY = []
 
-# Global registry for schedule metadata (parallel to _SCHEDULE_REGISTRY)
 _SCHEDULE_METADATA: list["CMSKernelInfo"] = []
 
 # Map dtype predicate functions to human-readable names
@@ -77,7 +76,6 @@ class CMSKernelInfo:
     """
     name: str
     dtype: str
-    supported_layouts: list[str]
     MacroTile0: int
     MacroTile1: int
     DepthU: int
@@ -92,6 +90,10 @@ class CMSKernelInfo:
     LocalReadVectorWidth: int
     MatrixInstruction: list[int]
     MIWaveGroup: list[int]
+    LDSTrInst: bool
+    TransposeLDS: int
+    TransposeA: bool
+    TransposeB: bool
 
     def matches(self, dtype: Optional[str] = None, layout: Optional[str] = None) -> bool:
         """Check if this kernel info matches the given dtype and/or layout filter.
@@ -105,8 +107,10 @@ class CMSKernelInfo:
         """
         if dtype is not None and self.dtype.lower() != dtype.lower():
             return False
-        if layout is not None and layout.upper() not in (l.upper() for l in self.supported_layouts):
-            return False
+        if layout is not None:
+            layout = layout.upper()
+            if self.TransposeA != (layout[0] == "T") or self.TransposeB != (layout[1] == "T"):
+                return False
         return True
 
 
@@ -236,16 +240,34 @@ class ScheduleInfo:
         self.nllZeroDscnt = nllZeroDscnt
         self.mfmaReorder = mfmaReorder
         self.snopCode = snopCode
-        self._skipValidation = False
+        self._disabledPasses: dict[cmsv.ValidatorPass, str] = {}
 
-        # Empty list - validate all keys; list of keys - skip order validation for these keys 
-        self._skipOrderValidation : None | list[str] = []
+    def disableValidationPass(self, pass_id: cmsv.ValidatorPass, reason: str) -> None:
+        """Disable a specific validator pass for this schedule.
 
-    def disableValidation(self):
-        self._skipValidation = True
+        Args:
+            pass_id: The ValidatorPass enum member to disable.
+            reason:  Mandatory explanation of why this pass is being disabled.
+        """
+        if not isinstance(pass_id, cmsv.ValidatorPass):
+            raise TypeError(f"pass_id must be a ValidatorPass enum member, got {type(pass_id).__name__}")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Reason for disabling pass must be a non-empty string")
+        self._disabledPasses[pass_id] = reason
 
-    def isValidationDisabled(self):
-        return self._skipValidation
+    def disableValidation(self, reason: str) -> None:
+        """Disable all validator passes for this schedule."""
+        for pass_id in cmsv.ValidatorPass:
+            self.disableValidationPass(pass_id, reason)
+
+    def reasonForDisablingValidationPass(self, pass_id: cmsv.ValidatorPass) -> Optional[str]:
+        """Return the reason this pass was disabled, or None if it is enabled.
+
+        Raises TypeError if pass_id is not a ValidatorPass enum member.
+        """
+        if not isinstance(pass_id, cmsv.ValidatorPass):
+            raise TypeError(f"pass_id must be a ValidatorPass enum member, got {type(pass_id).__name__}")
+        return self._disabledPasses.get(pass_id)
 
     def pretty_print(self):
         klen = max(len(k) for k in self.optSchedule.keys())
@@ -518,15 +540,7 @@ def query_cms_kernels(dtype: Optional[str] = None, layout: Optional[str] = None)
 
     Returns:
         A list of dicts, each containing the minimum parameter combination
-        needed for a matching CMS kernel. Each dict includes:
-            - name:                     Schedule function name
-            - dtype:                    Data type string
-            - supported_layouts:        List of all layouts this kernel supports
-            - MacroTile0, MacroTile1, DepthU
-            - PrefetchGlobalRead, PrefetchLocalRead, DirectToLds
-            - WaveSeparateGlobalReadA, WaveSeparateGlobalReadB
-            - GlobalReadVectorWidthA, GlobalReadVectorWidthB, LocalReadVectorWidth
-            - MatrixInstruction, MIWaveGroup
+        needed for a matching CMS kernel. Each dict includes the minimal parameters/values combinations needed for using each CMS kernel.
 
     """
     results = []
@@ -552,13 +566,13 @@ def get_cms_kernel_info_objects(dtype: Optional[str] = None, layout: Optional[st
     return [info for info in _SCHEDULE_METADATA if info.matches(dtype=dtype, layout=layout)]
 
 
-def get_available_dtypes() -> list[str]:
-    """Return a sorted list of all data type strings that have at least one CMS kernel."""
-    return sorted({info.dtype for info in _SCHEDULE_METADATA})
+def get_available_dtypes() -> set[str]:
+    """Return set of all data type strings that have at least one CMS kernel."""
+    return {info.dtype for info in _SCHEDULE_METADATA}
 
 
-def get_available_layouts(dtype: Optional[str] = None) -> list[str]:
-    """Return a sorted list of all layout strings available for the given data type.
+def get_available_layouts(dtype: Optional[str] = None) -> set[str]:
+    """Return a set of all layout strings available for the given data type.
 
     Args:
         dtype: Optional data type filter, or None for all data types.
@@ -566,11 +580,14 @@ def get_available_layouts(dtype: Optional[str] = None) -> list[str]:
     Returns:
         Sorted list of unique layout strings (e.g. ["NN", "NT", "TN", "TT"]).
     """
+    def as_str(transpose: bool) -> str:
+        return "T" if transpose else "N"
+
     layouts: set[str] = set()
     for info in _SCHEDULE_METADATA:
         if dtype is None or info.dtype.lower() == dtype.lower():
-            layouts.update(info.supported_layouts)
-    return sorted(layouts)
+            layouts.add(as_str(info.TransposeA) + as_str(info.TransposeB))
+    return layouts
 
 @CallableGuard
 def isNN(kernel):
@@ -710,7 +727,7 @@ class RegisterSchedule:
             "MfmaInitCVgprs": False,
         }
 
-    def _detect_supported_layouts(self, func: Callable) -> list[str]:
+    def _detect_supported_layouts(self, func: Callable) -> list[Tuple[bool, bool, bool, int]]:
         """Probe the inner function to discover which layouts it actually handles."""
         def as_str(transpose: bool) -> str:
             return "T" if transpose else "N"
@@ -724,7 +741,8 @@ class RegisterSchedule:
                     try:
                         found, _ = func(probe, useLDSTr, TLDS)
                         if found:
-                            detected.add(as_str(transA) + as_str(transB))
+                            detected_info_tuple = (transA, transB, useLDSTr, TLDS)
+                            detected.add(detected_info_tuple)
                     except (ValueError, KeyError) as e:
                         layout = as_str(transA) + as_str(transB)
                         printWarning(
@@ -778,30 +796,35 @@ class RegisterSchedule:
         _SCHEDULE_REGISTRY.append(wrapped_func)
 
         # Auto-detect supported layouts by probing the inner function
-        detected_layouts = self._detect_supported_layouts(func)
+        detected_infos = self._detect_supported_layouts(func)
 
         # Store metadata for query API
         dtype_name = _DTYPE_PREDICATE_NAMES.get(self.dtype_predicate, str(self.dtype_predicate))
         tc = self.tile_config
-        _SCHEDULE_METADATA.append(CMSKernelInfo(
-            name=func.__name__,
-            dtype=dtype_name,
-            supported_layouts=detected_layouts,
-            MacroTile0=tc.macro_tile_size_0,
-            MacroTile1=tc.macro_tile_size_1,
-            DepthU=tc.depth_u,
-            PrefetchGlobalRead=tc.prefetch_global_read,
-            PrefetchLocalRead=tc.prefetch_local_read,
-            DirectToLds=tc.direct_to_lds,
-            DtlPlusLdsBuf=tc.dtl_plus_lds_buf,
-            WaveSeparateGlobalReadA=tc.wave_separate_global_read_a,
-            WaveSeparateGlobalReadB=tc.wave_separate_global_read_b,
-            GlobalReadVectorWidthA=self.vector_widths[0],
-            GlobalReadVectorWidthB=self.vector_widths[1],
-            LocalReadVectorWidth=self.vector_widths[2],
-            MatrixInstruction=list(self.matrix_inst),
-            MIWaveGroup=list(self.mfma_wave_group),
-        ))
+        for detected_info in detected_infos:
+            _transA, _transB, _useLDSTr, _TLDS = detected_info
+            _SCHEDULE_METADATA.append(CMSKernelInfo(
+                name=func.__name__,
+                dtype=dtype_name,
+                TransposeA=_transA,
+                TransposeB=_transB,
+                MacroTile0=tc.macro_tile_size_0,
+                MacroTile1=tc.macro_tile_size_1,
+                DepthU=tc.depth_u,
+                PrefetchGlobalRead=tc.prefetch_global_read,
+                PrefetchLocalRead=tc.prefetch_local_read,
+                DirectToLds=tc.direct_to_lds,
+                DtlPlusLdsBuf=tc.dtl_plus_lds_buf,
+                WaveSeparateGlobalReadA=tc.wave_separate_global_read_a,
+                WaveSeparateGlobalReadB=tc.wave_separate_global_read_b,
+                GlobalReadVectorWidthA=self.vector_widths[0],
+                GlobalReadVectorWidthB=self.vector_widths[1],
+                LocalReadVectorWidth=self.vector_widths[2],
+                MatrixInstruction=list(self.matrix_inst),
+                MIWaveGroup=list(self.mfma_wave_group),
+                LDSTrInst=_useLDSTr,
+                TransposeLDS=_TLDS,
+            ))
         
         # Return original function unchanged (so it can still be called directly)
         return func
@@ -915,6 +938,69 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 48
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+@RegisterSchedule(
+    tile_config=TileConfig(256, 96, 64, 2, 1, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_256x96x64_16bit_DPLB(kernel, useLDSTr, TLDS):
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+
+    if isNT(kernel) and useLDSTr and TLDS == 0:
+        syncTable = [
+            -1, SWaitCnt(dscnt= 4, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one LRB1"),
+             7, SWaitCnt(dscnt= 6, vlcnt=-1, vscnt=-1, comment="wait the rest of LRB1"),
+            23, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="wait for all LR0 before starting 2nd sub-iteration"),
+            27, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for GRAs before starting LRA1"),
+            27, SBarrier(comment=""),
+            41, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for GRBs before starting LRB1"),
+            41, SBarrier(comment=""),
+        ]
+
+        optSchedule = {
+            'SYNC': [syncTable[::2]],
+
+            'GRIncA': [[0,1,1, 1,2,3, 3,3,4],
+                       [0,0,0, 1,2,2, 2,3,4]],
+            'GRIncB': [[18,18,18, 21,21,21, 22,22,22]],
+
+            'LRA0': [[0,0, 2,2, 4,4, 6,6, 8,8, 10,10, 12,12, 14,14],
+                     [1,1, 3,3, 5,5, 7,7, 9,9, 11,11, 13,13, 15,15]],
+            'LRB0': [[9,11, 13,15, 16,16],
+                     [10,12, 14,16, 17,17]],
+
+            'GRA': [[5,5, 5,6, 7, 9, 11,11, 15,16, 19,20, 24,25, 26,27],
+                    [4,5, 6,6, 7,10, 11,12, 15,16, 19,20, 24,25, 26,28]],
+            'GRB': [[31,31, 35,35, 39,39],
+                    [32,32, 36,36, 40,40]],
+
+            'LRA1': [[28,28, 30,30, 32,32, 34,34, 36,36, 37,37, 38,38, 40,40],
+                     [29,29, 31,31, 33,33, 35,35, 37,37, 39,39, 41,41, 42,42]],
+            'LRB1': [[42,42, 43,43, 45,45],
+                     [43,43, 44,44, 46,46]],
+
+            'LRSA': [[26,26,26,27]],
+            'LRSB': [[27]],
+            'LWSA': [[44,44,44],
+                     [44,45,45]],
+            'LWSB': [[]],
+            'LCC': [[46,46],
+                    [45,46]],
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 11
+    else:
+        return False, None
+
+    numMfma = 48
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidationPass(cmsv.ValidatorPass.ADD_GR_NOT_TOO_EARLY_CONSTRAINTS, "GR validation is not yet supported for DtlPlusLdsBuf")
     return True, opt1
 
 @RegisterSchedule(
@@ -1659,6 +1745,73 @@ def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
 
         syncCode = syncTable[1::2]
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    elif isNN(kernel) and not useLDSTr and TLDS==1:
+        snops = []
+        syncs = SyncSchedule()
+        syncs.add(-1, dscnt=4, comment="Wait for prior local read local write")
+        syncs.add(2, dscnt=3, comment="Wait for prior local read local write")
+        syncs.add(8, dscnt=6, comment="Wait for partial LRA0")
+        syncs.add(16, dscnt=0, barrier=True, comment="Wait for LRA0 to complete before starting LRB0+GRA")
+        syncs.add(23, dscnt=0, vlcnt=3, barrier=True, comment="Wait for LRB0+GRA")
+
+        snopIdxs = [1, 25]
+        snops = [[x, SNop(1, comment="")] for x in snopIdxs]
+
+        lra0 = [0,0,1,1,2,2,3,3,4,5,5,6,6,7,7,8,8,9,10,11,12,13,14,15]
+
+        # Issue LRB0+GRA after LRA0 completes.
+        lrb0 = [16, 17, 18, 19, 20, 21, 22, 22]
+        grA =  [18, 18, 20, 20, 21, 21]
+
+        # Issue LRA1+GRB after LRB0+GRA complete.
+        lra1 = [24,24, 25,25, 26,26, 27,27, 28, 29,29, 30,30, 31,31, 32,32, 33,34,35,36,37,38,39]
+        grB  = [24,24,26,26,28,28,30,30,32,32,36,36,38,38,40,40]
+        lrb1 = [39,40,41,42,43,44,45,46]
+
+        packA1 = [
+            -1,-1,-1,-1,-1,-1,
+            0,0,0,0,
+            1,1,
+        ]
+        packA0 = [
+            23,23,23,23,23,23,
+            24,24,24,24,
+            25,25,
+        ]
+
+        # GRIncs should be ordered AFTER LRs.
+        grIncA = [0,1,2,3,4,5,6,7,8]
+        grIncB = [9,10,11,12,13,14,15,16,17]
+
+        lwsa = [46]
+        lwsb = [46]
+        lrsa = [22]
+        lrsb = [22]
+        num_gr = (len(grA) + len(grB)) // 2
+        optSchedule = {
+            'SYNC'   : [syncs.get_indicies()],
+            'LRA0'   : [lra0],
+            'LRA1'   : [lra1],
+            'PackA0' : [packA0],
+            'PackA1' : [packA1],
+            'LRB0'   : [lrb0],
+            'LRB1'   : [lrb1],
+            'GRIncA' : [grIncA],
+            'GRIncB' : [grIncB],
+            'GRA'    : [grA],
+            'GRB'    : [grB],
+            'LRSA'   : [lrsa],
+            'LRSB'   : [lrsb],
+            'LWSA'   : [lwsa],
+            'LWSB'   : [lwsb],
+            'LCC'    : [[47, 47]],
+        }
+        nllshift = nglshift = num_gr
+        if snops:
+            optSchedule['SNOP'] = [[s[0] for s in snops]]
+            snopCode = [s[1] for s in snops]
+
+        opt1 = ScheduleInfo(1, 48, optSchedule=optSchedule, syncCode=syncs.get_code(), nglshift=nglshift, nllshift=nllshift, snopCode=snopCode)
     else:
         return False, None
 
@@ -4140,7 +4293,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("4x4MFMA with wider loads is not yet supported by validator")
     return True, opt1
 
 @RegisterSchedule(
@@ -4419,6 +4572,56 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
                                                                                    20,20,20,20, 20,20, 22,22,22,22]
         lwsa   = [                                                                            20] # use delay before mfma4x4x4
         lwsb   = [                                                                            20]    
+    
+    elif isNT(kernel) and useLDSTr and TLDS==0  and kernel["VectorWidthA"] == 2 and kernel["VectorWidthB"] == 2:
+        disable_validation = True # swap instructions included in pack are not supported yet
+
+        lra0   = [0,0,0,0,
+                    1,1,1,1]
+        lrb0   = [     3,3,4,4,
+                                 6,6,6,6]
+        #              wait then read
+        syncs.add(     3, dscnt=4, comment="wait for the first 2x2 LRAs before packing")
+        syncs.add(         4, dscnt=2, comment="wait for the rest of LRAs")
+        pack_a0 = [    3,3,4,4, # swap instructions, must come after LR and before other packs
+                             4,5,5,5, 6,6, 7,7,7,7, 
+                             5,5,6,6, 6,6, 8,8,8,8]
+        # because of GR starting at 10, we need barrier at 9, will use that for sync too.
+        syncs.add(                               9, dscnt=0, comment="wait for LRBs before the packing them",
+                                                 barrier=True, barrier_comment="make sure all LRs are done before starting GR")
+        pack_b0= [                               9,9, 9,9, # swap instructions, must come after LR and before other packs
+                                                 10,10,10,10, 10,10, 11,11,11,11,
+                                                 9,9,9,9,     10,10, 11,11,11,11]
+        grinca = [0,0,1, 1,2,2, 2,2,2]
+        grincb = [2,2,6, 7,7,7, 8,8,8]
+        lrsa   = [10]
+        lrsb   = [10]   
+        
+        num_code_paths = 2
+        gra   = [                                9,9,   11,11]
+        gra2  = [                                 10,10,11,11]
+        grb    = [                                              13,        14,14,17] # one index for two instructions
+        grb2   = [                                              13,         15,15,17] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+        syncs.add(                                             12, vlcnt=8, barrier=True, comment="wait for the previous GRAs")
+
+        lra1   = [                                             12,12,12,12,
+                                                                13,13,13,13]
+        syncs.add(                                                         14, vlcnt=4+1, barrier=True, barrier_comment="make sure GRBs are done before starting LRBs"  )
+        lrb1   = [                                                         14,14,15,15,
+                                                                             16,16,16,16]
+        syncs.add(                                                            15, dscnt=2, comment="wait for LRAs")
+        pack_a1 =[                                                            15,15,16,16, # swap instructions, must come after LR and before other packs
+                                                                                17,17,17,17, 20,20, 21,21,21,21,
+                                                                                 18,18,18,18, 20,20, 21,21,21,21]
+        syncs.add(                                                                19, dscnt=4, comment="wait for the first 2 LRBs before the packing them")
+        syncs.add(                                                                 20, dscnt=0, comment="wait for the rest of LRBs")
+        pack_b1= [                                                                19,19,19,19, # swap instructions, must come after LR and before other packs
+                                                                                  19,19,19,19, 20,20, 22,22,22,22,
+                                                                                   20,20,20,20, 20,20, 22,22,22,22]
+        lwsa   = [                                                                            20] # use delay before mfma4x4x4
+        lwsb   = [                                                                            20]    
+
     else:
         return False, None  
     
@@ -4459,7 +4662,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     kernel["UseMFMAF32XEmulation"] = True
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("swap instructions included in pack are not supported yet")
     return True, opt1
 
 @RegisterSchedule(
@@ -4521,51 +4724,52 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
         syncs.add(                                                                                 76, dscnt=0, comment="wait for LRBs before the packing them")
         pack_b1 =[                                                                                 i+77 for i in offset] # last at 93
 
-    elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 4:
-        disable_validation = True
+    #TODO(AIGEPRF-1203) Re-enable when fixed
+    # elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 4:
+    #     disable_validation = True
 
-        kernel["UseMFMAF32XEmulation"] = True
-        kernel["UseDot2F32XEmulation"] = False
-        kernel["UsePLRPack"] = True
+    #     kernel["UseMFMAF32XEmulation"] = True
+    #     kernel["UseDot2F32XEmulation"] = False
+    #     kernel["UsePLRPack"] = True
 
-        offset=[0,0,1,1, 8,8,  9, 9,10,10, 
-                2,2,3,3, 8,8, 11,11,12,12,
-                4,4,5,5, 8,8, 13,13,14,14, 
-                6,6,7,7, 8,8, 15,15,16,16]
+    #     offset=[0,0,1,1, 8,8,  9, 9,10,10, 
+    #             2,2,3,3, 8,8, 11,11,12,12,
+    #             4,4,5,5, 8,8, 13,13,14,14, 
+    #             6,6,7,7, 8,8, 15,15,16,16]
         
-        lra0   = [ 0,0,2,2,4,4,6,6]
-        lrb0   = [                                       11,11,13,13,15,15,17,17]
-        #                wait then read
-        syncs.add(             6, dscnt=2, comment="wait for the first 4 LRAs before swapping/packing")
-        syncs.add(                     9, dscnt=2, comment="wait for the rest of LRAs before swapping/packing them")
-        pack_a0= [              7,7,7, 9,9,9, 8,8, 10,10, 8, 10] # swap instructions
-        pack_a0+=[                                       i+11 for i in offset] # last at 27
-        # because of GR starting at 22, we need barrier at 21, will use that for sync too.
-        syncs.add(                                                                21, dscnt=0, comment="wait for LRBs before the packing them",
-                                                                                  barrier=True, barrier_comment="barrier before GR")
-        pack_b0= [                                                                  i+28 for i in offset] # last at 44
+    #     lra0   = [ 0,0,2,2,4,4,6,6]
+    #     lrb0   = [                                       11,11,13,13,15,15,17,17]
+    #     #                wait then read
+    #     syncs.add(             6, dscnt=2, comment="wait for the first 4 LRAs before swapping/packing")
+    #     syncs.add(                     9, dscnt=2, comment="wait for the rest of LRAs before swapping/packing them")
+    #     pack_a0= [              7,7,7, 9,9,9, 8,8, 10,10, 8, 10] # swap instructions
+    #     pack_a0+=[                                       i+11 for i in offset] # last at 27
+    #     # because of GR starting at 22, we need barrier at 21, will use that for sync too.
+    #     syncs.add(                                                                21, dscnt=0, comment="wait for LRBs before the packing them",
+    #                                                                               barrier=True, barrier_comment="barrier before GR")
+    #     pack_b0= [                                                                  i+28 for i in offset] # last at 44
 
-        grinca = [0,1,1,1,2,3,3,3,4]
-        grincb = [5,5,5,7,8,9,10,19,19]
-        lrsa   = [45]
-        lrsb   = [45]
-        lwsa   = [72]
-        lwsb   = [72]        
+    #     grinca = [0,1,1,1,2,3,3,3,4]
+    #     grincb = [5,5,5,7,8,9,10,19,19]
+    #     lrsa   = [45]
+    #     lrsb   = [45]
+    #     lwsa   = [72]
+    #     lwsb   = [72]        
         
-        gra    = [                            22,25,29,33, 37,41,45,49] # one index for two instructions
-        grb    = [                                                    53,57,61, 64,69,75,79,84] # one index for two instructions
-        num_gr = len(gra) + len(grb)
+    #     gra    = [                            22,25,29,33, 37,41,45,49] # one index for two instructions
+    #     grb    = [                                                    53,57,61, 64,69,75,79,84] # one index for two instructions
+    #     num_gr = len(gra) + len(grb)
 
-        syncs.add(                                                 47, vlcnt=7, barrier=True, comment="wait for the previous GRs")
-        lra1   =[[                                                 48,48,50,50,52,52,54,54],
-                                                                   [49,49,51,51,53,53,54,54]]
-        lrb1   = [                                                                                  59,59,  61,61,63,63,65,65]
-        syncs.add(                                                                   54, dscnt=2, comment="wait for the first two LRAs before packing")
-        syncs.add(                                                                             57, dscnt=0, comment="wait for the rest of LRAs before packing them")
-        pack_a1 =[                                                                    55,55,55, 57,57,57, 55,55, 57,57, 56, 58] # swap instructions
-        pack_a1+= [                                                                                 i+59 for i in offset] # last at 75
-        syncs.add(                                                                                     76, dscnt=0, comment="wait for LRBs before the packing them")
-        pack_b1 =[                                                                                     i+77 for i in offset] # last at 93
+    #     syncs.add(                                                 47, vlcnt=7, barrier=True, comment="wait for the previous GRs")
+    #     lra1   =[[                                                 48,48,50,50,52,52,54,54],
+    #                                                                [49,49,51,51,53,53,54,54]]
+    #     lrb1   = [                                                                                  59,59,  61,61,63,63,65,65]
+    #     syncs.add(                                                                   54, dscnt=2, comment="wait for the first two LRAs before packing")
+    #     syncs.add(                                                                             57, dscnt=0, comment="wait for the rest of LRAs before packing them")
+    #     pack_a1 =[                                                                    55,55,55, 57,57,57, 55,55, 57,57, 56, 58] # swap instructions
+    #     pack_a1+= [                                                                                 i+59 for i in offset] # last at 75
+    #     syncs.add(                                                                                     76, dscnt=0, comment="wait for LRBs before the packing them")
+    #     pack_b1 =[                                                                                     i+77 for i in offset] # last at 93
 
     else:
         return False, None  
@@ -4601,7 +4805,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     kernel["UsePLRPack"] = True
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     if disable_validation:
-        opt1.disableValidation()
+        opt1.disableValidation("NN transpose with wider loads is not yet supported by validator")
     return True, opt1
 
 
@@ -5423,3 +5627,56 @@ def _get_schedule_128x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     return True, opt1
 
+
+@RegisterSchedule(
+    tile_config=TileConfig(224, 320, 64, 2, 1, 1, False, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_224x320x64_16bit(kernel, useLDSTr, TLDS):
+    numMfma = 140
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    kernel["MfmaInitCVgprs"] = True
+    kernel["SwapGlobalReadOrder"] = False
+
+    if isTN(kernel) and useLDSTr and TLDS==1:
+        syncTable = [
+            -1, SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=9 newLW=0 newLR=9 for iteration == 0"),
+            6, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+            25, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LR0 before DTL"),
+            25, SBarrier(comment=""),
+            78, SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for prev iter GR before LRA1 and LRB1"),
+            78, SBarrier(comment=""),
+        ]
+        optSchedule = {
+            'SYNC': [syncTable[::2]],
+            'GRIncA': [[0, 1, 2, 3, 4, 5, 6, 7, 8]], # 9
+            'GRIncB': [[9, 10, 11, 12, 13, 14, 15, 16, 17]], # 9
+
+            'LRA0': [[0, 3, 6, 9, 12, 15, 18]], # 7
+            'LRB0': [[1, 2, 4, 5, 7, 8, 10, 11, 13, 17]], # 10
+
+            'GRA': [[25,25, 30,30, 36,36, 42,42, 48,48, 54,54, 60,60]], # 14
+            'GRB': [[62,62, 67,67, 72,72, 77,77, 88,88, 94,94, 100,100, 106,106, 112,112, 118,118]], # 20
+
+            'LRA1': [[79, 81, 82, 83, 84, 85, 86]], # 7
+            'LRB1': [[120, 121, 122, 123, 124, 125, 126, 127, 128, 129]], # 10
+
+            'LRSA': [[66]], # 1
+            'LRSB': [[66]], # 1
+            'LWSA': [[118]], # 1
+            'LWSB': [[118]], # 1
+            'LCC': [[138, 138]], # 2
+        }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 17
+
+    else:
+        return False, None
+
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
