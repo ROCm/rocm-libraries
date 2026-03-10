@@ -13,7 +13,7 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   if(NOT ROCM_FOUND)
     include(FetchContent)
     message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
-    set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
+    set(rocm_cmake_tag "develop" CACHE STRING "rocm-cmake tag to download")
     FetchContent_Declare(
       rocm-cmake
       GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
