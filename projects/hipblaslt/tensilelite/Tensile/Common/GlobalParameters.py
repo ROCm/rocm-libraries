@@ -423,7 +423,7 @@ defaultBenchmarkCommonParameters = [
     {"NonTemporalMetadata": [0]},
     {"NonTemporal": [-1]},
     {"PreloadKernArgs": [True]},
-    {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
+    # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},

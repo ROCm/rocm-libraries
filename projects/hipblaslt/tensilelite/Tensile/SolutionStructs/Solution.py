@@ -215,14 +215,17 @@ class Solution(collections.abc.Mapping):
       self["AssignedProblemIndependentDerivedParameters"] = False
     if "AssignedDerivedParameters" not in self._state:
       self["AssignedDerivedParameters"] = False
-    Solution.assignDerivedParameters(
-      self._state,
-      splitGSU,
-      printSolutionRejectionReason,
-      printIndexAssignmentInfo,
-      isaInfoMap,
-      assembler.rocm_version
-    )
+    if "CustomKernel" not in self._state:
+      Solution.assignDerivedParameters(
+        self._state,
+        splitGSU,
+        printSolutionRejectionReason,
+        printIndexAssignmentInfo,
+        isaInfoMap,
+        assembler.rocm_version
+      )
+    else:
+      Solution.assignCustomKernelParameters(self._state)
     self._name = config["CustomKernel"]["name"] if "CustomKernel" in config and config["CustomKernel"]["name"] else None
 
   # these keys are copied from ProblemType to internal that may be overridden
@@ -934,6 +937,52 @@ class Solution(collections.abc.Mapping):
       else:
         divisorName = "LVP{}".format(tC)
     return divisorName
+
+  @staticmethod
+  def assignCustomKernelParameters(state):
+    # Store values in state so they can be saved in SizeMapping
+    # Not all SizeMapping values will be needed (or applicable) for custom kernels
+
+    state["MacroTile0"] = state["CustomKernel"]["macrotile"][0]
+    state["MacroTile1"] = state["CustomKernel"]["macrotile"][1]
+    state["DepthU"] = state["CustomKernel"]["macrotile"][2]
+
+    # TODO Temp values to allow serializing SizeMapping
+    state["_GlobalAccumulation"]    = None
+    state["CUOccupancy"]            = -1
+    state["MathClocksUnrolledLoop"] = 0
+    state["PackedC0IndicesX"] = []
+    state["ThreadTile0"] = 0
+    state["ThreadTile1"] = 0
+    state["NumThreads"] = state["CustomKernel"]["threads"][0] * state["CustomKernel"]["threads"][1] * state["CustomKernel"]["threads"][2]
+
+    # TODO LSU
+    # numElementsPerWorkGroup = state["MacroTile0"]*state["MacroTile1"]*state["NumWaveSplitK"]
+    numElementsPerWorkGroup = state["MacroTile0"] * state["MacroTile1"]
+    state["NumElementsPerThread"] = numElementsPerWorkGroup // state["NumThreads"]
+
+    # TODO Check what DTL affects in SizeMapping
+    state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
+    state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
+
+    # TODO Override workspace info for custom kernel
+    computeBytes = state["ProblemType"]["ComputeDataType"].numBytes()
+    state["_WorkspaceSizePerElemC"] = computeBytes
+    state["_WorkspaceSizePerElemBias"] = 0
+    if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
+      state["_WorkspaceSizePerElemBias"] = computeBytes
+    # state["WorkspaceCheck"] = [state["_WorkspaceSizePerElemC"], state["_WorkspaceSizePerElemBias"], state["GlobalSplitU"] if (state["GlobalSplitUAlgorithm"] == 'MultipleBuffer' or state["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') else 1]
+
+    # state["MIWaveGroup"] = [state["SubGroup0"] // state["WavefrontSize"],  state["SubGroup1"]]
+    state["MIWaveGroup"] = [0, 0]
+
+    # state["LocalSplitU"] = state["WorkGroup"][2]
+    state["LocalSplitU"] = 1
+
+    state["GlobalReadVectorWidthA"] = 1
+    state["GlobalReadVectorWidthB"] = 1
+    state["StoreVectorWidth"] = 1
+
 
   ########################################
   # assign all derived parameters

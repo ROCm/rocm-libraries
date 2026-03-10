@@ -216,8 +216,6 @@ namespace TensileLite
 
         bool activationFused = true;
 
-        CustomKernel customKernel;
-
         int  workGroupMappingXCC                    = 0;
         int  workGroupMappingXCCGroup               = 0;
         bool globalSplitUCoalesced                  = false;
@@ -677,6 +675,7 @@ namespace TensileLite
             = std::make_shared<Predicates::True<Hardware>>();
 
         SizeMapping sizeMapping;
+        CustomKernel customKernel;
 
         InternalArgsSupport internalArgsSupport;
 

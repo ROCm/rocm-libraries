@@ -1562,8 +1562,8 @@ namespace TensileLite
         if(problem.transposeC01())
             std::swap(tiles.x, tiles.y);
 
-        tiles.x = CeilDivide(tiles.x, sizeMapping.customKernel.macrotile.x);
-        tiles.y = CeilDivide(tiles.y, sizeMapping.customKernel.macrotile.y);
+        tiles.x = CeilDivide(tiles.x, customKernel.macrotile.x);
+        tiles.y = CeilDivide(tiles.y, customKernel.macrotile.y);
     }
 
     void ContractionSolution::calculateGrid(dim3&                               workGroupSize,
@@ -1621,19 +1621,19 @@ namespace TensileLite
         assert(pAMDGPU);
 
         int wavefrontSize = pAMDGPU->wavefrontSize;
-        // rv.workGroupSize.x = sizeMapping.customKernel.waves.x * wavefrontSize;
-        // rv.workGroupSize.y = sizeMapping.customKernel.waves.y * wavefrontSize;
-        // rv.workGroupSize.z = sizeMapping.customKernel.waves.z * wavefrontSize;
-        rv.workGroupSize.x = sizeMapping.customKernel.threads.x;
-        rv.workGroupSize.y = sizeMapping.customKernel.threads.y;
-        rv.workGroupSize.z = sizeMapping.customKernel.threads.z;
+        // rv.workGroupSize.x = customKernel.waves.x * wavefrontSize;
+        // rv.workGroupSize.y = customKernel.waves.y * wavefrontSize;
+        // rv.workGroupSize.z = customKernel.waves.z * wavefrontSize;
+        rv.workGroupSize.x = customKernel.threads.x;
+        rv.workGroupSize.y = customKernel.threads.y;
+        rv.workGroupSize.z = customKernel.threads.z;
 
         if(T_Debug)
         {
             std::cout << "Wavefront size: " << wavefrontSize << std::endl;
-            std::cout << "Threads: " << sizeMapping.customKernel.threads.x << ", " << sizeMapping.customKernel.threads.y << ", " << sizeMapping.customKernel.threads.z << std::endl;
+            std::cout << "Threads: " << customKernel.threads.x << ", " << customKernel.threads.y << ", " << customKernel.threads.z << std::endl;
             std::cout << "Work group size: " << rv.workGroupSize.x << ", " << rv.workGroupSize.y << ", " << rv.workGroupSize.z << std::endl;
-            std::cout << "Macrotile: " << sizeMapping.customKernel.macrotile.x << ", " << sizeMapping.customKernel.macrotile.y << ", " << sizeMapping.customKernel.macrotile.z << std::endl;
+            std::cout << "Macrotile: " << customKernel.macrotile.x << ", " << customKernel.macrotile.y << ", " << customKernel.macrotile.z << std::endl;
         }
 
         dim3 tiles;
@@ -1677,9 +1677,9 @@ namespace TensileLite
             }
         };
 
-        assignGridSize(rv.numWorkGroups.x, sizeMapping.customKernel.grid.x);
-        assignGridSize(rv.numWorkGroups.y, sizeMapping.customKernel.grid.y);
-        assignGridSize(rv.numWorkGroups.z, sizeMapping.customKernel.grid.z);
+        assignGridSize(rv.numWorkGroups.x, customKernel.grid.x);
+        assignGridSize(rv.numWorkGroups.y, customKernel.grid.y);
+        assignGridSize(rv.numWorkGroups.z, customKernel.grid.z);
 
         if(T_Debug)
         {
@@ -1707,7 +1707,7 @@ namespace TensileLite
         if(T_Debug)
             std::cout << "Custom call arguments:" << std::endl;
 
-        for(auto arg : sizeMapping.customKernel.args)
+        for(auto arg : customKernel.args)
         {
             if(T_Debug)
                 std::cout << "Type: " << toString(arg.type) << " Semantic: " << toString(arg.semantic) << std::endl;
@@ -3158,7 +3158,7 @@ namespace TensileLite
             }
         }
 
-        if(sizeMapping.customKernel.name.empty())
+        if(customKernel.name.empty())
         {
             // Regular generated kernel
             if(debug)
@@ -3695,7 +3695,7 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
-        if(!sizeMapping.customKernel.name.empty())
+        if(!customKernel.name.empty())
         {
             // Custom kernel currently only supports single-kernel reduction
             reductionStrat = origami::reduction_t::tree;

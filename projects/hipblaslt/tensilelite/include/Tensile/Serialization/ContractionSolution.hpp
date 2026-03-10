@@ -66,6 +66,7 @@ namespace TensileLite
                 iot::mapOptional(io, "linearModel", s.linearModel);
 
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
+                iot::mapOptional(io, "customKernel", s.customKernel);
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
                 iot::mapRequired(io, "problemType", s.problemType);
             }
@@ -140,8 +141,6 @@ namespace TensileLite
                 iot::mapRequired(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
 
                 iot::mapOptional(io, "activationFused", s.activationFused);
-
-                iot::mapOptional(io, "customKernel", s.customKernel);
 
                 iot::mapRequired(io, "workGroupMappingXCC", s.workGroupMappingXCC);
                 iot::mapRequired(io, "workGroupMappingXCCGroup", s.workGroupMappingXCCGroup);
