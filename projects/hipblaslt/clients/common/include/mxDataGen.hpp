@@ -30,6 +30,7 @@
 
 #include <vector>
 
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 std::vector<float> generateMXInput(hipDataType                dataType,
                                    void*                      data,
                                    void*                      scale,
@@ -45,3 +46,4 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                    std::string_view const     initMethod = "Bounded",
                                    float                      min_val    = -1.0f,
                                    float                      max_val    = 1.0f);
+#endif

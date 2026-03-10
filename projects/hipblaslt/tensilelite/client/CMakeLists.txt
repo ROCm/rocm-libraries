@@ -13,8 +13,12 @@ set(COMMON_CLIENT_LIBS
     OpenMP::OpenMP_CXX
 )
 
-target_link_libraries(tensilelite-client PRIVATE roc::mxDataGenerator)
-target_link_libraries(cpu-gemm-driver PRIVATE roc::mxDataGenerator)
+if(TARGET roc::mxDataGenerator)
+    target_compile_definitions(tensilelite-client PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_link_libraries(tensilelite-client PRIVATE roc::mxDataGenerator)
+    target_compile_definitions(cpu-gemm-driver PRIVATE HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    target_link_libraries(cpu-gemm-driver PRIVATE roc::mxDataGenerator)
+endif()
 
 if(NOT WIN32)
     find_package(amd_smi REQUIRED)

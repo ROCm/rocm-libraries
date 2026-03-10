@@ -38,7 +38,9 @@
 #include "hipblaslt_random.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
+#endif
 #include "near.hpp"
 #include "norm.hpp"
 #include "unit.hpp"
@@ -1920,6 +1922,10 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(isBlockScaling(arg.scaleA))
         {
+#if !HIPBLASLT_ENABLE_MXDATAGENERATOR
+            hipblaslt_cout << "MX format (block scaling) is not supported when mxDataGenerator is disabled." << std::endl;
+            return;
+#else
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01)
@@ -1959,6 +1965,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             // Copy data and scale to device buffers
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
+#endif
         }
         else
         {
@@ -1976,6 +1983,10 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
         if(isBlockScaling(arg.scaleB))
         {
+#if !HIPBLASLT_ENABLE_MXDATAGENERATOR
+            hipblaslt_cout << "MX format (block scaling) is not supported when mxDataGenerator is disabled." << std::endl;
+            return;
+#else
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01)
@@ -2013,6 +2024,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             // Copy data and scale to device buffers
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
+#endif
         }
         else
         {
