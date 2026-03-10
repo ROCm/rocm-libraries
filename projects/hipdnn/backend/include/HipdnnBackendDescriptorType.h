@@ -209,21 +209,21 @@ typedef enum
     HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT = 22,
 
     /**
-     * @brief SDPA forward propagation operation descriptor (extension)
-     *
-     * Represents a scaled dot-product attention forward operation with
-     * query (Q), key (K), value (V), and output (O) tensors plus
-     * attention parameters.
-     */
-    HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT = 23,
-
-    /**
      * @brief RMSNorm operation descriptor
      *
      * Represents an RMS normalization forward operation with input (X),
      * scale, epsilon, bias (optional), output (Y), and inverse RMS
      * (optional, training only) tensors.
      */
-    HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT = 24,
+    HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT = 23,
+
+    /**
+     * @brief SDPA forward propagation operation descriptor (extension)
+     *
+     * Represents a scaled dot-product attention forward operation with
+     * query (Q), key (K), value (V), and output (O) tensors plus
+     * attention parameters.
+     */
+    HIPDNN_BACKEND_OPERATION_SDPA_FPROP_DESCRIPTOR_EXT = 24,
 
 } hipdnnBackendDescriptorType_t;
