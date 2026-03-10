@@ -33,7 +33,7 @@ namespace miopen {
 class Timer
 {
 public:
-    Timer() {};
+    Timer(){};
     void start() { st = std::chrono::steady_clock::now(); }
     float elapsed_ms()
     {

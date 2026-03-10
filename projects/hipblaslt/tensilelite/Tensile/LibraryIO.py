@@ -28,6 +28,7 @@ from .CustomYamlLoader import load_yaml_stream
 from Tensile import __version__
 from Tensile.Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
+from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
@@ -73,7 +74,9 @@ except ImportError:
 
 try:
     import msgpack
+    _msgpack_available = True
 except ImportError:
+    _msgpack_available = False
     print("Message pack python library not detected. Must use YAML backend instead.")
 
 
@@ -116,28 +119,53 @@ def writeMsgPack(filename, data):
     with open(filename, "wb") as f:
         msgpack.pack(data, f)
 
+def _solutionsCacheFilename(yamlFilename):
+    """Return path to the msgpack cache file for a solutions YAML."""
+    base, _ = os.path.splitext(yamlFilename)
+    return base + ".solcache.dat"
+
 def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
     """Writes solution YAML file."""
-
-    # convert objects to nested dictionaries
-    solutionStates = []
-
-    if cache:
+    def load_solution_states_from_cache(filename) -> list[dict]:
+        """Try loading from msgpack cache, falling back to YAML."""
+        cachePath = _solutionsCacheFilename(filename)
+        # Try msgpack cache if available and the cache file exists
+        if _msgpack_available and os.path.exists(cachePath):
+            # If the YAML is newer than the cache, don't use the cache; assume it's stale
+            if os.path.getmtime(cachePath) >= os.path.getmtime(filename):
+                try:
+                    with open(cachePath, "rb") as cf:
+                        return msgpack.unpack(cf, raw=False)
+                except Exception as e:
+                    printWarning("Failed to load solution cache: {}".format(e))
+        # Fall back to YAML
         solYaml = read(filename)
         if biasTypeArgs and activationArgs:
-            solutionStates = solYaml[4:]
+            return solYaml[4:]
         elif biasTypeArgs or activationArgs:
-            solutionStates = solYaml[3:]
+            return solYaml[3:]
         else:
-            solutionStates = solYaml[2:]
-    else:
-        for solution in solutions:
-            solutionState = solution.getAttributes()
-            solutionState["ProblemType"] = solutionState["ProblemType"].state
-            problemTypeToEnum(solutionState["ProblemType"])
-            isa = solutionState["ISA"]
-            solutionState["ISA"] = [isa[0], isa[1], isa[2]]
-            solutionStates.append(solutionState)
+            return solYaml[2:]
+
+    with timing_context("python_wsol_prepare"):
+        if cache:
+            with timing_context("python_wsol_prepare_cache"):
+                solutionStates = load_solution_states_from_cache(filename)
+        else:
+            with timing_context("python_wsol_prepare_nocache"):
+                solutionStates: list[dict] = []
+                for solution in solutions:
+                    solutionState = solution.getAttributes()
+                    solutionState["ProblemType"] = solutionState["ProblemType"].state
+                    problemTypeToEnum(solutionState["ProblemType"])
+                    isa = solutionState["ISA"]
+                    solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+                    solutionStates.append(solutionState)
+                if _msgpack_available:
+                    try:
+                        writeMsgPack(_solutionsCacheFilename(filename), solutionStates)
+                    except Exception as e:
+                        printWarning("Failed to write solution cache: {}".format(e))
     # write dictionaries
     with open(filename, "w") as f:
         f.write("- MinimumRequiredVersion: {}\n".format(__version__))

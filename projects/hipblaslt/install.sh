@@ -710,7 +710,7 @@ if [[ "${install_dependencies}" == true ]]; then
 
   # The following builds googletest from source, installs into cmake default /usr/local
   build_lapack="ON"
-  if [ "${use_system_packages}" == true ]; then
+  if [ "${use_system_packages}" == true || "${cpu_ref_lib}" == "blis" ]; then
     build_lapack="OFF"
   fi
   pushd .
@@ -814,9 +814,9 @@ pushd .
   fi
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTENSILELITE_LIBRARY_FORMAT=msgpack"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_YAML=OFF"
   else
-    tensile_opt="${tensile_opt} -DTENSILELITE_LIBRARY_FORMAT=yaml"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_YAML=ON"
   fi
 
   if [[ "${build_release}" == false ]]; then

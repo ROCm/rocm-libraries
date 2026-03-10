@@ -52,6 +52,8 @@
 #include "HipdnnBackendLimits.h"
 #include "HipdnnBackendPluginLoadingMode.h"
 #include "HipdnnBackendPluginUnloadingMode.h"
+#include "HipdnnConvolutionMode.h"
+#include "HipdnnDataType.h"
 #include "HipdnnStatus.h"
 
 // NOLINTBEGIN
@@ -340,6 +342,36 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateAndDeserializeGraph_ext(
     hipdnnBackendDescriptor_t* descriptor, const uint8_t* serializedGraph, size_t graphByteSize);
 
 /*!
+ * @brief Retrieves the binary-serialized graph from a finalized operation graph descriptor.
+ *
+ * Uses the standard two-call pattern: call first with @p serializedGraph set to @c nullptr to query
+ * the required buffer size, then call again with a caller-allocated buffer to receive the data.
+ * The descriptor must be of type HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR and must be finalized.
+ *
+ * @param [in]  descriptor        A finalized operation graph descriptor.
+ * @param [in]  requestedByteSize Size of the caller-allocated buffer in bytes.
+ *                                Ignored when @p serializedGraph is @c nullptr.
+ * @param [out] graphByteSize     Pointer to receive the size of the serialized graph in bytes.
+ *                                Always written on success.
+ * @param [out] serializedGraph   Caller-allocated buffer to receive the serialized graph data,
+ *                                or @c nullptr to query the required size only.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS              The serialized graph was successfully retrieved,
+ *                                            or the size query completed successfully.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER  descriptor or graphByteSize is null.
+ * @retval HIPDNN_STATUS_BAD_PARAM            The descriptor is not an operation graph descriptor.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED  The descriptor is not finalized.
+ * @retval HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT  The requestedByteSize is smaller than the
+ *                                                     serialized graph size.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR       An internal error occurred during serialization.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendGetSerializedBinaryGraph_ext(hipdnnBackendDescriptor_t descriptor,
+                                              size_t requestedByteSize,
+                                              size_t* graphByteSize,
+                                              uint8_t* serializedGraph);
+
+/*!
  * @brief Callback function for logging messages.
  *
  * This function is called by the hipDNN library to log messages. The severity level of the message
@@ -420,6 +452,79 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetLoadedEnginePluginPaths_ext(hipdnn
                                                                           size_t* maxStringLen);
 
 /**
+ * @brief Callback mode (sync vs async).
+ */
+typedef enum
+{
+    HIPDNN_LOG_CALLBACK_SYNC = 0, ///< Callback invoked on logging thread (synchronous)
+    HIPDNN_LOG_CALLBACK_ASYNC = 1 ///< Callback invoked on worker thread (asynchronous)
+} hipdnnLogCallbackMode_t;
+
+/**
+ * @brief Set or update a user log callback.
+ *
+ * This API allows registering multiple user callbacks with individual log levels and sync/async modes.
+ * Each callback is uniquely identified by the composite key (callback, userHandle).
+ *
+ * @note When a synchronous callback is registered, the synchronous callbacks will delay hipDNN
+ *       until the callback returns, regardless of any async log callbacks also being registered.
+ *       Synchronous callbacks are recommended only for debugging or testing purposes due to
+ *       their blocking nature. Use async callbacks for production workloads.
+ *
+ * Behavior:
+ * - If (callback, userHandle) already registered: UPDATES settings (level and/or sync/async mode)
+ * - If (callback, userHandle) new: ADDS new registration
+ * - If minLevel == SEV_OFF: REMOVES registration
+ * - userHandle must be non-null
+ *
+ * Callback Removal (minLevel == SEV_OFF):
+ * - No further logs will be received on the callback.
+ * - Any pending async logs for this callback will be abandoned
+ * - After this function returns, user can safely destroy data referenced by userHandle
+ *
+ * @param[in] callback   The callback function to invoke
+ * @param[in] minLevel   Minimum severity level (SEV_OFF removes the callback). Note that
+ *                        the logs produced on this callback will be limited by the global log
+ *                        level set either by the HIPDNN_LOG_LEVEL environment variable or
+ *                        the setGlobalLogLevel() API function.
+ * @param[in] mode       Sync or async invocation mode
+ * @param[in] userHandle Non-null user data (also serves as unique callback ID)
+ *
+ * @retval HIPDNN_STATUS_SUCCESS           The callback was set/updated/removed successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM         callback is NULL, userHandle is NULL, invalid mode,
+ *                                         or attempting to remove non-existent callback
+ * @retval HIPDNN_STATUS_NOT_INITIALIZED   Logging system not initialized
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnSetUserLogCallback_ext(hipdnnUserLogCallback_t callback,
+                                 hipdnnSeverity_t minLevel,
+                                 hipdnnLogCallbackMode_t mode,
+                                 hipdnnUserLogCallbackHandle_t userHandle);
+
+/**
+ * @brief Set the global log level for the backend.
+ *
+ * This controls which log messages are output to console/file AND to the global backend log output callback.
+ * Valid levels: HIPDNN_SEV_INFO, HIPDNN_SEV_WARN, HIPDNN_SEV_ERROR, HIPDNN_SEV_FATAL, HIPDNN_SEV_OFF.
+ *
+ * @param[in] level   The severity level to set
+ *
+ * @retval HIPDNN_STATUS_SUCCESS      The log level was set successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM    Invalid log level
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendSetGlobalLogLevel_ext(hipdnnSeverity_t level);
+
+/**
+ * @brief Get the global log level for the backend.
+ *
+ * @param[out] level   Pointer to store the current log level
+ *
+ * @retval HIPDNN_STATUS_SUCCESS      The log level was retrieved successfully
+ * @retval HIPDNN_STATUS_BAD_PARAM    level pointer is NULL
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendGetGlobalLogLevel_ext(hipdnnSeverity_t* level);
+
+/**
  * @brief Gets the number of loaded engines for a given handle.
  *
  * @param[in]  handle       A valid hipDNN handle.
@@ -474,7 +579,24 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
                                                              char* type,
                                                              size_t* typeLen);
 
-HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
+/**
+ * @brief Returns hipdnn backend version string. Returns an error if nullptr is passed
+ *
+ * @deprecated Use hipdnnVersionString_ext instead
+ *
+ * @param[out] version pointer to where version string will be written
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   If version parameter is nullptr
+ */
+HIPDNN_BACKEND_DEPRECATED_EXPORT hipdnnStatus_t hipdnnGetVersion_ext(const char** version);
+
+/**
+ * @brief Returns hipdnn backend version string
+ *
+ * @return A string in the format "MAJOR.MINOR.PATCH.TWEAK". The returned value has a static lifetime
+ */
+HIPDNN_BACKEND_EXPORT const char* hipdnnVersionString_ext();
 
 #ifdef __cplusplus
 }

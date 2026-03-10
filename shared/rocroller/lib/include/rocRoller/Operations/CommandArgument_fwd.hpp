@@ -56,6 +56,7 @@ namespace rocRoller
     concept CCommandArgumentValue = requires(T& val)
     {
         {CommandArgumentValue(val)};
+        {!std::same_as<T, CommandArgumentValue>};
     };
 
     static_assert(!CCommandArgumentValue<bool*>);

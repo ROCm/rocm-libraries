@@ -20,7 +20,8 @@
 *
 * ************************************************************************ */
 
-/*!\file
+/*!
+* \file
 * \brief rocblas_block_sizes.h includes the definition of various block sizes used in rocBLAS instantiations.
 *        This file is for internal use only.
 */
@@ -28,12 +29,14 @@
 #ifndef ROCBLAS_BLOCK_SIZES_H
 #define ROCBLAS_BLOCK_SIZES_H
 
+#include "asan_helpers.hpp"
+
 // L1 NB
 #define ROCBLAS_ASUM_NB 512
 #define ROCBLAS_AXPY_NB 256
 #define ROCBLAS_COPY_NB 256
 #define ROCBLAS_DOT_NB 512
-#define ROCBLAS_IAMAX_NB 1024
+#define ROCBLAS_IAMAX_NB rocblas::conditional_v<rocblas_enable_asan, 256, 1024>
 #define ROCBLAS_NRM2_NB 512
 #define ROCBLAS_ROT_NB 512
 #define ROCBLAS_ROTM_NB 512
@@ -41,9 +44,9 @@
 #define ROCBLAS_SWAP_NB 256
 
 // L2 NB
-#define ROCBLAS_TPMV_NB 512
+#define ROCBLAS_TPMV_NB rocblas::conditional_v<rocblas_enable_asan, 256, 512>
 #define ROCBLAS_TBSV_NB 512
-#define ROCBLAS_TRMV_NB 512
+#define ROCBLAS_TRMV_NB rocblas::conditional_v<rocblas_enable_asan, 256, 512>
 #define ROCBLAS_TPSV_NB 512
 #define ROCBLAS_SDCTRSV_NB 64
 #define ROCBLAS_ZTRSV_NB 32
@@ -75,7 +78,7 @@
 #define ROCBLAS_CHER2K_NB 32
 #define ROCBLAS_ZHER2K_NB 16
 
-#define ROCBLAS_SDTRMM_NB 32
+#define ROCBLAS_SDTRMM_NB rocblas::conditional_v<rocblas_enable_asan, 16, 32>
 #define ROCBLAS_CZTRMM_NB 16
 #define ROCBLAS_TRMM_OUTOFPLACE_NB 512
 

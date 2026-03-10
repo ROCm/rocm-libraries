@@ -122,12 +122,6 @@ ninja check
 # Note: Some HIP-related tests may be skipped due to AddressSanitizer incompatibility
 ```
 
-### Building Specific Components
-```bash
-# Build without plugins
-cmake -GNinja -DHIPDNN_BUILD_PLUGINS=OFF ..
-```
-
 ### Disabling JSON Support
 By default, hipDNN includes JSON serialization support via [nlohmann_json](https://github.com/nlohmann/json). To build without the nlohmann_json dependency:
 ```bash
@@ -161,6 +155,12 @@ cmake -GNinja -DCMAKE_INSTALL_PREFIX=/custom/install/path ..
 # Both custom
 cmake -GNinja -DROCM_CMAKE_PATH=/custom/rocm -DCMAKE_INSTALL_PREFIX=/another/path ..
 ```
+
+### rocm-libraries Superbuild
+
+The superbuild allows you to build hipdnn + dnn-providers in the same build making it easier to do cross project changes.
+
+See [Superbuild](./Superbuild.md) documentation for usage.
 
 ### Clang Tools
 

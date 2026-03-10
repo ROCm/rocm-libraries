@@ -4,6 +4,7 @@
 set(COMMON_CLIENT_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/PerformanceReporter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorListener.cpp"
@@ -25,3 +26,12 @@ set(COMMON_CLIENT_SOURCES
 target_sources(tensilelite-client PRIVATE ${COMMON_CLIENT_SOURCES})
 target_sources(cpu-gemm-driver PRIVATE ${COMMON_CLIENT_SOURCES})
 
+if (TENSILELITE_CLIENT_ENABLE_ROCPROFSDK)
+
+target_sources(tensilelite-client
+    PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/Profiler.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/RocProfiler.cpp"
+)
+
+endif()
