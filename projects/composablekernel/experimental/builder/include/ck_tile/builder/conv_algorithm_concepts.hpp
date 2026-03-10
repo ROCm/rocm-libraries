@@ -296,7 +296,7 @@ concept SpecifiesTileOptimizations = requires {
     { T::optimizations.num_groups_to_merge } -> std::convertible_to<int>;
     { T::optimizations.split_image } -> std::convertible_to<bool>;
     { T::optimizations.explicit_gemm } -> std::convertible_to<bool>;
-    { T::two_stage } -> std::convertible_to<bool>;
+    { T::optimizations.two_stage } -> std::convertible_to<bool>;
 };
 
 template <typename T>
