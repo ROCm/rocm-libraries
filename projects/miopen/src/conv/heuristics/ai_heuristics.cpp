@@ -541,7 +541,7 @@ void StorePredictionCache(const conv::ProblemDescription& problem,
                           const std::string& device,
                           std::vector<std::any>& any_sol)
 {
-    const bool is3d = problem.Is3d();
+    const bool is3d      = problem.Is3d();
     std::string est_name = is3d ? (":memory:3d_" + device) : (":memory:" + device);
     auto& db             = AnyRamDb::GetCached(est_name);
     db.StoreRecord(problem, any_sol);
@@ -681,8 +681,8 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                                     const ExecutionContext& ctx,
                                     const std::string& device)
 {
-    const bool is3d = problem.Is3d();
-    const bool is2d = problem.Is2d();
+    const bool is3d   = problem.Is3d();
+    const bool is2d   = problem.Is2d();
     const bool use_nd = is2d || is3d;
 
     // Check cache FIRST - avoids expensive model creation if we have cached results
@@ -692,7 +692,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         return cached_result;
     }
 
-    if( use_nd )
+    if(use_nd)
     {
         int dim = is3d ? 3 : 2;
         // 3D or 2D path: Use TunaNetND model
@@ -747,7 +747,7 @@ public:
     MetadataND metadata;
 
     explicit TunaNetNDModel(const std::string& device, const int& dim)
-        : device_name(device), metadata(MetadataND(device,dim))
+        : device_name(device), metadata(MetadataND(device, dim))
     {
         MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name << " dim: " << dim);
     }
@@ -758,7 +758,7 @@ public:
         MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
 
         // Use fdeep to run TunaNetND inference
-	const int dim = problem.Is3d() ? 3 : 2;
+        const int dim                = problem.Is3d() ? 3 : 2;
         const std::string model_path = ModelNDPath(device_name, dim);
         const auto model             = fdeep::load_model(model_path);
         MIOPEN_LOG_I2("TunaNetNDModel: Loaded fdeep model from " << model_path << ".");
@@ -796,18 +796,18 @@ protected:
         const bool isFwd = problem.GetDirection() == conv::Direction::Forward;
 
         std::vector<float> features = {};
-        if ( problem.Is2d() ) //2d version as in the
+        if(problem.Is2d()) // 2d version as in the
         {
             features = {
                 // Input dimensions
                 static_cast<float>(isFwd ? problem.GetInChannels()
-                                        : problem.GetOutChannels()),                     // in_channels
+                                         : problem.GetOutChannels()), // in_channels
                 static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
                 static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
 
                 // Output dimensions
                 static_cast<float>(isFwd ? problem.GetOutChannels()
-                                        : problem.GetInChannels()), // out_channels
+                                         : problem.GetInChannels()), // out_channels
                 static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
                 static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
 
@@ -831,9 +831,10 @@ protected:
                 static_cast<float>(problem.GetOutBatchSize()), // batchsize
 
                 // Layout encodings
-                static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())),       // in_layout
-                static_cast<float>(metadata.EncodeFilLayout(problem.GetWeightsLayout())), // fil_layout
-                static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())),     // out_layout
+                static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())), // in_layout
+                static_cast<float>(
+                    metadata.EncodeFilLayout(problem.GetWeightsLayout())),            // fil_layout
+                static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())), // out_layout
 
                 // Precision encoding
                 static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
@@ -844,18 +845,20 @@ protected:
                 // Group count
                 static_cast<float>(problem.GetGroupCount()), // group_count
             };
-        } else if ( problem.Is3d() ) {
+        }
+        else if(problem.Is3d())
+        {
             features = {
                 // Input dimensions
                 static_cast<float>(isFwd ? problem.GetInChannels()
-                                        : problem.GetOutChannels()),                     // in_channels
-                static_cast<float>(isFwd ? problem.GetInDepth() : problem.GetOutDepth()), // in_d
+                                         : problem.GetOutChannels()), // in_channels
+                static_cast<float>(isFwd ? problem.GetInDepth() : problem.GetOutDepth()),   // in_d
                 static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
                 static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
 
                 // Output dimensions
                 static_cast<float>(isFwd ? problem.GetOutChannels()
-                                        : problem.GetInChannels()), // out_channels
+                                         : problem.GetInChannels()), // out_channels
                 static_cast<float>(isFwd ? problem.GetOutDepth() : problem.GetInDepth()),   // out_d
                 static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
                 static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
@@ -879,9 +882,10 @@ protected:
                 static_cast<float>(problem.GetOutBatchSize()), // batchsize
 
                 // Layout encodings
-                static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())),       // in_layout
-                static_cast<float>(metadata.EncodeFilLayout(problem.GetWeightsLayout())), // fil_layout
-                static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())),     // out_layout
+                static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())), // in_layout
+                static_cast<float>(
+                    metadata.EncodeFilLayout(problem.GetWeightsLayout())),            // fil_layout
+                static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())), // out_layout
 
                 // Precision encoding
                 static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
@@ -892,7 +896,9 @@ protected:
                 // Group count
                 static_cast<float>(problem.GetGroupCount()), // group_count
             };
-        } else {
+        }
+        else
+        {
             MIOPEN_LOG_I2("Unsupported problem type for ND feature extraction");
         }
 
@@ -902,19 +908,22 @@ protected:
 
     static std::string ModelNDPath(const std::string& device, const int& dim)
     {
-	auto file_path = GetSystemDbPath();
+        auto file_path = GetSystemDbPath();
 
-        if ( dim == 3 )
-	{
-		file_path = file_path / (device + "_3d.tn.model");
-        } else if ( dim == 2 )
-	{
-		file_path = file_path / (device + ".tn.model");
-        } else {
-		MIOPEN_LOG_I2("Unsupported dim:" << dim);
-	}
+        if(dim == 3)
+        {
+            file_path = file_path / (device + "_3d.tn.model");
+        }
+        else if(dim == 2)
+        {
+            file_path = file_path / (device + ".tn.model");
+        }
+        else
+        {
+            MIOPEN_LOG_I2("Unsupported dim:" << dim);
+        }
 
-	if(!fs::exists(file_path))
+        if(!fs::exists(file_path))
         {
             MIOPEN_THROW(miopenStatusInternalError,
                          "Unable to load ND AI model file: " + file_path.string());
@@ -1207,7 +1216,7 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
     std::string path =
         (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
 
-    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path );
+    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
     auto tensors = GetFdeepModel(path, key).predict({input_tensor});
     if(tensors.empty())
         MIOPEN_THROW(miopenStatusInternalError, "Input encoder returned empty tensor list");
@@ -1228,7 +1237,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
     std::string path =
         (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
 
-    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path );
+    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
     const auto& model = GetFdeepModel(path, key);
 
     // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is

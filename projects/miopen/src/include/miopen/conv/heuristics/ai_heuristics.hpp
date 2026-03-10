@@ -340,7 +340,8 @@ protected:
  * @param device GPU device name (e.g., "gfx942", "gfx950")
  * @return Device-specific 3D model instance, or nullptr if unsupported
  */
-MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device, const int& dim);
+MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
+                                                            const int& dim);
 } // namespace convnd
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK

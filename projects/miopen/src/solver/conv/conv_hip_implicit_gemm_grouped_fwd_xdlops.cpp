@@ -206,12 +206,12 @@ struct CKArgs
 } // namespace
 
 template <typename DataType, typename ComputeType>
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(
-    const ProblemDescription& problem)
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(const ProblemDescription& problem)
 {
     if(valid_kernels.empty())
     {
-        valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType, ComputeType>, CKArgs>(problem);
+        valid_kernels =
+            FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType, ComputeType>, CKArgs>(problem);
     }
     if(!valid_kernels.empty())
     {
@@ -221,8 +221,7 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(
 }
 
 template <typename DataType>
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(
-    const ProblemDescription& problem)
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::Init(const ProblemDescription& problem)
 {
     Init<DataType, DataType>(problem);
 }
@@ -312,7 +311,8 @@ static std::vector<std::string> GetKernelAsTokensKTN(const std::string& kernel)
     return tokens;
 }
 
-void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDsKTN(const std::string& type)
+void PerformanceConfigHipImplicitGemmGroupFwdXdlops::InitHeuristicKernelIDsKTN(
+    const std::string& type)
 {
     for(int i = 0; i < valid_kernels.size(); i++)
     {
@@ -430,15 +430,20 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel
     {
         valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<DataType>, CKArgs>(problem);
     }
-    
+
     static const std::string& arch = ctx.GetStream().GetDeviceName();
     if(arch == "gfx90a")
         InitHeuristicKernelIDsKTN("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle");
     static const std::string solver = GetSolverNameForArch(arch);
-    
-    std::vector<float> features = GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
+
+    std::vector<float> features =
+        GetFeaturesKTN(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
     bool transform = (arch == "gfx90a") ? false : true;
-    if(ai::tuning::ModelSetParams(arch, solver, problem.GetDirection(), features, transform,
+    if(ai::tuning::ModelSetParams(arch,
+                                  solver,
+                                  problem.GetDirection(),
+                                  features,
+                                  transform,
                                   [&](int idx, const std::string& value) {
                                       return this->ModelApplyTokenKTN(idx, value, arch);
                                   }))
@@ -480,20 +485,21 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
     const std::string& arch = ctx.GetStream().GetDeviceName();
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
-    if(&ctx != &GetDummyCtx() &&
-       IsModelApplicable(ctx, problem))
+    if(&ctx != &GetDummyCtx() && IsModelApplicable(ctx, problem))
     {
         if(arch == "gfx942" || arch == "gfx950")
         {
             MIOPEN_LOG_I2("Candidate Selection heuristics for " << arch);
             std::string solver_name = GetSolverNameForArch(arch);
-            
+
             auto run_cs = [&](auto data_type_tag) {
                 using T = decltype(data_type_tag);
                 if constexpr(std::is_same_v<T, float>)
                 {
                     if(problem.UseTF32())
-                        valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<float, ck::tf32_t>, CKArgs>(problem);
+                        valid_kernels =
+                            FillValidKernelsIDs<DeviceOpGFwdPtrs<float, ck::tf32_t>, CKArgs>(
+                                problem);
                 }
                 if(valid_kernels.empty())
                     valid_kernels = FillValidKernelsIDs<DeviceOpGFwdPtrs<T>, CKArgs>(problem);
@@ -502,13 +508,23 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
                     if constexpr(std::is_same_v<T, float>)
                     {
                         if(problem.UseTF32())
-                            return FillValidKernelsIDs<DeviceOpGFwdPtrs<float, ck::tf32_t>, CKArgs>(problem);
+                            return FillValidKernelsIDs<DeviceOpGFwdPtrs<float, ck::tf32_t>, CKArgs>(
+                                problem);
                     }
                     return FillValidKernelsIDs<DeviceOpGFwdPtrs<T>, CKArgs>(problem);
                 };
-                auto is_valid = [&](int ki, int sk) { return ki >= 0 && ki < static_cast<int>(valid_kernels.size()) && sk == 0; };
-                return miopen::solver::conv::RunParameterPredictionModel<T>(
-                    ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name, is_valid);
+                auto is_valid = [&](int ki, int sk) {
+                    return ki >= 0 && ki < static_cast<int>(valid_kernels.size()) && sk == 0;
+                };
+                return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
+                                                                            problem,
+                                                                            valid_kernels,
+                                                                            index,
+                                                                            split_k,
+                                                                            kernel_id,
+                                                                            fill_valid_kernels,
+                                                                            solver_name,
+                                                                            is_valid);
             };
 
             bool ai_success = false;
@@ -532,9 +548,15 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
             bool ktn_succeeded = false;
             switch(problem.GetInDataType())
             {
-            case miopenFloat: ktn_succeeded = RunParameterPredictionModelKTN<float>(ctx, problem); break;
-            case miopenBFloat16: ktn_succeeded = RunParameterPredictionModelKTN<ck::bhalf_t>(ctx, problem); break;
-            case miopenHalf: ktn_succeeded = RunParameterPredictionModelKTN<ck::half_t>(ctx, problem); break;
+            case miopenFloat:
+                ktn_succeeded = RunParameterPredictionModelKTN<float>(ctx, problem);
+                break;
+            case miopenBFloat16:
+                ktn_succeeded = RunParameterPredictionModelKTN<ck::bhalf_t>(ctx, problem);
+                break;
+            case miopenHalf:
+                ktn_succeeded = RunParameterPredictionModelKTN<ck::half_t>(ctx, problem);
+                break;
             default: break;
             }
             if(ktn_succeeded)

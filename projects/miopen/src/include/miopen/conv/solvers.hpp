@@ -4443,7 +4443,7 @@ private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    
+
     // OLD KTN functions (for gfx90a)
     template <typename DataType>
     bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
@@ -4451,7 +4451,7 @@ private:
     void InitHeuristicKernelIDsKTN(const std::string& type);
     bool ModelApplyTokenKTN(int idx, std::string value, const std::string& arch);
 #endif
-    
+
     template <typename DataType, typename ComputeType>
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
@@ -4790,7 +4790,7 @@ private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    
+
     // OLD KTN functions (for gfx90a)
     template <typename DataType>
     bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
@@ -4801,7 +4801,7 @@ private:
                             const std::string& arch,
                             const miopen::conv::ProblemDescription& problem);
 #endif
-    
+
     template <typename DataType, typename ComputeType>
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
@@ -4894,7 +4894,7 @@ private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     std::vector<int> heuristic_indexes;
     std::unordered_map<int, std::vector<std::string>> heuristic_kernels;
-    
+
     // OLD KTN functions (for gfx90a)
     template <typename DataType>
     bool RunParameterPredictionModelKTN(const ExecutionContext& ctx,
@@ -4905,7 +4905,7 @@ private:
                             const std::string& arch,
                             const miopen::conv::ProblemDescription& problem);
 #endif
-    
+
     template <typename DataType, typename ComputeType>
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>

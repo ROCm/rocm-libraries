@@ -415,16 +415,16 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
 
     for(const auto& candidate : valid_kernel_params)
     {
-         std::ostringstream candidate_str;
-         candidate_str << "[";
-         for(size_t i = 0; i < candidate.size(); ++i)
-         {
-             if(i > 0)
-                 candidate_str << ", ";
-             candidate_str << "\"" << candidate[i] << "\"";
-         }
-   	candidate_str << "]";
-        MIOPEN_LOG_I2("Kernel Parameter Candidate: " << candidate_str.str() );
+        std::ostringstream candidate_str;
+        candidate_str << "[";
+        for(size_t i = 0; i < candidate.size(); ++i)
+        {
+            if(i > 0)
+                candidate_str << ", ";
+            candidate_str << "\"" << candidate[i] << "\"";
+        }
+        candidate_str << "]";
+        MIOPEN_LOG_I2("Kernel Parameter Candidate: " << candidate_str.str());
         // Get kernel_str_mapping for this candidate's kernel_name
         if(candidate.empty())
             MIOPEN_THROW("Candidate vector is empty, cannot extract kernel_name.");

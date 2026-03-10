@@ -40,7 +40,7 @@ namespace convnd {
 static std::optional<nlohmann::json> LoadJSONSafe(const std::string& arch)
 {
 
-    //const std::string archh = "gfx942";
+    // const std::string archh = "gfx942";
 
     try
     {
@@ -57,7 +57,7 @@ static std::optional<nlohmann::json> LoadJSONSafe(const std::string& arch)
         MIOPEN_LOG_I2("Failed to load JSON for " << arch << ": unknown error");
         return std::nullopt;
     }
-    MIOPEN_LOG_I2("Read metadata for: " << arch );
+    MIOPEN_LOG_I2("Read metadata for: " << arch);
 }
 
 // Static helper functions for loading individual components
@@ -266,7 +266,7 @@ MetadataND::LoadOutLayoutEncodings(const std::string& arch)
 // Constructor - loads all data immediately with error handling
 MIOPEN_INTERNALS_EXPORT
 MetadataND::MetadataND(const std::string& device, const int& dim)
-    : is_valid(false),              // Initialize to false, will be set to true if all loads succeed
+    : is_valid(false), // Initialize to false, will be set to true if all loads succeed
       features(),
       num_inputs(0),
       num_outputs(0),
@@ -280,11 +280,16 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
       fil_layout_encodings(),
       out_layout_encodings()
 {
-    if ( dim == 2 ) {
+    if(dim == 2)
+    {
         model_prefix = device;
-    } else if ( dim == 3 ) {
+    }
+    else if(dim == 3)
+    {
         model_prefix = device + "_3d";
-    } else {
+    }
+    else
+    {
         MIOPEN_LOG_I2("Unsupported dimension " << dim << " for MetadataND, expected 2 or 3");
         return;
     }
