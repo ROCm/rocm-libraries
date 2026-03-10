@@ -61,6 +61,10 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT),
                  "HIPDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR_EXT");
 
+    EXPECT_STREQ(
+        hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT),
+        "HIPDNN_BACKEND_OPERATION_RMSNORM_DESCRIPTOR_EXT");
+
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
                  "UNKNOWN_TYPE");
@@ -342,6 +346,24 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATION_MATMUL_C_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_MATMUL_MATH_PREC_EXT),
                  "HIPDNN_ATTR_MATMUL_MATH_PREC_EXT");
+
+    // RMSNorm operation attributes
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT),
+                 "HIPDNN_ATTR_OPERATION_RMSNORM_X_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT),
+                 "HIPDNN_ATTR_OPERATION_RMSNORM_SCALE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT),
+                 "HIPDNN_ATTR_OPERATION_RMSNORM_EPSILON_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT),
+                 "HIPDNN_ATTR_OPERATION_RMSNORM_Y_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT),
+                 "HIPDNN_ATTR_OPERATION_RMSNORM_BIAS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT),
+                 "HIPDNN_ATTR_OPERATION_RMSNORM_INV_RMS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT),
+                 "HIPDNN_ATTR_OPERATION_RMSNORM_FWD_PHASE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT),
+                 "HIPDNN_ATTR_RMSNORM_MATH_PREC_EXT");
 }
 
 TEST(TestBackendEnumStringUtils, GetStatusString)
@@ -547,4 +569,15 @@ TEST(TestBackendEnumStringUtils, GetPointwiseModeString)
 
     EXPECT_STREQ(hipdnnGetPointwiseModeString(static_cast<hipdnnPointwiseMode_t>(-1)),
                  "HIPDNN_POINTWISE_UNKNOWN");
+}
+
+TEST(TestBackendEnumStringUtils, GetNormFwdPhaseString)
+{
+    EXPECT_STREQ(hipdnnGetNormFwdPhaseString(HIPDNN_NORM_FWD_PHASE_INFERENCE),
+                 "HIPDNN_NORM_FWD_PHASE_INFERENCE");
+    EXPECT_STREQ(hipdnnGetNormFwdPhaseString(HIPDNN_NORM_FWD_PHASE_TRAINING),
+                 "HIPDNN_NORM_FWD_PHASE_TRAINING");
+
+    EXPECT_STREQ(hipdnnGetNormFwdPhaseString(static_cast<hipdnnNormFwdPhase_t>(-1)),
+                 "HIPDNN_NORM_FWD_PHASE_UNKNOWN");
 }
