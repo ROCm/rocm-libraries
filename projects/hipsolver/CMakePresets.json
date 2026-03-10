@@ -1,0 +1,88 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+                "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
+                "CMAKE_PREFIX_PATH": "/opt/rocm",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "dev-hip",
+            "displayName": "HIP Development",
+            "description": "HIP backend with tests, benchmarks, and samples enabled",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "HIPSOLVER_ENABLE_CUDA": "OFF",
+                "HIPSOLVER_BUILD_TESTING": "ON",
+                "HIPSOLVER_ENABLE_BENCHMARKS": "ON",
+                "HIPSOLVER_ENABLE_SAMPLES": "ON",
+                "HIPSOLVER_ENABLE_VERBOSE": "ON"
+            }
+        },
+        {
+            "name": "dev-cuda",
+            "displayName": "CUDA Development",
+            "description": "CUDA backend with tests, benchmarks, and samples enabled",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "HIPSOLVER_ENABLE_CUDA": "ON",
+                "HIPSOLVER_BUILD_TESTING": "ON",
+                "HIPSOLVER_ENABLE_BENCHMARKS": "ON",
+                "HIPSOLVER_ENABLE_SAMPLES": "ON",
+                "HIPSOLVER_ENABLE_VERBOSE": "ON"
+            }
+        },
+        {
+            "name": "release-hip",
+            "displayName": "HIP Release",
+            "description": "HIP backend release build with default options",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_INSTALL_PREFIX": "/opt/rocm",
+                "HIPSOLVER_ENABLE_CUDA": "OFF"
+            }
+        },
+        {
+            "name": "release-cuda",
+            "displayName": "CUDA Release",
+            "description": "CUDA backend release build with default options",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "HIPSOLVER_ENABLE_CUDA": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "build-dev-hip",
+            "configurePreset": "dev-hip"
+        },
+        {
+            "name": "build-dev-cuda",
+            "configurePreset": "dev-cuda"
+        },
+        {
+            "name": "build-release-hip",
+            "configurePreset": "release-hip"
+        },
+        {
+            "name": "build-release-cuda",
+            "configurePreset": "release-cuda"
+        }
+    ]
+}

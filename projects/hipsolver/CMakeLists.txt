@@ -1,83 +1,40 @@
-# ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.21)
 
-# Consider removing this in the future
-# This should appear before the project command, because it does not use FORCE
-if(WIN32)
-  set(CMAKE_INSTALL_PREFIX "${PROJECT_BINARY_DIR}/package" CACHE PATH "Install path prefix, prepended onto install directories")
-else()
-  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
+# Default install prefix (before project() so it doesn't use FORCE)
+if(NOT DEFINED CMAKE_INSTALL_PREFIX OR CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(WIN32)
+        set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path prefix." FORCE)
+    else()
+        set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix." FORCE)
+    endif()
 endif()
 
-# This has to be initialized before the project() command appears
-# Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
+# Default build type for single-config generators
 if(NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel.")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel."
+    )
 endif()
 
 if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-  set(CMAKE_Fortran_COMPILER  "gfortran")
+    set(CMAKE_Fortran_COMPILER "gfortran")
 endif()
 
 project(hipsolver LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# This finds the rocm-cmake project, and installs it if not found
-# rocm-cmake contains common cmake code for rocm projects to help setup and install
-set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
-find_package(ROCM 0.7.3 CONFIG QUIET PATHS /opt/rocm)
-if(NOT ROCM_FOUND)
-  set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-  set(rocm_cmake_url "https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip")
-  set(rocm_cmake_path "${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}")
-  set(rocm_cmake_archive "${rocm_cmake_path}.zip")
-  file(DOWNLOAD "${rocm_cmake_url}" "${rocm_cmake_archive}" STATUS status LOG log)
+# Set cpack license file early to avoid rocm-cmake warning
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
-  list(GET status 0 status_code)
-  list(GET status 1 status_string)
+# --- Backward-compatibility shim for renamed options ---
+include(hipsolver-options-shim)
 
-  if(status_code EQUAL 0)
-    message(STATUS "downloading... done")
-  else()
-    message(FATAL_ERROR "error: downloading\n'${rocm_cmake_url}' failed
-    status_code: ${status_code}
-    status_string: ${status_string}
-    log: ${log}\n")
-  endif()
-
-  execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzvf "${rocm_cmake_archive}"
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-  execute_process(COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag})
-  execute_process(COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-
-  find_package(ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake)
-endif()
+# --- rocm-cmake ---
+find_package(ROCM 0.7.3 REQUIRED CONFIG)
 
 include(ROCMSetupVersion)
 include(ROCMCreatePackage)
@@ -86,215 +43,163 @@ include(ROCMPackageConfigHelpers)
 include(ROCMInstallSymlinks)
 include(ROCMClients)
 include(ROCMHeaderWrapper)
+include(CMakeDependentOption)
+include(GNUInstallDirs)
 
 set(VERSION_STRING "3.3.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
-if(NOT DEFINED ENV{HIP_PATH})
-  set(HIP_PATH "/opt/rocm/hip")
-else()
-  file(TO_CMAKE_PATH "$ENV{HIP_PATH}" HIP_PATH)
-endif()
+# --- Build options ---
 
-# NOTE:  workaround until hip cmake modules fixes symlink logic in their config files; remove when fixed
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/llvm /opt/rocm/hip)
+option(BUILD_SHARED_LIBS "Build hipSOLVER as a shared library." ON)
+option(HIPSOLVER_ENABLE_CUDA "Build with CUDA backend instead of HIP." OFF)
+option(HIPSOLVER_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
+option(HIPSOLVER_BUILD_COVERAGE "Build with code coverage enabled." OFF)
+option(HIPSOLVER_ENABLE_HIPBLAS_TESTS "Build tests for hipBLAS/hipSOLVER compatibility (requires hipBLAS)." OFF)
+option(HIPSOLVER_ENABLE_HIPSPARSE_TESTS "Build tests for sparse functionality (requires hipSPARSE)." ON)
+option(HIPSOLVER_ENABLE_SPARSE "Build with sparse functionality at build time (requires dependencies)." OFF)
+option(HIPSOLVER_ENABLE_VERBOSE "Output additional build information." OFF)
+option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK." ON)
+option(HIPSOLVER_ENABLE_FORTRAN "Build the Fortran bindings." "${UNIX}")
+option(HIPSOLVER_BUILD_TESTING "Build hipSOLVER unit tests." OFF)
+option(HIPSOLVER_ENABLE_BENCHMARKS "Build hipSOLVER benchmarks." OFF)
+option(HIPSOLVER_ENABLE_SAMPLES "Build hipSOLVER samples." OFF)
+option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support." ON)
 
-option(BUILD_SHARED_LIBS "Build hipSOLVER as a shared library" ON)
-option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
-option(BUILD_CODE_COVERAGE "Build hipSOLVER with code coverage enabled" OFF)
-option(BUILD_HIPBLAS_TESTS "Build additional tests to ensure hipBLAS and hipSOLVER are compatible (requires installed hipBLAS)" OFF)
-option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionality (requires installed hipSPARSE)" ON)
-# BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
-option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at build time (requires installed dependencies)" OFF)
-option(BUILD_VERBOSE "Output additional build information" OFF)
-option(USE_CUDA "Look for CUDA and use that as a backend if found" OFF)
-option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
-option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
-
-if(NOT BUILD_SHARED_LIBS)
-  add_compile_definitions(HIPSOLVER_STATIC_LIB)
-endif()
-
-if(BUILD_FORTRAN_BINDINGS)
-  enable_language(Fortran)
-endif()
-
-add_library(hipsolver-common INTERFACE)
-target_compile_options(hipsolver-common INTERFACE
-  -Wno-unused-result # TODO: address [[nodiscard]] warnings
+set(HIPSOLVER_ARMOR_LEVEL "0" CACHE STRING
+    "Runtime correctness check level (0=none, 1=assertions, 2=debug iterators)."
 )
-if(BUILD_ADDRESS_SANITIZER)
-  target_compile_options(hipsolver-common INTERFACE
-    -fsanitize=address
-    -shared-libasan
-  )
-  target_link_options(hipsolver-common INTERFACE
-    -fsanitize=address
-    -shared-libasan
-    -fuse-ld=lld
-  )
+
+# --- Language setup ---
+
+if(HIPSOLVER_ENABLE_FORTRAN)
+    enable_language(Fortran)
 endif()
 
+# --- Dependencies ---
 
-
-# Find CUDA if the user wants a CUDA version.
-if(USE_CUDA)
-  find_package(CUDA REQUIRED)
-endif()
-
-# Hip headers required of all clients; clients use hip to allocate device memory
-if(USE_CUDA)
-  # Append cmake path for hip (for convenience)
-  # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-  list(APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${HIP_PATH}/cmake)
-  find_package(HIP MODULE REQUIRED)
+if(HIPSOLVER_ENABLE_CUDA)
+    find_package(CUDA REQUIRED)
+    find_package(HIP MODULE REQUIRED)
 else()
-  find_package(hip REQUIRED CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+    find_package(hip REQUIRED CONFIG)
 endif()
 
-if(USE_CUDA)
-  list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
-endif()
-
-# Append our library helper cmake path
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  set(DEFAULT_ARMOR_LEVEL 1)
-else()
-  set(DEFAULT_ARMOR_LEVEL 0)
-endif()
-set(ARMOR_LEVEL "${DEFAULT_ARMOR_LEVEL}" CACHE STRING "Enables increasingly expensive runtime correctness checks")
+# --- Armor configuration ---
 include(armor-config)
 
-# FOR OPTIONAL CODE COVERAGE
-if(BUILD_CODE_COVERAGE)
-  target_compile_options(hipsolver-common
-    INTERFACE
-    -g
-    -O0
-    -fprofile-instr-generate
-    -fcoverage-mapping)
-  target_link_options(hipsolver-common
-    INTERFACE
-    -fprofile-instr-generate)
-endif()
-
-include(CMakeDependentOption)
+# --- Backward compatibility for file reorg ---
 cmake_dependent_option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY
-  "Build with file/folder reorg backward compatibility enabled" OFF "NOT WIN32" OFF)
+    "Build with file/folder reorg backward compatibility enabled." OFF "NOT WIN32" OFF
+)
 if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
-  )
+    rocm_wrap_header_dir(
+        "${PROJECT_SOURCE_DIR}/library/include"
+        PATTERNS "*.h"
+        GUARDS SYMLINK WRAPPER
+        WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
+    )
 endif()
 
-if(WIN32)
-  add_compile_definitions(
-    WIN32_LEAN_AND_MEAN
-    _CRT_SECURE_NO_WARNINGS
-    NOMINMAX
-  )
-endif()
-
+# --- Library ---
 add_subdirectory(library)
 
-include(clients/cmake/build-options.cmake)
-
+# --- OS detection for packaging ---
 if(NOT SYSTEM_OS)
-  rocm_set_os_id(SYSTEM_OS)
-  string(TOLOWER "${SYSTEM_OS}" SYSTEM_OS)
-  rocm_read_os_release(SYSTEM_OS_VERSION VERSION_ID)
+    rocm_set_os_id(SYSTEM_OS)
+    string(TOLOWER "${SYSTEM_OS}" SYSTEM_OS)
+    rocm_read_os_release(SYSTEM_OS_VERSION VERSION_ID)
 endif()
 
-# Build clients of the library
-if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
-  set(GFORTRAN_RPM "libgfortran4")
-  set(GFORTRAN_DEB "libgfortran4")
-  if(SYSTEM_OS STREQUAL "centos" OR SYSTEM_OS STREQUAL "rhel" OR SYSTEM_OS STREQUAL "almalinux")
-    if(SYSTEM_OS_VERSION VERSION_GREATER_EQUAL "8")
-      set(GFORTRAN_RPM "libgfortran")
+# --- Clients ---
+if(HIPSOLVER_BUILD_TESTING OR HIPSOLVER_ENABLE_BENCHMARKS OR HIPSOLVER_ENABLE_SAMPLES)
+    set(GFORTRAN_RPM "libgfortran4")
+    set(GFORTRAN_DEB "libgfortran4")
+    if(SYSTEM_OS STREQUAL "centos" OR SYSTEM_OS STREQUAL "rhel" OR SYSTEM_OS STREQUAL "almalinux")
+        if(SYSTEM_OS_VERSION VERSION_GREATER_EQUAL "8")
+            set(GFORTRAN_RPM "libgfortran")
+        endif()
+    elseif(SYSTEM_OS STREQUAL "ubuntu" AND SYSTEM_OS_VERSION VERSION_GREATER_EQUAL "20.04")
+        set(GFORTRAN_DEB "libgfortran5")
+    elseif(SYSTEM_OS STREQUAL "mariner" OR SYSTEM_OS STREQUAL "azurelinux")
+        set(GFORTRAN_RPM "gfortran")
     endif()
-  elseif(SYSTEM_OS STREQUAL "ubuntu" AND SYSTEM_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-    set(GFORTRAN_DEB "libgfortran5")
-  elseif(SYSTEM_OS STREQUAL "mariner" OR SYSTEM_OS STREQUAL "azurelinux")
-    set(GFORTRAN_RPM "gfortran")
-  endif()
-  rocm_package_setup_component(clients)
-  if(UNIX)
-    set(DEP_ARGS DEPENDS RPM "${GFORTRAN_RPM}" DEB "${GFORTRAN_DEB}")
-  endif()
-  if(BUILD_CLIENTS_TESTS)
-    rocm_package_setup_client_component(tests ${DEP_ARGS})
-  endif()
-  if(BUILD_CLIENTS_BENCHMARKS)
-    rocm_package_setup_client_component(benchmarks ${DEP_ARGS})
-  endif()
-  add_subdirectory(clients)
+    rocm_package_setup_component(clients)
+    if(UNIX)
+        set(DEP_ARGS DEPENDS RPM "${GFORTRAN_RPM}" DEB "${GFORTRAN_DEB}")
+    endif()
+    if(HIPSOLVER_BUILD_TESTING)
+        rocm_package_setup_client_component(tests ${DEP_ARGS})
+    endif()
+    if(HIPSOLVER_ENABLE_BENCHMARKS)
+        rocm_package_setup_client_component(benchmarks ${DEP_ARGS})
+    endif()
+    add_subdirectory(clients)
 endif()
 
-# Package specific CPACK vars
-if(NOT USE_CUDA)
-  set(rocblas_minimum 4.2.0)
-  set(rocsolver_minimum 3.33.0)
-  rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
-  rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
-  rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
+# --- Packaging ---
 
-  if(SYSTEM_OS STREQUAL "centos" OR SYSTEM_OS STREQUAL "rhel" OR SYSTEM_OS STREQUAL "mariner" OR SYSTEM_OS STREQUAL "azurelinux")
-    list(APPEND hipsolver_pkgdeps "suitesparse")
-  elseif(SYSTEM_OS STREQUAL "ubuntu" AND SYSTEM_OS_VERSION VERSION_GREATER_EQUAL "24.04")
-    list(APPEND hipsolver_pkgdeps "libcholmod5" "libsuitesparseconfig7")
-  else()
-    list(APPEND hipsolver_pkgdeps "libcholmod3" "libsuitesparseconfig5")
-  endif()
+if(NOT HIPSOLVER_ENABLE_CUDA)
+    set(rocblas_minimum 4.2.0)
+    set(rocsolver_minimum 3.33.0)
+    rocm_package_add_dependencies(SHARED_DEPENDS
+        "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}"
+    )
+    rocm_package_add_rpm_dependencies(STATIC_DEPENDS
+        "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}"
+    )
+    rocm_package_add_deb_dependencies(STATIC_DEPENDS
+        "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}"
+    )
 
-  if(BUILD_WITH_SPARSE)
-    set(rocsparse_minimum 2.3.0)
-    rocm_package_add_dependencies(SHARED_DEPENDS "rocsparse >= ${rocsparse_minimum}")
-    rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocsparse-static-devel >= ${rocsparse_minimum}")
-    rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocsparse-static-dev >= ${rocsparse_minimum}")
+    if(SYSTEM_OS STREQUAL "centos" OR SYSTEM_OS STREQUAL "rhel"
+       OR SYSTEM_OS STREQUAL "mariner" OR SYSTEM_OS STREQUAL "azurelinux")
+        list(APPEND hipsolver_pkgdeps "suitesparse")
+    elseif(SYSTEM_OS STREQUAL "ubuntu" AND SYSTEM_OS_VERSION VERSION_GREATER_EQUAL "24.04")
+        list(APPEND hipsolver_pkgdeps "libcholmod5" "libsuitesparseconfig7")
+    else()
+        list(APPEND hipsolver_pkgdeps "libcholmod3" "libsuitesparseconfig5")
+    endif()
 
-    rocm_package_add_dependencies(DEPENDS ${hipsolver_pkgdeps})
-  else()
-    string(JOIN "," CPACK_DEBIAN_RUNTIME_PACKAGE_RECOMMENDS "rocsparse" ${hipsolver_pkgdeps})
-    string(JOIN "," CPACK_RPM_RUNTIME_PACKAGE_SUGGESTS "rocsparse" ${hipsolver_pkgdeps})
-  endif()
+    if(HIPSOLVER_ENABLE_SPARSE)
+        set(rocsparse_minimum 2.3.0)
+        rocm_package_add_dependencies(SHARED_DEPENDS "rocsparse >= ${rocsparse_minimum}")
+        rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocsparse-static-devel >= ${rocsparse_minimum}")
+        rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocsparse-static-dev >= ${rocsparse_minimum}")
+        rocm_package_add_dependencies(DEPENDS ${hipsolver_pkgdeps})
+    else()
+        string(JOIN "," CPACK_DEBIAN_RUNTIME_PACKAGE_RECOMMENDS "rocsparse" ${hipsolver_pkgdeps})
+        string(JOIN "," CPACK_RPM_RUNTIME_PACKAGE_SUGGESTS "rocsparse" ${hipsolver_pkgdeps})
+    endif()
 endif()
 
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 if(WIN32)
-  set(CPACK_SOURCE_GENERATOR "ZIP")
-  set(CPACK_GENERATOR "ZIP")
-  if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE)
-  endif()
-  set(INSTALL_PREFIX "C:/hipSDK")
-  set(CPACK_SET_DESTDIR OFF)
-  set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
-  set(CPACK_PACKAGING_INSTALL_PREFIX "")
-  set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+    set(CPACK_SOURCE_GENERATOR "ZIP")
+    set(CPACK_GENERATOR "ZIP")
+    set(INSTALL_PREFIX "C:/hipSDK")
+    set(CPACK_SET_DESTDIR OFF)
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
+    set(CPACK_PACKAGING_INSTALL_PREFIX "")
+    set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 else()
-  if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-    set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}")
-  endif()
+    if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+        set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}")
+    endif()
 endif()
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
-# Give hipsolver compiled for CUDA backend a different name
-if(NOT USE_CUDA)
-  set(package_name hipsolver)
+if(NOT HIPSOLVER_ENABLE_CUDA)
+    set(package_name hipsolver)
 else()
-  set(package_name hipsolver-alt)
+    set(package_name hipsolver-alt)
 endif()
 
-set(HIPSOLVER_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
+set(HIPSOLVER_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+    CACHE PATH "Path placed into ldconfig file"
+)
 
 rocm_create_package(
     NAME ${package_name}
@@ -304,52 +209,54 @@ rocm_create_package(
     LDCONFIG_DIR ${HIPSOLVER_CONFIG_DIR}
 )
 
-# ADDITIONAL TARGETS FOR CODE COVERAGE
-#
-# make coverage
-if(BUILD_CODE_COVERAGE)
-  set(coverage_test ./clients/staging/hipsolver-test)
+# --- Code coverage targets ---
 
-  add_custom_target(
-    code_cov_tests
-    DEPENDS hipsolver-test
-    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
-    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
-    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipSOLVER-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG ${coverage_test} --gtest_filter=\"\${GTEST_FILTER}\"
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  )
+if(HIPSOLVER_BUILD_COVERAGE)
+    find_program(LLVM_PROFDATA llvm-profdata
+        REQUIRED HINTS ${ROCM_PATH}/llvm/bin
+    )
+    find_program(LLVM_COV llvm-cov
+        REQUIRED HINTS ${ROCM_PATH}/llvm/bin
+    )
 
-  find_program(
-    LLVM_PROFDATA
-    llvm-profdata
-    REQUIRED
-    HINTS ${ROCM_PATH}/llvm/bin
-    PATHS /opt/rocm/llvm/bin
-  )
+    set(_coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
 
-  find_program(
-    LLVM_COV
-    llvm-cov
-    REQUIRED
-    HINTS ${ROCM_PATH}/llvm/bin
-    PATHS /opt/rocm/llvm/bin
-  )
+    add_custom_target(code_cov_tests
+        DEPENDS hipsolver-test
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_coverage_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_coverage_dir}/profraw"
+        COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_FILE="${_coverage_dir}/profraw/hipSOLVER-coverage_%p.profraw"
+            GTEST_LISTENER=NO_PASS_LINE_IN_LOG
+            $<TARGET_FILE:hipsolver-test> --gtest_filter="\${GTEST_FILTER}"
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
 
-  add_custom_target(
-    coverage
-    DEPENDS code_cov_tests
-    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipSOLVER-coverage_*.profraw -o ./coverage-report/hipSOLVER.profdata
-    COMMAND ${LLVM_COV} report -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata
-    COMMAND ${LLVM_COV} show -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata -format=html -output-dir=coverage-report
-    COMMAND ${LLVM_COV} export -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata -format=lcov > ./coverage-report/coverage.info
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  )
+    add_custom_target(coverage
+        DEPENDS code_cov_tests
+        COMMAND ${LLVM_PROFDATA} merge -sparse
+            "${_coverage_dir}/profraw/hipSOLVER-coverage_*.profraw"
+            -o "${_coverage_dir}/hipSOLVER.profdata"
+        COMMAND ${LLVM_COV} report
+            -object $<TARGET_FILE:hipsolver>
+            -instr-profile="${_coverage_dir}/hipSOLVER.profdata"
+        COMMAND ${LLVM_COV} show
+            -object $<TARGET_FILE:hipsolver>
+            -instr-profile="${_coverage_dir}/hipSOLVER.profdata"
+            -format=html -output-dir="${_coverage_dir}"
+        COMMAND ${LLVM_COV} export
+            -object $<TARGET_FILE:hipsolver>
+            -instr-profile="${_coverage_dir}/hipSOLVER.profdata"
+            -format=lcov > "${_coverage_dir}/coverage.info"
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Generating coverage report in ${_coverage_dir}"
+    )
 
-  # Coverage cleanup
-  add_custom_target(coverage_cleanup
-      COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
-      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  )
+    add_custom_target(coverage_cleanup
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+            "${CMAKE_BINARY_DIR}/*.profraw"
+            "${_coverage_dir}/hipSOLVER.profdata"
+            "${_coverage_dir}/coverage.info"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_coverage_dir}"
+    )
 endif()
-
