@@ -20,13 +20,6 @@ endif()
 # of TheRock. Windows and Linux are supported.
 if(BUILD_ADDRESS_SANITIZER)
 
-    # Query the compiler for the resource directory to locate sanitizer runtime libraries.
-    execute_process(
-        COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
-        OUTPUT_VARIABLE CLANG_RESOURCE_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-
     # Windows configuration
     if (WIN32)
         message(STATUS "Configuring Address Sanitizer for Windows")
@@ -38,10 +31,15 @@ if(BUILD_ADDRESS_SANITIZER)
         else()
             set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer)
             set(SANITIZER_LINK_FLAGS    -fsanitize=address -fno-omit-frame-pointer)
-        endif()
 
-        # Windows sanitizer libraries
-        link_directories(${CLANG_RESOURCE_DIR}/lib/windows)
+            # -print-resource-dir is clang-specific; only query it for non-MSVC compilers.
+            execute_process(
+                COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+                OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            link_directories(${CLANG_RESOURCE_DIR}/lib/windows)
+        endif()
 
         add_compile_options(${SANITIZER_COMPILE_FLAGS})
         add_link_options(${SANITIZER_LINK_FLAGS})
@@ -57,6 +55,12 @@ if(BUILD_ADDRESS_SANITIZER)
             gfx942:xnack+
         )
 
+        # Query the compiler for the resource directory to locate sanitizer runtime libraries.
+        execute_process(
+            COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+            OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
         link_directories(${CLANG_RESOURCE_DIR}/lib/linux)
 
         set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer)
