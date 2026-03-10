@@ -316,7 +316,7 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
                                                            0 /*log_level*/,
                                                            5 /*cold_iters*/,
                                                            50 /*nrepeat_*/,
-                                                           true /*flush_cache*/});
+                                                           time_kernel /*flush_cache*/});
 
             std::size_t flop      = conv_param.GetFlops();
             std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
@@ -437,6 +437,30 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
         std::cout << "\nValid instances for this problem:" << std::endl;
     }
 
+    // Run first instance twice to get proper time
+    {
+        auto argument_ptr = op_ptrs[0]->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),
+                                                            wei_device_buf.GetDeviceBuffer(),
+                                                            {},
+                                                            out_device_buf.GetDeviceBuffer(),
+                                                            a_g_n_c_wis_lengths,
+                                                            a_g_n_c_wis_strides,
+                                                            b_g_k_c_xs_lengths,
+                                                            b_g_k_c_xs_strides,
+                                                            {},
+                                                            {},
+                                                            e_g_n_k_wos_lengths,
+                                                            e_g_n_k_wos_strides,
+                                                            conv_filter_strides,
+                                                            conv_filter_dilations,
+                                                            input_left_pads,
+                                                            input_right_pads,
+                                                            in_element_op,
+                                                            wei_element_op,
+                                                            out_element_op);
+
+        run_impl(op_ptrs[0], argument_ptr);
+    }
     for(auto& op_ptr : op_ptrs)
     {
         auto argument_ptr = op_ptr->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),

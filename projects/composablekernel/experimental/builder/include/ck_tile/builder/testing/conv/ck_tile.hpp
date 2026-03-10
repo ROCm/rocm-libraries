@@ -60,11 +60,8 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
                                                      std::end(kargs.wei_g_k_c_xs_lengths.data),
                                                      1,
                                                      std::multiplies<std::size_t>());
-    auto preprocess                = [&]() {
-        if(s_conf.flush_cache_)
-        {
-            ck_tile::flush_icache();
-        }
+
+    auto preprocess = [&]() {
         if constexpr(ConvDirectionIsBackwardWeight<SIGNATURE>)
         {
             if(args.k_batch > 1)
@@ -78,10 +75,20 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
     constexpr index_t minimum_occupancy =
         Conv::GemmPipeline::Scheduler == ck_tile::GemmPipelineScheduler::Intrawave ? 1 : 2;
 
-    return RunResult::from_runtime(ck_tile::launch_kernel_time_mask(
-        s_conf,
-        preprocess,
-        ck_tile::make_kernel<minimum_occupancy>(conv, grids, blocks, 0, kargs)));
+    if(s_conf.flush_cache_)
+    {
+        return RunResult::from_runtime(ck_tile::launch_kernel_time_mask_flush_cache(
+            s_conf,
+            preprocess,
+            ck_tile::make_kernel<minimum_occupancy>(conv, grids, blocks, 0, kargs)));
+    }
+    else
+    {
+        return RunResult::from_runtime(ck_tile::launch_kernel_time_mask(
+            s_conf,
+            preprocess,
+            ck_tile::make_kernel<minimum_occupancy>(conv, grids, blocks, 0, kargs)));
+    }
 }
 
 } // namespace detail
