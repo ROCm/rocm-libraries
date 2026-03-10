@@ -267,7 +267,7 @@ category_data[category_name] = {
 ```cmake
 # Filter format: positive_string-exclude_string
 add_test(
-  NAME miopen_gtest-standard-suite
+  NAME miopen_gtest_standard_suite
   COMMAND miopen_gtest --gtest_filter="*Fusion*:*Conv*-*DeepBench*:*Slow*"
 )
 ```
@@ -276,7 +276,7 @@ add_test(
 ```cmake
 # Filter format: positive_string-exclude_string:gpu_exclude_string
 add_test(
-  NAME miopen_gtest-standard-gfx1150-exclude
+  NAME miopen_gtest_standard_gfx1150_suite
   COMMAND miopen_gtest --gtest_filter="*Fusion*:*Conv*-*DeepBench*:*Slow*:*gfx942*"
 )
 ```
@@ -469,12 +469,12 @@ install(
 
 ### Excluding Category Suites from `make check`
 
-All YAML-generated tests are named with a `-suite` suffix. If your project has a `check` target that runs `ctest`, the newly generated tests may be excluded to avoid extended run times:
+All YAML-generated tests are named with a `_suite` suffix. If your project has a `check` target that runs `ctest`, the newly generated tests may be excluded to avoid extended run times:
 
 ```cmake
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR}
-    --exclude-regex ".*-suite"
+    --exclude-regex ".*_suite"
 )
 ```
 
@@ -505,8 +505,8 @@ The framework generates tests with predictable naming:
 
 | Type           | Name Format                            | Example                                |
 | -------------- | -------------------------------------- | -------------------------------------- |
-| Category suite | `{target}-{category}-suite`            | `my_project_gtest-quick-suite`         |
-| GPU exclusion  | `{target}-{category}-{gpu_arch}-suite` | `my_project_gtest-quick-gfx1150-suite` |
+| Category suite | `{target}_{category}_suite`            | `my_project_gtest_quick_suite`         |
+| GPU exclusion  | `{target}_{category}_{gpu_arch}_suite` | `my_project_gtest_quick_gfx1150_suite` |
 
 
 ## Generated Labels
