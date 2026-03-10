@@ -200,8 +200,7 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
     testing::internal::CaptureStderr();
 
     // Construct rocprof command
-    std::string driver_output =
-        temp_dir + PATH_SEPARATOR + test_case.test_name + "_output.txt";
+    std::string driver_output = temp_dir + PATH_SEPARATOR + test_case.test_name + "_output.txt";
 
     std::ostringstream cmd;
 
@@ -217,8 +216,7 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
     cmd << "\"" << fs::absolute(driver_path).string() << "\" " << test_case.driver_type << " ";
     cmd << test_case.driver_args;
     // Only add --use_hip_graph 1 if not already in driver_args and expect_graph is true
-    if(test_case.expect_graph &&
-       test_case.driver_args.find("--use_hip_graph") == std::string::npos)
+    if(test_case.expect_graph && test_case.driver_args.find("--use_hip_graph") == std::string::npos)
     {
         cmd << " --use_hip_graph 1";
     }
@@ -239,12 +237,12 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
     std::cout << "Command return code: " << ret << std::endl;
 
     // Look for rocprof output files (rocprof creates files with default names in working dir)
-    std::vector<std::string> possible_trace_files = {temp_dir + PATH_SEPARATOR + "results.json",
-                                                     temp_dir + PATH_SEPARATOR +
-                                                         "results.hip_stats.csv",
-                                                     temp_dir + PATH_SEPARATOR + "results.csv",
-                                                     temp_dir + PATH_SEPARATOR + "hip_api_trace.txt",
-                                                     temp_dir + PATH_SEPARATOR + "results.txt"};
+    std::vector<std::string> possible_trace_files = {
+        temp_dir + PATH_SEPARATOR + "results.json",
+        temp_dir + PATH_SEPARATOR + "results.hip_stats.csv",
+        temp_dir + PATH_SEPARATOR + "results.csv",
+        temp_dir + PATH_SEPARATOR + "hip_api_trace.txt",
+        temp_dir + PATH_SEPARATOR + "results.txt"};
 
     std::string trace_file;
 
@@ -262,8 +260,8 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
         if(fs::exists(file) && fs::file_size(file) > 0)
         {
             trace_file = file;
-            std::cout << "Found trace file: " << trace_file
-                      << " (size: " << fs::file_size(file) << " bytes)" << std::endl;
+            std::cout << "Found trace file: " << trace_file << " (size: " << fs::file_size(file)
+                      << " bytes)" << std::endl;
             break;
         }
     }
@@ -312,9 +310,8 @@ void RunHipGraphTest(const HipGraphTestCase& test_case, const std::string& temp_
             << "hipGraphLaunch not called - HIP Graph was not executed";
 
         // Overall success check
-        bool hip_graph_detected =
-            (stream_begin_capture_count > 0 && stream_end_capture_count > 0 &&
-             graph_instantiate_count > 0 && graph_launch_count > 0);
+        bool hip_graph_detected = (stream_begin_capture_count > 0 && stream_end_capture_count > 0 &&
+                                   graph_instantiate_count > 0 && graph_launch_count > 0);
 
         ASSERT_TRUE(hip_graph_detected)
             << "HIP Graph was not properly created/executed for " << test_case.driver_type;
@@ -341,6 +338,4 @@ TEST_P(GPU_HipGraphExistTest_NONE, HipGraphExist)
     RunHipGraphTest(test_case, temp_dir);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_HipGraphExistTest_NONE,
-                         testing::ValuesIn(GenSmokeTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_HipGraphExistTest_NONE, testing::ValuesIn(GenSmokeTestCases()));
