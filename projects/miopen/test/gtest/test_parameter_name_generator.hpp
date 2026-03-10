@@ -139,6 +139,7 @@ struct NamedContainer
 //      );
 //
 template <typename... T>
+[[maybe_unused]]
 static auto MakeNamedParameterValues(const std::string& name, T... values)
 {
     return testing::Values(NamedParameter<T>{name, values}...);
@@ -162,6 +163,7 @@ static auto MakeNamedParameterValues(const std::string& name, T... values)
 //
 template <typename T>
     requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
+[[maybe_unused]]
 static auto MakeNamedParameterCollectionValues(const std::string& name,
                                                const std::ranges::range auto& collection,
                                                const std::string& separator = " ")
@@ -180,6 +182,7 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
 
 template <typename T>
     requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
+[[maybe_unused]]
 static auto MakeNamedParameterCollectionValues(const std::string& name,
                                                const std::ranges::range auto& collection)
 {

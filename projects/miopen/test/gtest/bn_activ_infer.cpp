@@ -59,6 +59,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
 {
     int n, c, h, w;
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
+    (void)yDesc;
 
     // Setup the kernel launch parameters
     bool is_layout_NHWC = (xDesc.GetLayout_t() == miopenTensorNHWC);
@@ -121,6 +122,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     ss << "activ" << activ_mode;
     std::string network_config = ss.str();
 
+    (void)bnScaleBiasMeanVarDesc;
     // add the kernel to the handle
     [[maybe_unused]] auto kernelInvoke =
         handle.AddKernel(kernel_name, network_config, kernel_file, kernel_name, vld, vgd, params);

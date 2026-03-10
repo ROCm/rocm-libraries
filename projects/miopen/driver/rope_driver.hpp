@@ -31,6 +31,8 @@
 #include "timer.hpp"
 #include "../test/verify.hpp"
 
+#include <numeric>
+
 template <typename Tgpu, typename Tcheck>
 int32_t mloRoPEForwardRunHost(miopenTensorDescriptor_t xDesc,
                               miopenTensorDescriptor_t cosDesc,
