@@ -141,7 +141,8 @@ int Driver::ExecuteKernel()
         hipError_t he = hipGraphLaunch(hipGraphExec, q);
         (void)hipEventRecord(hipGraphStopEvent, q);
         (void)hipEventSynchronize(hipGraphStopEvent);
-        (void)hipEventElapsedTime(&hipGraphLastExecutionTime, hipGraphStartEvent, hipGraphStopEvent);
+        (void)hipEventElapsedTime(
+            &hipGraphLastExecutionTime, hipGraphStartEvent, hipGraphStopEvent);
         if(he == hipSuccess)
         {
             return miopenStatusSuccess;
