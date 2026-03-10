@@ -15,6 +15,8 @@
 #include <HipdnnBackendHeuristicType.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
+#include <HipdnnNormFwdPhase.h>
+#include <HipdnnPointwiseMode.h>
 #include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
@@ -294,6 +296,140 @@ inline std::optional<hipdnnConvolutionMode_t> toBackendConvMode(const Convolutio
         return HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION;
     case ConvolutionMode::CONVOLUTION:
         return HIPDNN_CONVOLUTION_MODE_CONVOLUTION;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert frontend NormFwdPhase to backend hipdnnNormFwdPhase_t
+ *
+ * Maps frontend normalization forward phase to the backend C API enum type
+ * for use with HIPDNN_TYPE_NORM_FWD_PHASE attributes.
+ *
+ * @param type The frontend NormFwdPhase value
+ * @return The corresponding hipdnnNormFwdPhase_t value, or std::nullopt if not set
+ */
+inline std::optional<hipdnnNormFwdPhase_t> toBackendNormFwdPhase(const NormFwdPhase& type)
+{
+    switch(type)
+    {
+    case NormFwdPhase::INFERENCE:
+        return HIPDNN_NORM_FWD_PHASE_INFERENCE;
+    case NormFwdPhase::TRAINING:
+        return HIPDNN_NORM_FWD_PHASE_TRAINING;
+    default:
+        return std::nullopt;
+    }
+}
+
+/**
+ * @brief Convert frontend PointwiseMode to backend hipdnnPointwiseMode_t
+ *
+ * Maps frontend pointwise mode enum to the backend C API enum type for use
+ * with HIPDNN_TYPE_POINTWISE_MODE attributes.
+ *
+ * @param type The frontend PointwiseMode value
+ * @return The corresponding hipdnnPointwiseMode_t value, or std::nullopt if not set
+ */
+inline std::optional<hipdnnPointwiseMode_t> toBackendPointwiseMode(const PointwiseMode& type)
+{
+    switch(type)
+    {
+    case PointwiseMode::ABS:
+        return HIPDNN_POINTWISE_ABS;
+    case PointwiseMode::ADD:
+        return HIPDNN_POINTWISE_ADD;
+    case PointwiseMode::ADD_SQUARE:
+        return HIPDNN_POINTWISE_ADD_SQUARE;
+    case PointwiseMode::BINARY_SELECT:
+        return HIPDNN_POINTWISE_BINARY_SELECT;
+    case PointwiseMode::CEIL:
+        return HIPDNN_POINTWISE_CEIL;
+    case PointwiseMode::CMP_EQ:
+        return HIPDNN_POINTWISE_CMP_EQ;
+    case PointwiseMode::CMP_GE:
+        return HIPDNN_POINTWISE_CMP_GE;
+    case PointwiseMode::CMP_GT:
+        return HIPDNN_POINTWISE_CMP_GT;
+    case PointwiseMode::CMP_LE:
+        return HIPDNN_POINTWISE_CMP_LE;
+    case PointwiseMode::CMP_LT:
+        return HIPDNN_POINTWISE_CMP_LT;
+    case PointwiseMode::CMP_NEQ:
+        return HIPDNN_POINTWISE_CMP_NEQ;
+    case PointwiseMode::DIV:
+        return HIPDNN_POINTWISE_DIV;
+    case PointwiseMode::ELU_BWD:
+        return HIPDNN_POINTWISE_ELU_BWD;
+    case PointwiseMode::ELU_FWD:
+        return HIPDNN_POINTWISE_ELU_FWD;
+    case PointwiseMode::ERF:
+        return HIPDNN_POINTWISE_ERF;
+    case PointwiseMode::EXP:
+        return HIPDNN_POINTWISE_EXP;
+    case PointwiseMode::FLOOR:
+        return HIPDNN_POINTWISE_FLOOR;
+    case PointwiseMode::GELU_APPROX_TANH_BWD:
+        return HIPDNN_POINTWISE_GELU_APPROX_TANH_BWD;
+    case PointwiseMode::GELU_APPROX_TANH_FWD:
+        return HIPDNN_POINTWISE_GELU_APPROX_TANH_FWD;
+    case PointwiseMode::GELU_BWD:
+        return HIPDNN_POINTWISE_GELU_BWD;
+    case PointwiseMode::GELU_FWD:
+        return HIPDNN_POINTWISE_GELU_FWD;
+    case PointwiseMode::GEN_INDEX:
+        return HIPDNN_POINTWISE_GEN_INDEX;
+    case PointwiseMode::IDENTITY:
+        return HIPDNN_POINTWISE_IDENTITY;
+    case PointwiseMode::LOG:
+        return HIPDNN_POINTWISE_LOG;
+    case PointwiseMode::LOGICAL_AND:
+        return HIPDNN_POINTWISE_LOGICAL_AND;
+    case PointwiseMode::LOGICAL_NOT:
+        return HIPDNN_POINTWISE_LOGICAL_NOT;
+    case PointwiseMode::LOGICAL_OR:
+        return HIPDNN_POINTWISE_LOGICAL_OR;
+    case PointwiseMode::MAX:
+        return HIPDNN_POINTWISE_MAX;
+    case PointwiseMode::MIN:
+        return HIPDNN_POINTWISE_MIN;
+    case PointwiseMode::MUL:
+        return HIPDNN_POINTWISE_MUL;
+    case PointwiseMode::NEG:
+        return HIPDNN_POINTWISE_NEG;
+    case PointwiseMode::RECIPROCAL:
+        return HIPDNN_POINTWISE_RECIPROCAL;
+    case PointwiseMode::RELU_BWD:
+        return HIPDNN_POINTWISE_RELU_BWD;
+    case PointwiseMode::RELU_FWD:
+        return HIPDNN_POINTWISE_RELU_FWD;
+    case PointwiseMode::RSQRT:
+        return HIPDNN_POINTWISE_RSQRT;
+    case PointwiseMode::SIGMOID_BWD:
+        return HIPDNN_POINTWISE_SIGMOID_BWD;
+    case PointwiseMode::SIGMOID_FWD:
+        return HIPDNN_POINTWISE_SIGMOID_FWD;
+    case PointwiseMode::SIN:
+        return HIPDNN_POINTWISE_SIN;
+    case PointwiseMode::SOFTPLUS_BWD:
+        return HIPDNN_POINTWISE_SOFTPLUS_BWD;
+    case PointwiseMode::SOFTPLUS_FWD:
+        return HIPDNN_POINTWISE_SOFTPLUS_FWD;
+    case PointwiseMode::SQRT:
+        return HIPDNN_POINTWISE_SQRT;
+    case PointwiseMode::SUB:
+        return HIPDNN_POINTWISE_SUB;
+    case PointwiseMode::SWISH_BWD:
+        return HIPDNN_POINTWISE_SWISH_BWD;
+    case PointwiseMode::SWISH_FWD:
+        return HIPDNN_POINTWISE_SWISH_FWD;
+    case PointwiseMode::TAN:
+        return HIPDNN_POINTWISE_TAN;
+    case PointwiseMode::TANH_BWD:
+        return HIPDNN_POINTWISE_TANH_BWD;
+    case PointwiseMode::TANH_FWD:
+        return HIPDNN_POINTWISE_TANH_FWD;
     default:
         return std::nullopt;
     }

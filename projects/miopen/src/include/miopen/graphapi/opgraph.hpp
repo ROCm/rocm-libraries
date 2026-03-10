@@ -158,7 +158,7 @@ protected:
 
 using Edge = OpNode::Edge;
 
-class MIOPEN_INTERNALS_EXPORT SourceOpNode : public OpNode
+class SourceOpNode : public OpNode
 {
 protected:
     std::vector<Tensor*> mOutTensors;
@@ -188,7 +188,7 @@ protected:
     }
 };
 
-class MIOPEN_INTERNALS_EXPORT SinkOpNode : public OpNode
+class SinkOpNode : public OpNode
 {
 protected:
     std::vector<Tensor*> mInTensors;
@@ -220,7 +220,7 @@ using VecOfPaths = std::vector<Path>;
 
 class Engine;
 
-class MIOPEN_INTERNALS_EXPORT OpGraph
+class OpGraph
 {
     // NOTE: mSrcNode and mSinkNode need to reside on the heap because the graph may move
     // to a new memory location after building, while the nodes maintain address
@@ -391,7 +391,7 @@ private:
     }
 };
 
-class MIOPEN_INTERNALS_EXPORT OpGraphBuilder
+class OpGraphBuilder
 {
 private:
     std::vector<OpNode*> mNodes;
@@ -428,12 +428,12 @@ public:
     };
 
     // r-value method that consumes *this
-    OpGraph build() &&;
+    MIOPEN_INTERNALS_EXPORT OpGraph build() &&;
 };
 
 MIOPEN_INTERNALS_EXPORT bool isIsomorphic(const OpGraph& left, const OpGraph& right);
 
-MIOPEN_INTERNALS_EXPORT std::string pathToStr(const Path& path);
+std::string pathToStr(const Path& path);
 
 class MIOPEN_INTERNALS_EXPORT BackendOperationGraphDescriptor : public BackendDescriptor
 {

@@ -144,9 +144,17 @@ namespace rocRoller
                 auto isConstructMacroTile
                     = CoordinateGraph::isEdge<CoordinateGraph::ConstructMacroTile>;
 
+                auto notFixedSize = [&](int tag) -> bool {
+                    auto size = getSize(graph.coordinates.getNode(tag));
+                    return !Expression::evaluationTimes(
+                        size)[Expression::EvaluationTime::Translate];
+                };
+
                 auto aTileDims = graph.coordinates.getInputNodeIndices(A, isConstructMacroTile)
+                                     .filter(notFixedSize)
                                      .to<std::vector>();
                 auto bTileDims = graph.coordinates.getInputNodeIndices(B, isConstructMacroTile)
+                                     .filter(notFixedSize)
                                      .to<std::vector>();
 
                 AssertFatal(aTileDims.size() == bTileDims.size());

@@ -129,7 +129,7 @@ inline Error validateBatchNormTrainingSpatialDimensions(
         // Spatial mode: normalizes over N*spatial_dims per channel
         // Requires N*H*W > 1 (or N*D*H*W > 1 for 3D)
 
-        // dims are always declared in NCHW & NCDHW order
+        // Batchnorm dims follow NCHW & NCDHW order
         int64_t spatialElements = dims[0]; // Start with N
         for(size_t i = 2; i < dims.size(); ++i)
         {
