@@ -25,7 +25,7 @@ namespace hipdnn_data_sdk::utilities
  * @param engineName The name of the engine to convert to an ID
  * @return int64_t The unique engine ID
  */
-inline int64_t engineNameToId(const char* engineName)
+inline int64_t engineNameToId(const char* engineName) noexcept
 {
     return static_cast<int64_t>(fnv1aHash(engineName));
 }
@@ -126,7 +126,7 @@ struct EngineRegistrar
 #define HIPDNN_REGISTER_ENGINE(name, value)                 \
     inline constexpr const char* name##_NAME = value;       \
     inline const int64_t name##_ID = engineNameToId(value); \
-    inline const EngineRegistrar name##_registrar{value};
+    inline const EngineRegistrar name##_registrar{value}; /* NOLINT(bugprone-throwing-static-initialization) collision detection requires throw */
 
 //Note: Once an engine is named here, it should never be renamed.  Renaming an engine will
 // change the generated uint64_t ID.
