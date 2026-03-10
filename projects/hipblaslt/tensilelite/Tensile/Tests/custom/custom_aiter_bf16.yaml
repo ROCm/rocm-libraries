@@ -1,0 +1,175 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  # PrintTensorA: 1
+  # PrintTensorB: 1
+  # PrintTensorD: 2
+  # PrintTensorRef: 2
+  # NumWarmups: 20 # eqvlnt to cold-iter for hipblaslt
+  # EnqueuesPerSync: 1000
+  # DataInitTypeA: 12 # TrigSin (problem dependant)
+  # DataInitTypeB: 13 # TrigCos (problem dependant)
+  # KeepBuildTmp: True
+  # ClientLogLevel: 3 # Debug level - includes rejection reasons
+  # KernelTime: True
+  # BoundsCheck: 2
+  # RotatingBufferSize: 512
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+      Activation: False
+      UseScaleAlphaVec: 0
+
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - CustomKernel:
+          - name: "_ZN5aiter24bf16gemm_bf16_tn_256x256E"
+            args: [ { type: address, semantic: AddressD },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: address, semantic: AddressC },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: address, semantic: AddressB },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: address, semantic: AddressA },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: float32, semantic: Alpha },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: float32, semantic: Beta },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: StrideD0Bytes },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: StrideD1 },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: StrideC0Bytes },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: StrideC1 },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: StrideB0Bytes },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: StrideB1 },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: StrideA0Bytes },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: StrideA1 },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: SizeFree1 },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: SizeFree0 },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: SizeSum },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: SplitK },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: OutputBF16 },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern },
+                    { type: uint32,  semantic: DebugPattern } ]
+            macrotile: [256, 256, 64]
+            threads: [256, 1, 1]
+            grid: [TilesX, TilesY, One]
+        - MatrixInstruction:
+          - [16,16,32,1, 1, 8,8, 2,2] # 256 x 256
+        - PreloadKernArgs: [False]
+        - DepthU: [64]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - TransposeLDS: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [16]
+        - StaggerUStride: [-1]
+        - WorkGroupMapping: [1]
+        - StaggerUMapping: [0]
+        - 1LDSBuffer: [-1]
+        - WorkGroupMappingXCC: [8]
+        - WorkGroupMappingXCCGroup: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalReadPerMfma: [1]
+        - LocalWritePerMfma: [-1]
+        - StoreRemapVectorWidth: [0]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [1]
+        - NumElementsPerBatchStore: [16]
+        - ClusterLocalRead: [1]
+        - NonTemporalA: [0]
+        - NonTemporalB: [0]
+        - DirectToVgprA: [1]
+        - DirectToVgprB: [0]
+
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 8192]
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 0049", "Device 0050"]
+    ArchitectureName: "gfx950"
+    LibraryType: "GridBased"

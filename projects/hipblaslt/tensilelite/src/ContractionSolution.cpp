@@ -93,6 +93,18 @@ namespace TensileLite
             return "Alpha";
         case CustomArgSemantic::Beta:
             return "Beta";
+        case CustomArgSemantic::SplitK:
+            return "SplitK";
+        case CustomArgSemantic::OutputBF16:
+            return "OutputBF16";
+        case CustomArgSemantic::StrideA0Bytes:
+            return "StrideA0Bytes";
+        case CustomArgSemantic::StrideB0Bytes:
+            return "StrideB0Bytes";
+        case CustomArgSemantic::StrideC0Bytes:
+            return "StrideC0Bytes";
+        case CustomArgSemantic::StrideD0Bytes:
+            return "StrideD0Bytes";
         case CustomArgSemantic::DebugPattern:
             return "DebugPattern";
         case CustomArgSemantic::CustomArgSemantic_Count:
@@ -142,6 +154,18 @@ namespace TensileLite
             return CustomArgSemantic::Alpha;
         else if(str == toString(CustomArgSemantic::Beta))
             return CustomArgSemantic::Beta;
+        else if(str == toString(CustomArgSemantic::SplitK))
+            return CustomArgSemantic::SplitK;
+        else if(str == toString(CustomArgSemantic::OutputBF16))
+            return CustomArgSemantic::OutputBF16;
+        else if(str == toString(CustomArgSemantic::StrideA0Bytes))
+            return CustomArgSemantic::StrideA0Bytes;
+        else if(str == toString(CustomArgSemantic::StrideB0Bytes))
+            return CustomArgSemantic::StrideB0Bytes;
+        else if(str == toString(CustomArgSemantic::StrideC0Bytes))
+            return CustomArgSemantic::StrideC0Bytes;
+        else if(str == toString(CustomArgSemantic::StrideD0Bytes))
+            return CustomArgSemantic::StrideD0Bytes;
         else if(str == toString(CustomArgSemantic::DebugPattern))
             return CustomArgSemantic::DebugPattern;
         else
@@ -1767,6 +1791,34 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::Beta:
                     rv.args.appendCustomType("Beta", inputs.beta, arg.type);
+                    break;
+                case CustomArgSemantic::SplitK:
+                {
+                    uint32_t splitK = (sizeMapping.globalSplitU > 0) ? sizeMapping.globalSplitU : 0;
+                    rv.args.appendCustomType("SplitK", splitK, arg.type);
+                    break;
+                }
+                case CustomArgSemantic::OutputBF16:
+                {
+                    uint32_t isBF16 = (problem.d().dataType() == rocisa::DataType::BFloat16) ? 1 : 0;
+                    rv.args.appendCustomType("OutputBF16", isBF16, arg.type);
+                    break;
+                }
+                case CustomArgSemantic::StrideA0Bytes:
+                    rv.args.appendCustomType("StrideA0Bytes",
+                        problem.a().strides()[1] * problem.a().elementBytes(), arg.type);
+                    break;
+                case CustomArgSemantic::StrideB0Bytes:
+                    rv.args.appendCustomType("StrideB0Bytes",
+                        problem.b().strides()[1] * problem.b().elementBytes(), arg.type);
+                    break;
+                case CustomArgSemantic::StrideC0Bytes:
+                    rv.args.appendCustomType("StrideC0Bytes",
+                        problem.c().strides()[1] * problem.c().elementBytes(), arg.type);
+                    break;
+                case CustomArgSemantic::StrideD0Bytes:
+                    rv.args.appendCustomType("StrideD0Bytes",
+                        problem.d().strides()[1] * problem.d().elementBytes(), arg.type);
                     break;
                 case CustomArgSemantic::DebugPattern:
                     rv.args.template append<uint32_t>("DebugPattern", debugPattern);

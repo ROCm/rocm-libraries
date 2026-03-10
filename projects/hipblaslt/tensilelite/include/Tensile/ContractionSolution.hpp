@@ -70,8 +70,14 @@ namespace TensileLite
         StrideD1,   // 15
         Alpha,      // 16
         Beta,       // 17
-        DebugPattern,      // 18
-        CustomArgSemantic_Count,      // 19
+        SplitK,            // 18
+        OutputBF16,        // 19
+        StrideA0Bytes,     // 20
+        StrideB0Bytes,     // 21
+        StrideC0Bytes,     // 22
+        StrideD0Bytes,     // 23
+        DebugPattern,      // 24
+        CustomArgSemantic_Count,      // 25
     };
     
     std::string toString(CustomArgSemantic arg);
