@@ -267,6 +267,8 @@ class GemmKernelBuilder:
             default_pipeline = "comp_async"
         elif self.kernel_name_prefix == "gemm_tensor_quant":
             default_pipeline = "compv3"
+        elif self.kernel_name_prefix == "batched_gemm":
+            default_pipeline = "compv4"
 
         configs = []
         for tile_m in tile_m_values:
