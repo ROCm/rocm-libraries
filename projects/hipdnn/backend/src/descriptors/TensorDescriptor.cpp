@@ -431,6 +431,15 @@ std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
     return desc;
 }
 
+std::shared_ptr<TensorDescriptor>
+    TensorDescriptor::fromFlatBuffer(hipdnn_data_sdk::data_objects::TensorAttributesT&& tensorT)
+{
+    auto desc = std::make_shared<TensorDescriptor>();
+    desc->_data = std::move(tensorT);
+    desc->finalize();
+    return desc;
+}
+
 hipdnnBackendDescriptorType_t TensorDescriptor::getStaticType()
 {
     return HIPDNN_BACKEND_TENSOR_DESCRIPTOR;

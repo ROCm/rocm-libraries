@@ -64,36 +64,18 @@ TEST_F(TestTensorDescriptorFromFlatBuffer, PopulatesAllFieldsCorrectly)
     EXPECT_FALSE(desc->getData().virtual_);
 }
 
-TEST_F(TestTensorDescriptorFromFlatBuffer, PreservesUid)
-{
-    auto attrs = createStandardTensorAttrs(42);
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
-
-    ASSERT_EQ(desc->getData().uid, 42);
-}
-
-TEST_F(TestTensorDescriptorFromFlatBuffer, PreservesDataType)
-{
-    auto attrs = createStandardTensorAttrs(K_TENSOR_X_UID, DataType::HALF);
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
-
-    ASSERT_EQ(desc->getData().data_type, DataType::HALF);
-}
-
-TEST_F(TestTensorDescriptorFromFlatBuffer, PreservesDims)
+TEST_F(TestTensorDescriptorFromFlatBuffer, MoveOverloadPopulatesAllFields)
 {
     auto attrs = createStandardTensorAttrs(K_TENSOR_X_UID);
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
+    auto desc = TensorDescriptor::fromFlatBuffer(std::move(attrs));
 
-    ASSERT_EQ(desc->getData().dims, toVec(K_TENSOR_X_DIMS));
-}
-
-TEST_F(TestTensorDescriptorFromFlatBuffer, PreservesStrides)
-{
-    auto attrs = createStandardTensorAttrs(K_TENSOR_X_UID);
-    auto desc = TensorDescriptor::fromFlatBuffer(attrs);
-
-    ASSERT_EQ(desc->getData().strides, toVec(K_TENSOR_X_STRIDES));
+    ASSERT_NE(desc, nullptr);
+    ASSERT_TRUE(desc->isFinalized());
+    EXPECT_EQ(desc->getData().uid, K_TENSOR_X_UID);
+    EXPECT_EQ(desc->getData().data_type, DataType::FLOAT);
+    EXPECT_EQ(desc->getData().dims, toVec(K_TENSOR_X_DIMS));
+    EXPECT_EQ(desc->getData().strides, toVec(K_TENSOR_X_STRIDES));
+    EXPECT_FALSE(desc->getData().virtual_);
 }
 
 TEST_F(TestTensorDescriptorFromFlatBuffer, PreservesVirtualFlag)

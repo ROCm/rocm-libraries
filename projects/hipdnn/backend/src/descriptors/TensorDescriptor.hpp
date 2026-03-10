@@ -35,6 +35,8 @@ public:
     // Bypasses setAttribute() by directly copying the data struct and calling finalize().
     static std::shared_ptr<TensorDescriptor>
         fromFlatBuffer(const hipdnn_data_sdk::data_objects::TensorAttributesT& tensorT);
+    static std::shared_ptr<TensorDescriptor>
+        fromFlatBuffer(hipdnn_data_sdk::data_objects::TensorAttributesT&& tensorT);
 
     static hipdnnBackendDescriptorType_t getStaticType();
 
