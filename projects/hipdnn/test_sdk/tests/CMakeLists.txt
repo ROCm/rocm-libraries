@@ -62,6 +62,7 @@ add_executable(
     utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp
     TestVersion.cpp
 )
 
