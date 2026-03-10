@@ -3,6 +3,7 @@
 
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
+#include "HipdnnNormFwdPhase.h"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/GraphDescriptor.hpp"
@@ -71,10 +72,12 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                            1,
                            &invVarianceDesc);
     }
-    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-    auto forwardPhase = static_cast<int64_t>(NormFwdPhase::TRAINING);
-    desc->setAttribute(
-        HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT, HIPDNN_TYPE_INT64, 1, &forwardPhase);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                       HIPDNN_TYPE_NORM_FWD_PHASE,
+                       1,
+                       &forwardPhase);
 
     desc->finalize();
     return wrapper;

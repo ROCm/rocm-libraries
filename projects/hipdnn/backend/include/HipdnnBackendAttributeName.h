@@ -657,11 +657,11 @@ typedef enum
     /** @brief Inverse variance output tensor for layernorm (optional) */
     HIPDNN_ATTR_OPERATION_LAYERNORM_INV_VARIANCE_EXT = 2606,
 
-    /** @brief Forward phase for layernorm */
-    HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT = 2607,
+    /** @brief Forward phase for layernorm (TRAINING or INFERENCE) */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT = 2607,
 
-    /** @brief Compute data type for layernorm */
-    HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT = 2608,
+    /** @brief Math precision (compute data type) for layernorm */
+    HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT = 2608,
 
     /** @} */
 

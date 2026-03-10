@@ -3,6 +3,7 @@
 
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
+#include "HipdnnNormFwdPhase.h"
 #include "TensorDescriptorTestUtils.hpp"
 #include "TestMacros.hpp"
 #include "descriptors/IGraphOperation.hpp"
@@ -88,13 +89,15 @@ public:
         {
             auto computeType = HIPDNN_DATA_FLOAT;
             desc->setAttribute(
-                HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+                HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
         }
         if(shouldSet("forward_phase"))
         {
-            auto forwardPhase = static_cast<int64_t>(NormFwdPhase::INFERENCE);
-            desc->setAttribute(
-                HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT, HIPDNN_TYPE_INT64, 1, &forwardPhase);
+            auto forwardPhase = HIPDNN_NORM_FWD_PHASE_INFERENCE;
+            desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                               HIPDNN_TYPE_NORM_FWD_PHASE,
+                               1,
+                               &forwardPhase);
         }
     }
 
@@ -362,10 +365,12 @@ TEST_F(TestLayernormOperationDescriptor, SetTensorFailsNullPointer)
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhase)
 {
     auto desc = getDescriptor();
-    auto forwardPhase = static_cast<int64_t>(NormFwdPhase::INFERENCE);
+    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_INFERENCE;
 
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT, HIPDNN_TYPE_INT64, 1, &forwardPhase));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                                       HIPDNN_TYPE_NORM_FWD_PHASE,
+                                       1,
+                                       &forwardPhase));
 
     ASSERT_EQ(desc->getData().forward_phase, NormFwdPhase::INFERENCE);
 }
@@ -373,10 +378,12 @@ TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhase)
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseTraining)
 {
     auto desc = getDescriptor();
-    auto forwardPhase = static_cast<int64_t>(NormFwdPhase::TRAINING);
+    auto forwardPhase = HIPDNN_NORM_FWD_PHASE_TRAINING;
 
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT, HIPDNN_TYPE_INT64, 1, &forwardPhase));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                                       HIPDNN_TYPE_NORM_FWD_PHASE,
+                                       1,
+                                       &forwardPhase));
 
     ASSERT_EQ(desc->getData().forward_phase, NormFwdPhase::TRAINING);
 }
@@ -384,11 +391,13 @@ TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseTraining)
 TEST_F(TestLayernormOperationDescriptor, SetNormFwdPhaseWrongElementCount)
 {
     auto desc = getDescriptor();
-    int64_t forwardPhase = 0;
+    hipdnnNormFwdPhase_t forwardPhase = HIPDNN_NORM_FWD_PHASE_INFERENCE;
 
     ASSERT_THROW_HIPDNN_STATUS(
-        desc->setAttribute(
-            HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT, HIPDNN_TYPE_INT64, 2, &forwardPhase),
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                           HIPDNN_TYPE_NORM_FWD_PHASE,
+                           2,
+                           &forwardPhase),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -398,7 +407,7 @@ TEST_F(TestLayernormOperationDescriptor, SetComputeDataType)
     auto computeType = HIPDNN_DATA_FLOAT;
 
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
@@ -410,7 +419,7 @@ TEST_F(TestLayernormOperationDescriptor, SetComputeDataTypeWrongElementCount)
 
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
+            HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 2, &computeType),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
@@ -470,15 +479,15 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeLayernormParams)
     auto desc = getDescriptor();
 
     // forward phase
-    int64_t forwardPhase = -1;
+    hipdnnNormFwdPhase_t forwardPhase = {};
     int64_t forwardPhaseCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT,
-                                       HIPDNN_TYPE_INT64,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                                       HIPDNN_TYPE_NORM_FWD_PHASE,
                                        1,
                                        &forwardPhaseCount,
                                        &forwardPhase));
     ASSERT_EQ(forwardPhaseCount, 1);
-    EXPECT_EQ(forwardPhase, static_cast<int64_t>(NormFwdPhase::INFERENCE));
+    EXPECT_EQ(forwardPhase, HIPDNN_NORM_FWD_PHASE_INFERENCE);
 }
 
 TEST_F(TestLayernormOperationDescriptor, GetAttributeComputeType)
@@ -486,13 +495,13 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeComputeType)
     auto desc = getDescriptor();
     setRequiredAttributes();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
+        HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
 
     ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
     ASSERT_EQ(elementCount, 1);
@@ -564,8 +573,11 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeNormFwdPhaseQueryReturnsOne
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT, HIPDNN_TYPE_INT64, 0, &elementCount, nullptr));
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                                       HIPDNN_TYPE_NORM_FWD_PHASE,
+                                       0,
+                                       &elementCount,
+                                       nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -576,7 +588,7 @@ TEST_F(TestLayernormOperationDescriptor, GetAttributeComputeTypeQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -705,7 +717,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeWithHalfComputeType)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();

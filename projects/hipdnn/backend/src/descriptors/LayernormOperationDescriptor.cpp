@@ -109,25 +109,14 @@ void LayernormOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t att
                                     arrayOfElements,
                                     "LayernormOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT:
-    {
-        // Forward phase is passed as int64_t via void*; extract with memcpy via setScalar
-        int64_t rawValue = 0;
-        setScalar(rawValue,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "LayernormOperationDescriptor::setAttribute()");
-        auto mode = static_cast<hipdnn_data_sdk::data_objects::NormFwdPhase>(rawValue);
-        THROW_IF_TRUE(mode < hipdnn_data_sdk::data_objects::NormFwdPhase::MIN
-                          || mode > hipdnn_data_sdk::data_objects::NormFwdPhase::MAX,
-                      HIPDNN_STATUS_BAD_PARAM,
-                      "LayernormOperationDescriptor::setAttribute(): invalid NormFwdPhase value");
-        _data.forward_phase = mode;
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT:
+        setNormFwdPhase(_data.forward_phase,
+                        attributeType,
+                        elementCount,
+                        arrayOfElements,
+                        "LayernormOperationDescriptor::setAttribute()");
         break;
-    }
-    case HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT:
         setDataType(_computeDataType,
                     attributeType,
                     elementCount,
@@ -213,19 +202,15 @@ void LayernormOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t att
                                     arrayOfElements,
                                     "LayernormOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT:
-    {
-        auto value = static_cast<int64_t>(_data.forward_phase);
-        getScalar(value,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "LayernormOperationDescriptor::getAttribute()");
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT:
+        getNormFwdPhase(_data.forward_phase,
+                        attributeType,
+                        requestedElementCount,
+                        elementCount,
+                        arrayOfElements,
+                        "LayernormOperationDescriptor::getAttribute()");
         break;
-    }
-    case HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT:
+    case HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT:
         getDataType(_computeDataType,
                     attributeType,
                     requestedElementCount,

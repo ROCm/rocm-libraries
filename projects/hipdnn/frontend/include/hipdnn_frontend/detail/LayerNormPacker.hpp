@@ -71,19 +71,23 @@ inline Error createLayernormOperation(
                                                  "layernorm INV_VARIANCE"));
     }
 
-    // Set forward phase as int64_t
-    auto forwardPhase = static_cast<int64_t>(toSdkType(attributes.get_forward_phase()));
+    // Set forward phase
+    auto forwardPhase = toBackendNormFwdPhase(attributes.get_forward_phase());
+    if(!forwardPhase.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported layernorm forward phase"};
+    }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_LAYERNORM_FORWARD_PHASE_EXT,
-                                               HIPDNN_TYPE_INT64,
-                                               forwardPhase,
+                                               HIPDNN_ATTR_OPERATION_LAYERNORM_FWD_PHASE_EXT,
+                                               HIPDNN_TYPE_NORM_FWD_PHASE,
+                                               *forwardPhase,
                                                "layernorm forward phase"));
 
-    // Set compute data type
+    // Set math precision (compute data type)
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT,
+                                                 HIPDNN_ATTR_LAYERNORM_MATH_PREC_EXT,
                                                  attributes.compute_data_type,
-                                                 "layernorm compute data type"));
+                                                 "layernorm math precision"));
 
     // Finalize operation descriptor
     HIPDNN_CHECK_ERROR(finalizeDescriptor(opDesc.get(), "layernorm operation descriptor"));
