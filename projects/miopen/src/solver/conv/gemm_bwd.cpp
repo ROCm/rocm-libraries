@@ -122,7 +122,7 @@ float GemmBwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
     // if not 1x1
     else
     {
-        if(conv.group_count == 1 && conv.GetSpatialDimension() == 3)
+        if(prefer_point_output_shape)
         {
             // Keep the WTI model aligned with the 3D execution path:
             // one strided-batched GEMM + one batched Col2Im launch.
@@ -573,7 +573,7 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
 
     // 3D regular convolution uses one strided-batched GEMM over N, so workspace must hold
     // all N GEMM outputs before batched Col2Im.
-    if(conv.group_count == 1 && spatial_dim == 3)
+    if(miopen::conv::IsBwdDataPointOutput3dStrideEqFilter(problem))
         gemm_size *= in_n;
 
     if(gemm_size > handle.GetMaxMemoryAllocSize())
@@ -704,7 +704,7 @@ ConvSolution GemmBwdRest::GetSolution(const ExecutionContext& context,
 
             // Specialized 3D path for non-grouped convolutions:
             // launch one strided-batched GEMM over N, then one batched Col2Im.
-            if(group_count == 1 && spatial_dims == 3)
+            if(miopen::conv::IsBwdDataPointOutput3dStrideEqFilter(problem))
             {
                 auto batched_gemm_desc        = gemm_desc;
                 batched_gemm_desc.batch_count = static_cast<int>(in_n);
